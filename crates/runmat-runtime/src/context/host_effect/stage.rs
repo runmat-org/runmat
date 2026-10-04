@@ -52,6 +52,17 @@ impl HostEffectStagePermit {
         Ok(())
     }
 
+    fn validate_runtime(&self, runtime: &RuntimeContext) -> BuiltinResult<()> {
+        self.checkpoint()?;
+        if self.runtime.local_identity() != runtime.local_identity() {
+            return Err(invalid_stage("final call uses a different runtime session"));
+        }
+        if runtime.is_cancelled() {
+            return Err(cancelled());
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_request(&self, request: &HostEffectRequest<'_>) -> BuiltinResult<()> {
         self.checkpoint()?;
         if !Arc::ptr_eq(&self.filesystem, request.filesystem)
@@ -162,10 +173,12 @@ pub fn admit_host_effect_stage(
 pub fn select_host_effect_after_stage(
     runtime: &RuntimeContext,
     request: HostEffectRequest<'_>,
+    final_facts: &dyn std::any::Any,
     stage: HostEffectStagePermit,
 ) -> BuiltinResult<HostEffectReceipt> {
+    stage.validate_runtime(runtime)?;
     stage.validate_request(&request)?;
-    let receipt = select_host_effect_inner(Some(runtime), request, Some(stage))?
+    let receipt = select_host_effect_inner(Some(runtime), request, Some(stage), Some(final_facts))?
         .ok_or_else(|| insufficient("staged final complete-call selection is unavailable"))?;
     receipt
         ._stage
@@ -176,13 +189,12 @@ pub fn select_host_effect_after_stage(
 }
 
 fn request_identity(request: &HostEffectRequest<'_>) -> Digest {
+    // The complete call's public operation, source, options, and output mode
+    // are fixed before scan. `domain_facts` is deliberately excluded because
+    // it becomes the checked post-header geometry digest at final selection.
     Digest::sha256(
-        serde_json::to_vec(&(
-            request.operation,
-            request.workload.identity_bytes(),
-            request.domain_facts,
-        ))
-        .expect("typed stage request serializes"),
+        serde_json::to_vec(&(request.operation, request.workload.identity_bytes()))
+            .expect("typed stage request serializes"),
     )
 }
 

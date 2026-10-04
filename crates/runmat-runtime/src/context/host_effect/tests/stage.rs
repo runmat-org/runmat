@@ -65,6 +65,18 @@ impl RuntimeHostEffectResourceService for StagedResources {
             }
         })
     }
+
+    fn final_admission_after_stage(
+        &self,
+        request: &HostEffectRequest<'_>,
+        facts: &dyn std::any::Any,
+        runtime: &RuntimeContext,
+    ) -> Option<HostEffectResourceAdmission> {
+        facts
+            .is::<()>()
+            .then(|| self.admission(request, runtime))
+            .flatten()
+    }
 }
 
 fn staged_runtime(
@@ -115,9 +127,13 @@ fn stage_reserves_before_effect_and_final_selection_owns_one_probe_and_observati
     assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     stage.checkpoint().unwrap();
-    let receipt =
-        select_host_effect_after_stage(&runtime, request(HostEffectOutput::ReturnedValue), stage)
-            .unwrap();
+    let receipt = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        &(),
+        stage,
+    )
+    .unwrap();
     assert_eq!(placement.selections.get(), 1);
     assert_eq!(placement.probes.load(Ordering::SeqCst), 1);
     receipt.finish(WholeWorkObservationOutcome::Success);
@@ -161,10 +177,14 @@ fn revoked_or_abandoned_stage_never_selects_or_observes() {
     let stage =
         admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
     live.store(false, Ordering::SeqCst);
-    let error =
-        select_host_effect_after_stage(&runtime, request(HostEffectOutput::ReturnedValue), stage)
-            .err()
-            .expect("revoked stage");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        &(),
+        stage,
+    )
+    .err()
+    .expect("revoked stage");
     assert_eq!(
         error.identifier(),
         Some("RunMat:Placement:StaleResourceAuthority")
@@ -194,10 +214,14 @@ fn cancellation_after_scan_releases_reservation_without_a_probe() {
     let stage =
         admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
     cancellation.cancel(CancellationReason::User);
-    let error =
-        select_host_effect_after_stage(&runtime, request(HostEffectOutput::ReturnedValue), stage)
-            .err()
-            .expect("cancelled scan cannot select");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        &(),
+        stage,
+    )
+    .err()
+    .expect("cancelled scan cannot select");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert_eq!(placement.selections.get(), 0);
     assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
@@ -215,10 +239,14 @@ fn final_call_must_match_original_owner_identity_and_peak() {
     );
     let stage =
         admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
-    let error =
-        select_host_effect_after_stage(&runtime, request(HostEffectOutput::ReturnedValue), stage)
-            .err()
-            .expect("final route omits staged peak");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        &(),
+        stage,
+    )
+    .err()
+    .expect("final route omits staged peak");
     assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
     assert_eq!(placement.selections.get(), 0);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
@@ -243,9 +271,34 @@ fn stage_cannot_be_replayed_on_another_filesystem_owner() {
         domain_facts: original.domain_facts,
         filesystem: &foreign,
     };
-    let error = select_host_effect_after_stage(&runtime, other, stage)
+    let error = select_host_effect_after_stage(&runtime, other, &(), stage)
         .err()
         .expect("foreign filesystem is not the opened source owner");
+    assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
+    assert_eq!(placement.selections.get(), 0);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn stage_cannot_be_selected_from_another_runtime_session() {
+    let (runtime, placement, _, drops) = staged_runtime(
+        ResourceByteBound::Known(16),
+        ResourceByteBound::Known(16),
+        16,
+        64,
+    );
+    let stage =
+        admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
+    let other = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(runtime.service_ports().clone());
+    let error = select_host_effect_after_stage(
+        &other,
+        request(HostEffectOutput::ReturnedValue),
+        &(),
+        stage,
+    )
+    .err()
+    .expect("foreign session cannot consume staged source");
     assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
     assert_eq!(placement.selections.get(), 0);
     assert_eq!(drops.load(Ordering::SeqCst), 1);

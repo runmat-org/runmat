@@ -284,6 +284,19 @@ pub trait RuntimeHostEffectResourceService {
     ) -> Option<super::host_effect::HostEffectStageAdmission> {
         None
     }
+
+    /// The operation owner supplies its checked, typed post-scan facts. The
+    /// installed resource adapter downcasts only its own domain type; shared
+    /// placement never interprets operation spellings or opaque digests as
+    /// physical resource evidence. No fallback to pre-scan admission exists.
+    fn final_admission_after_stage(
+        &self,
+        _request: &super::host_effect::HostEffectRequest<'_>,
+        _facts: &dyn std::any::Any,
+        _runtime: &super::RuntimeContext,
+    ) -> Option<super::host_effect::HostEffectResourceAdmission> {
+        None
+    }
 }
 
 /// Session-owned execution-placement authority. The runtime exposes only

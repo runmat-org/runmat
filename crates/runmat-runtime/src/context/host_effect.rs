@@ -84,13 +84,14 @@ pub fn select_host_effect(
     runtime: Option<&RuntimeContext>,
     request: HostEffectRequest<'_>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
-    select_host_effect_inner(runtime, request, None)
+    select_host_effect_inner(runtime, request, None, None)
 }
 
 fn select_host_effect_inner(
     runtime: Option<&RuntimeContext>,
     request: HostEffectRequest<'_>,
     stage: Option<HostEffectStagePermit>,
+    final_facts: Option<&dyn std::any::Any>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
     if let Some(stage) = stage.as_ref() {
         stage.validate_request(&request)?;
@@ -114,7 +115,11 @@ fn select_host_effect_inner(
     let Some(admission) = runtime
         .service_ports()
         .host_effect_resources()
-        .and_then(|port| port.admission(&request, runtime))
+        .and_then(|port| match (stage.as_ref(), final_facts) {
+            (Some(_), Some(facts)) => port.final_admission_after_stage(&request, facts, runtime),
+            (None, None) => port.admission(&request, runtime),
+            _ => None,
+        })
     else {
         return if finite {
             Err(insufficient(
