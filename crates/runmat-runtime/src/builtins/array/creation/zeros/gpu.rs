@@ -42,7 +42,7 @@ pub(super) async fn build(shape: &[usize], element_class: GpuElementClass) -> Bu
         shape,
         GpuTensorStorage::Real,
         precision,
-        integer_type(dtype),
+        dtype.integer_class().map(IntegerElementType::from),
         false,
     )
     .map(Value::GpuTensor)
@@ -55,20 +55,6 @@ fn upload_zeros(
 ) -> BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
     let host = tensor::zeros_with_dtype(shape, dtype)?;
     gpu_helpers::upload_tensor(provider, &host)
-}
-
-fn integer_type(dtype: NumericDType) -> Option<IntegerElementType> {
-    match dtype {
-        NumericDType::I8 => Some(IntegerElementType::I8),
-        NumericDType::I16 => Some(IntegerElementType::I16),
-        NumericDType::I32 => Some(IntegerElementType::I32),
-        NumericDType::I64 => Some(IntegerElementType::I64),
-        NumericDType::U8 => Some(IntegerElementType::U8),
-        NumericDType::U16 => Some(IntegerElementType::U16),
-        NumericDType::U32 => Some(IntegerElementType::U32),
-        NumericDType::U64 => Some(IntegerElementType::U64),
-        NumericDType::F32 | NumericDType::F64 => None,
-    }
 }
 
 #[cfg(test)]

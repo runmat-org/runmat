@@ -10,8 +10,10 @@ use runmat_builtins::{
     ZEROS_IMPLICIT_PROTOTYPE_EXTENSION, ZEROS_RESIDENT_SIZE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
+use runmat_types::{standard, ClassIdentity, NumericClass};
 use runmat_value::{
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor, Value,
+    ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericStorage,
+    SparseTensor, Value,
 };
 use std::sync::OnceLock;
 
@@ -123,7 +125,7 @@ enum OutputTemplate {
     /// Single-precision output request.
     Single,
     Logical,
-    Integer(IntegerStorage),
+    Integer(NumericDType),
     /// GPU residency is independent of the requested underlying element class.
     GpuArray(GpuElementClass),
     Like(Value),
@@ -133,6 +135,28 @@ enum OutputTemplate {
 enum GpuElementClass {
     Numeric(NumericDType),
     Logical,
+}
+
+#[derive(Clone, Copy)]
+enum ParsedClassKeyword {
+    GpuArray,
+    Logical,
+    Numeric(NumericClass),
+}
+
+fn parse_class_keyword(keyword: &str) -> Option<ParsedClassKeyword> {
+    let identity = if keyword.eq_ignore_ascii_case(standard::GPU_ARRAY.display_name()) {
+        standard::GPU_ARRAY.owned()
+    } else {
+        ClassIdentity::new(keyword).ok()?
+    };
+    if identity.is(standard::GPU_ARRAY) {
+        Some(ParsedClassKeyword::GpuArray)
+    } else if identity.is(standard::LOGICAL) {
+        Some(ParsedClassKeyword::Logical)
+    } else {
+        NumericClass::from_class_identity(&identity).map(ParsedClassKeyword::Numeric)
+    }
 }
 
 impl ParsedZeros {
@@ -149,25 +173,25 @@ impl ParsedZeros {
         while idx < args.len() {
             let arg = args[idx].clone();
             if let Some(keyword) = keyword_of(&arg) {
-                match keyword.as_str() {
-                    "like" => {
-                        if like_proto.is_some() {
-                            return Err(zeros_error(&ZEROS_ERROR_LIKE_DUPLICATE));
-                        }
-                        if class_override.is_some() || gpu_output {
-                            return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
-                        }
-                        let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err(zeros_error(&ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE));
-                        };
-                        like_proto = Some(proto.clone());
-                        if shape_source.is_none() && !saw_dims_arg {
-                            shape_source = Some(shape_from_value(&proto)?);
-                        }
-                        idx += 2;
-                        continue;
+                if keyword == "like" {
+                    if like_proto.is_some() {
+                        return Err(zeros_error(&ZEROS_ERROR_LIKE_DUPLICATE));
                     }
-                    "logical" => {
+                    if class_override.is_some() || gpu_output {
+                        return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
+                    }
+                    let Some(proto) = args.get(idx + 1).cloned() else {
+                        return Err(zeros_error(&ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE));
+                    };
+                    like_proto = Some(proto.clone());
+                    if shape_source.is_none() && !saw_dims_arg {
+                        shape_source = Some(shape_from_value(&proto)?);
+                    }
+                    idx += 2;
+                    continue;
+                }
+                match parse_class_keyword(&keyword) {
+                    Some(ParsedClassKeyword::Logical) => {
                         if like_proto.is_some() || class_override.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
@@ -178,44 +202,22 @@ impl ParsedZeros {
                         idx += 1;
                         continue;
                     }
-                    "double" => {
-                        if like_proto.is_some() || class_override.is_some() || gpu_output {
-                            return Err(zeros_error_with_detail(
-                                &ZEROS_ERROR_CLASS_CONFLICT,
-                                "double class override",
-                            ));
-                        }
-                        class_override = Some(OutputTemplate::Double);
-                        idx += 1;
-                        continue;
-                    }
-                    "single" => {
-                        if like_proto.is_some() || class_override.is_some() || gpu_output {
-                            return Err(zeros_error_with_detail(
-                                &ZEROS_ERROR_CLASS_CONFLICT,
-                                "single class override",
-                            ));
-                        }
-                        class_override = Some(OutputTemplate::Single);
-                        idx += 1;
-                        continue;
-                    }
-                    "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
-                    | "uint64" => {
+                    Some(ParsedClassKeyword::Numeric(class)) => {
                         if like_proto.is_some() || class_override.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
                                 format!("{keyword} class override"),
                             ));
                         }
-                        class_override = Some(OutputTemplate::Integer(
-                            integer_storage_prototype_from_keyword(keyword.as_str())
-                                .expect("matched integer class keyword"),
-                        ));
+                        class_override = Some(match NumericDType::from(class) {
+                            NumericDType::F64 => OutputTemplate::Double,
+                            NumericDType::F32 => OutputTemplate::Single,
+                            dtype => OutputTemplate::Integer(dtype),
+                        });
                         idx += 1;
                         continue;
                     }
-                    "gpuArray" | "gpuarray" => {
+                    Some(ParsedClassKeyword::GpuArray) => {
                         if like_proto.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
@@ -226,10 +228,10 @@ impl ParsedZeros {
                         idx += 1;
                         continue;
                     }
-                    other => {
+                    None => {
                         return Err(zeros_error_with_detail(
                             &ZEROS_ERROR_UNRECOGNIZED_OPTION,
-                            format!("'{other}'"),
+                            format!("'{keyword}'"),
                         ));
                     }
                 }
@@ -316,9 +318,7 @@ impl ParsedZeros {
                 OutputTemplate::Double => GpuElementClass::Numeric(NumericDType::F64),
                 OutputTemplate::Single => GpuElementClass::Numeric(NumericDType::F32),
                 OutputTemplate::Logical => GpuElementClass::Logical,
-                OutputTemplate::Integer(storage) => {
-                    GpuElementClass::Numeric(storage.numeric_dtype())
-                }
+                OutputTemplate::Integer(dtype) => GpuElementClass::Numeric(dtype),
                 OutputTemplate::Like(_) | OutputTemplate::GpuArray(_) => {
                     return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
                 }
@@ -337,24 +337,15 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Double => zeros_double(&parsed.shape),
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
-        OutputTemplate::Integer(storage) => zeros_integer_like(&storage, &parsed.shape),
+        OutputTemplate::Integer(dtype) => {
+            let prototype = NumericStorage::zeros(dtype, 0)
+                .into_integer_storage()
+                .expect("typed integer class control");
+            zeros_integer_like(&prototype, &parsed.shape)
+        }
         OutputTemplate::GpuArray(element_class) => gpu::build(&parsed.shape, element_class).await,
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
-}
-
-fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
-    Some(match keyword {
-        "int8" => IntegerStorage::I8(Vec::new()),
-        "int16" => IntegerStorage::I16(Vec::new()),
-        "int32" => IntegerStorage::I32(Vec::new()),
-        "int64" => IntegerStorage::I64(Vec::new()),
-        "uint8" => IntegerStorage::U8(Vec::new()),
-        "uint16" => IntegerStorage::U16(Vec::new()),
-        "uint32" => IntegerStorage::U32(Vec::new()),
-        "uint64" => IntegerStorage::U64(Vec::new()),
-        _ => return None,
-    })
 }
 
 fn value_tag(value: &Value) -> &'static str {
@@ -944,6 +935,34 @@ pub(crate) mod tests {
             assert_eq!(output.shape, vec![2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
+    }
+
+    #[test]
+    fn class_keyword_decoder_preserves_case_insensitive_public_forms() {
+        let _guard = clear_accel_provider_state();
+        for (spelling, expected) in [
+            ("DOUBLE", NumericDType::F64),
+            ("SiNgLe", NumericDType::F32),
+            ("UINT64", NumericDType::U64),
+        ] {
+            let result = block_on(zeros_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::from(spelling),
+            ]))
+            .expect("canonical class option");
+            let value = test_support::gather(result).expect("host value");
+            assert_eq!(value.numeric_dtype(), expected);
+        }
+        assert!(matches!(
+            parse_class_keyword("gpuarray"),
+            Some(ParsedClassKeyword::GpuArray)
+        ));
+        assert!(matches!(
+            parse_class_keyword("logical"),
+            Some(ParsedClassKeyword::Logical)
+        ));
+        assert!(parse_class_keyword("notAClass").is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
