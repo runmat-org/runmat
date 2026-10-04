@@ -39,7 +39,7 @@ impl Read for RevokeAfterFirstWrite {
 
 impl Write for RevokeAfterFirstWrite {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let result = self.inner.write(bytes)?;
+        let result = self.inner.write(&bytes[..bytes.len().min(1)])?;
         self.writes.fetch_add(1, Ordering::SeqCst);
         self.valid.store(false, Ordering::SeqCst);
         Ok(result)
@@ -131,7 +131,7 @@ impl FsProvider for RevokingProvider {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn revoked_owner_after_first_cell_prevents_next_write_and_success() {
+fn revoked_owner_after_partial_first_write_prevents_retry_and_success() {
     let _lock = runmat_filesystem::provider_override_lock();
     let memory = MemoryFsProvider::with_current_dir("/tabular");
     let writes = Arc::new(AtomicUsize::new(0));

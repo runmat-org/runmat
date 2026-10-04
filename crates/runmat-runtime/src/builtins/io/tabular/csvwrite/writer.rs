@@ -8,6 +8,20 @@ pub(super) async fn write_csv(
     row_offset: usize,
     col_offset: usize,
 ) -> BuiltinResult<usize> {
+    let rows = matrix.rows();
+    let cols = matrix.cols();
+    row_offset.checked_add(rows).ok_or_else(|| {
+        csvwrite_error_with(
+            &CSVWRITE_ERROR_IO_WRITE,
+            "csvwrite: output row count exceeds platform limits",
+        )
+    })?;
+    let output_cols = col_offset.checked_add(cols).ok_or_else(|| {
+        csvwrite_error_with(
+            &CSVWRITE_ERROR_IO_WRITE,
+            "csvwrite: output column count exceeds platform limits",
+        )
+    })?;
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
     let path = selected.path();
@@ -24,32 +38,14 @@ pub(super) async fn write_csv(
             )
         })?;
 
-    let line_ending = "\n";
-    let rows = matrix.rows();
-    let cols = matrix.cols();
-
     let mut bytes_written = 0usize;
 
     for _ in 0..row_offset {
-        selected.check().map_err(|source| {
-            csvwrite_error_with_source(
-                &CSVWRITE_ERROR_IO_WRITE,
-                "csvwrite: captured filesystem authority was revoked",
-                source,
-            )
-        })?;
-        file.write_all(line_ending.as_bytes()).map_err(|err| {
-            csvwrite_error_with_source(
-                &CSVWRITE_ERROR_IO_WRITE,
-                format!("csvwrite: failed to write line ending ({err})"),
-                err,
-            )
-        })?;
-        bytes_written += line_ending.len();
-        cooperation.completed(line_ending.len()).await?;
+        write_csv_bytes(&mut file, cooperation, selected, b"\n", &mut bytes_written).await?;
     }
 
     if rows == 0 || cols == 0 {
+        check_csv_owner(selected)?;
         await_io(runtime, BUILTIN_NAME, file.flush_async())
             .await?
             .map_err(|err| {
@@ -70,45 +66,28 @@ pub(super) async fn write_csv(
     }
 
     for row in 0..rows {
-        selected.check().map_err(|source| {
-            csvwrite_error_with_source(
-                &CSVWRITE_ERROR_IO_WRITE,
-                "csvwrite: captured filesystem authority was revoked",
-                source,
-            )
-        })?;
-        let mut fields = Vec::with_capacity(col_offset + cols);
-        for _ in 0..col_offset {
-            fields.push(String::new());
-        }
-        for col in 0..cols {
-            let idx = row + col * rows;
-            fields.push(matrix.format_at(idx));
-        }
-        let line = fields.join(",");
-        if !line.is_empty() {
-            file.write_all(line.as_bytes()).map_err(|err| {
-                csvwrite_error_with_source(
-                    &CSVWRITE_ERROR_IO_WRITE,
-                    format!("csvwrite: failed to write value ({err})"),
-                    err,
+        for field in 0..output_cols {
+            if field > 0 {
+                write_csv_bytes(&mut file, cooperation, selected, b",", &mut bytes_written).await?;
+            }
+            if field >= col_offset {
+                let col = field - col_offset;
+                let idx = row + col * rows;
+                let rendered = matrix.format_at(idx);
+                write_csv_bytes(
+                    &mut file,
+                    cooperation,
+                    selected,
+                    rendered.as_bytes(),
+                    &mut bytes_written,
                 )
-            })?;
-            bytes_written += line.len();
+                .await?;
+            }
         }
-        file.write_all(line_ending.as_bytes()).map_err(|err| {
-            csvwrite_error_with_source(
-                &CSVWRITE_ERROR_IO_WRITE,
-                format!("csvwrite: failed to write line ending ({err})"),
-                err,
-            )
-        })?;
-        bytes_written += line_ending.len();
-        cooperation
-            .completed(line.len() + line_ending.len())
-            .await?;
+        write_csv_bytes(&mut file, cooperation, selected, b"\n", &mut bytes_written).await?;
     }
 
+    check_csv_owner(selected)?;
     await_io(runtime, BUILTIN_NAME, file.flush_async())
         .await?
         .map_err(|err| {
@@ -127,6 +106,59 @@ pub(super) async fn write_csv(
         )
     })?;
     Ok(bytes_written)
+}
+
+fn check_csv_owner(selected: &TabularFsPath) -> BuiltinResult<()> {
+    selected.check().map_err(|source| {
+        csvwrite_error_with_source(
+            &CSVWRITE_ERROR_IO_WRITE,
+            "csvwrite: captured filesystem authority was revoked",
+            source,
+        )
+    })
+}
+
+async fn write_csv_bytes(
+    file: &mut runmat_filesystem::File,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    bytes: &[u8],
+    total: &mut usize,
+) -> BuiltinResult<()> {
+    for chunk in bytes.chunks(4096) {
+        (*total).checked_add(chunk.len()).ok_or_else(|| {
+            csvwrite_error_with(
+                &CSVWRITE_ERROR_IO_WRITE,
+                "csvwrite: output byte count exceeds platform limits",
+            )
+        })?;
+        let mut remaining = chunk;
+        while !remaining.is_empty() {
+            check_csv_owner(selected)?;
+            let count = file.write(remaining).map_err(|source| {
+                csvwrite_error_with_source(
+                    &CSVWRITE_ERROR_IO_WRITE,
+                    format!("csvwrite: failed to write output ({source})"),
+                    source,
+                )
+            })?;
+            if count == 0 {
+                let source = std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "csvwrite: provider made no progress writing output",
+                );
+                return Err(csvwrite_error_with_source(
+                    &CSVWRITE_ERROR_IO_WRITE,
+                    source.to_string(),
+                    source,
+                ));
+            }
+            *total += count;
+            remaining = &remaining[count..];
+            cooperation.completed(count).await?;
+        }
+    }
+    Ok(())
 }
 
 fn format_complex(re: f64, im: f64) -> String {

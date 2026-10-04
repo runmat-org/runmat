@@ -150,22 +150,37 @@ async fn write_bounded(
     written: &mut usize,
 ) -> BuiltinResult<()> {
     for chunk in bytes.chunks(4096) {
-        let next = (*written).checked_add(chunk.len()).ok_or_else(|| {
+        (*written).checked_add(chunk.len()).ok_or_else(|| {
             writematrix_error_with(
                 &WRITEMATRIX_ERROR_IO,
                 "writematrix: output byte count exceeds platform limits",
             )
         })?;
-        check_owner(selected)?;
-        file.write_all(chunk).map_err(|source| {
-            writematrix_error_with_source(
-                &WRITEMATRIX_ERROR_IO,
-                format!("writematrix: failed to write output ({source})"),
-                source,
-            )
-        })?;
-        *written = next;
-        cooperation.completed(chunk.len()).await?;
+        let mut remaining = chunk;
+        while !remaining.is_empty() {
+            check_owner(selected)?;
+            let count = file.write(remaining).map_err(|source| {
+                writematrix_error_with_source(
+                    &WRITEMATRIX_ERROR_IO,
+                    format!("writematrix: failed to write output ({source})"),
+                    source,
+                )
+            })?;
+            if count == 0 {
+                let source = std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "writematrix: provider made no progress writing output",
+                );
+                return Err(writematrix_error_with_source(
+                    &WRITEMATRIX_ERROR_IO,
+                    source.to_string(),
+                    source,
+                ));
+            }
+            *written += count;
+            remaining = &remaining[count..];
+            cooperation.completed(count).await?;
+        }
     }
     Ok(())
 }
@@ -183,12 +198,16 @@ async fn write_text_cell(
         return write_bounded(file, cooperation, selected, value.as_bytes(), written).await;
     }
     write_bounded(file, cooperation, selected, b"\"", written).await?;
-    let mut parts = value.split('"').peekable();
-    while let Some(part) = parts.next() {
-        write_bounded(file, cooperation, selected, part.as_bytes(), written).await?;
-        if parts.peek().is_some() {
-            write_bounded(file, cooperation, selected, b"\"\"", written).await?;
+    for chunk in value.as_bytes().chunks(4096) {
+        let mut start = 0usize;
+        for (index, byte) in chunk.iter().enumerate() {
+            if *byte == b'"' {
+                write_bounded(file, cooperation, selected, &chunk[start..index], written).await?;
+                write_bounded(file, cooperation, selected, b"\"\"", written).await?;
+                start = index + 1;
+            }
         }
+        write_bounded(file, cooperation, selected, &chunk[start..], written).await?;
     }
     write_bounded(file, cooperation, selected, b"\"", written).await
 }
