@@ -221,7 +221,10 @@ fn pending_download_keeps_captured_filesystem_owner_and_cwd() {
         Vec::new(),
     ));
     assert!(matches!(
-        futures::poll!(pending.as_mut()),
+        std::future::Future::poll(
+            pending.as_mut(),
+            &mut std::task::Context::from_waker(futures::task::noop_waker_ref()),
+        ),
         std::task::Poll::Pending
     ));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
