@@ -25,7 +25,7 @@ pub(super) fn preflight_host_arguments(
             if prepared_api_key.is_some_and(|prepared| prepared.contains_field(name)) {
                 continue;
             }
-            let field = RequestOptionName::decode(name, true);
+            let field = RequestOptionName::decode(name);
             prepared_names
                 .struct_fields
                 .push((name.clone(), field.clone()));
@@ -57,7 +57,7 @@ pub(super) fn preflight_host_arguments(
                 &args[index],
                 "webwrite: parameter names must be character vectors or strings",
             )?;
-            let field = RequestOptionName::decode(&name, false);
+            let field = RequestOptionName::decode(&name);
             prepared_names.pair_fields.push(Some(field.clone()));
             if !crate::dispatcher::value_contains_gpu(&args[index + 1]) {
                 process_name_value_pair(&field, &args[index + 1], &mut options, &mut query)?;

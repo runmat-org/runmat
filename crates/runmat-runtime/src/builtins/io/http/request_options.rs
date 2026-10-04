@@ -9,11 +9,11 @@ pub(super) enum RequestOptionName {
 }
 
 impl RequestOptionName {
-    pub(super) fn decode(name: &str, leading_options_struct: bool) -> Self {
+    pub(super) fn decode(name: &str) -> Self {
         match WebOptionField::decode(name) {
-            // Only the leading weboptions structure gives these names header meaning.
-            // Direct pairs have always been ordinary query parameters.
-            Some(WebOptionField::KeyName | WebOptionField::KeyValue) if !leading_options_struct => {
+            // PreparedApiKey owns these only in the leading options structure.
+            // Elsewhere, their original spelling remains an ordinary query name.
+            Some(WebOptionField::KeyName | WebOptionField::KeyValue) => {
                 Self::Query(name.to_owned())
             }
             Some(field) => Self::Field(field),
@@ -37,11 +37,11 @@ mod tests {
     #[test]
     fn direct_api_key_spellings_remain_query_names() {
         assert_eq!(
-            RequestOptionName::decode("KeyName", false),
+            RequestOptionName::decode("KeyName"),
             RequestOptionName::Query("KeyName".into())
         );
         assert_eq!(
-            RequestOptionName::decode("Timeout", false),
+            RequestOptionName::decode("Timeout"),
             RequestOptionName::Field(WebOptionField::Timeout)
         );
     }

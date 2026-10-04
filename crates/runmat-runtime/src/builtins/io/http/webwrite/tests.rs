@@ -92,7 +92,7 @@ fn direct_keyname_pair_remains_a_request_parameter() {
     let mut options = WebWriteOptions::default();
     let mut query = Vec::new();
     process_name_value_pair(
-        &RequestOptionName::decode("KeyName", false),
+        &RequestOptionName::decode("KeyName"),
         &Value::from("ordinary-query"),
         &mut options,
         &mut query,

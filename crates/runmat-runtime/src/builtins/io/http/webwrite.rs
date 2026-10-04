@@ -209,13 +209,10 @@ fn parse_arguments(
             .and_then(Clone::clone)
         {
             Some(field) => field,
-            None => RequestOptionName::decode(
-                &expect_string_scalar(
-                    &name_value,
-                    "webwrite: parameter names must be character vectors or strings",
-                )?,
-                false,
-            ),
+            None => RequestOptionName::decode(&expect_string_scalar(
+                &name_value,
+                "webwrite: parameter names must be character vectors or strings",
+            )?),
         };
         pair_index += 1;
         let value = queue.pop_front().ok_or_else(|| {

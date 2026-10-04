@@ -192,13 +192,10 @@ fn parse_arguments(
             .and_then(Clone::clone)
         {
             Some(field) => field,
-            None => RequestOptionName::decode(
-                &expect_string_scalar(
-                    &name_value,
-                    "webread: parameter names must be character vectors or string scalars",
-                )?,
-                false,
-            ),
+            None => RequestOptionName::decode(&expect_string_scalar(
+                &name_value,
+                "webread: parameter names must be character vectors or string scalars",
+            )?),
         };
         pair_index += 1;
         let value = queue.pop_front().ok_or_else(|| {
