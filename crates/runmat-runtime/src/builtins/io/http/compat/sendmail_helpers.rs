@@ -5,37 +5,6 @@ use crate::context::{
     RuntimeContext,
 };
 
-#[derive(Clone, Copy)]
-pub(super) enum SendmailFailure {
-    Arity,
-    InvalidMailInput,
-    InvalidText,
-    EmptyRecipient,
-    Attachments,
-    Outbox,
-    Command,
-    Smtp,
-    NoTransport,
-    Preferences,
-}
-
-impl SendmailFailure {
-    const fn identifier(self) -> &'static str {
-        match self {
-            Self::Arity => "RunMat:sendmail:ArgumentCount",
-            Self::InvalidMailInput => "RunMat:sendmail:InvalidMailInput",
-            Self::InvalidText => "RunMat:sendmail:InvalidText",
-            Self::EmptyRecipient => "RunMat:sendmail:EmptyRecipient",
-            Self::Attachments => "RunMat:sendmail:UnsupportedAttachments",
-            Self::Outbox => "RunMat:sendmail:OutboxFailure",
-            Self::Command => "RunMat:sendmail:CommandFailure",
-            Self::Smtp => "RunMat:sendmail:SmtpUnavailable",
-            Self::NoTransport => "RunMat:sendmail:NoTransport",
-            Self::Preferences => "RunMat:sendmail:PreferenceFailure",
-        }
-    }
-}
-
 pub(super) fn sendmail_error(kind: SendmailFailure, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("sendmail")

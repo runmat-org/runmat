@@ -45,3 +45,34 @@ fn known_invalid_forms_reject_and_unknown_remains_possible() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-SENDMAIL-ATTACHMENTS"));
 }
+
+#[test]
+fn typed_failure_identities_are_exactly_catalog_descriptor_errors() {
+    let identifiers: Vec<_> = SENDMAIL_DESCRIPTOR
+        .errors
+        .iter()
+        .map(|error| error.identifier.expect("public sendmail identifier"))
+        .collect();
+    for failure in [
+        SendmailFailure::Outputs,
+        SendmailFailure::Arity,
+        SendmailFailure::InvalidMailInput,
+        SendmailFailure::InvalidText,
+        SendmailFailure::EmptyRecipient,
+        SendmailFailure::Attachments,
+        SendmailFailure::Outbox,
+        SendmailFailure::Command,
+        SendmailFailure::Preferences,
+        SendmailFailure::Smtp,
+        SendmailFailure::NoTransport,
+    ] {
+        assert_eq!(
+            identifiers
+                .iter()
+                .filter(|id| **id == failure.identifier())
+                .count(),
+            1
+        );
+    }
+    assert_eq!(identifiers.len(), 11);
+}

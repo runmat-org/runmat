@@ -8,6 +8,7 @@ use sendmail_helpers::*;
 use websave_helpers::*;
 
 use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_builtins::{SendmailFailure, SENDMAIL_DESCRIPTOR, SENDMAIL_ERROR_OUTPUTS};
 use runmat_builtins::{WEBSAVE_DESCRIPTOR, WEBSAVE_ERROR_OUTPUTS, WEBSAVE_EXPLICIT_GPU_EXTENSION};
 use runmat_value::NumericScalar;
 use std::path::PathBuf;
@@ -318,6 +319,11 @@ async fn sendmail_builtin(
     context: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &SENDMAIL_DESCRIPTOR,
+        &SENDMAIL_ERROR_OUTPUTS,
+        "sendmail",
+    )?;
     if args.iter().any(|value| {
         crate::builtins::common::validation::value_contains_native_integer_class(value)
             || value_contains_resident(value)

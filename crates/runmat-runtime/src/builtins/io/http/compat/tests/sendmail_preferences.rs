@@ -238,3 +238,23 @@ fn all_known_invalid_mail_forms_have_stable_identifiers_before_preferences() {
     }
     assert_eq!(calls.get(), 0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn excessive_output_request_rejects_before_mail_parsing_or_service_effects() {
+    let (runtime, calls) = context(Reply::Values(None));
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = run(sendmail_builtin(
+        Some(runtime),
+        vec![
+            Value::String("a@example.test".into()),
+            Value::String("status".into()),
+        ],
+    ))
+    .expect_err("fixed status output limit");
+    assert_eq!(
+        error.identifier(),
+        Some(SendmailFailure::Outputs.identifier())
+    );
+    assert_eq!(calls.get(), 0);
+}
