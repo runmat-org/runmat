@@ -199,8 +199,8 @@ fn mat_handle_and_member_suffix_identity_are_exact_or_explicitly_unavailable() {
         assignment(exact).identity_bytes(),
         assignment(other).identity_bytes()
     );
-    assert!(assignment(exact).has_exact_identity());
-    assert!(!assignment(MatAssignmentSuffix::Unavailable).has_exact_identity());
+    assert!(assignment(exact).identity_complete());
+    assert!(!assignment(MatAssignmentSuffix::Unavailable).identity_complete());
     assert!(!HostEffectWorkload::MatDecode {
         source,
         selection: MatDecodeSelection::MemberPath {
@@ -209,7 +209,7 @@ fn mat_handle_and_member_suffix_identity_are_exact_or_explicitly_unavailable() {
         },
         output: MatDecodeOutput::SingleMember,
     }
-    .has_exact_identity());
+    .identity_complete());
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

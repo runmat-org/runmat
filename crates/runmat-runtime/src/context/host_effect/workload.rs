@@ -168,27 +168,24 @@ impl HostEffectWorkload<'_> {
             Self::DatasetHandle { inputs, .. } => {
                 inputs.iter().all(|input| input.identity_digest.is_some())
             }
-            _ => true,
-        }
-    }
-
-    pub const fn has_exact_identity(self) -> bool {
-        !matches!(
-            self,
             Self::MatEncode {
-                mode: MatEncodeMode::AssignMember {
-                    suffix: MatAssignmentSuffix::Unavailable,
-                    ..
-                },
-                ..
-            } | Self::MatDecode {
-                selection: MatDecodeSelection::MemberPath {
-                    suffix: MatAssignmentSuffix::Unavailable,
-                    ..
-                },
+                mode:
+                    MatEncodeMode::AssignMember {
+                        suffix: MatAssignmentSuffix::Unavailable,
+                        ..
+                    },
                 ..
             }
-        )
+            | Self::MatDecode {
+                selection:
+                    MatDecodeSelection::MemberPath {
+                        suffix: MatAssignmentSuffix::Unavailable,
+                        ..
+                    },
+                ..
+            } => false,
+            _ => true,
+        }
     }
 
     pub const fn output(self) -> HostEffectOutput {

@@ -26,9 +26,8 @@ pub use stage::{
 pub use workload::{
     AudioDecodeOutput, AudioFrameRange, DatasetHandleInput, DatasetHandleKey,
     DatasetHandleOperation, DatasetHandleRole, DatasetPathOperation, HostEffectOutput,
-    HostEffectSource, HostEffectWorkload, MatDecodeOutput, MatDecodeSelection,
-    MatEncodeMode, MatEncodeOutput, MatStructSelection,
-    MatAssignmentSuffix, MatHandleControl,
+    HostEffectSource, HostEffectWorkload, MatAssignmentSuffix, MatDecodeOutput, MatDecodeSelection,
+    MatEncodeMode, MatEncodeOutput, MatHandleControl, MatStructSelection,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -112,19 +111,6 @@ fn select_host_effect_inner(
     if let Some(facts) = final_facts {
         facts.validate_for(&request)?;
     }
-    if !request.workload.has_exact_identity() {
-        let finite = runtime
-            .and_then(|runtime| runtime.service_ports().parallel())
-            .and_then(|parallel| parallel.placement_resources().memory_available_bytes)
-            .is_some();
-        return if finite {
-            Err(insufficient(
-                "exact host effect control identity is unavailable",
-            ))
-        } else {
-            Ok(None)
-        };
-    }
     let Some(runtime) = runtime else {
         return Ok(None);
     };
@@ -136,7 +122,9 @@ fn select_host_effect_inner(
     let finite = parallel.memory_available_bytes.is_some();
     if !request.workload.identity_complete() {
         return if finite {
-            Err(insufficient("host effect input identity is incomplete"))
+            Err(insufficient(
+                "host effect control or input identity is incomplete",
+            ))
         } else {
             Ok(None)
         };
