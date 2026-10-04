@@ -11,7 +11,8 @@ use runmat_filesystem::data_contract::{
     DataChunkDescriptor, DataChunkUploadRequest, DataChunkUploadTarget,
 };
 use runmat_value::{
-    IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor, Value,
+    ForeignRef, IntValue, IntegerStorage, NumericScalar, NumericStorage, ObjectInstance, Tensor,
+    Value,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1097,14 +1098,23 @@ pub async fn read_array_payload_async(
     root: &Path,
     meta: &DataArrayMeta,
 ) -> BuiltinResult<DataArrayPayload> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    read_array_payload_on(provider.as_ref(), &resolved, meta).await
+}
+
+pub async fn read_array_payload_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    meta: &DataArrayMeta,
+) -> BuiltinResult<DataArrayPayload> {
     if let Some(index_path) = &meta.chunk_index_path {
         let path = root.join(index_path);
-        if fs::metadata_async(&path).await.is_ok() {
-            return read_array_payload_chunked_async(root, meta, &path).await;
+        if provider.metadata(&path).await.is_ok() {
+            return read_array_payload_chunked_on(provider, root, meta, &path).await;
         }
     }
     let payload_path = root.join(&meta.data_path);
-    let bytes = fs::read_async(&payload_path).await.map_err(|err| {
+    let bytes = provider.read(&payload_path).await.map_err(|err| {
         data_error(format!(
             "failed to read payload '{}': {err}",
             payload_path.display()
@@ -1126,11 +1136,23 @@ pub async fn read_array_slice_payload_async(
     start: &[usize],
     shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    read_array_slice_payload_on(provider.as_ref(), &resolved, meta, start, shape).await
+}
+
+pub async fn read_array_slice_payload_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    meta: &DataArrayMeta,
+    start: &[usize],
+    shape: &[usize],
+) -> BuiltinResult<DataArrayPayload> {
     let (slice_start, slice_shape) = normalize_slice_bounds(&meta.shape, start, shape)?;
     if let Some(index_path) = &meta.chunk_index_path {
         let path = root.join(index_path);
-        if fs::metadata_async(&path).await.is_ok() {
-            return read_array_payload_chunked_slice_async(
+        if provider.metadata(&path).await.is_ok() {
+            return read_array_payload_chunked_slice_on(
+                provider,
                 root,
                 meta,
                 &path,
@@ -1140,18 +1162,19 @@ pub async fn read_array_slice_payload_async(
             .await;
         }
     }
-    let full = read_array_payload_async(root, meta).await?;
+    let full = read_array_payload_on(provider, root, meta).await?;
     extract_slice_payload(&full, &slice_start, &slice_shape)
 }
 
-async fn read_array_payload_chunked_slice_async(
+async fn read_array_payload_chunked_slice_on(
+    provider: &dyn fs::FsProvider,
     root: &Path,
     meta: &DataArrayMeta,
     index_path: &Path,
     slice_start: &[usize],
     slice_shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
-    let bytes = fs::read_async(index_path).await.map_err(|err| {
+    let bytes = provider.read(index_path).await.map_err(|err| {
         data_error(format!(
             "failed to read chunk index '{}': {err}",
             index_path.display()
@@ -1180,7 +1203,7 @@ async fn read_array_payload_chunked_slice_async(
         }
 
         let chunk_path = root.join(&chunk.data_path);
-        let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
+        let bytes = provider.read(&chunk_path).await.map_err(|err| {
             data_error(format!(
                 "failed to read chunk payload '{}': {err}",
                 chunk_path.display()
@@ -1240,12 +1263,13 @@ async fn read_array_payload_chunked_slice_async(
     })
 }
 
-async fn read_array_payload_chunked_async(
+async fn read_array_payload_chunked_on(
+    provider: &dyn fs::FsProvider,
     root: &Path,
     meta: &DataArrayMeta,
     index_path: &Path,
 ) -> BuiltinResult<DataArrayPayload> {
-    let bytes = fs::read_async(index_path).await.map_err(|err| {
+    let bytes = provider.read(index_path).await.map_err(|err| {
         data_error(format!(
             "failed to read chunk index '{}': {err}",
             index_path.display()
@@ -1262,7 +1286,7 @@ async fn read_array_payload_chunked_async(
     let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
-        let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
+        let bytes = provider.read(&chunk_path).await.map_err(|err| {
             data_error(format!(
                 "failed to read chunk payload '{}': {err}",
                 chunk_path.display()
@@ -1771,8 +1795,9 @@ fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
     Ok(out)
 }
 
-pub fn dataset_object(path: &str, manifest: &DataManifest) -> Value {
-    let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.owned());
+pub fn dataset_object(path: &str, manifest: &DataManifest, authority: ForeignRef) -> Value {
+    let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.owned())
+        .with_dataset_authority(authority);
     obj.properties
         .insert("__data_path".to_string(), Value::String(path.to_string()));
     obj.properties.insert(
@@ -1806,8 +1831,9 @@ pub fn ensure_manifest_sequence(expected: u64, manifest: &DataManifest) -> Built
     Ok(())
 }
 
-pub fn array_object(dataset_path: &str, array_name: &str) -> Value {
-    let mut obj = ObjectInstance::new("DataArray".to_string());
+pub fn array_object(dataset_path: &str, array_name: &str, authority: ForeignRef) -> Value {
+    let mut obj =
+        ObjectInstance::new(authority::DATA_ARRAY_CLASS.owned()).with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),
         Value::String(dataset_path.to_string()),
@@ -1819,8 +1845,9 @@ pub fn array_object(dataset_path: &str, array_name: &str) -> Value {
     Value::Object(obj)
 }
 
-pub fn transaction_object(dataset_path: &str, tx_id: &str) -> Value {
-    let mut obj = ObjectInstance::new("DataTransaction".to_string());
+pub fn transaction_object(dataset_path: &str, tx_id: &str, authority: ForeignRef) -> Value {
+    let mut obj = ObjectInstance::new(authority::DATA_TRANSACTION_CLASS.owned())
+        .with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),
         Value::String(dataset_path.to_string()),

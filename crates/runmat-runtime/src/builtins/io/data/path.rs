@@ -67,7 +67,12 @@ async fn data_create_builtin(
             txn_sequence: 0,
         };
         crate::data::write_manifest_on(authority.provider(), &root, &manifest).await?;
-        Ok(dataset_object(&path, &manifest))
+        let lease = crate::data::authority::issue_dataset(
+            authority.provider_arc().clone(),
+            root.clone(),
+            path.clone(),
+        )?;
+        Ok(dataset_object(&path, &manifest, lease))
     })
     .await
 }
@@ -92,7 +97,12 @@ async fn data_open_builtin(runtime: Option<RuntimeContext>, path: Value) -> Buil
     )?;
     admission::execute(runtime.as_ref(), receipt, async {
         let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
-        let mut ds = dataset_object(&path, &manifest);
+        let lease = crate::data::authority::issue_dataset(
+            authority.provider_arc().clone(),
+            root.clone(),
+            path.clone(),
+        )?;
+        let mut ds = dataset_object(&path, &manifest, lease);
         hydrate_dataset_descriptor_on(authority.provider(), &root, &mut ds).await;
         Ok(ds)
     })
@@ -278,7 +288,12 @@ async fn data_import_builtin(
     admission::execute(runtime.as_ref(), receipt, async {
         copy_dir_recursive_on(authority.provider(), &source_root, &root, &mut budget).await?;
         let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
-        Ok(dataset_object(&path, &manifest))
+        let lease = crate::data::authority::issue_dataset(
+            authority.provider_arc().clone(),
+            root.clone(),
+            path.clone(),
+        )?;
+        Ok(dataset_object(&path, &manifest, lease))
     })
     .await
 }

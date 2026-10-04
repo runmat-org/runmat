@@ -28,6 +28,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
+use crate::data::authority::{self, AuthorizedHandle, HandleRole};
 use crate::data::{
     array_object, data_error, dataset_object, dataset_root, ensure_manifest_sequence,
     get_object_prop, manifest_path, manifest_version_token, now_rfc3339, parse_schema,
@@ -1205,6 +1206,7 @@ one_sig_descriptor!(
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
+    authority::resolve_object(&base, HandleRole::Dataset)?;
     let obj = as_object(&base, "Dataset.path")?;
     Ok(get_object_prop(obj, "__data_path")?.clone())
 }
@@ -1218,6 +1220,7 @@ async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
+    authority::resolve_object(&base, HandleRole::Dataset)?;
     let obj = as_object(&base, "Dataset.id")?;
     Ok(get_object_prop(obj, "__data_id")?.clone())
 }
@@ -1231,6 +1234,7 @@ async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
+    authority::resolve_object(&base, HandleRole::Dataset)?;
     let obj = as_object(&base, "Dataset.version")?;
     Ok(get_object_prop(obj, "__data_version")?.clone())
 }
@@ -1244,8 +1248,8 @@ async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.arrays")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let owner = dataset_owner(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let values: Vec<Value> = manifest
         .arrays
         .keys()
@@ -1263,9 +1267,9 @@ async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.has_array")?;
+    let owner = dataset_owner(&base)?;
     let name = parse_string(&name, "Dataset.has_array name")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     Ok(Value::Bool(manifest.arrays.contains_key(&name)))
 }
 
@@ -1278,15 +1282,16 @@ async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Va
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.array")?;
+    let owner = dataset_owner(&base)?;
     let name = parse_string(&name, "Dataset.array name")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     if !manifest.arrays.contains_key(&name) {
         return Err(data_error(format!(
             "Dataset.array: array '{name}' not found"
         )));
     }
-    Ok(array_object(&path, &name))
+    let lease = authority::issue_child(&owner, HandleRole::Array(name.clone()))?;
+    Ok(array_object(&owner.public_path, &name, lease))
 }
 
 #[runtime_builtin(
@@ -1298,8 +1303,8 @@ async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value>
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.attrs")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let owner = dataset_owner(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     Ok(attrs_to_struct(&manifest.attrs))
 }
 
@@ -1316,9 +1321,9 @@ async fn dataset_get_attr_builtin(
     key: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.get_attr")?;
+    let owner = dataset_owner(&base)?;
     let key = parse_string(&key, "Dataset.get_attr key")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     if let Some(value) = manifest.attrs.get(&key) {
         return Ok(json_to_value(value));
     }
@@ -1335,14 +1340,14 @@ async fn dataset_get_attr_builtin(
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.set_attr")?;
+    let owner = dataset_owner(&base)?;
     let key = parse_string(&key, "Dataset.set_attr key")?;
-    let root = dataset_root(&path);
-    let mut manifest = read_manifest_async(&root).await?;
+    let mut manifest =
+        crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     manifest.attrs.insert(key, value_to_json(&value));
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest_async(&root, &manifest).await?;
+    crate::data::write_manifest_on(owner.filesystem.as_ref(), &owner.root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -1356,18 +1361,18 @@ async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.set_attrs")?;
+    let owner = dataset_owner(&base)?;
     let Value::Struct(incoming) = attrs else {
         return Err(data_error("Dataset.set_attrs: attrs must be a struct"));
     };
-    let root = dataset_root(&path);
-    let mut manifest = read_manifest_async(&root).await?;
+    let mut manifest =
+        crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     for (k, v) in incoming.fields {
         manifest.attrs.insert(k, value_to_json(&v));
     }
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest_async(&root, &manifest).await?;
+    crate::data::write_manifest_on(owner.filesystem.as_ref(), &owner.root, &manifest).await?;
     Ok(Value::Bool(true))
 }
 
@@ -1380,17 +1385,18 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.begin")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
-    let tx_id = start_tx(path.clone(), manifest.txn_sequence)?;
+    let owner = dataset_owner(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
+    let tx_id = start_tx(owner.public_path.clone(), manifest.txn_sequence)?;
     tracing::info!(
         target: "runmat.data",
-        dataset = path,
+        dataset = owner.public_path,
         tx_id = tx_id,
         base_sequence = manifest.txn_sequence,
         "data transaction begin"
     );
-    Ok(transaction_object(&path, &tx_id))
+    let lease = authority::issue_child(&owner, HandleRole::Transaction(tx_id.clone()))?;
+    Ok(transaction_object(&owner.public_path, &tx_id, lease))
 }
 
 #[runtime_builtin(
@@ -1406,15 +1412,12 @@ async fn dataset_snapshot_builtin(
     label: Value,
     _rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.snapshot")?;
+    let owner = dataset_owner(&base)?;
     let label = parse_string(&label, "Dataset.snapshot label")?;
-    let root = dataset_root(&path);
-    let authority = DataPathAuthority::capture(&[&root])?;
-    let resolved_root = authority.resolve(&root)?;
-    let snapshots = root.join(".snapshots");
-    authority
-        .provider()
-        .create_dir_all(&resolved_root.join(".snapshots"))
+    let snapshots = owner.root.join(".snapshots");
+    owner
+        .filesystem
+        .create_dir_all(&snapshots)
         .await
         .map_err(|source| {
             crate::data::data_error_with_source(
@@ -1422,9 +1425,10 @@ async fn dataset_snapshot_builtin(
                 source,
             )
         })?;
-    let src = manifest_path(&root);
+    let src = manifest_path(&owner.root);
     let dst = snapshots.join(format!("{}.manifest.json", sanitize_label(&label)));
-    copy_file(&authority, &src, &dst).await?;
+    let mut unmetered = None;
+    copy_file_on(owner.filesystem.as_ref(), &src, &dst, &mut unmetered).await?;
     Ok(Value::String(dst.to_string_lossy().to_string()))
 }
 
@@ -1437,10 +1441,15 @@ async fn dataset_snapshot_builtin(
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
-    let path = dataset_path_from_object(&base, "Dataset.refresh")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
-    let mut ds = dataset_object(&path, &manifest);
-    hydrate_dataset_descriptor_async(&path, &mut ds).await;
+    let owner = dataset_owner(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
+    let lease = authority::issue_dataset(
+        owner.filesystem.clone(),
+        owner.root.clone(),
+        owner.public_path.clone(),
+    )?;
+    let mut ds = dataset_object(&owner.public_path, &manifest, lease);
+    hydrate_dataset_descriptor_on(owner.filesystem.as_ref(), &owner.root, &mut ds).await;
     Ok(ds)
 }
 
@@ -1453,8 +1462,8 @@ async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
-    let obj = as_object(&base, "DataArray.name")?;
-    Ok(get_object_prop(obj, "__array_name")?.clone())
+    let (_, name) = authority::resolve_array(&base)?;
+    Ok(Value::String(name))
 }
 
 #[runtime_builtin(
@@ -1466,8 +1475,8 @@ async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.dtype")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -1484,8 +1493,8 @@ async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.shape")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -1505,8 +1514,8 @@ async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.rank")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -1523,8 +1532,8 @@ async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.chunk_shape")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -1548,8 +1557,8 @@ async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.codec")?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let (owner, name) = authority::resolve_array(&base)?;
+    let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
     let meta = manifest
         .arrays
         .get(&name)
@@ -2090,9 +2099,8 @@ async fn data_tx_status_builtin(base: Value) -> BuiltinResult<Value> {
     })
 }
 
-fn dataset_path_from_object(base: &Value, context: &str) -> BuiltinResult<String> {
-    let obj = as_object(base, context)?;
-    parse_string(get_object_prop(obj, "__data_path")?, context)
+fn dataset_owner(base: &Value) -> BuiltinResult<AuthorizedHandle> {
+    authority::resolve_object(base, HandleRole::Dataset)
 }
 
 fn tx_id_from_object(base: &Value, context: &str) -> BuiltinResult<String> {
@@ -2112,11 +2120,6 @@ fn as_object<'a>(value: &'a Value, context: &str) -> BuiltinResult<&'a ObjectIns
         Value::Object(obj) => Ok(obj),
         _ => Err(data_error(format!("{context}: expected object receiver"))),
     }
-}
-
-async fn hydrate_dataset_descriptor_async(path: &str, dataset: &mut Value) {
-    let provider = runmat_filesystem::current_provider();
-    hydrate_dataset_descriptor_on(provider.as_ref(), std::path::Path::new(path), dataset).await;
 }
 
 async fn hydrate_dataset_descriptor_on(
@@ -2161,17 +2164,6 @@ fn sanitize_label(label: &str) -> String {
             }
         })
         .collect()
-}
-
-async fn copy_file(
-    authority: &DataPathAuthority,
-    src: &PathBuf,
-    dst: &PathBuf,
-) -> BuiltinResult<()> {
-    let src = authority.resolve(src)?;
-    let dst = authority.resolve(dst)?;
-    let mut unmetered = None;
-    copy_file_on(authority.provider(), &src, &dst, &mut unmetered).await
 }
 
 async fn copy_file_on(
@@ -4207,6 +4199,12 @@ mod tests {
         )
         .expect("create finishes on original authority after ambient swap");
         assert!(matches!(result, Value::Object(_)));
+        let arrays = call_builtin("Dataset.arrays", std::slice::from_ref(&result))
+            .expect("follow-on Dataset read retains selected provider");
+        let Value::Cell(arrays) = arrays else {
+            panic!("Dataset.arrays must return a cell");
+        };
+        assert_eq!(arrays.data, vec![Value::String("sample".into())]);
         assert_eq!(*suspensions.lock().expect("suspension count"), 1);
         let root = dir.path().join("pinned.data");
         assert!(root.join("manifest.json").is_file());

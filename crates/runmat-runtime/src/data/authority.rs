@@ -190,17 +190,44 @@ pub(crate) fn resolve_object(
     value: &Value,
     expected: HandleRole,
 ) -> BuiltinResult<AuthorizedHandle> {
+    let resolved = resolve_any_object(value)?;
+    if resolved.role != expected {
+        return Err(data_error(
+            "Dataset family receiver has the wrong sealed role",
+        ));
+    }
+    Ok(resolved)
+}
+
+pub(crate) fn resolve_array(value: &Value) -> BuiltinResult<(AuthorizedHandle, String)> {
+    let resolved = resolve_any_object(value)?;
+    let HandleRole::Array(name) = &resolved.role else {
+        return Err(data_error("DataArray receiver has the wrong sealed role"));
+    };
+    let name = name.clone();
+    Ok((resolved, name))
+}
+
+pub(crate) fn resolve_transaction(value: &Value) -> BuiltinResult<(AuthorizedHandle, String)> {
+    let resolved = resolve_any_object(value)?;
+    let HandleRole::Transaction(tx_id) = &resolved.role else {
+        return Err(data_error(
+            "DataTransaction receiver has the wrong sealed role",
+        ));
+    };
+    let tx_id = tx_id.clone();
+    Ok((resolved, tx_id))
+}
+
+fn resolve_any_object(value: &Value) -> BuiltinResult<AuthorizedHandle> {
     let Value::Object(object) = value else {
         return Err(data_error("Dataset family receiver must be an object"));
     };
-    if !object.is_class(expected.class()) {
-        return Err(data_error("Dataset family receiver has the wrong class"));
-    }
     let reference = object
         .dataset_authority()
         .ok_or_else(|| data_error("Dataset family receiver has no managed authority"))?;
     let resolved = resolve(reference)?;
-    if resolved.role != expected || !presentation_matches(object, &resolved) {
+    if !object.is_class(resolved.role.class()) || !presentation_matches(object, &resolved) {
         return Err(data_error(
             "Dataset family receiver authority does not match its presentation",
         ));
