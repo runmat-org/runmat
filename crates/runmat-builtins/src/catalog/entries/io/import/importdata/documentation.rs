@@ -15,7 +15,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Without an explicit delimiter, nonempty lines are sampled for comma, tab, semicolon, pipe, or whitespace separation. A supplied delimiter is used as given; the escaped text spellings \\t, \\n, and \\r select the corresponding control characters.",
         ] },
         BuiltinDocumentationSection { heading: "Filesystem and execution", paragraphs: &[
-            "Text input is read through the installed filesystem provider with its provider and working directory captured for the call. Returned tensors and structs reside on the host; no accelerator kernel or fusion route is used. Resident filename or controls are invalid and rejected before provider download or file access.",
+            "Text input is read through the installed filesystem provider. An absolute filename captures that provider directly; a relative filename also captures the working directory before the read. An opt-in filesystem resource lease is checked during the call. Returned tensors and structs reside on the host; no accelerator kernel or fusion route is used. Resident filename or controls are invalid and rejected before provider download or file access.",
+            "The read and parser cooperate with the current execution service for cancellation and CPU turns. This is not a finite whole-call memory guarantee: file bytes, decoded text, tokens, and result containers still need complete-call resource evidence when a finite host budget is enforced.",
             "The current implementation imports UTF-8 text, not binary, image, audio, or MAT data. Use their dedicated import operations for those formats. A distributed worker needs its own accessible filesystem source; a filename is not a transferable file snapshot.",
         ] },
     ],
@@ -67,6 +68,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "Import admission and filesystem owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata.rs") },
+            BuiltinDocumentationLink { label: "Captured provider, path, and resource lease", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata/input.rs") },
+            BuiltinDocumentationLink { label: "Execution-service cooperation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata/cooperation.rs") },
             BuiltinDocumentationLink { label: "Text parser and result construction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/importdata/text.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric, header, and output forms", location: "builtins::io::importdata::tests" }],

@@ -1,6 +1,10 @@
 use super::*;
 use runmat_value::{CellArray, StructValue, Tensor};
 
+#[path = "text/lines.rs"]
+mod lines;
+use lines::collect_nonempty_lines;
+
 pub(super) struct ImportTextResult {
     pub(super) value: Value,
     pub(super) delimiter: String,
@@ -15,18 +19,13 @@ struct ImportedText {
     rowheaders: Vec<String>,
 }
 
-pub(super) fn import_text_data(
+pub(super) async fn import_text_data(
     text: &str,
     delimiter: Option<&str>,
     header_lines: Option<usize>,
+    cooperation: &mut cooperation::ImportCooperation,
 ) -> BuiltinResult<ImportTextResult> {
-    let lines: Vec<&str> = text.lines().collect();
-    let nonempty: Vec<(usize, &str)> = lines
-        .iter()
-        .copied()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .collect();
+    let nonempty = collect_nonempty_lines(text, cooperation).await?;
     if nonempty.is_empty() {
         return Ok(ImportTextResult {
             value: Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
@@ -37,19 +36,23 @@ pub(super) fn import_text_data(
         });
     }
 
-    let delimiter = delimiter
-        .map(Delimiter::Explicit)
-        .unwrap_or_else(|| detect_delimiter(nonempty.iter().map(|(_, line)| *line)));
+    let delimiter = match delimiter {
+        Some(value) => Delimiter::Explicit(value),
+        None => detect_delimiter(nonempty.iter().map(|(_, line)| *line), cooperation).await?,
+    };
     let delimiter_out = match &delimiter {
         Delimiter::Whitespace => " ".to_string(),
         Delimiter::Explicit(value) => (*value).to_string(),
     };
-    let records: Vec<(usize, Vec<String>)> = nonempty
-        .iter()
-        .map(|(idx, line)| (*idx, split_record(line, &delimiter)))
-        .collect();
+    let mut records = Vec::with_capacity(nonempty.len());
+    for (idx, line) in &nonempty {
+        records.push((*idx, split_record(line, &delimiter, cooperation).await?));
+    }
 
-    let data_start = header_lines.unwrap_or_else(|| infer_header_lines(&records));
+    let data_start = match header_lines {
+        Some(value) => value,
+        None => infer_header_lines(&records, cooperation).await?,
+    };
     if data_start > records.len() {
         return Err(importdata_error_with(
             &IMPORTDATA_ERROR_ARGUMENT,
@@ -63,8 +66,8 @@ pub(super) fn import_text_data(
         .collect();
     let data_records = &records[data_start..];
 
-    let imported = parse_numeric_records(data_records, &header_records)?;
-    let tensor = rows_to_tensor(&imported.data)?;
+    let imported = parse_numeric_records(data_records, &header_records, cooperation).await?;
+    let tensor = rows_to_tensor(&imported.data, cooperation).await?;
     if imported.textdata.is_empty()
         && imported.colheaders.is_empty()
         && imported.rowheaders.is_empty()
@@ -79,13 +82,22 @@ pub(super) fn import_text_data(
     let mut out = StructValue::new();
     out.insert("data", Value::Tensor(tensor));
     if !imported.textdata.is_empty() {
-        out.insert("textdata", cell_from_rows(&imported.textdata)?);
+        out.insert(
+            "textdata",
+            cell_from_rows(&imported.textdata, cooperation).await?,
+        );
     }
     if !imported.colheaders.is_empty() {
-        out.insert("colheaders", cell_from_row(&imported.colheaders)?);
+        out.insert(
+            "colheaders",
+            cell_from_row(&imported.colheaders, cooperation).await?,
+        );
     }
     if !imported.rowheaders.is_empty() {
-        out.insert("rowheaders", cell_from_col(&imported.rowheaders)?);
+        out.insert(
+            "rowheaders",
+            cell_from_col(&imported.rowheaders, cooperation).await?,
+        );
     }
     Ok(ImportTextResult {
         value: Value::Struct(out),
@@ -94,9 +106,10 @@ pub(super) fn import_text_data(
     })
 }
 
-fn parse_numeric_records(
+async fn parse_numeric_records(
     data_records: &[(usize, Vec<String>)],
     header_records: &[Vec<String>],
+    cooperation: &mut cooperation::ImportCooperation,
 ) -> BuiltinResult<ImportedText> {
     if data_records.is_empty() {
         return Ok(ImportedText {
@@ -108,7 +121,7 @@ fn parse_numeric_records(
     }
 
     let first = &data_records[0].1;
-    let row_header_cols = infer_row_header_cols(data_records);
+    let row_header_cols = infer_row_header_cols(data_records, cooperation).await?;
     let numeric_cols = first.len().saturating_sub(row_header_cols);
     if numeric_cols == 0 {
         return Err(importdata_error_with(
@@ -151,8 +164,10 @@ fn parse_numeric_records(
                     ),
                 )
             })?);
+            cooperation.completed(token.len()).await?;
         }
         rows.push(row);
+        cooperation.completed(record.len()).await?;
     }
 
     let mut colheaders = Vec::new();
@@ -172,48 +187,76 @@ fn parse_numeric_records(
     })
 }
 
-fn infer_row_header_cols(records: &[(usize, Vec<String>)]) -> usize {
+async fn infer_row_header_cols(
+    records: &[(usize, Vec<String>)],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<usize> {
     let Some(first) = records.first() else {
-        return 0;
+        return Ok(0);
     };
     if first.1.len() < 2 || parse_numeric_token(&first.1[0]).is_some() {
-        return 0;
+        return Ok(0);
     }
-    if records.iter().all(|(_, row)| {
-        row.len() == first.1.len()
-            && parse_numeric_token(&row[0]).is_none()
-            && row[1..]
-                .iter()
-                .all(|token| parse_numeric_token(token).is_some())
-    }) {
-        1
-    } else {
-        0
+    for (_, row) in records {
+        if row.len() != first.1.len() || parse_numeric_token(&row[0]).is_some() {
+            return Ok(0);
+        }
+        for token in &row[1..] {
+            if parse_numeric_token(token).is_none() {
+                return Ok(0);
+            }
+            cooperation.completed(token.len()).await?;
+        }
     }
+    Ok(1)
 }
 
-fn infer_header_lines(records: &[(usize, Vec<String>)]) -> usize {
-    records
-        .iter()
-        .position(|(_, row)| is_numeric_data_row(row))
-        .unwrap_or(records.len())
+async fn infer_header_lines(
+    records: &[(usize, Vec<String>)],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<usize> {
+    for (index, (_, row)) in records.iter().enumerate() {
+        if is_numeric_data_row(row, cooperation).await? {
+            return Ok(index);
+        }
+        cooperation
+            .completed(row.iter().map(String::len).sum())
+            .await?;
+    }
+    Ok(records.len())
 }
 
-fn is_numeric_data_row(row: &[String]) -> bool {
+async fn is_numeric_data_row(
+    row: &[String],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<bool> {
     if row.is_empty() {
-        return false;
+        return Ok(false);
     }
-    if row.iter().all(|token| parse_numeric_token(token).is_some()) {
-        return true;
+    let mut all_numeric = true;
+    for token in row {
+        all_numeric &= parse_numeric_token(token).is_some();
+        cooperation.completed(token.len()).await?;
     }
-    row.len() > 1
-        && parse_numeric_token(&row[0]).is_none()
-        && row[1..]
-            .iter()
-            .all(|token| parse_numeric_token(token).is_some())
+    if all_numeric {
+        return Ok(true);
+    }
+    if row.len() <= 1 || parse_numeric_token(&row[0]).is_some() {
+        return Ok(false);
+    }
+    for token in &row[1..] {
+        if parse_numeric_token(token).is_none() {
+            return Ok(false);
+        }
+        cooperation.completed(token.len()).await?;
+    }
+    Ok(true)
 }
 
-fn rows_to_tensor(rows: &[Vec<f64>]) -> BuiltinResult<Tensor> {
+async fn rows_to_tensor(
+    rows: &[Vec<f64>],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Tensor> {
     let row_count = rows.len();
     let col_count = rows.first().map(|row| row.len()).unwrap_or(0);
     if rows.iter().any(|row| row.len() != col_count) {
@@ -227,6 +270,7 @@ fn rows_to_tensor(rows: &[Vec<f64>]) -> BuiltinResult<Tensor> {
         for row in rows {
             data.push(row[col]);
         }
+        cooperation.completed(row_count).await?;
     }
     Tensor::new(data, vec![row_count, col_count])
         .map_err(|err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")))
@@ -238,16 +282,23 @@ enum Delimiter<'a> {
     Explicit(&'a str),
 }
 
-fn detect_delimiter<'a>(lines: impl Iterator<Item = &'a str>) -> Delimiter<'static> {
+async fn detect_delimiter<'a>(
+    lines: impl Iterator<Item = &'a str>,
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Delimiter<'static>> {
     let candidates = [",", "\t", ";", "|"];
     let sample: Vec<&str> = lines.take(12).collect();
     let mut best: Option<(&str, usize, usize)> = None;
     for candidate in candidates {
-        let counts: Vec<usize> = sample
-            .iter()
-            .map(|line| split_record(line, &Delimiter::Explicit(candidate)).len())
-            .filter(|count| *count > 1)
-            .collect();
+        let mut counts = Vec::new();
+        for line in &sample {
+            let count = split_record(line, &Delimiter::Explicit(candidate), cooperation)
+                .await?
+                .len();
+            if count > 1 {
+                counts.push(count);
+            }
+        }
         if counts.is_empty() {
             continue;
         }
@@ -260,24 +311,56 @@ fn detect_delimiter<'a>(lines: impl Iterator<Item = &'a str>) -> Delimiter<'stat
             best = Some((candidate, consistent, counts[0]));
         }
     }
-    best.map(|(candidate, _, _)| Delimiter::Explicit(candidate))
-        .unwrap_or(Delimiter::Whitespace)
+    Ok(best
+        .map(|(candidate, _, _)| Delimiter::Explicit(candidate))
+        .unwrap_or(Delimiter::Whitespace))
 }
 
-fn split_record(line: &str, delimiter: &Delimiter<'_>) -> Vec<String> {
+async fn split_record(
+    line: &str,
+    delimiter: &Delimiter<'_>,
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Vec<String>> {
     match delimiter {
-        Delimiter::Whitespace => line
-            .split_whitespace()
-            .map(|token| unquote(token.trim()))
-            .filter(|token| !token.is_empty())
-            .collect(),
-        Delimiter::Explicit(delimiter) => split_explicit(line, delimiter),
+        Delimiter::Whitespace => {
+            let mut fields = Vec::new();
+            let mut current = String::new();
+            for ch in line.chars() {
+                if ch.is_whitespace() {
+                    if !current.is_empty() {
+                        let token = unquote(current.trim());
+                        if !token.is_empty() {
+                            fields.push(token);
+                        }
+                        current.clear();
+                    }
+                } else {
+                    current.push(ch);
+                }
+                cooperation.completed(ch.len_utf8()).await?;
+            }
+            if !current.is_empty() {
+                let token = unquote(current.trim());
+                if !token.is_empty() {
+                    fields.push(token);
+                }
+            }
+            Ok(fields)
+        }
+        Delimiter::Explicit(delimiter) => split_explicit(line, delimiter, cooperation).await,
     }
 }
 
-fn split_explicit(line: &str, delimiter: &str) -> Vec<String> {
+async fn split_explicit(
+    line: &str,
+    delimiter: &str,
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Vec<String>> {
     if delimiter.is_empty() {
-        return vec![line.trim().to_string()];
+        for chunk in line.as_bytes().chunks(4096) {
+            cooperation.completed(chunk.len()).await?;
+        }
+        return Ok(vec![line.trim().to_string()]);
     }
     let mut fields = Vec::new();
     let mut current = String::new();
@@ -291,23 +374,27 @@ fn split_explicit(line: &str, delimiter: &str) -> Vec<String> {
             if in_quotes && line[idx + ch.len_utf8()..].starts_with('"') {
                 current.push('"');
                 idx += ch.len_utf8() * 2;
+                cooperation.completed(ch.len_utf8() * 2).await?;
                 continue;
             }
             in_quotes = !in_quotes;
             idx += ch.len_utf8();
+            cooperation.completed(ch.len_utf8()).await?;
             continue;
         }
         if !in_quotes && line[idx..].starts_with(delimiter) {
             fields.push(unquote(current.trim()));
             current.clear();
             idx += delimiter.len();
+            cooperation.completed(delimiter.len()).await?;
             continue;
         }
         current.push(ch);
         idx += ch.len_utf8();
+        cooperation.completed(ch.len_utf8()).await?;
     }
     fields.push(unquote(current.trim()));
-    fields
+    Ok(fields)
 }
 
 fn unquote(token: &str) -> String {
@@ -332,7 +419,10 @@ fn parse_numeric_token(token: &str) -> Option<f64> {
     }
 }
 
-fn cell_from_rows(rows: &[Vec<String>]) -> BuiltinResult<Value> {
+async fn cell_from_rows(
+    rows: &[Vec<String>],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Value> {
     let row_count = rows.len();
     let col_count = rows.iter().map(|row| row.len()).max().unwrap_or(0);
     let mut values = Vec::with_capacity(row_count * col_count);
@@ -340,28 +430,37 @@ fn cell_from_rows(rows: &[Vec<String>]) -> BuiltinResult<Value> {
         for col in 0..col_count {
             values.push(Value::String(row.get(col).cloned().unwrap_or_default()));
         }
+        cooperation.completed(col_count).await?;
     }
     CellArray::new(values, row_count, col_count)
         .map(Value::Cell)
         .map_err(|err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")))
 }
 
-fn cell_from_row(values: &[String]) -> BuiltinResult<Value> {
-    CellArray::new(
-        values.iter().cloned().map(Value::String).collect(),
-        1,
-        values.len(),
-    )
-    .map(Value::Cell)
-    .map_err(|err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")))
+async fn cell_from_row(
+    values: &[String],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Value> {
+    let mut entries = Vec::with_capacity(values.len());
+    for value in values {
+        entries.push(Value::String(value.clone()));
+        cooperation.completed(value.len()).await?;
+    }
+    CellArray::new(entries, 1, values.len())
+        .map(Value::Cell)
+        .map_err(|err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")))
 }
 
-fn cell_from_col(values: &[String]) -> BuiltinResult<Value> {
-    CellArray::new(
-        values.iter().cloned().map(Value::String).collect(),
-        values.len(),
-        1,
-    )
-    .map(Value::Cell)
-    .map_err(|err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")))
+async fn cell_from_col(
+    values: &[String],
+    cooperation: &mut cooperation::ImportCooperation,
+) -> BuiltinResult<Value> {
+    let mut entries = Vec::with_capacity(values.len());
+    for value in values {
+        entries.push(Value::String(value.clone()));
+        cooperation.completed(value.len()).await?;
+    }
+    CellArray::new(entries, values.len(), 1)
+        .map(Value::Cell)
+        .map_err(|err| importdata_error_with(&IMPORTDATA_ERROR_PARSE, format!("importdata: {err}")))
 }

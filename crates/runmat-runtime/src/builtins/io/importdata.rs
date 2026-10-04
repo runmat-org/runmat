@@ -52,9 +52,14 @@ where
 #[runtime_builtin(
     name = "importdata",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::importdata"
 )]
-async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn importdata_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(importdata_error_with(
             &IMPORTDATA_ERROR_ARGUMENT,
@@ -85,42 +90,37 @@ async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<
         None
     };
 
-    // Pin the filesystem owner and effective working directory before the
-    // asynchronous read. A later provider/CWD change must not redirect this
-    // invocation to a different file.
-    let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|err| {
-        importdata_error_with_source(
-            &IMPORTDATA_ERROR_IO,
-            "importdata: unable to capture file owner",
-            err,
-        )
-    })?;
-    let resolved = if path.is_absolute() {
-        path.clone()
-    } else {
-        cwd.join(&path)
-    };
-    let bytes = provider.read(&resolved).await.map_err(|err| {
-        importdata_error_with_source(
-            &IMPORTDATA_ERROR_IO,
-            format!(
-                "importdata: unable to read \"{}\" ({err})",
-                resolved.display()
-            ),
-            err,
-        )
-    })?;
+    let input = input::ImportInput::capture(path)?;
+    let mut cooperation = cooperation::ImportCooperation::new(runtime.as_ref());
+    cooperation.completed(0).await?;
+    let bytes = cooperation
+        .await_io(input.provider.read(&input.path), &input)
+        .await?
+        .map_err(|err| {
+            importdata_error_with_source(
+                &IMPORTDATA_ERROR_IO,
+                format!(
+                    "importdata: unable to read \"{}\" ({err})",
+                    input.path.display()
+                ),
+                err,
+            )
+        })?;
+    cooperation.completed(0).await?;
     let text = String::from_utf8(bytes).map_err(|err| {
         importdata_error_with_source(
             &IMPORTDATA_ERROR_IO,
             format!(
                 "importdata: unable to decode \"{}\" ({err})",
-                resolved.display()
+                input.path.display()
             ),
             err,
         )
     })?;
-    let imported = import_text_data(&text, delimiter.as_deref(), header_lines)?;
+    let imported =
+        import_text_data(&text, delimiter.as_deref(), header_lines, &mut cooperation).await?;
+    input.check_resource()?;
+    cooperation.completed(0).await?;
     if let Some(output_count) = crate::output_count::current_output_count() {
         if output_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -139,6 +139,8 @@ async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<
 }
 
 mod text;
+mod input;
+mod cooperation;
 use text::import_text_data;
 
 fn parse_delimiter_arg(value: &Value) -> BuiltinResult<String> {

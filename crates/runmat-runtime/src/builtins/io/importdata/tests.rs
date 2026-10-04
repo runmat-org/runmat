@@ -109,8 +109,12 @@ fn relative_import_reads_from_installed_memory_provider() {
         .write_project_path("/import/data.txt", b"1 2\n3 4\n")
         .expect("fixture");
     let _owner = fs::replace_provider(provider);
-    let out = block_on(importdata_builtin(Value::from("data.txt"), Vec::new()))
-        .expect("import from captured owner");
+    let out = block_on(importdata_builtin(
+        None,
+        Value::from("data.txt"),
+        Vec::new(),
+    ))
+    .expect("import from captured owner");
     assert_eq!(tensor_data(&out), (vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]));
 }
 
@@ -118,8 +122,12 @@ fn relative_import_reads_from_installed_memory_provider() {
 #[test]
 fn excessive_outputs_reject_before_missing_file_read() {
     let _requested = crate::output_count::push_output_count(Some(4));
-    let err = block_on(importdata_builtin(Value::from("missing.txt"), Vec::new()))
-        .expect_err("output bound");
+    let err = block_on(importdata_builtin(
+        None,
+        Value::from("missing.txt"),
+        Vec::new(),
+    ))
+    .expect_err("output bound");
     assert_eq!(err.identifier(), Some("RunMat:importdata:InvalidArgument"));
     assert!(err.message().contains("at most three outputs"));
 }
@@ -129,6 +137,7 @@ fn excessive_outputs_reject_before_missing_file_read() {
 fn importdata_reads_plain_numeric_matrix() {
     let path = write_fixture("txt", "1 2 3\n4 5 6\n");
     let out = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         Vec::new(),
     ))
@@ -144,6 +153,7 @@ fn importdata_reads_plain_numeric_matrix() {
 fn importdata_headerlines_zero_numeric_input_returns_tensor() {
     let path = write_fixture("txt", "1 2\n3 4\n");
     let out = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         vec![Value::from(" "), Value::Num(0.0)],
     ))
@@ -198,6 +208,7 @@ fn importdata_returns_documented_delimiter_and_header_count_outputs() {
     let path = write_fixture("csv", "name,value\na,1\nb,2\n");
     let _outputs = crate::output_count::push_output_count(Some(3));
     let result = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         Vec::new(),
     ))
@@ -229,7 +240,7 @@ fn importdata_rejects_resident_controls_before_provider_or_file_access() {
             .is_none()
     );
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let error = block_on(importdata_builtin(resident, Vec::new()))
+    let error = block_on(importdata_builtin(None, resident, Vec::new()))
         .expect_err("resident filename must reject");
     assert_eq!(
         error.identifier(),
@@ -246,6 +257,7 @@ fn importdata_rejects_resident_controls_before_provider_or_file_access() {
 fn importdata_detects_csv_header_and_colheaders() {
     let path = write_fixture("csv", "time,value\n0,1.5\n1,2.5\n");
     let out = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         Vec::new(),
     ))
@@ -264,6 +276,7 @@ fn importdata_detects_csv_header_and_colheaders() {
 fn importdata_honors_explicit_delimiter_and_header_lines() {
     let path = write_fixture("dat", "# instrument log\nA|B\n10|20\n30|40\n");
     let out = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         vec![Value::from("|"), Value::Num(2.0)],
     ))
@@ -284,6 +297,7 @@ fn importdata_honors_explicit_delimiter_and_header_lines() {
 fn importdata_preserves_rowheaders() {
     let path = write_fixture("txt", "label x y\nr1 1 2\nr2 3 4\n");
     let out = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         Vec::new(),
     ))
@@ -300,6 +314,7 @@ fn importdata_preserves_rowheaders() {
 fn importdata_reports_mixed_unsupported_data() {
     let path = write_fixture("txt", "1 2\n3 nope\n");
     let err = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         Vec::new(),
     ))
@@ -313,6 +328,7 @@ fn importdata_reports_mixed_unsupported_data() {
 fn importdata_rejects_rows_with_extra_numeric_columns() {
     let path = write_fixture("txt", "1 2\n3 4 5\n");
     let err = block_on(importdata_builtin(
+        None,
         Value::from(path.to_string_lossy().into_owned()),
         Vec::new(),
     ))
