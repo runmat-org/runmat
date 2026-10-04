@@ -9,6 +9,9 @@ use runmat_value::{IntValue, IntegerStorage, LogicalArray};
 use crate::builtins::common::fs as fs_helpers;
 use crate::builtins::common::test_support;
 
+#[path = "tests/cooperation.rs"]
+mod cooperation;
+
 fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let _provider_lock = runmat_filesystem::provider_override_lock();
     futures::executor::block_on(super::csvwrite_builtin(None, filename, data, rest))
