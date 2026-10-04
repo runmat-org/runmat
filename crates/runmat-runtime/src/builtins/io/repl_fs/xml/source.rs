@@ -13,16 +13,16 @@ pub(super) struct XmlFsPath {
 
 /// A filename that must be materialized can still retain the provider and
 /// working directory selected before that suspension.
-pub(super) struct XmlWriteOwner {
+pub(super) struct XmlPathOwner {
     provider: Arc<dyn FsProvider>,
     cwd: PathBuf,
     lease: Option<CapturedFsResourceLease>,
 }
 
-impl XmlWriteOwner {
+impl XmlPathOwner {
     pub(super) fn capture() -> io::Result<Self> {
         let (provider, cwd) = fs::current_provider_with_current_dir()?;
-        let lease = fs::capture_resource_lease(provider.clone());
+        let lease = capture_lease(&provider)?;
         Ok(Self {
             provider,
             cwd,
@@ -52,7 +52,7 @@ impl XmlFsPath {
             let (provider, cwd) = fs::current_provider_with_current_dir()?;
             (provider, cwd.join(path))
         };
-        let lease = fs::capture_resource_lease(provider.clone());
+        let lease = capture_lease(&provider)?;
         Ok(Self {
             provider,
             path,
@@ -84,42 +84,64 @@ impl XmlFsPath {
     }
 }
 
+fn capture_lease(provider: &Arc<dyn FsProvider>) -> io::Result<Option<CapturedFsResourceLease>> {
+    let advertised = provider.resource_lease().is_some();
+    let captured = fs::capture_resource_lease(provider.clone());
+    if advertised && captured.is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "captured XML filesystem authority was revoked",
+        ));
+    }
+    Ok(captured)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_dir(name: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!(r"C:\{name}"))
+        } else {
+            PathBuf::from(format!("/{name}"))
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn captured_provider_and_relative_path_survive_ambient_swap() {
         let _lock = fs::provider_override_lock();
-        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
-        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
+        let selected_dir = test_dir("selected");
+        let replacement_dir = test_dir("replacement");
+        let selected_path = selected_dir.join("test.xml");
+        let replacement_path = replacement_dir.join("test.xml");
+        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(selected_dir.clone()));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir(
+            replacement_dir.clone(),
+        ));
         selected
-            .write_project_path("/selected/test.xml", b"<selected/>")
+            .write_project_path(&selected_path, b"<selected/>")
             .expect("selected fixture");
         replacement
-            .write_project_path("/replacement/test.xml", b"<replacement/>")
+            .write_project_path(&replacement_path, b"<replacement/>")
             .expect("replacement fixture");
         let _selected = fs::replace_provider(selected.clone());
-        fs::set_current_dir("/selected").expect("selected cwd");
+        fs::set_current_dir(&selected_dir).expect("selected cwd");
         let captured = XmlFsPath::capture(PathBuf::from("test.xml")).expect("capture");
         let _replacement = fs::replace_provider(replacement.clone());
-        fs::set_current_dir("/replacement").expect("replacement cwd");
+        fs::set_current_dir(&replacement_dir).expect("replacement cwd");
         assert_eq!(
             futures::executor::block_on(captured.read_bytes()).unwrap(),
             b"<selected/>"
         );
         futures::executor::block_on(captured.write(b"<changed/>")).expect("selected write");
         assert_eq!(
-            futures::executor::block_on(selected.read(std::path::Path::new("/selected/test.xml")))
-                .unwrap(),
+            futures::executor::block_on(selected.read(&selected_path)).unwrap(),
             b"<changed/>"
         );
         assert_eq!(
-            futures::executor::block_on(
-                replacement.read(std::path::Path::new("/replacement/test.xml"))
-            )
-            .unwrap(),
+            futures::executor::block_on(replacement.read(&replacement_path)).unwrap(),
             b"<replacement/>"
         );
     }
@@ -128,22 +150,28 @@ mod tests {
     #[test]
     fn encoded_xml_uses_the_captured_provider_after_ambient_swap() {
         let _lock = fs::provider_override_lock();
-        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
-        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
+        let selected_dir = test_dir("selected");
+        let replacement_dir = test_dir("replacement");
+        let selected_path = selected_dir.join("encoded.xml");
+        let replacement_path = replacement_dir.join("encoded.xml");
+        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(selected_dir.clone()));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir(
+            replacement_dir.clone(),
+        ));
         selected
             .write_project_path(
-                "/selected/encoded.xml",
+                &selected_path,
                 b"<?xml version='1.0' encoding='windows-1252'?><root>caf\xE9</root>",
             )
             .expect("encoded fixture");
         replacement
-            .write_project_path("/replacement/encoded.xml", b"<wrong/>")
+            .write_project_path(&replacement_path, b"<wrong/>")
             .expect("replacement fixture");
         let _selected = fs::replace_provider(selected);
-        fs::set_current_dir("/selected").expect("selected cwd");
+        fs::set_current_dir(&selected_dir).expect("selected cwd");
         let captured = XmlFsPath::capture(PathBuf::from("encoded.xml")).expect("capture");
         let _replacement = fs::replace_provider(replacement);
-        fs::set_current_dir("/replacement").expect("replacement cwd");
+        fs::set_current_dir(&replacement_dir).expect("replacement cwd");
         let bytes = futures::executor::block_on(captured.read_bytes()).expect("captured read");
         let mut cooperation = XmlCooperation::new(None, XmlOperation::XmlRead);
         let text = futures::executor::block_on(super::super::parser::decode_document_bytes(

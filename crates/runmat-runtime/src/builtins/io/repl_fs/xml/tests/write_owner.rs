@@ -6,6 +6,10 @@ use crate::execution::{
     AwaitAction, CpuCooperationPolicy, DeferredCall, ExecutionServiceError,
     RuntimeExecutionServices,
 };
+use runmat_accelerate_api::{
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
+    HostTensorView, ProviderPrecision,
+};
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
@@ -233,8 +237,13 @@ impl runmat_filesystem::FsResourceLease for RevocableLease {
 struct RevocableProvider {
     memory: runmat_filesystem::MemoryFsProvider,
     valid: Arc<AtomicBool>,
+    opens: Arc<AtomicUsize>,
+    reads: Arc<AtomicUsize>,
     writes: Arc<AtomicUsize>,
 }
+
+#[path = "write_owner/pre_revoked.rs"]
+mod pre_revoked;
 
 fn unsupported() -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Unsupported, "unused fixture operation")
@@ -253,9 +262,11 @@ impl runmat_filesystem::FsProvider for RevocableProvider {
         _: &Path,
         _: &runmat_filesystem::OpenFlags,
     ) -> std::io::Result<Box<dyn runmat_filesystem::FileHandle>> {
+        self.opens.fetch_add(1, Ordering::SeqCst);
         Err(unsupported())
     }
     async fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
         self.memory.read(path).await
     }
     async fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -306,6 +317,8 @@ fn revoked_during_turn_rejects_write_before_provider_effect() {
     let selected = Arc::new(RevocableProvider {
         memory: runmat_filesystem::MemoryFsProvider::with_current_dir(selected_dir()),
         valid: valid.clone(),
+        opens: Arc::new(AtomicUsize::new(0)),
+        reads: Arc::new(AtomicUsize::new(0)),
         writes: writes.clone(),
     });
     let _selected = runmat_filesystem::replace_provider(selected.clone());

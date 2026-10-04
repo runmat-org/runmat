@@ -41,19 +41,35 @@ fn xml_error_with_source(
 
 #[path = "xml/source.rs"]
 mod source;
-use source::{XmlFsPath, XmlWriteOwner};
+use source::{XmlFsPath, XmlPathOwner};
 
-enum CapturedXmlWriteTarget {
+enum CapturedXmlPath {
     Exact(XmlFsPath),
-    AwaitingFilename(XmlWriteOwner),
+    AwaitingFilename(XmlPathOwner),
 }
 
-impl CapturedXmlWriteTarget {
-    fn resolve(self, filename: &Value) -> BuiltinResult<XmlFsPath> {
+impl CapturedXmlPath {
+    fn capture(filename: &Value, operation: XmlOperation) -> BuiltinResult<Self> {
+        match filename {
+            Value::GpuTensor(_) => Ok(Self::AwaitingFilename(
+                XmlPathOwner::capture().map_err(|error| xml_io_error(operation, error))?,
+            )),
+            known => {
+                let path = value_to_path(known, operation.name(), "filename").map_err(|error| {
+                    xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, error)
+                })?;
+                Ok(Self::Exact(
+                    XmlFsPath::capture(path).map_err(|error| xml_io_error(operation, error))?,
+                ))
+            }
+        }
+    }
+
+    fn resolve(self, filename: &Value, operation: XmlOperation) -> BuiltinResult<XmlFsPath> {
         match self {
             Self::Exact(path) => Ok(path),
             Self::AwaitingFilename(owner) => {
-                let path = value_to_path(filename, "xmlwrite", "filename")?;
+                let path = value_to_path(filename, operation.name(), "filename")?;
                 Ok(owner.resolve(path))
             }
         }
@@ -146,15 +162,18 @@ async fn readstruct_builtin(
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     ReadStructOptions::preflight(&args[1..])
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
+    let target = CapturedXmlPath::capture(&args[0], operation)?;
     cooperation.completed(0).await?;
-    let args = gather_args("readstruct", &args).await?;
+    let args = cooperation
+        .await_io(gather_args("readstruct", &args))
+        .await??;
     scalar_text(&args[0], "readstruct", "filename")
-        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
-    let path = value_to_path(&args[0], "readstruct", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let options = ReadStructOptions::parse(&args[1..])
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
-    let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
+    let source = target
+        .resolve(&args[0], operation)
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let bytes = cooperation
         .await_io(source.read_bytes())
         .await?
@@ -219,14 +238,19 @@ async fn xmlread_builtin(
     }
     known_text(&args[0], "xmlread", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let target = CapturedXmlPath::capture(&args[0], operation)?;
     cooperation.completed(0).await?;
-    let args = gather_args("xmlread", &args).await?;
+    let args = cooperation
+        .await_io(gather_args("xmlread", &args))
+        .await??;
     scalar_text(&args[0], "xmlread", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let path = value_to_path(&args[0], "xmlread", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let filename = path_to_string(&path);
-    let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
+    let source = target
+        .resolve(&args[0], operation)
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let bytes = cooperation
         .await_io(source.read_bytes())
         .await?
@@ -297,19 +321,7 @@ async fn xmlwrite_builtin(
     known_document_preflight(document)
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let target = if args.len() == 2 {
-        Some(match &args[0] {
-            Value::GpuTensor(_) => CapturedXmlWriteTarget::AwaitingFilename(
-                XmlWriteOwner::capture().map_err(|err| xml_io_error(operation, err))?,
-            ),
-            known => {
-                let path = value_to_path(known, "xmlwrite", "filename").map_err(|err| {
-                    xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
-                })?;
-                CapturedXmlWriteTarget::Exact(
-                    XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?,
-                )
-            }
-        })
+        Some(CapturedXmlPath::capture(&args[0], operation)?)
     } else {
         None
     };
@@ -365,7 +377,7 @@ async fn xmlwrite_builtin(
             cooperation.completed(xml.len()).await?;
             let destination = target
                 .expect("two-argument XML write has a captured destination")
-                .resolve(&args[0])
+                .resolve(&args[0], operation)
                 .map_err(|err| {
                     xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
                 })?;
