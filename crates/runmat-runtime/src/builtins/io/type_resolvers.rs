@@ -130,48 +130,6 @@ pub fn xlswrite_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     ])
 }
 
-pub fn data_dataset_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Struct { known_fields: None }
-}
-
-pub fn data_array_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Struct { known_fields: None }
-}
-
-pub fn data_tx_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Struct { known_fields: None }
-}
-
-pub fn data_cell_string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::cell_of(Type::String)
-}
-
-pub fn data_bool_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Bool
-}
-
-pub fn data_int_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Int
-}
-
-pub fn data_string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::String
-}
-
-pub fn data_struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Struct { known_fields: None }
-}
-
-pub fn data_tensor_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
-pub fn data_shape_tensor_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Tensor {
-        shape: Some(vec![Some(1), None]),
-    }
-}
-
 pub fn data_unknown_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -265,39 +223,5 @@ mod tests {
             Type::OutputList(vec![Type::Bool]),
             Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None },]),
         ])
-    );
-
-    assert_resolver!(
-        data_dataset_type_resolver,
-        data_dataset_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
-    assert_resolver!(
-        data_array_type_resolver,
-        data_array_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
-    assert_resolver!(
-        data_tx_type_resolver,
-        data_tx_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
-    assert_resolver!(data_int_type_resolver, data_int_type, &[], Type::Int);
-    assert_resolver!(
-        data_shape_tensor_type_resolver,
-        data_shape_tensor_type,
-        &[],
-        Type::Tensor {
-            shape: Some(vec![Some(1), None])
-        }
-    );
-    assert_resolver!(
-        data_cell_string_type_resolver,
-        data_cell_string_type,
-        &[],
-        Type::cell_of(Type::String)
     );
 }
