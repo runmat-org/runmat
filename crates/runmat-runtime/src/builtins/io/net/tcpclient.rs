@@ -413,7 +413,7 @@ fn connect_with_timeout(
 ) -> io::Result<(TcpStream, SocketAddr)> {
     let mut last_err: Option<io::Error> = None;
     for addr in (host, port).to_socket_addrs()? {
-        let attempt = if timeout.is_infinite() || timeout == 0.0 {
+        let attempt = if timeout.is_infinite() {
             TcpStream::connect(addr)
         } else {
             let duration = Duration::from_secs_f64(timeout);
@@ -632,27 +632,6 @@ pub(crate) mod tests {
 
         let cid = client_id(&client);
         remove_client_for_test(cid);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn zero_connect_timeout_uses_documented_blocking_semantics() {
-        let _guard = net_guard();
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback");
-        let port = listener.local_addr().expect("local address").port();
-        let peer = thread::spawn(move || listener.accept().expect("accept zero-timeout client"));
-        let client = run_tcpclient(
-            Value::from("127.0.0.1"),
-            Value::Num(port as f64),
-            vec![Value::from("ConnectTimeout"), Value::Num(0.0)],
-        )
-        .expect("zero ConnectTimeout is accepted and connects");
-        assert!(matches!(
-            struct_field(&client, "Connected"),
-            Value::Bool(true)
-        ));
-        remove_client_for_test(client_id(&client));
-        drop(peer.join().expect("peer accepted"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

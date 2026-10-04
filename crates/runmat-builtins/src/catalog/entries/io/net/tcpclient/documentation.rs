@@ -10,7 +10,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Endpoint and options", paragraphs: &[
             "`tcpclient(host,port)` resolves IPv4, IPv6, or DNS hostnames and connects using a default 10-second `ConnectTimeout`. The documented port range is 1 through 65535.",
-            "`Timeout` and `ConnectTimeout` accept nonnegative double values or `Inf`. Zero and `Inf` select blocking behavior for the respective operation. The currently documented `EnableTransferDelay` option is not implemented.",
+            "The current RunMat parser accepts nonnegative double values or `Inf` for `Timeout` and `ConnectTimeout`. `Timeout = 0` and `Inf` leave I/O blocking, but a zero `ConnectTimeout` currently fails connection setup; use a positive value or `Inf` for connection attempts. The documented `EnableTransferDelay` option is not implemented.",
             "RunMat mode additionally accepts typed-integer port and timeout values, port zero, and legacy constructor options `ByteOrder`, `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Integer values entering a seconds boundary must be exactly representable as double.",
             "Read and write timeouts use the captured `Timeout`. Passing `Inf` keeps operations blocking. The returned value reports the configured timeout verbatim.",
         ] },
