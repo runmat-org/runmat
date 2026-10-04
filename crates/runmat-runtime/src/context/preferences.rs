@@ -10,6 +10,11 @@ mod memory;
 pub use memory::IsolatedMemoryPreferenceService;
 #[path = "preferences/document.rs"]
 mod document;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "preferences/native.rs"]
+mod native;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native::NativePreferenceService;
 
 pub type PreferenceValues = BTreeMap<String, Value>;
 pub type PreferenceGroups = BTreeMap<String, PreferenceValues>;
@@ -38,6 +43,8 @@ pub enum PreferenceServiceError {
     Document(#[source] serde_json::Error),
     #[error("application settings contain an invalid empty custom user path")]
     InvalidStoredUserPath,
+    #[error("preference I/O failed: {0}")]
+    Io(#[source] std::io::Error),
 }
 
 /// Installed by the application host, not created by a builtin or session.
