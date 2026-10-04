@@ -45,14 +45,14 @@ pub enum UserPathServiceError {
     #[error("application user-path execution failed: {0}")]
     Execution(#[source] crate::execution::ExecutionServiceError),
     #[error("application user-path storage failed: {0}")]
-    Storage(#[source] super::PreferenceServiceError),
+    Storage(#[source] Box<super::PreferenceServiceError>),
 }
 
 impl From<super::PreferenceServiceError> for UserPathServiceError {
     fn from(error: super::PreferenceServiceError) -> Self {
         match error {
             super::PreferenceServiceError::Execution(source) => Self::Execution(source),
-            other => Self::Storage(other),
+            other => Self::Storage(Box::new(other)),
         }
     }
 }

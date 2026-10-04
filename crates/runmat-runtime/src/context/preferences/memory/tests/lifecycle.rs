@@ -157,7 +157,9 @@ fn cancelled_mutex_waiter_does_not_release_or_publish_the_first_transaction() {
     waiter_cancel.cancel(CancellationReason::User);
     assert!(matches!(
         poll_once(waiter.as_mut()),
-        Poll::Ready(Err(PreferenceServiceError::Storage(_)))
+        Poll::Ready(Err(PreferenceServiceError::Execution(
+            ExecutionServiceError::Cancelled
+        )))
     ));
     drop(waiter);
     assert!(
@@ -168,7 +170,9 @@ fn cancelled_mutex_waiter_does_not_release_or_publish_the_first_transaction() {
     first_cancel.cancel(CancellationReason::User);
     assert!(matches!(
         poll_once(first.as_mut()),
-        Poll::Ready(Err(PreferenceServiceError::Storage(_)))
+        Poll::Ready(Err(PreferenceServiceError::Execution(
+            ExecutionServiceError::Cancelled
+        )))
     ));
     drop(first);
     assert!(execution.pending_turn_dropped.get());
