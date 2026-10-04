@@ -19,6 +19,25 @@ pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    fn acquire_native_path(
+        &self,
+        path: &Path,
+        intent: crate::NativePathIntent,
+    ) -> io::Result<Option<crate::NativePathGrant>> {
+        struct StableNativeMapping;
+        impl crate::NativePathAuthority for StableNativeMapping {
+            fn is_valid(&self) -> bool {
+                true
+            }
+        }
+        crate::NativePathGrant::issued_by_provider(
+            path.to_path_buf(),
+            intent,
+            Box::new(StableNativeMapping),
+        )
+        .map(Some)
+    }
+
     async fn open_bounded_input(&self, path: &Path) -> io::Result<Option<FsBoundedInput>> {
         if !path.is_absolute() {
             return Err(io::Error::new(

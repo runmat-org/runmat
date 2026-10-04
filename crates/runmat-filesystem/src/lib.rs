@@ -10,6 +10,8 @@ use std::time::SystemTime;
 
 mod dialog;
 mod memory;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_path;
 mod resource;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -24,6 +26,10 @@ pub use dialog::*;
 pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_path::{
+    capture_native_path, CapturedNativePath, NativePathAuthority, NativePathGrant, NativePathIntent,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
@@ -336,6 +342,19 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Opt in to direct OS-path access by a native library. The path is
+    /// absolute and resolved with this provider's captured working directory.
+    /// `None` means the provider has no safe direct native-path route; callers
+    /// must not fall back to the process filesystem.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn acquire_native_path(
+        &self,
+        _resolved_absolute: &Path,
+        _intent: NativePathIntent,
+    ) -> io::Result<Option<NativePathGrant>> {
+        Ok(None)
+    }
+
     /// Opt-in opened-source bound for an already resolved absolute path.
     /// `None` means this provider cannot certify direct, extent-limited reads;
     /// callers retain their ordinary route. The certificate and handle must
