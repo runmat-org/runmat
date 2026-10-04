@@ -11,10 +11,6 @@ use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
 use super::load::read_mat_file_for_builtin_on_with_context;
 use super::save::encode_workspace_to_mat_bytes;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{
     build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
     OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
@@ -34,33 +30,6 @@ static MATFILE_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
 use runmat_builtins::{
     MATFILE_ERROR_INVALID_ARGUMENT, MATFILE_ERROR_INVALID_OPTION, MATFILE_ERROR_IO,
     MATFILE_ERROR_SELECTION, MATFILE_ERROR_UNSUPPORTED,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::matfile")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "matfile",
-    op_kind: GpuOpKind::Custom("io-matfile"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "MAT-file object construction and whole-variable reads/writes are host I/O operations. GPU-resident assignment values are gathered before Level-5 MAT serialization.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::mat::matfile")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "matfile",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "MAT-file object creation and subsequent I/O are not fusion candidates.",
 };
 
 #[runtime_builtin(

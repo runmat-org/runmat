@@ -10,10 +10,6 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -22,32 +18,6 @@ use runmat_builtins::{
     LOAD_ERROR_OUTPUT_COUNT, LOAD_ERROR_SELECTION, LOAD_ERROR_WORKSPACE,
 };
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "load",
-    op_kind: GpuOpKind::Custom("io-load"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Reads MAT-files on the host and produces CPU-resident values. Providers are not involved until accelerated code later promotes the results.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::mat::load")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "load",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "File I/O is not eligible for fusion. Registration exists for documentation completeness only.",
-};
 
 #[runtime_builtin(
     name = "load",
