@@ -21,11 +21,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "What if the name does not exist?", answer: "Without a default, `getpref` raises an error. With a default, the missing value is stored and returned." },
-        BuiltinDocumentationFaq { question: "Are values saved across launches?", answer: "Not yet. The current preference owner is in-memory; durable settings storage remains unimplemented." },
+        BuiltinDocumentationFaq { question: "Are values saved across launches?", answer: "Not yet. Preferences are currently kept in memory and are not saved across launches." },
     ],
     links: &[BuiltinDocumentationLink { label: "setpref", target: BuiltinDocumentationLinkTarget::Builtin("setpref") }, BuiltinDocumentationLink { label: "ispref", target: BuiltinDocumentationLinkTarget::Builtin("ispref") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "Preference runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/preferences.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact classes, name-array shape, defaults, and invalid controls", location: "builtins::io::repl_fs::compat::tests" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "getpref runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/preferences/getpref.rs") }, BuiltinDocumentationLink { label: "Shared preference controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/preferences/controls.rs") }, BuiltinDocumentationLink { label: "Current preference storage", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/preferences/store.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact classes, name-array shape, defaults, and invalid controls", location: "builtins::io::repl_fs::compat::tests" }], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
 };
