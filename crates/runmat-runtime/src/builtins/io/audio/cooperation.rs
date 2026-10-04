@@ -71,12 +71,16 @@ impl AudioCooperation {
         self.check_resource_liveness()?;
         let Some(budget) = self.budget.as_ref() else {
             let value = future.await;
-            self.check_resource_liveness()?;
+            if value.is_ok() {
+                self.check_resource_liveness()?;
+            }
             return Ok(value);
         };
         let outcome = budget.await_cancellable(future).await;
         let value = outcome.map_err(|error| self.runtime_error(error))?;
-        self.check_resource_liveness()?;
+        if value.is_ok() {
+            self.check_resource_liveness()?;
+        }
         Ok(value)
     }
 
@@ -138,6 +142,20 @@ mod tests {
             error.identifier(),
             Some("RunMat:Placement:StaleResourceAuthority")
         );
+    }
+
+    #[test]
+    fn provider_error_remains_available_when_lease_revokes_during_await() {
+        let valid = Arc::new(AtomicBool::new(true));
+        let mut cooperation = AudioCooperation::new(None, "audioinfo");
+        cooperation.install_resource_liveness_lease(Arc::new(Revocable(valid.clone())));
+        let error = block_on(cooperation.await_io(async {
+            valid.store(false, Ordering::SeqCst);
+            Err::<(), _>(std::io::Error::other("opened provider failed"))
+        }))
+        .expect("provider result retains its original cause")
+        .expect_err("provider error");
+        assert_eq!(error.to_string(), "opened provider failed");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

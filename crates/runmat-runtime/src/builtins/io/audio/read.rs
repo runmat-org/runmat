@@ -38,7 +38,7 @@ pub(super) async fn audioread_builtin(
     let result = async {
         cooperation.completed(0).await?;
         let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;
-        Ok(match outputs {
+        let value = match outputs {
             None => Value::Tensor(decoded.samples),
             Some(0) => Value::OutputList(Vec::new()),
             Some(1) => Value::OutputList(vec![Value::Tensor(decoded.samples)]),
@@ -47,7 +47,9 @@ pub(super) async fn audioread_builtin(
                 Value::Num(decoded.sample_rate),
             ]),
             Some(_) => unreachable!("output arity was admitted before filesystem capture"),
-        })
+        };
+        cooperation.completed(0).await?;
+        Ok(value)
     }
     .await;
     finish_receipt(receipt, &result, cooperation.was_cancelled());
