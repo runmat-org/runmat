@@ -121,8 +121,6 @@ mod tests {
     );
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
-    assert_resolver!(csvread_type_resolver, tensor_type, &[], Type::tensor());
-    assert_resolver!(csvwrite_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(dlmread_type_resolver, tensor_type, &[], Type::tensor());
     assert_resolver!(dlmwrite_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(

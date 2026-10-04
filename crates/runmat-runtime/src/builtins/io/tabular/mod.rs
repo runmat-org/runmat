@@ -1,5 +1,8 @@
 //! Tabular data import builtins.
 
+mod cooperation;
+mod path;
+
 pub mod csvread;
 pub mod csvwrite;
 pub mod dlmread;
