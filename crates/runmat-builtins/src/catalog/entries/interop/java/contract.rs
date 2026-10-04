@@ -6,6 +6,31 @@ use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement}
 pub const JAVA_ENVIRONMENT_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("matlab.javaclient.JavaEnvironment");
 
+/// Public feature identity, independent of host availability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JavaFeature {
+    Jvm,
+    Desktop,
+    Awt,
+    Swing,
+}
+
+impl JavaFeature {
+    pub fn parse(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("jvm") {
+            Some(Self::Jvm)
+        } else if name.eq_ignore_ascii_case("desktop") {
+            Some(Self::Desktop)
+        } else if name.eq_ignore_ascii_case("awt") {
+            Some(Self::Awt)
+        } else if name.eq_ignore_ascii_case("swing") {
+            Some(Self::Swing)
+        } else {
+            None
+        }
+    }
+}
+
 pub const JAVA_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,

@@ -23,6 +23,7 @@ use super::super::{
     ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::conversion::{array_from_java, invalid_conversion, scalar_from_java, value_to_java};
+use crate::builtins::common::validation::value_text_scalar_string;
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -601,7 +602,8 @@ impl JavaAdapter {
         } else {
             discover_jvm(&self.discovery.borrow()).ok()
         };
-        let mut status = ObjectInstance::new("matlab.javaclient.JavaEnvironment");
+        let mut status =
+            ObjectInstance::new(runmat_builtins::JAVA_ENVIRONMENT_CLASS.display_name());
         status.properties.insert(
             "Version".into(),
             Value::String(
@@ -649,14 +651,16 @@ impl JavaAdapter {
     }
 
     fn usejava_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
-        let feature =
-            string_argument(arguments.into_iter().next(), "Java feature")?.to_ascii_lowercase();
-        match feature.as_str() {
-            "jvm" => Ok(Value::Bool(
+        let feature = string_argument(arguments.into_iter().next(), "Java feature")?;
+        let feature = runmat_builtins::JavaFeature::parse(&feature).ok_or_else(|| {
+            invalid_conversion("Java feature must be 'jvm', 'awt', 'swing', or 'desktop'")
+        })?;
+        match feature {
+            runmat_builtins::JavaFeature::Jvm => Ok(Value::Bool(
                 self.session.borrow().is_some() || discover_jvm(&self.discovery.borrow()).is_ok(),
             )),
-            "desktop" => Ok(Value::Bool(self.desktop_available.get())),
-            "awt" | "swing" => {
+            runmat_builtins::JavaFeature::Desktop => Ok(Value::Bool(self.desktop_available.get())),
+            runmat_builtins::JavaFeature::Awt | runmat_builtins::JavaFeature::Swing => {
                 self.ensure_session()?;
                 let headless = self.with_session(|session| {
                     session.call_static_resolved("java.awt.GraphicsEnvironment", "isHeadless", &[])
@@ -668,9 +672,6 @@ impl JavaAdapter {
                 };
                 Ok(Value::Bool(!headless))
             }
-            _ => Err(invalid_conversion(
-                "Java feature must be 'jvm', 'awt', 'swing', or 'desktop'",
-            )),
         }
     }
 
@@ -866,7 +867,9 @@ impl ForeignAdapter for JavaAdapter {
 
 fn string_argument(value: Option<Value>, label: &str) -> Result<String, RuntimeError> {
     match value {
-        Some(Value::String(value)) if !value.trim().is_empty() => Ok(value),
+        Some(value) => value_text_scalar_string(&value)
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| invalid_conversion(format!("{label} must be non-empty text"))),
         _ => Err(invalid_conversion(format!(
             "{label} must be non-empty text"
         ))),
@@ -927,3 +930,7 @@ fn java_invocation_error(error: JavaInvocationError) -> RuntimeError {
         .with_identifier(identifier)
         .build()
 }
+
+#[cfg(test)]
+#[path = "adapter/tests.rs"]
+mod tests;

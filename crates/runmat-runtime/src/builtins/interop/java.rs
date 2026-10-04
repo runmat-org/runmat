@@ -192,7 +192,9 @@ async fn java_class_path_builtin(
         .await;
     }
     if arguments.len() == 1 {
-        if let Ok(option) = String::try_from(&arguments[0]) {
+        if let Some(option) =
+            crate::builtins::common::validation::value_text_scalar_string(&arguments[0])
+        {
             let layer = match option.to_ascii_lowercase().as_str() {
                 "-dynamic" => Some("dynamic"),
                 "-static" => Some("static"),
@@ -247,7 +249,14 @@ async fn use_java_builtin(
 ) -> BuiltinResult<Value> {
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (context, feature);
+        let _ = context;
+        let name = crate::builtins::common::validation::value_text_scalar_string(&feature)
+            .ok_or_else(|| invalid_call("usejava feature must be text"))?;
+        if runmat_builtins::JavaFeature::parse(&name).is_none() {
+            return Err(invalid_call(
+                "usejava feature must be jvm, desktop, awt, or swing",
+            ));
+        }
         Ok(Value::Bool(false))
     }
     #[cfg(not(target_arch = "wasm32"))]

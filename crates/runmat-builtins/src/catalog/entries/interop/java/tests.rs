@@ -120,3 +120,42 @@ fn local_isjava_and_feature_probe_do_not_invent_java_results() {
         .0
         .contains(&CapabilityRequirement::ForeignRuntime));
 }
+
+#[test]
+fn text_controls_reject_proven_matrix_pages_and_numeric_cell_entries() {
+    let pages = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(1), Some(4)]),
+        StorageFact::Dense,
+    );
+    let class = infer(&request(vec![pages], 1), &JAVA_OBJECT_CATALOG_ENTRY);
+    assert!(class
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-JAVA-TEXT"));
+
+    let number = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let cell = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::unknown(DynamicReason::Unspecified)),
+            elements: vec![number],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Opaque,
+    );
+    let path = infer(&request(vec![cell], 0), &JAVA_ADD_PATH_CATALOG_ENTRY);
+    assert!(path
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-JAVA-PATH"));
+}
+
+#[test]
+fn feature_literals_use_the_same_typed_identity_as_runtime() {
+    assert_eq!(JavaFeature::parse("sWiNg"), Some(JavaFeature::Swing));
+    assert_eq!(JavaFeature::parse("unknown"), None);
+}

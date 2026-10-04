@@ -116,20 +116,28 @@ pub(super) async fn invoke_java(
 }
 
 pub(super) fn text_entries(arguments: Vec<Value>, builtin: &str) -> BuiltinResult<Vec<String>> {
+    use crate::builtins::common::validation::value_text_scalar_string;
+
     let mut entries = Vec::new();
     for value in arguments {
         match value {
             Value::Cell(cell) => {
                 for value in cell.data {
-                    entries
-                        .push(String::try_from(&value).map_err(|_| {
-                            invalid_call(format!("{builtin} entries must be text"))
-                        })?);
+                    entries.push(
+                        value_text_scalar_string(&value)
+                            .filter(|text| !text.trim().is_empty())
+                            .ok_or_else(|| {
+                                invalid_call(format!("{builtin} entries must be non-empty text"))
+                            })?,
+                    );
                 }
             }
             value => entries.push(
-                String::try_from(&value)
-                    .map_err(|_| invalid_call(format!("{builtin} entries must be text")))?,
+                value_text_scalar_string(&value)
+                    .filter(|text| !text.trim().is_empty())
+                    .ok_or_else(|| {
+                        invalid_call(format!("{builtin} entries must be non-empty text"))
+                    })?,
             ),
         }
     }

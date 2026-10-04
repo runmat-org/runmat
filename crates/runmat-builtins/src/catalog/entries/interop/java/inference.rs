@@ -21,14 +21,34 @@ pub(super) enum JavaForm {
 }
 
 fn text_possible(fact: &ValueFact) -> bool {
-    matches!(
-        fact.kind,
-        ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
-    )
+    match fact.kind {
+        ValueKindFact::Unknown => true,
+        ValueKindFact::String => !fact.shape.is_definitely_nonscalar(),
+        ValueKindFact::Character => match fact.shape.known_dims() {
+            None => true,
+            Some(dims) => {
+                dims.first()
+                    .is_none_or(|row| row.is_none_or(|row| row == 1))
+                    && dims
+                        .iter()
+                        .skip(2)
+                        .all(|page| page.is_none_or(|page| page == 1))
+            }
+        },
+        _ => false,
+    }
 }
 
 fn path_possible(fact: &ValueFact) -> bool {
-    text_possible(fact) || matches!(fact.kind, ValueKindFact::Cell(_))
+    if text_possible(fact) {
+        return true;
+    }
+    match &fact.kind {
+        ValueKindFact::Cell(cell) => {
+            text_possible(&cell.element) && cell.elements.iter().all(text_possible)
+        }
+        _ => false,
+    }
 }
 
 fn checked_text(request: &CallRequest, index: usize, diagnostics: &mut Vec<InferenceDiagnostic>) {
@@ -258,12 +278,7 @@ pub(super) fn infer(
             if request
                 .literals
                 .literal_string_at(0)
-                .is_some_and(|feature| {
-                    !matches!(
-                        feature.to_ascii_lowercase().as_str(),
-                        "jvm" | "desktop" | "awt" | "swing"
-                    )
-                })
+                .is_some_and(|feature| super::JavaFeature::parse(feature).is_none())
             {
                 diagnostics.push(argument_error(
                     "RM-JAVA-FEATURE",
