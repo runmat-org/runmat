@@ -139,7 +139,7 @@ fn dropped_yielding_read_restores_exact_fid_handle() {
         Poll::Pending
     ));
     drop(read);
-    assert_eq!(operation.file_mut().seek(SeekFrom::Current(0)).unwrap(), 1);
+    assert_eq!(operation.file_mut().stream_position().unwrap(), 1);
     drop(operation);
     let restored = registry::shared_handle(fid).expect("restored handle");
     assert!(std::sync::Arc::ptr_eq(&original, &restored));

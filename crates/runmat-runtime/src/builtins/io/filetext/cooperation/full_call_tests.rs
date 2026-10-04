@@ -111,13 +111,15 @@ fn root() -> &'static str {
     }
 }
 
-fn fixture() -> (
-    Arc<runmat_filesystem::MemoryFsProvider>,
-    RuntimeContext,
-    CancellationSource,
-    Rc<Cell<usize>>,
-    Rc<Cell<bool>>,
-) {
+struct Fixture {
+    provider: Arc<runmat_filesystem::MemoryFsProvider>,
+    runtime: RuntimeContext,
+    cancellation: CancellationSource,
+    turns: Rc<Cell<usize>>,
+    dropped: Rc<Cell<bool>>,
+}
+
+fn fixture() -> Fixture {
     let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(root()));
     let turns = Rc::new(Cell::new(0));
     let dropped = Rc::new(Cell::new(false));
@@ -129,7 +131,13 @@ fn fixture() -> (
         }),
         cancellation.token(),
     );
-    (provider, runtime, cancellation, turns, dropped)
+    Fixture {
+        provider,
+        runtime,
+        cancellation,
+        turns,
+        dropped,
+    }
 }
 
 fn poll_once<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> Poll<F::Output> {
@@ -143,7 +151,13 @@ fn actual_fread_cancelled_on_first_charged_byte_restores_checked_out_fid() {
     let _registry = registry::test_guard();
     let _filesystem = runmat_filesystem::provider_override_lock();
     registry::reset_for_tests();
-    let (provider, runtime, cancellation, turns, dropped) = fixture();
+    let Fixture {
+        provider,
+        runtime,
+        cancellation,
+        turns,
+        dropped,
+    } = fixture();
     let path = Path::new(root()).join("read.bin");
     provider
         .write_project_path(&path, &[11, 22, 33])
@@ -168,9 +182,7 @@ fn actual_fread_cancelled_on_first_charged_byte_restores_checked_out_fid() {
         Err(registry::FileOperationError::Busy)
     ));
     cancellation.cancel(CancellationReason::User);
-    let error = futures::executor::block_on(call)
-        .err()
-        .expect("cancelled read");
+    let error = futures::executor::block_on(call).expect_err("cancelled read");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert!(dropped.get(), "pending execution turn was dropped");
     let mut restored = registry::acquire_file_in(fid, Some(&runtime)).expect("same FID restored");
@@ -190,7 +202,13 @@ fn abandoned_actual_fwrite_turn_retains_fid_and_only_first_byte() {
     let _registry = registry::test_guard();
     let _filesystem = runmat_filesystem::provider_override_lock();
     registry::reset_for_tests();
-    let (provider, runtime, _cancellation, turns, dropped) = fixture();
+    let Fixture {
+        provider,
+        runtime,
+        cancellation: _cancellation,
+        turns,
+        dropped,
+    } = fixture();
     let path: PathBuf = Path::new(root()).join("write.bin");
     let _selected = runmat_filesystem::replace_provider(provider.clone());
     let opened = futures::executor::block_on(fopen::evaluate_in(

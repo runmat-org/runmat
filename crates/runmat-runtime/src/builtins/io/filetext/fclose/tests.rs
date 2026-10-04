@@ -320,9 +320,7 @@ fn cancelled_pending_flush_restores_session_identifier_and_exact_handle() {
     assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
     assert!(registry::info_for_in(fid, Some(&runtime)).is_none());
     cancellation.cancel(CancellationReason::User);
-    let error = futures::executor::block_on(call)
-        .err()
-        .expect("cancelled flush");
+    let error = futures::executor::block_on(call).expect_err("cancelled flush");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     let restored = registry::shared_handle(fid).expect("restored handle");
     assert!(Arc::ptr_eq(&original, &restored));
@@ -360,8 +358,7 @@ fn cancellation_during_ready_flush_cannot_commit_identifier_removal() {
     let fid = opened.as_open().expect("open form").fid as i32;
     let original = registry::shared_handle(fid).expect("registered handle");
     let error = futures::executor::block_on(evaluate_in(Some(&runtime), &[Value::Num(fid as f64)]))
-        .err()
-        .expect("inline cancellation before close publication");
+        .expect_err("inline cancellation before close publication");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert!(registry::info_for_in(fid, Some(&runtime)).is_some());
     let restored = registry::shared_handle(fid).expect("restored handle");
