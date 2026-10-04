@@ -1,0 +1,77 @@
+use super::*;
+
+#[test]
+fn unnamed_cell_format_retains_declared_shape_and_cell_form() {
+    let shape = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
+    for cells in [
+        vec![char_value("uint16")],
+        vec![char_value("uint16"), shape],
+    ] {
+        let value = Value::Cell(CellArray::new(cells.clone(), 1, cells.len()).unwrap());
+        let parsed = MemmapFormat::from_value(&value).unwrap();
+        let presented = parsed.to_value().unwrap();
+        assert_eq!(presented, value);
+        assert_eq!(
+            MemmapFormat::from_value(&presented).unwrap().shape,
+            parsed.shape
+        );
+    }
+}
+
+#[test]
+fn character_format_returns_character_class_and_column_major_shape() {
+    let format = MemmapFormat {
+        dtype: MemmapDataType::Character,
+        shape: vec![2, 2],
+        field: None,
+        additional_fields: Vec::new(),
+        presentation: MemmapFormatPresentation::TypeName,
+    };
+    let Value::CharArray(chars) = format.decode(b"ABCD", Some(1)).unwrap() else {
+        panic!("Format char must return character data");
+    };
+    assert_eq!(chars.shape, vec![2, 2]);
+    assert_eq!(chars.data, vec!['A', 'C', 'B', 'D']);
+    assert_eq!(chars.to_column_major(), vec!['A', 'B', 'C', 'D']);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn wide_repeat_property_is_exact_without_a_large_file() {
+    use runmat_value::IntValue;
+    use std::sync::Arc;
+
+    let _lock = super::super::vfs::provider_override_lock();
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-memmap-wide-repeat");
+    #[cfg(target_arch = "wasm32")]
+    let root = std::path::PathBuf::from("/runmat-memmap-wide-repeat");
+    let provider = Arc::new(super::super::vfs::MemoryFsProvider::with_current_dir(
+        root.clone(),
+    ));
+    provider
+        .write_project_path(root.join("one.bin"), b"Z")
+        .unwrap();
+    let _selected = super::super::vfs::replace_provider(provider);
+    super::super::vfs::set_current_dir(&root).unwrap();
+    let wide = (1_u64 << 53) + 1;
+    let Value::Object(mapped) =
+        futures::executor::block_on(super::super::memmapfile_builtin(vec![
+            Value::String("one.bin".into()),
+            char_value("Repeat"),
+            Value::Int(IntValue::U64(wide)),
+        ]))
+        .unwrap()
+    else {
+        panic!("memmapfile object");
+    };
+    assert_eq!(
+        mapped.properties.get("Repeat"),
+        Some(&Value::Int(IntValue::U64(wide)))
+    );
+    let Value::Tensor(data) = mapped.properties.get("Data").unwrap() else {
+        panic!("numeric payload");
+    };
+    assert_eq!(data.shape, vec![1, 1]);
+}

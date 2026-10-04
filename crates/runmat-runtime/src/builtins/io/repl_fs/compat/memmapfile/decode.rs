@@ -1,7 +1,9 @@
 use super::super::compat_error;
-use super::{memmap_field_bytes, MemmapDataType, MemmapField, MemmapFormat};
+use super::{
+    memmap_field_bytes, MemmapDataType, MemmapField, MemmapFormat, MemmapFormatPresentation,
+};
 use crate::BuiltinResult;
-use runmat_value::{IntegerStorage, NumericDType, StructValue, Tensor, Value};
+use runmat_value::{CharArray, IntegerStorage, NumericDType, StructValue, Tensor, Value};
 
 impl MemmapFormat {
     pub(in crate::builtins::io::repl_fs::compat) fn decode(
@@ -27,6 +29,16 @@ impl MemmapFormat {
             shape.push(record_count);
         } else if record_len != total_values {
             shape = vec![total_values, 1];
+        }
+        if self.dtype == MemmapDataType::Character {
+            let characters = bytes[..total_values]
+                .iter()
+                .map(|byte| char::from(*byte))
+                .collect();
+            return Ok(Value::CharArray(
+                CharArray::from_column_major(characters, shape)
+                    .map_err(|error| compat_error("memmapfile", error))?,
+            ));
         }
         let tensor = if let Some(storage) = decode_integer_storage(self.dtype, bytes, total_values)
         {
@@ -70,6 +82,7 @@ impl MemmapFormat {
                     shape: field.shape,
                     field: None,
                     additional_fields: Vec::new(),
+                    presentation: MemmapFormatPresentation::TypeName,
                 }
                 .decode(&record[cursor..cursor + field_bytes], Some(1))?;
                 structure.insert(field.name, value);
@@ -106,9 +119,7 @@ fn decode_integer_storage(
         MemmapDataType::Numeric(NumericDType::I8) => {
             IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect())
         }
-        MemmapDataType::Numeric(NumericDType::U8) | MemmapDataType::Character => {
-            IntegerStorage::U8(bytes.to_vec())
-        }
+        MemmapDataType::Numeric(NumericDType::U8) => IntegerStorage::U8(bytes.to_vec()),
         MemmapDataType::Numeric(NumericDType::I16) => IntegerStorage::I16(
             bytes
                 .chunks_exact(2)
@@ -155,6 +166,7 @@ fn decode_integer_storage(
                 })
                 .collect(),
         ),
-        MemmapDataType::Numeric(NumericDType::F32 | NumericDType::F64) => return None,
+        MemmapDataType::Numeric(NumericDType::F32 | NumericDType::F64)
+        | MemmapDataType::Character => return None,
     })
 }

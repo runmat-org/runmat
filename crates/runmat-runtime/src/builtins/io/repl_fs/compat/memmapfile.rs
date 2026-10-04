@@ -89,6 +89,13 @@ pub(super) struct MemmapFormat {
     pub(super) shape: Vec<usize>,
     pub(super) field: Option<String>,
     pub(super) additional_fields: Vec<MemmapField>,
+    pub(super) presentation: MemmapFormatPresentation,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum MemmapFormatPresentation {
+    TypeName,
+    Cell { columns: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +112,7 @@ impl Default for MemmapFormat {
             shape: vec![1, 1],
             field: None,
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::TypeName,
         }
     }
 }
@@ -201,6 +209,7 @@ impl MemmapFormat {
                     shape,
                     field,
                     additional_fields,
+                    presentation: MemmapFormatPresentation::Cell { columns: cell.cols },
                 })
             }
             _ => Err(compat_error(
@@ -211,26 +220,30 @@ impl MemmapFormat {
     }
 
     pub(super) fn to_value(&self) -> BuiltinResult<Value> {
-        if let Some(field) = &self.field {
-            let mut cells = Vec::with_capacity((self.additional_fields.len() + 1) * 3);
-            cells.extend([
-                char_value(self.dtype.name()),
-                memmap_shape_value(&self.shape)?,
-                char_value(field),
-            ]);
-            for segment in &self.additional_fields {
-                cells.extend([
-                    char_value(segment.dtype.name()),
-                    memmap_shape_value(&segment.shape)?,
-                    char_value(&segment.name),
-                ]);
-            }
-            return Ok(Value::Cell(
-                CellArray::new(cells, self.additional_fields.len() + 1, 3)
-                    .map_err(|err| compat_error("memmapfile", err))?,
-            ));
+        let MemmapFormatPresentation::Cell { columns } = self.presentation else {
+            return Ok(char_value(self.dtype.name()));
+        };
+        let rows = self.additional_fields.len() + 1;
+        let mut cells = Vec::with_capacity(rows * columns);
+        cells.push(char_value(self.dtype.name()));
+        if columns >= 2 {
+            cells.push(memmap_shape_value(&self.shape)?);
         }
-        Ok(char_value(self.dtype.name()))
+        if columns == 3 {
+            cells.push(char_value(self.field.as_deref().ok_or_else(|| {
+                compat_error("memmapfile", "memmapfile: Format field is missing")
+            })?));
+        }
+        for segment in &self.additional_fields {
+            cells.extend([
+                char_value(segment.dtype.name()),
+                memmap_shape_value(&segment.shape)?,
+                char_value(&segment.name),
+            ]);
+        }
+        Ok(Value::Cell(
+            CellArray::new(cells, rows, columns).map_err(|err| compat_error("memmapfile", err))?,
+        ))
     }
 }
 
@@ -267,6 +280,15 @@ fn memmap_shape_value(shape: &[usize]) -> BuiltinResult<Value> {
         Tensor::new(values, vec![1, shape.len()])
             .map_err(|error| compat_error("memmapfile", error))?,
     ))
+}
+
+pub(super) fn memmap_count_value(count: usize) -> BuiltinResult<Value> {
+    if (count as u128) > (1u128 << 53) {
+        return Ok(Value::Int(runmat_value::IntValue::U64(
+            u64::try_from(count).map_err(|error| compat_error("memmapfile", error.to_string()))?,
+        )));
+    }
+    Ok(Value::Num(count as f64))
 }
 
 pub(super) fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
@@ -348,6 +370,9 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
 }
 
 mod decode;
+#[cfg(test)]
+#[path = "memmapfile/tests.rs"]
+mod tests;
 
 pub(super) fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
     match value {

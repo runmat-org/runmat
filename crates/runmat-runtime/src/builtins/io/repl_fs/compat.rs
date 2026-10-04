@@ -550,15 +550,19 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     object
         .properties
         .insert("Writable".to_string(), Value::Bool(writable));
-    object
-        .properties
-        .insert("Offset".to_string(), Value::Num(offset as f64));
+    object.properties.insert(
+        "Offset".to_string(),
+        memmapfile::memmap_count_value(offset)?,
+    );
     object
         .properties
         .insert("Format".to_string(), format.to_value()?);
     object.properties.insert(
         "Repeat".to_string(),
-        repeat.map_or_else(|| char_value("Inf"), |value| Value::Num(value as f64)),
+        repeat
+            .map(memmapfile::memmap_count_value)
+            .transpose()?
+            .unwrap_or_else(|| char_value("Inf")),
     );
     object.properties.insert("Data".to_string(), data_value);
     Ok(Value::Object(object))
@@ -574,6 +578,8 @@ mod user_path;
 mod system;
 use captured_fs_path::CapturedFsPath;
 mod memmapfile;
+#[cfg(test)]
+use memmapfile::MemmapFormatPresentation;
 use memmapfile::{numeric_usize, MemmapFormat, MemmapOption};
 
 #[runtime_builtin(
@@ -900,6 +906,7 @@ mod tests {
             shape: vec![usize::MAX, 2],
             field: None,
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::TypeName,
         };
         assert!(impossible_record.decode(&[], None).is_err());
 
@@ -908,6 +915,7 @@ mod tests {
             shape: vec![2, 1],
             field: None,
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::TypeName,
         };
         let error = impossible_repeat
             .decode(&[0], Some(usize::MAX))
@@ -1040,6 +1048,7 @@ mod tests {
             shape: vec![usize::MAX, 1],
             field: Some("wide".into()),
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::Cell { columns: 3 },
         };
         assert!(overflow.validate_layout(None).is_err());
     }
@@ -1052,6 +1061,7 @@ mod tests {
             shape: vec![(1usize << 53) + 1, 1],
             field: Some("wide".into()),
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::Cell { columns: 3 },
         };
         let presented = format.to_value().expect("exact shape presentation");
         let reparsed = MemmapFormat::from_value(&presented).expect("exact shape parsing");
@@ -1070,6 +1080,7 @@ mod tests {
             shape: vec![1, 2],
             field: None,
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::TypeName,
         };
         let Value::Tensor(result) = format.decode(&bytes, None).unwrap() else {
             panic!("single tensor");
@@ -1199,6 +1210,7 @@ mod tests {
                 shape: vec![1, 2],
                 field: None,
                 additional_fields: Vec::new(),
+                presentation: MemmapFormatPresentation::TypeName,
             }
             .decode(&bytes, None)
             .unwrap();
@@ -1224,6 +1236,7 @@ mod tests {
             shape: vec![2, 1],
             field: None,
             additional_fields: Vec::new(),
+            presentation: MemmapFormatPresentation::TypeName,
         }
         .decode(&bytes, Some(2))
         .unwrap();
