@@ -17,6 +17,7 @@ use runmat_builtins::{
     LOAD_CATALOG_ENTRY, MATFILE_CATALOG_ENTRY, MATFILE_SUBSASGN_CATALOG_ENTRY,
     MATFILE_SUBSREF_CATALOG_ENTRY, SAVE_CATALOG_ENTRY,
 };
+use runmat_builtins::{READSTRUCT_CATALOG_ENTRY, XMLREAD_CATALOG_ENTRY, XMLWRITE_CATALOG_ENTRY};
 use runmat_runtime::builtin::migration_inventory::migration_inventory;
 
 #[test]
@@ -52,6 +53,9 @@ fn migrated_identities_have_one_production_binding_and_no_legacy_authority() {
         &MATFILE_CATALOG_ENTRY,
         &MATFILE_SUBSREF_CATALOG_ENTRY,
         &MATFILE_SUBSASGN_CATALOG_ENTRY,
+        &READSTRUCT_CATALOG_ENTRY,
+        &XMLREAD_CATALOG_ENTRY,
+        &XMLWRITE_CATALOG_ENTRY,
     ];
     // This is an inventory scope, not runtime class or operation dispatch.
     let data_entries: Vec<_> = builtin_catalog_entries()
