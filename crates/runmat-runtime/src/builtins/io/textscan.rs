@@ -84,13 +84,24 @@ async fn textscan_builtin(
         )?;
     }
     let admitted = admission::preflight(runtime.as_ref(), &input, &format_spec, &rest)?;
-    let input = gather_if_needed_async(&input)
-        .await
-        .map_err(map_control_flow)?;
+    let input = crate::builtins::io::filetext::cooperation::await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        gather_if_needed_async(&input),
+    )
+    .await?
+    .map_err(map_control_flow)?;
     let parsed_format = admitted.format;
     let (repeat, options) = match admitted.controls {
         Some(controls) => controls,
-        None => parse_args(&gather_rest(rest).await?)?,
+        None => parse_args(
+            &crate::builtins::io::filetext::cooperation::await_io(
+                runtime.as_ref(),
+                BUILTIN_NAME,
+                gather_rest(rest),
+            )
+            .await??,
+        )?,
     };
     let mut cooperation = TextscanCooperation::new(runtime.as_ref());
     cooperation.completed(0).await?;

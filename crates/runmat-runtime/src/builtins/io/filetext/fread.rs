@@ -138,7 +138,7 @@ pub async fn evaluate_in(
     rest: &[Value],
 ) -> BuiltinResult<FreadEval> {
     let prepared = PreparedFreadCall::new(fid_value, rest)?;
-    let fid = prepared.resolve_fid().await?;
+    let fid = super::cooperation::await_io(runtime, BUILTIN_NAME, prepared.resolve_fid()).await??;
 
     let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
         registry::FileOperationError::InvalidIdentifier
@@ -164,9 +164,12 @@ pub async fn evaluate_in(
         ));
     }
     let like = prepared.like;
-    let controls = prepared
-        .resolve_controls(&operation.info.machinefmt)
-        .await?;
+    let controls = super::cooperation::await_io(
+        runtime,
+        BUILTIN_NAME,
+        prepared.resolve_controls(&operation.info.machinefmt),
+    )
+    .await??;
 
     operation.check_authority(runtime).map_err(|source| {
         let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
@@ -177,6 +180,7 @@ pub async fn evaluate_in(
         }
         builder.build()
     })?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
 
     let (mut eval, encountered_eof) = read_from_handle(
         operation.file_mut(),
@@ -218,6 +222,7 @@ pub async fn evaluate_in(
         }
         builder.build()
     })?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     Ok(eval)
 }
 

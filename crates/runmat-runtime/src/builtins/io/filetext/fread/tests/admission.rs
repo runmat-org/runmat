@@ -41,6 +41,63 @@ fn poll_once<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> std::task
 }
 
 #[test]
+fn cancelled_pending_resident_control_drops_download_and_restores_session_fid() {
+    use crate::context::RuntimeContext;
+    use crate::execution::RuntimeExecutionService;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::rc::Rc;
+
+    let _registry = registry_guard();
+    let _accel = test_support::accel_test_lock();
+    registry::reset_for_tests();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let path = unique_path("fread_cancelled_control");
+    test_support::fs::write(&path, "abc").expect("source fixture");
+    let cancellation = CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let opened = futures::executor::block_on(fopen::evaluate_in(
+        Some(&runtime),
+        &[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("r"),
+        ],
+    ))
+    .expect("session open");
+    let fid = opened.as_open().expect("open form").fid as i32;
+    let provider = Box::leak(Box::new(PendingControlProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident size");
+    let fid_value = Value::Num(fid as f64);
+    let controls = [Value::GpuTensor(resident.handle.clone())];
+    let mut call = Box::pin(evaluate_in(Some(&runtime), &fid_value, &controls));
+    assert!(poll_once(call.as_mut()).is_pending());
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    cancellation.cancel(CancellationReason::User);
+    let error = futures::executor::block_on(call).expect_err("cancelled gather");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(
+        resident.probe.retirements(),
+        0,
+        "borrowed resident input stays live"
+    );
+    assert!(registry::acquire_file_in(fid, Some(&runtime)).is_ok());
+    futures::executor::block_on(registry::close_async_in(fid, Some(&runtime)))
+        .expect("close after cancelled gather");
+    test_support::fs::remove_file(path).expect("cleanup");
+    registry::reset_for_tests();
+}
+
+#[test]
 fn host_controls_are_prepared_as_typed_values_once() {
     let fid = Value::Num(3.0);
     let arguments = [

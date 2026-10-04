@@ -144,7 +144,8 @@ pub async fn evaluate_in(
             parse_nchar_host(nchar)?;
         }
     }
-    let fid_host = gather_value(fid_value).await?;
+    let fid_host =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(fid_value)).await??;
     preflight_fid(&fid_host)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
@@ -174,10 +175,12 @@ pub async fn evaluate_in(
         ));
     }
     let encoding = operation.info.encoding.clone();
-    let nchar_limit = parse_nchar(rest).await?;
+    let nchar_limit =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, parse_nchar(rest)).await??;
     operation
         .check_authority(runtime)
         .map_err(fgets_error_with_source)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     let read =
         read_text_line(operation.file_mut(), nchar_limit, BUILTIN_NAME).map_err(|error| {
             let mut builder =
@@ -192,6 +195,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(fgets_error_with_source)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     if read.encountered_eof {
         registry::mark_eof_encountered_in(fid, runtime);
     }
@@ -217,6 +221,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(fgets_error_with_source)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     Ok(FgetsEval::new(line_value, terminators_value))
 }
 

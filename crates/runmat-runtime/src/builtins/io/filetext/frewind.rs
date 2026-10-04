@@ -105,9 +105,10 @@ pub async fn evaluate_in(
     fid_value: &Value,
 ) -> BuiltinResult<()> {
     preflight_fid(fid_value)?;
-    let fid_host = gather_if_needed_async(fid_value)
-        .await
-        .map_err(map_control_flow)?;
+    let fid_host =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_if_needed_async(fid_value))
+            .await?
+            .map_err(map_control_flow)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
         return Err(frewind_error_with_detail(
@@ -133,6 +134,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(|err| frewind_error_with_source_detail(&FREWIND_ERROR_IO, err.to_string(), err))?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     operation
         .file_mut()
         .seek(SeekFrom::Start(0))
@@ -146,6 +148,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(|err| frewind_error_with_source_detail(&FREWIND_ERROR_IO, err.to_string(), err))?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     drop(operation);
     registry::clear_eof_encountered_in(fid, runtime);
 

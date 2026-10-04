@@ -105,18 +105,26 @@ pub async fn evaluate_in(
         .map_err(remap_format_error)?;
     let mut data_args = Vec::with_capacity(prepared.data_args.len());
     for value in prepared.data_args {
-        data_args.push(gather_value(&value).await?);
+        data_args.push(
+            super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(&value)).await??,
+        );
     }
     let data_args = coerce_single_integer_string_argument(format_summary, data_args)?;
-    let flattened_args = flatten_arguments(&data_args, "fprintf")
-        .await
-        .map_err(map_control_flow)?;
+    let flattened_args = super::cooperation::await_io(
+        runtime,
+        BUILTIN_NAME,
+        flatten_arguments(&data_args, "fprintf"),
+    )
+    .await?
+    .map_err(map_control_flow)?;
     let rendered = format_with_repetition(&format_string, &flattened_args)?;
     let bytes = map_string_result(
         encode_output(&rendered, target.encoding_label()),
         &FPRINTF_ERROR_ENCODE,
     )?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     target.write(runtime, &bytes)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     Ok(FprintfEval {
         bytes_written: bytes.len(),
     })

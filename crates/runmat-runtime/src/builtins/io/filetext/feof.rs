@@ -77,9 +77,10 @@ pub async fn evaluate_in(
     fid_value: &Value,
 ) -> BuiltinResult<bool> {
     preflight_fid(fid_value)?;
-    let fid_host = gather_if_needed_async(fid_value)
-        .await
-        .map_err(map_control_flow)?;
+    let fid_host =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_if_needed_async(fid_value))
+            .await?
+            .map_err(map_control_flow)?;
     preflight_fid(&fid_host)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {

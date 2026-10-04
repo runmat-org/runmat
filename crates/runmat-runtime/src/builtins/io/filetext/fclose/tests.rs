@@ -283,6 +283,53 @@ fn dropping_pending_close_restores_identifier_and_exact_handle() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn cancelled_pending_flush_restores_session_identifier_and_exact_handle() {
+    use crate::context::RuntimeContext;
+    use crate::execution::RuntimeExecutionService;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::future::Future;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    let _guard = registry_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
+    registry::reset_for_tests();
+    let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
+        fail_flush: Arc::new(AtomicBool::new(false)),
+    }));
+    let cancellation = CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let opened = futures::executor::block_on(fopen::evaluate_in(
+        Some(&runtime),
+        &[Value::from("pending_session_close.txt"), Value::from("w")],
+    ))
+    .expect("session open");
+    let fid = opened.as_open().expect("open form").fid as i32;
+    let original = registry::shared_handle(fid).expect("registered handle");
+    let fid_value = [Value::Num(fid as f64)];
+    let mut call = Box::pin(evaluate_in(Some(&runtime), &fid_value));
+    let mut context = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
+    assert!(registry::info_for_in(fid, Some(&runtime)).is_none());
+    cancellation.cancel(CancellationReason::User);
+    let error = futures::executor::block_on(call)
+        .err()
+        .expect("cancelled flush");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    let restored = registry::shared_handle(fid).expect("restored handle");
+    assert!(Arc::ptr_eq(&original, &restored));
+    assert!(restored.lock().expect("handle lock").is_some());
+    futures::executor::block_on(registry::close_async_in(fid, Some(&runtime)))
+        .expect("later close");
+    registry::reset_for_tests();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn fclose_standard_stream_bool_argument() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();

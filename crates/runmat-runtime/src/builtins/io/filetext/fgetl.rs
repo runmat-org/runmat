@@ -126,7 +126,8 @@ pub async fn evaluate_in(
     }
 
     preflight_fid(fid_value)?;
-    let fid_host = gather_value(fid_value).await?;
+    let fid_host =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(fid_value)).await??;
     preflight_fid(&fid_host)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
@@ -159,6 +160,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(fgetl_error_with_source)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     let read = read_text_line(operation.file_mut(), None, BUILTIN_NAME).map_err(|error| {
         let mut builder =
             build_runtime_error(format!("{}: {}", FGETL_ERROR_IO.message, error.message()))
@@ -172,6 +174,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(fgetl_error_with_source)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     if read.encountered_eof {
         registry::mark_eof_encountered_in(fid, runtime);
     }
@@ -191,6 +194,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(fgetl_error_with_source)?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     Ok(FgetlEval::new(line_value))
 }
 

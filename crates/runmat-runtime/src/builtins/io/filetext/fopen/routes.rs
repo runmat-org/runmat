@@ -36,9 +36,12 @@ pub(super) async fn handle_open(
     if let Err(error) = filesystem.check() {
         return Ok(FopenEval::open(OpenOutputs::failure(error.to_string())));
     }
-    match options
-        .open_async_on(filesystem.provider.as_ref(), &filesystem.path)
-        .await
+    match super::super::cooperation::await_io(
+        runtime,
+        BUILTIN_NAME,
+        options.open_async_on(filesystem.provider.as_ref(), &filesystem.path),
+    )
+    .await?
     {
         Ok(file) => {
             if let Err(error) = filesystem.check() {

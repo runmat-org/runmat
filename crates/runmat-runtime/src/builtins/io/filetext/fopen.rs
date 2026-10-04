@@ -123,7 +123,7 @@ pub async fn evaluate_in(
     } else {
         None
     };
-    let gathered = gather_args(args).await?;
+    let gathered = super::cooperation::await_io(runtime, BUILTIN_NAME, gather_args(args)).await??;
     if gathered.is_empty() {
         return handle_all(runtime, &[]);
     }

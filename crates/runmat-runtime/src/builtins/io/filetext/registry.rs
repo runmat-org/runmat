@@ -466,3 +466,6 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 #[cfg(test)]
 #[path = "registry/session_tests.rs"]
 mod session_tests;
+#[cfg(test)]
+#[path = "registry/await_tests.rs"]
+mod await_tests;

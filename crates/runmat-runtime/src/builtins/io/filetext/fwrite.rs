@@ -155,7 +155,8 @@ pub async fn evaluate_in(
             &FWRITE_ERROR_INVALID_OPTION,
         )?;
     }
-    let fid_host = gather_value(fid_value).await?;
+    let fid_host =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(fid_value)).await??;
     let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
     if fid < 0 {
         return Err(fwrite_error_with_detail(
@@ -188,7 +189,9 @@ pub async fn evaluate_in(
         ));
     }
     let skip_host = match raw_skip {
-        Some(value @ Value::GpuTensor(_)) => Some(gather_value(value).await?),
+        Some(value @ Value::GpuTensor(_)) => {
+            Some(super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(value)).await??)
+        }
         Some(value) => Some(value.clone()),
         None => None,
     };
@@ -198,12 +201,14 @@ pub async fn evaluate_in(
         parse_machine_format(raw_machine, &operation.info.machinefmt),
         &FWRITE_ERROR_INVALID_OPTION,
     )?;
-    let data_host = gather_value(data_value).await?;
+    let data_host =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(data_value)).await??;
     let elements = map_string_result(borrow_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
 
     operation
         .check_authority(runtime)
         .map_err(|source| fwrite_error_with_source(source.to_string(), &FWRITE_ERROR_IO, source))?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     let count = write_elements(
         operation.file_mut(),
         elements,
@@ -214,6 +219,7 @@ pub async fn evaluate_in(
     operation
         .check_authority(runtime)
         .map_err(|source| fwrite_error_with_source(source.to_string(), &FWRITE_ERROR_IO, source))?;
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
     Ok(FwriteEval::new(count))
 }
 

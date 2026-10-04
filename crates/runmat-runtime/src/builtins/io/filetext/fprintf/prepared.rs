@@ -36,7 +36,12 @@ pub(super) async fn prepare(
             FormatPlan::Host { index, text } => break (index, text),
             FormatPlan::Resident { index } => {
                 validate_unambiguous_host_target(runtime, args, index)?;
-                let host = gather_value(&args[index]).await?;
+                let host = super::super::cooperation::await_io(
+                    runtime,
+                    BUILTIN_NAME,
+                    gather_value(&args[index]),
+                )
+                .await??;
                 let text = map_string_result(
                     coerce_to_format_string(&host),
                     &FPRINTF_ERROR_INVALID_INPUT,
@@ -145,7 +150,9 @@ async fn select_target(
         let host = match staged[index].as_ref() {
             Some(host) => host.clone(),
             None if matches!(value, Value::GpuTensor(_)) => {
-                let host = gather_value(value).await?;
+                let host =
+                    super::super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(value))
+                        .await??;
                 staged[index] = Some(host.clone());
                 host
             }

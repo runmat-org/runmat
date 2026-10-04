@@ -126,9 +126,9 @@ pub async fn evaluate_in(
     args: &[Value],
 ) -> BuiltinResult<FcloseEval> {
     preflight_fclose_inputs(args)?;
-    let gathered = gather_args(args).await?;
+    let gathered = super::cooperation::await_io(runtime, BUILTIN_NAME, gather_args(args)).await??;
     match gathered.len() {
-        0 => Ok(close_all(runtime).await),
+        0 => close_all(runtime).await,
         1 => handle_single_argument(runtime, &gathered[0]).await,
         _ => Err(fclose_error_with_detail(
             &FCLOSE_ERROR_INVALID_INPUT,
@@ -270,19 +270,25 @@ async fn handle_single_argument(
     value: &Value,
 ) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
-        return Ok(close_all(runtime).await);
+        return close_all(runtime).await;
     }
     let fids = collect_file_ids(value)?;
-    Ok(close_fids(runtime, &fids).await)
+    close_fids(runtime, &fids).await
 }
 
-async fn close_all(runtime: Option<&crate::context::RuntimeContext>) -> FcloseEval {
+async fn close_all(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<FcloseEval> {
     let infos = registry::list_infos_in(runtime);
     let mut status_ok = true;
     let mut message = String::new();
     for info in infos {
         if info.id >= 3 {
-            if let Err(err) = registry::close_async_in(info.id, runtime).await {
+            if let Err(err) = super::cooperation::await_io(
+                runtime,
+                BUILTIN_NAME,
+                registry::close_async_in(info.id, runtime),
+            )
+            .await?
+            {
                 status_ok = false;
                 if message.is_empty() {
                     message = err.to_string();
@@ -291,15 +297,18 @@ async fn close_all(runtime: Option<&crate::context::RuntimeContext>) -> FcloseEv
         }
     }
     if status_ok {
-        FcloseEval::success()
+        Ok(FcloseEval::success())
     } else {
-        FcloseEval::failure(message)
+        Ok(FcloseEval::failure(message))
     }
 }
 
-async fn close_fids(runtime: Option<&crate::context::RuntimeContext>, fids: &[i32]) -> FcloseEval {
+async fn close_fids(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fids: &[i32],
+) -> BuiltinResult<FcloseEval> {
     if fids.is_empty() {
-        return FcloseEval::success();
+        return Ok(FcloseEval::success());
     }
     let mut status_ok = true;
     let mut message = String::new();
@@ -314,7 +323,13 @@ async fn close_fids(runtime: Option<&crate::context::RuntimeContext>, fids: &[i3
         if fid < 3 {
             continue;
         }
-        match registry::close_async_in(fid, runtime).await {
+        match super::cooperation::await_io(
+            runtime,
+            BUILTIN_NAME,
+            registry::close_async_in(fid, runtime),
+        )
+        .await?
+        {
             Ok(Some(_)) => {}
             Ok(None) => {
                 status_ok = false;
@@ -331,9 +346,9 @@ async fn close_fids(runtime: Option<&crate::context::RuntimeContext>, fids: &[i3
         }
     }
     if status_ok {
-        FcloseEval::success()
+        Ok(FcloseEval::success())
     } else {
-        FcloseEval::failure(message)
+        Ok(FcloseEval::failure(message))
     }
 }
 
