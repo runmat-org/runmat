@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::FsStagedOutput;
+use std::sync::atomic::AtomicU64;
 
 pub(super) fn begin(
     provider: MemoryFsProvider,
@@ -68,7 +69,7 @@ impl FsStagedOutput for MemoryStagedOutput {
             MemoryEntry::File {
                 bytes: std::mem::take(&mut self.bytes),
                 readonly: false,
-                identity: Arc::new(()),
+                identity: Arc::new(AtomicU64::new(0)),
             },
         );
         Ok(())

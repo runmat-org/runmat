@@ -5,11 +5,15 @@ use std::{
     ffi::OsString,
     io::{self, Cursor, ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 mod rename;
 mod mapped;
+mod handle_commit;
 mod staged;
 
 #[derive(Clone, Debug)]
@@ -24,8 +28,17 @@ enum MemoryEntry {
     File {
         bytes: Vec<u8>,
         readonly: bool,
-        identity: Arc<()>,
+        identity: Arc<AtomicU64>,
     },
+}
+
+fn bump_identity(identity: &AtomicU64) -> io::Result<u64> {
+    let next = identity
+        .load(Ordering::SeqCst)
+        .checked_add(1)
+        .ok_or_else(|| io::Error::other("memory file revision exhausted"))?;
+    identity.store(next, Ordering::SeqCst);
+    Ok(next)
 }
 
 #[derive(Debug)]
@@ -92,13 +105,17 @@ impl MemoryFsProvider {
                 ));
             }
             Some(MemoryEntry::File { identity, .. }) => identity.clone(),
-            None => Arc::new(()),
+            None => Arc::new(AtomicU64::new(0)),
         };
         ensure_parent_dirs(&mut guard, &path)?;
+        let replacement = data.to_vec();
+        if guard.entries.contains_key(&path) {
+            bump_identity(&identity)?;
+        }
         guard.entries.insert(
             path,
             MemoryEntry::File {
-                bytes: data.to_vec(),
+                bytes: replacement,
                 readonly: false,
                 identity,
             },
@@ -276,16 +293,24 @@ impl FsProvider for MemoryFsProvider {
                     format!("file is readonly: {}", path.display()),
                 ));
             }
-            Some(MemoryEntry::File { bytes, .. }) => Some(bytes),
+            Some(MemoryEntry::File {
+                bytes, identity, ..
+            }) => Some((bytes, identity)),
             None => None,
         };
         if existing.is_none() && !flags.create && !flags.create_new {
             return Err(not_found(&path));
         }
+        let originally_present = existing.is_some();
+        let identity = existing.as_ref().map_or_else(
+            || Arc::new(AtomicU64::new(0)),
+            |(_, identity)| identity.clone(),
+        );
+        let opened_version = identity.load(Ordering::SeqCst);
         let bytes = if flags.truncate {
             Vec::new()
         } else {
-            existing.unwrap_or_default()
+            existing.map_or_else(Vec::new, |(bytes, _)| bytes)
         };
         let mut cursor = Cursor::new(bytes);
         if flags.append {
@@ -294,6 +319,9 @@ impl FsProvider for MemoryFsProvider {
         Ok(Box::new(MemoryFileHandle {
             provider: self.clone(),
             path,
+            identity,
+            opened_version,
+            originally_present,
             cursor,
             writable: flags.write || flags.append || flags.truncate,
             dirty: flags.truncate,
@@ -400,6 +428,9 @@ impl FsProvider for MemoryFsProvider {
 struct MemoryFileHandle {
     provider: MemoryFsProvider,
     path: PathBuf,
+    identity: Arc<AtomicU64>,
+    opened_version: u64,
+    originally_present: bool,
     cursor: Cursor<Vec<u8>>,
     writable: bool,
     dirty: bool,
@@ -411,8 +442,15 @@ impl MemoryFileHandle {
         if !self.writable || !self.dirty || self.flushed {
             return Ok(());
         }
-        self.provider
-            .write_project_path(&self.path, self.cursor.get_ref())?;
+        self.opened_version = handle_commit::commit(
+            &self.provider,
+            &self.path,
+            &self.identity,
+            self.opened_version,
+            self.originally_present,
+            self.cursor.get_ref(),
+        )?;
+        self.originally_present = true;
         self.flushed = true;
         Ok(())
     }

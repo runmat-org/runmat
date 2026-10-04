@@ -26,7 +26,10 @@ pub mod sandbox;
 mod wasm;
 
 pub use dialog::*;
-pub use mapped_backing::{capture_mapped_backing, CapturedMappedBacking, FsMappedBacking};
+pub use mapped_backing::{
+    capture_mapped_backing, CapturedMappedBacking, FsMappedBacking, FsMappedWriteDisposition,
+    FsMappedWriteFailure, FsMappedWriteOutcome,
+};
 pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;

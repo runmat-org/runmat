@@ -1,5 +1,5 @@
 use crate::mapped_backing::check_range;
-use crate::FsMappedBacking;
+use crate::{FsMappedBacking, FsMappedWriteFailure};
 use async_trait::async_trait;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -61,30 +61,42 @@ impl FsMappedBacking for NativeMappedBacking {
         self.file.read(buffer)
     }
 
-    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<usize> {
-        check_range(offset, bytes.len(), self.extent)?;
+    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<usize, FsMappedWriteFailure> {
+        check_range(offset, bytes.len(), self.extent)
+            .map_err(FsMappedWriteFailure::before_effect)?;
         if !self.writable {
-            return Err(io::Error::new(
+            return Err(FsMappedWriteFailure::before_effect(io::Error::new(
                 ErrorKind::PermissionDenied,
                 "native mapped backing is read-only",
-            ));
+            )));
         }
         // A pre-write truncation is an error, not permission to extend a map.
         // Concurrent external truncation after this check is not an atomic
         // transaction; the caller must treat such interference as unsupported.
-        if self.file.metadata()?.len() < self.extent {
-            return Err(io::Error::new(
+        if self
+            .file
+            .metadata()
+            .map_err(FsMappedWriteFailure::before_effect)?
+            .len()
+            < self.extent
+        {
+            return Err(FsMappedWriteFailure::before_effect(io::Error::new(
                 ErrorKind::UnexpectedEof,
                 "native mapped source was truncated after opening",
-            ));
+            )));
         }
-        let actual = self.file.seek(SeekFrom::Start(offset))?;
+        let actual = self
+            .file
+            .seek(SeekFrom::Start(offset))
+            .map_err(FsMappedWriteFailure::before_effect)?;
         if actual != offset {
-            return Err(io::Error::new(
+            return Err(FsMappedWriteFailure::before_effect(io::Error::new(
                 ErrorKind::InvalidData,
                 "native mapped write seek returned a different offset",
-            ));
+            )));
         }
-        self.file.write(bytes)
+        self.file
+            .write(bytes)
+            .map_err(|source| FsMappedWriteFailure::indeterminate(bytes.len(), source))
     }
 }

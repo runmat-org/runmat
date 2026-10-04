@@ -1,10 +1,10 @@
-use super::{normalize_path, MemoryEntry, MemoryFsProvider};
+use super::{bump_identity, normalize_path, MemoryEntry, MemoryFsProvider};
 use crate::mapped_backing::check_range;
-use crate::FsMappedBacking;
+use crate::{FsMappedBacking, FsMappedWriteFailure};
 use async_trait::async_trait;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
 
 pub(super) fn open(
     provider: MemoryFsProvider,
@@ -58,7 +58,7 @@ pub(super) fn open(
 struct MemoryMappedBacking {
     provider: MemoryFsProvider,
     path: PathBuf,
-    identity: Arc<()>,
+    identity: Arc<AtomicU64>,
     extent: u64,
     writable: bool,
 }
@@ -132,35 +132,51 @@ impl FsMappedBacking for MemoryMappedBacking {
         })
     }
 
-    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> io::Result<usize> {
+    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<usize, FsMappedWriteFailure> {
         if !self.writable {
-            return Err(io::Error::new(
+            return Err(FsMappedWriteFailure::before_effect(io::Error::new(
                 ErrorKind::PermissionDenied,
                 "memory mapped backing is read-only",
-            ));
+            )));
         }
-        check_range(offset, bytes.len(), self.extent)?;
-        let mut tree = self
-            .provider
-            .inner
-            .lock()
-            .map_err(|_| io::Error::other("memory filesystem lock poisoned"))?;
-        let entry = tree.entries.get_mut(&self.path).ok_or_else(stale)?;
-        self.validate(entry)?;
-        let MemoryEntry::File { bytes: target, .. } = entry else {
+        check_range(offset, bytes.len(), self.extent)
+            .map_err(FsMappedWriteFailure::before_effect)?;
+        let mut tree = self.provider.inner.lock().map_err(|_| {
+            FsMappedWriteFailure::before_effect(io::Error::other("memory filesystem lock poisoned"))
+        })?;
+        let entry = tree
+            .entries
+            .get_mut(&self.path)
+            .ok_or_else(|| FsMappedWriteFailure::before_effect(stale()))?;
+        self.validate(entry)
+            .map_err(FsMappedWriteFailure::before_effect)?;
+        let MemoryEntry::File {
+            bytes: target,
+            identity,
+            ..
+        } = entry
+        else {
             unreachable!("validated file entry")
         };
-        let start = usize::try_from(offset)
-            .map_err(|_| io::Error::new(ErrorKind::InvalidInput, "offset is too large"))?;
-        let end = start
-            .checked_add(bytes.len())
-            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "range is too large"))?;
+        let start = usize::try_from(offset).map_err(|_| {
+            FsMappedWriteFailure::before_effect(io::Error::new(
+                ErrorKind::InvalidInput,
+                "offset is too large",
+            ))
+        })?;
+        let end = start.checked_add(bytes.len()).ok_or_else(|| {
+            FsMappedWriteFailure::before_effect(io::Error::new(
+                ErrorKind::InvalidInput,
+                "range is too large",
+            ))
+        })?;
         if end > target.len() {
-            return Err(io::Error::new(
+            return Err(FsMappedWriteFailure::before_effect(io::Error::new(
                 ErrorKind::UnexpectedEof,
                 "memory mapped source was truncated after opening",
-            ));
+            )));
         }
+        bump_identity(identity).map_err(FsMappedWriteFailure::before_effect)?;
         target[start..end].copy_from_slice(bytes);
         Ok(bytes.len())
     }
