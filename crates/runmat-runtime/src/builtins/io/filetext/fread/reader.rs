@@ -95,7 +95,11 @@ pub(super) fn read_numeric_values<R: Read + Seek>(
     endianness: Endianness,
 ) -> Result<(NumericStorage, usize, bool), ReadFailure> {
     if let Some(0) = limit {
-        return Ok((NumericStorage::zeros(input.numeric_dtype(), 0), 0, false));
+        return Ok((
+            NumericStorage::zeros(NumericDType::from(input.numeric_class()), 0),
+            0,
+            false,
+        ));
     }
     let element_size = input.byte_len();
     let mut buffer = vec![0u8; element_size];

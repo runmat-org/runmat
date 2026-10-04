@@ -1,6 +1,5 @@
 use super::*;
 use runmat_builtins::{parse_fread_precision, FreadOutputKind, FreadPrecisionSpec};
-use runmat_types::NumericClass;
 
 pub(super) use runmat_builtins::FreadInputType as InputType;
 
@@ -27,21 +26,7 @@ impl PrecisionSpec {
     fn from_contract(contract: FreadPrecisionSpec) -> Self {
         let output = match contract.output {
             FreadOutputKind::Char => OutputKind::Char,
-            FreadOutputKind::Numeric(class) => {
-                let dtype = match class {
-                    NumericClass::Double => NumericDType::F64,
-                    NumericClass::Single => NumericDType::F32,
-                    NumericClass::Int8 => NumericDType::I8,
-                    NumericClass::UInt8 => NumericDType::U8,
-                    NumericClass::Int16 => NumericDType::I16,
-                    NumericClass::UInt16 => NumericDType::U16,
-                    NumericClass::Int32 => NumericDType::I32,
-                    NumericClass::UInt32 => NumericDType::U32,
-                    NumericClass::Int64 => NumericDType::I64,
-                    NumericClass::UInt64 => NumericDType::U64,
-                };
-                OutputKind::Numeric(dtype)
-            }
+            FreadOutputKind::Numeric(class) => OutputKind::Numeric(NumericDType::from(class)),
         };
         Self {
             input: contract.input,
