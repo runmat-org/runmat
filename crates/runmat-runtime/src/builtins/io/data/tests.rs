@@ -887,6 +887,9 @@ impl FsProvider for CountingDataUploadProvider {
         let replacement = self.swap_on_write.lock().expect("swap lock").take();
         if let Some(replacement) = replacement {
             runmat_filesystem::set_provider(replacement);
+            runmat_filesystem::set_current_dir_async("/replacement")
+                .await
+                .expect("replacement fixture working directory");
             assert_eq!(
                 runmat_filesystem::current_dir().unwrap(),
                 Path::new("/replacement")

@@ -95,6 +95,12 @@ impl RuntimePlacementService for SwappingPlacement {
         request.validate().expect("typed selected host effect");
         self.selected.set(self.selected.get() + 1);
         *self.guard.borrow_mut() = Some(fs::replace_provider(self.replacement.clone()));
+        // Model the host changing its CWD while the invocation's executor is
+        // active. The blocking host API belongs on that external host thread.
+        std::thread::spawn(|| fs::set_current_dir("/replacement"))
+            .join()
+            .expect("host CWD update thread")
+            .expect("replacement provider CWD");
         assert_eq!(fs::current_dir().unwrap(), Path::new("/replacement"));
         let candidate = &request.candidates[0];
         Ok(RuntimeWholeWorkSelection {
