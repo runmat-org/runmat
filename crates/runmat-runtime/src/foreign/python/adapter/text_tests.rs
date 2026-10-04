@@ -74,3 +74,89 @@ fn output_name_cells_and_script_arguments_require_actual_text() {
     assert_eq!(arguments, vec!["--flag".to_string()]);
     assert!(remaining.is_empty());
 }
+
+#[test]
+fn empty_output_names_keep_the_existing_container_contract() {
+    // Unlike source and attribute text, the output-name decoder historically
+    // accepts empty text here; changing name validity belongs to a separate
+    // public-contract review, not the no-coercion repair.
+    assert_eq!(
+        output_names(Some(Value::String(String::new()))).unwrap(),
+        vec![String::new()]
+    );
+    let cell = Value::Cell(CellArray::new(vec![Value::String(String::new())], 1, 1).unwrap());
+    assert_eq!(output_names(Some(cell)).unwrap(), vec![String::new()]);
+}
+
+#[test]
+fn invalid_python_controls_do_not_discover_or_start_an_interpreter() {
+    use crate::execution::RuntimeExecutionService;
+
+    let mut configuration = PythonRuntimeConfiguration::default();
+    configuration.executable = Some("/runmat/nonexistent-python-for-preflight".into());
+    let adapter =
+        PythonAdapter::with_configuration(ForeignHandleRegistry::default(), configuration)
+            .expect("register host without starting Python");
+    let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let invalid_calls = [
+        ("invoke_qualified", vec![Value::Bool(true)]),
+        ("get_member", vec![Value::Num(1.0)]),
+        ("set_member", vec![Value::Num(1.0)]),
+        ("invoke_member", vec![Value::Num(1.0)]),
+        ("get_item", vec![Value::Num(1.0)]),
+        ("set_item", vec![Value::Num(1.0)]),
+        ("iterate", vec![Value::Num(1.0)]),
+        (
+            "pyrun",
+            vec![Value::Num(1.0), Value::String("answer".into())],
+        ),
+        (
+            "pyrun",
+            vec![
+                Value::String("answer = 1".into()),
+                Value::Cell(CellArray::new(vec![Value::Bool(true)], 1, 1).unwrap()),
+            ],
+        ),
+        (
+            "pyrun",
+            vec![
+                Value::String("answer = 1".into()),
+                Value::String("answer".into()),
+                Value::Int(IntValue::I64(1)),
+                Value::Num(2.0),
+            ],
+        ),
+        (
+            "pyrunfile",
+            vec![Value::Bool(true), Value::String("answer".into())],
+        ),
+        (
+            "pyrunfile",
+            vec![
+                Value::String("script.py".into()),
+                Value::String("answer".into()),
+                Value::String("Arguments".into()),
+                Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+            ],
+        ),
+    ];
+    for (symbol, arguments) in invalid_calls {
+        let error = adapter
+            .invoke_now(
+                &context,
+                ForeignCall {
+                    adapter: PYTHON_ADAPTER_ID.into(),
+                    symbol: symbol.into(),
+                    arguments,
+                    requested_outputs: 1,
+                },
+            )
+            .expect_err("invalid control must precede interpreter discovery");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Foreign:InvalidCall"),
+            "{symbol}"
+        );
+        assert!(!adapter.is_running(), "{symbol} started an interpreter");
+    }
+}

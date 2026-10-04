@@ -17,10 +17,12 @@ use runmat_value::{ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
 mod environment;
 mod isolated;
+mod prepared;
 #[cfg(test)]
 use environment::environment_metadata;
 use environment::{issued_python_status_value, validate_environment};
 use isolated::{IsolatedCallGuard, NestedCallLease};
+use prepared::{prepare_python_call, PreparedPythonCall};
 
 use super::super::{
     foreign_callback_request, foreign_error, invoke_foreign_callback, ForeignAdapter,
@@ -356,86 +358,88 @@ impl PythonAdapter {
             }
             _ => {}
         }
+        let prepared = prepare_python_call(&call.symbol, call.arguments)?;
         let session = self.ensure_session()?;
         self.drain_releases()?;
-        let mut arguments = call.arguments.into_iter();
         let mut assigned_receiver = None;
-        let python_call = match call.symbol.as_str() {
-            "invoke_qualified" => PythonCall::InvokeQualified {
-                name: string_argument(arguments.next(), "Python name")?,
-                arguments: arguments
-                    .map(|value| self.argument_to_python(context, value))
-                    .collect::<Result<_, _>>()?,
-            },
-            "get_member" => PythonCall::GetMember {
-                receiver: self.python_handle(&foreign_argument(arguments.next())?)?,
-                name: string_argument(arguments.next(), "Python attribute")?,
-            },
-            "set_member" => {
-                let reference = foreign_argument(arguments.next())?;
-                assigned_receiver = Some(reference.clone());
-                PythonCall::SetMember {
-                    receiver: self.python_handle(&reference)?,
-                    name: string_argument(arguments.next(), "Python attribute")?,
-                    value: self.argument_to_python(
-                        context,
-                        arguments.next().ok_or_else(|| {
-                            invalid_call("Python attribute assignment requires a value")
-                        })?,
-                    )?,
+        let python_call = match prepared {
+            PreparedPythonCall::InvokeQualified { name, arguments } => {
+                PythonCall::InvokeQualified {
+                    name,
+                    arguments: arguments
+                        .into_iter()
+                        .map(|value| self.argument_to_python(context, value))
+                        .collect::<Result<_, _>>()?,
                 }
             }
-            "invoke_member" => PythonCall::InvokeMember {
-                receiver: self.python_handle(&foreign_argument(arguments.next())?)?,
-                name: string_argument(arguments.next(), "Python method")?,
-                arguments: arguments
-                    .map(|value| self.argument_to_python(context, value))
-                    .collect::<Result<_, _>>()?,
+            PreparedPythonCall::GetMember { receiver, name } => PythonCall::GetMember {
+                receiver: self.python_handle(&receiver)?,
+                name,
             },
-            "get_item" => PythonCall::GetItem {
-                receiver: self.python_handle(&foreign_argument(arguments.next())?)?,
-                index: python_indices(arguments.collect())?,
-            },
-            "set_item" => {
-                let reference = foreign_argument(arguments.next())?;
-                let receiver = self.python_handle(&reference)?;
-                let (indices, value) = split_item_assignment_arguments(arguments.collect())?;
-                assigned_receiver = Some(reference);
-                PythonCall::SetItem {
-                    receiver,
-                    index: python_indices(indices)?,
+            PreparedPythonCall::SetMember {
+                receiver,
+                name,
+                value,
+            } => {
+                assigned_receiver = Some(receiver.clone());
+                PythonCall::SetMember {
+                    receiver: self.python_handle(&receiver)?,
+                    name,
                     value: self.argument_to_python(context, value)?,
                 }
             }
-            "iterate" => PythonCall::Iterate {
-                receiver: self.python_handle(&foreign_argument(arguments.next())?)?,
+            PreparedPythonCall::InvokeMember {
+                receiver,
+                name,
+                arguments,
+            } => PythonCall::InvokeMember {
+                receiver: self.python_handle(&receiver)?,
+                name,
+                arguments: arguments
+                    .into_iter()
+                    .map(|value| self.argument_to_python(context, value))
+                    .collect::<Result<_, _>>()?,
             },
-            "pyrun" => {
-                let code = string_argument(arguments.next(), "Python code")?;
-                let outputs = output_names(arguments.next())?;
-                PythonCall::ExecutePersistent {
-                    code,
-                    inputs: self.named_inputs(context, arguments.collect())?,
-                    outputs,
+            PreparedPythonCall::GetItem { receiver, index } => PythonCall::GetItem {
+                receiver: self.python_handle(&receiver)?,
+                index,
+            },
+            PreparedPythonCall::SetItem {
+                receiver,
+                index,
+                value,
+            } => {
+                let handle = self.python_handle(&receiver)?;
+                assigned_receiver = Some(receiver);
+                PythonCall::SetItem {
+                    receiver: handle,
+                    index,
+                    value: self.argument_to_python(context, value)?,
                 }
             }
-            "pyrunfile" => {
-                let path = string_argument(arguments.next(), "Python file")?.into();
-                let outputs = output_names(arguments.next())?;
-                let remaining = arguments.collect::<Vec<_>>();
-                let (script_arguments, inputs) = split_file_inputs(remaining)?;
-                PythonCall::ExecuteFile {
-                    path,
-                    arguments: script_arguments,
-                    inputs: self.named_inputs(context, inputs)?,
-                    outputs,
-                }
-            }
-            operation => {
-                return Err(invalid_call(format!(
-                    "unknown Python adapter operation {operation}"
-                )));
-            }
+            PreparedPythonCall::Iterate { receiver } => PythonCall::Iterate {
+                receiver: self.python_handle(&receiver)?,
+            },
+            PreparedPythonCall::Run {
+                code,
+                outputs,
+                inputs,
+            } => PythonCall::ExecutePersistent {
+                code,
+                inputs: self.convert_named_inputs(context, inputs)?,
+                outputs,
+            },
+            PreparedPythonCall::RunFile {
+                path,
+                arguments,
+                outputs,
+                inputs,
+            } => PythonCall::ExecuteFile {
+                path: path.into(),
+                arguments,
+                inputs: self.convert_named_inputs(context, inputs)?,
+                outputs,
+            },
         };
         let cancellation = context.cancellation();
         let values = session
@@ -554,22 +558,15 @@ impl PythonAdapter {
             })
     }
 
-    fn named_inputs(
+    fn convert_named_inputs(
         &self,
         context: &RuntimeContext,
-        arguments: Vec<Value>,
+        inputs: Vec<(String, Value)>,
     ) -> Result<Vec<(String, PythonValue)>, RuntimeError> {
-        if !arguments.len().is_multiple_of(2) {
-            return Err(invalid_call("Python named inputs require name-value pairs"));
-        }
-        let mut inputs = Vec::with_capacity(arguments.len() / 2);
-        let mut arguments = arguments.into_iter();
-        while let Some(name) = arguments.next() {
-            let name = string_argument(Some(name), "Python input name")?;
-            let value = arguments.next().expect("even argument count");
-            inputs.push((name, self.argument_to_python(context, value)?));
-        }
-        Ok(inputs)
+        inputs
+            .into_iter()
+            .map(|(name, value)| Ok((name, self.argument_to_python(context, value)?)))
+            .collect()
     }
 
     fn invoke_callback(
