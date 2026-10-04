@@ -44,6 +44,7 @@ fn contract_and_native_effects_are_inferred() {
         BuiltinPortability::NativeOnly
     );
     assert_eq!(H5DISP_CATALOG_ENTRY.bindings, &REQUIRED_DEFAULT_BINDING);
+    assert_eq!(H5DISP_CATALOG_ENTRY.extensions, &[H5DISP_CAPTURE_EXTENSION]);
 }
 
 #[test]

@@ -9,7 +9,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     keywords: &["h5disp", "hdf5", "metadata", "display", "dataset", "group", "file", "io"],
     related: &["h5info"],
     sections: &[
-        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["The text traverses groups, datasets, shapes, datatypes, and attributes. It is returned as a string so scripts can capture or print it deterministically.", "HDF5 access uses the native HDF5 library. Browser execution reports `RunMat:hdf5:UnsupportedTarget`; there is no GPU kernel or fusion route. Admitted resident numeric controls are materialized on the host before native access."] },
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["The text traverses groups, datasets, shapes, datatypes, and attributes. MATLAB documents `h5disp` as a display statement; capturing that text as a string is a RunMat extension and requires RunMat compatibility mode. The current implementation accepts filename and an optional location, but not MATLAB's `mode` or `TextEncoding` forms.", "HDF5 access uses the native HDF5 library. Browser execution reports `RunMat:hdf5:UnsupportedTarget`; there is no GPU kernel or fusion route. Filename and location controls are scalar host text, not resident numeric operands."] },
         BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &["Native HDF5 file access is synchronous host work. It terminates fusion and does not launch a GPU kernel. The active native filesystem path authority and HDF5 library must be available; a missing native route reports a typed error rather than falling back to an unrelated ambient path."] },
     ],
     examples: &[BuiltinExample {
@@ -17,7 +17,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         title: "h5disp with a deterministic native HDF5 file",
         program: "h5write('measurements.h5', '/group/A', [1 2; 3 4]);\ntxt = h5disp('measurements.h5');\ntxt",
         display_output: None,
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

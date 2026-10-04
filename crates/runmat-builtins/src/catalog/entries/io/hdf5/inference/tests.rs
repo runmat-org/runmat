@@ -86,6 +86,40 @@ fn invalid_selection_and_sparse_complex_write_are_definite_errors() {
 }
 
 #[test]
+fn character_text_geometry_rejects_only_proven_invalid_pages_or_rows() {
+    let character = |shape| ValueFact::proven(ValueKindFact::Character, shape, StorageFact::Dense);
+    for shape in [
+        ShapeFact::from(vec![Some(2), Some(2)]),
+        ShapeFact::from(vec![Some(1), Some(1), Some(2)]),
+    ] {
+        let inferred = infer(
+            &request(vec![character(shape), text()], 1),
+            &H5READ_CATALOG_ENTRY,
+            Hdf5Form::Read,
+        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-HDF5-TEXT"));
+    }
+    for shape in [
+        ShapeFact::from(vec![Some(1), Some(3), Some(1)]),
+        ShapeFact::from(vec![Some(1), Some(3), None]),
+    ] {
+        let inferred = infer(
+            &request(vec![character(shape), text()], 1),
+            &H5READ_CATALOG_ENTRY,
+            Hdf5Form::Read,
+        );
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+    }
+}
+
+#[test]
 fn unknown_write_data_stays_conservative_and_root_metadata_has_fields() {
     let write = infer(
         &request(

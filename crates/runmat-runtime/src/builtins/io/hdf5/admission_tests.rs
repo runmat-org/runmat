@@ -33,6 +33,29 @@ fn invalid_text_and_selection_precede_resident_download() {
     .expect_err("invalid host selection before resident download or file open");
     assert_eq!(invalid_selection.identifier(), ERR_ARGUMENT.identifier);
     assert_eq!(resident.handle.wire_descriptor(), original);
+
+    let paged_filename = Value::CharArray(
+        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .expect("paged character array"),
+    );
+    let paged = block_on(h5read_builtin(
+        paged_filename,
+        Value::String("/data".into()),
+        vec![Value::GpuTensor(resident.handle.clone()), Value::Num(1.0)],
+    ))
+    .expect_err("paged text is rejected before resident selection download");
+    assert_eq!(paged.identifier(), ERR_ARGUMENT.identifier);
+    assert_eq!(resident.handle.wire_descriptor(), original);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn singleton_trailing_character_pages_remain_scalar_text() {
+    let row = Value::CharArray(
+        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1])
+            .expect("singleton trailing page"),
+    );
+    assert_eq!(string_scalar(&row, H5READ_NAME, "filename").unwrap(), "ab");
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -112,6 +135,51 @@ fn fixed_output_arity_rejects_all_eight_before_file_access() {
             );
         }
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn nested_implicit_output_does_not_inherit_enclosing_presentation_count() {
+    let _presentation = crate::output_context::push_output_count(3);
+    let _invocation = crate::output_count::push_output_count(None);
+    let error = block_on(h5write_builtin(
+        Value::Bool(true),
+        Value::String("/A".into()),
+        Value::Num(1.0),
+        Vec::new(),
+    ))
+    .expect_err("invalid filename, not an inherited output-count error");
+    assert_eq!(error.identifier(), ERR_ARGUMENT.identifier);
+    assert!(error.message().contains("filename"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn captured_h5disp_text_is_gated_before_native_file_access() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let _captured = crate::output_count::push_output_count(Some(1));
+    let denied = block_on(h5disp_builtin(
+        Value::String("never-opened.h5".into()),
+        Vec::new(),
+    ))
+    .expect_err("captured text is a RunMat-only form");
+    assert_eq!(
+        denied.identifier(),
+        H5DISP_CAPTURE_EXTENSION.error_identifier
+    );
+    drop(_captured);
+
+    let _statement = crate::output_count::push_output_count(Some(0));
+    let invalid = block_on(h5disp_builtin(Value::Bool(true), Vec::new()))
+        .expect_err("statement form must continue into ordinary argument validation");
+    assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
+    drop(_statement);
+
+    let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _captured = crate::output_count::push_output_count(Some(1));
+    let invalid = block_on(h5disp_builtin(Value::Bool(true), Vec::new()))
+        .expect_err("enabled captured form must continue into argument validation");
+    assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
 }
 
 #[cfg(target_arch = "wasm32")]

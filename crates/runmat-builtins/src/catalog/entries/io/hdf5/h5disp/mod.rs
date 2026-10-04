@@ -7,6 +7,13 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
+pub const H5DISP_CAPTURE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "h5disp-captured-text-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "capturing h5disp display text is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:H5dispCapturedTextExtension"),
+};
+
 const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "text = h5disp(filename)",
@@ -76,7 +83,7 @@ pub const H5DISP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &["hdf5-metno"],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &[H5DISP_CAPTURE_EXTENSION],
     integer_capabilities: &[],
     integer_audit: Some(&INTEGER_AUDIT),
     suppress_auto_output: false,

@@ -2,10 +2,16 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_builtins::HDF5_ERROR_PROVIDER as ERR_PROVIDER;
+#[cfg(target_arch = "wasm32")]
+use runmat_builtins::HDF5_ERROR_WASM as ERR_WASM;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, HDF5_ERROR_ARGUMENT as ERR_ARGUMENT, HDF5_ERROR_IO as ERR_IO,
-    HDF5_ERROR_PROVIDER as ERR_PROVIDER, HDF5_ERROR_UNSUPPORTED as ERR_UNSUPPORTED,
-    HDF5_ERROR_WASM as ERR_WASM,
+    BuiltinDescriptor, BuiltinErrorDescriptor, H5DISP_CAPTURE_EXTENSION, H5DISP_DESCRIPTOR,
+    H5INFO_DESCRIPTOR, H5READ_DESCRIPTOR, H5WRITEATT_DESCRIPTOR, H5WRITE_DESCRIPTOR,
+    HDF5INFO_DESCRIPTOR, HDF5READ_DESCRIPTOR, HDF5WRITE_DESCRIPTOR,
+    HDF5_ERROR_ARGUMENT as ERR_ARGUMENT, HDF5_ERROR_IO as ERR_IO,
+    HDF5_ERROR_UNSUPPORTED as ERR_UNSUPPORTED,
 };
 use runmat_filesystem::NativePathIntent;
 use runmat_macros::runtime_builtin;
@@ -16,6 +22,7 @@ use runmat_value::{
 };
 
 use crate::builtins::common::fs::expand_user_path;
+use crate::builtins::common::validation::value_text_scalar_string;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 mod path;
@@ -42,15 +49,11 @@ fn hdf5_error(
     builder.build()
 }
 
-fn admit_output_count(builtin: &'static str, maximum: usize) -> BuiltinResult<()> {
-    if crate::output_count::current_output_count().is_some_and(|requested| requested > maximum) {
-        return Err(hdf5_error(
-            builtin,
-            &ERR_ARGUMENT,
-            format!("{builtin}: too many output arguments"),
-        ));
-    }
-    Ok(())
+fn admit_output_count(
+    builtin: &'static str,
+    descriptor: &'static BuiltinDescriptor,
+) -> BuiltinResult<()> {
+    crate::output_count::validate_fixed_outputs(descriptor, &ERR_ARGUMENT, builtin)
 }
 
 fn map_control_flow(builtin: &'static str, err: RuntimeError) -> RuntimeError {
@@ -66,16 +69,13 @@ fn map_control_flow(builtin: &'static str, err: RuntimeError) -> RuntimeError {
 }
 
 fn string_scalar(value: &Value, builtin: &'static str, label: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(hdf5_error(
+    value_text_scalar_string(value).ok_or_else(|| {
+        hdf5_error(
             builtin,
             &ERR_ARGUMENT,
             format!("{builtin}: expected {label} as a string scalar or character vector"),
-        )),
-    }
+        )
+    })
 }
 
 fn resolve_path(value: &Value, builtin: &'static str) -> BuiltinResult<PathBuf> {
@@ -162,7 +162,7 @@ fn preflight_writable_data(value: &Value, builtin: &'static str) -> BuiltinResul
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5read_builtin(filename: Value, dataset: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    admit_output_count(H5READ_NAME, 1)?;
+    admit_output_count(H5READ_NAME, &H5READ_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5READ_NAME)?;
     let dataset_path = hdf5_path(&dataset, H5READ_NAME, "dataset")?;
     let host_controls = prepare_host_selection_controls(&rest, H5READ_NAME)?;
@@ -184,7 +184,7 @@ async fn hdf5read_builtin(
     dataset: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    admit_output_count(HDF5READ_NAME, 1)?;
+    admit_output_count(HDF5READ_NAME, &HDF5READ_DESCRIPTOR)?;
     let path = resolve_path(&filename, HDF5READ_NAME)?;
     let dataset_path = hdf5_path(&dataset, HDF5READ_NAME, "dataset")?;
     let host_controls = prepare_host_selection_controls(&rest, HDF5READ_NAME)?;
@@ -207,7 +207,7 @@ async fn h5write_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    admit_output_count(H5WRITE_NAME, 0)?;
+    admit_output_count(H5WRITE_NAME, &H5WRITE_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5WRITE_NAME)?;
     let dataset_path = hdf5_path(&dataset, H5WRITE_NAME, "dataset")?;
     preflight_writable_data(&data, H5WRITE_NAME)?;
@@ -234,7 +234,7 @@ async fn hdf5write_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    admit_output_count(HDF5WRITE_NAME, 0)?;
+    admit_output_count(HDF5WRITE_NAME, &HDF5WRITE_DESCRIPTOR)?;
     let path = resolve_path(&filename, HDF5WRITE_NAME)?;
     let dataset_path = hdf5_path(&dataset, HDF5WRITE_NAME, "dataset")?;
     preflight_writable_data(&data, HDF5WRITE_NAME)?;
@@ -261,7 +261,7 @@ async fn h5writeatt_builtin(
     attribute: Value,
     data: Value,
 ) -> BuiltinResult<Value> {
-    admit_output_count(H5WRITEATT_NAME, 0)?;
+    admit_output_count(H5WRITEATT_NAME, &H5WRITEATT_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5WRITEATT_NAME)?;
     let location_path = hdf5_path(&location, H5WRITEATT_NAME, "location")?;
     let attr_name = string_scalar(&attribute, H5WRITEATT_NAME, "attribute")?;
@@ -289,7 +289,7 @@ async fn h5writeatt_builtin(
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    admit_output_count(H5INFO_NAME, 1)?;
+    admit_output_count(H5INFO_NAME, &H5INFO_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5INFO_NAME)?;
     let location = optional_location(&rest, H5INFO_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, H5INFO_NAME)?;
@@ -305,7 +305,7 @@ async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    admit_output_count(HDF5INFO_NAME, 1)?;
+    admit_output_count(HDF5INFO_NAME, &HDF5INFO_DESCRIPTOR)?;
     let path = resolve_path(&filename, HDF5INFO_NAME)?;
     let location = optional_location(&rest, HDF5INFO_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, HDF5INFO_NAME)?;
@@ -321,7 +321,13 @@ async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Va
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    admit_output_count(H5DISP_NAME, 1)?;
+    admit_output_count(H5DISP_NAME, &H5DISP_DESCRIPTOR)?;
+    if crate::output_count::current_output_count().is_some_and(|requested| requested > 0) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &H5DISP_CAPTURE_EXTENSION,
+            H5DISP_NAME,
+        )?;
+    }
     let path = resolve_path(&filename, H5DISP_NAME)?;
     let location = optional_location(&rest, H5DISP_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, H5DISP_NAME)?;

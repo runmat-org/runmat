@@ -122,11 +122,16 @@ fn known_invalid_text(value: &ValueFact) -> bool {
     match value.kind {
         ValueKindFact::Unknown => false,
         ValueKindFact::String => value.shape.is_definitely_nonscalar(),
-        ValueKindFact::Character => value
-            .shape
-            .known_dims()
-            .and_then(|dims| dims.first().copied().flatten())
-            .is_some_and(|rows| rows != 1),
+        ValueKindFact::Character => value.shape.known_dims().is_some_and(|dims| {
+            dims.first()
+                .copied()
+                .flatten()
+                .is_some_and(|rows| rows != 1)
+                || dims
+                    .iter()
+                    .skip(2)
+                    .any(|extent| extent.is_some_and(|pages| pages != 1))
+        }),
         _ => true,
     }
 }
