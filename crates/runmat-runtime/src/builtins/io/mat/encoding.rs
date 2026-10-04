@@ -167,13 +167,19 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                     },
                 })
             }
-            Value::CharArray(ca) => Ok(MatArray {
-                class: MatClass::Char,
-                dims: ca.shape.clone(),
-                data: MatData::Char {
-                    data: char_array_to_utf16_cooperative(&ca, owner, &mut cooperation).await?,
-                },
-            }),
+            Value::CharArray(ca) => {
+                let data = char_array_to_utf16_cooperative(&ca, owner, &mut cooperation).await?;
+                let dims = if ca.shape.len() == 2 && ca.rows == 1 {
+                    vec![1, data.len()]
+                } else {
+                    ca.shape.clone()
+                };
+                Ok(MatArray {
+                    class: MatClass::Char,
+                    dims,
+                    data: MatData::Char { data },
+                })
+            }
             Value::String(s) => {
                 let data = text_to_utf16_cooperative(&s, owner, &mut cooperation).await?;
                 Ok(MatArray {
@@ -337,6 +343,14 @@ async fn char_array_to_utf16_cooperative(
     owner: MatEncodingOwner,
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u16>> {
+    if chars.shape.len() != 2 || chars.rows != 1 {
+        if chars.data.iter().any(|ch| ch.len_utf16() != 1) {
+            return Err(owner.error(
+                MatEncodingFailure::Unsupported,
+                "non-BMP multidimensional MAT character arrays cannot retain rectangular UTF-16 geometry",
+            ));
+        }
+    }
     let mut data = Vec::new();
     let mut work = 0usize;
     let page_len = chars.rows.checked_mul(chars.cols).ok_or_else(|| {
@@ -372,19 +386,25 @@ async fn char_array_to_utf16_cooperative(
         let page_offset = page * page_len;
         for col in 0..chars.cols {
             for row in 0..chars.rows {
-                if data.capacity() == data.len() {
-                    data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
-                        owner.error(
-                            MatEncodingFailure::Io,
-                            format!("MAT characters cannot be allocated: {error}"),
-                        )
-                    })?;
-                }
-                data.push(chars.data[page_offset + row * chars.cols + col] as u16);
-                work += 1;
-                if work == TEXT_WORK_CHUNK {
-                    completed(cooperation, work).await?;
-                    work = 0;
+                let mut units = [0; 2];
+                for &unit in chars.data[page_offset + row * chars.cols + col]
+                    .encode_utf16(&mut units)
+                    .iter()
+                {
+                    if data.capacity() == data.len() {
+                        data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
+                            owner.error(
+                                MatEncodingFailure::Io,
+                                format!("MAT characters cannot be allocated: {error}"),
+                            )
+                        })?;
+                    }
+                    data.push(unit);
+                    work += 1;
+                    if work == TEXT_WORK_CHUNK {
+                        completed(cooperation, work).await?;
+                        work = 0;
+                    }
                 }
             }
         }
@@ -492,6 +512,30 @@ mod tests {
             panic!("text must become MAT char data");
         };
         assert_eq!(data, vec![0x0041, 0xd83d, 0xde00]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn unicode_char_row_expands_mat_unit_geometry_without_truncation() {
+        let source = CharArray::new_row("A😀");
+        let array = block_on(convert_value(Value::CharArray(source)))
+            .expect("Unicode char row has representable MAT geometry");
+        assert_eq!(array.dims, vec![1, 3]);
+        let MatData::Char { data } = array.data else {
+            panic!("expected character payload");
+        };
+        assert_eq!(data, vec![0x0041, 0xd83d, 0xde00]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn non_bmp_multidimensional_char_array_rejects_instead_of_truncating() {
+        let source = CharArray::new_with_shape(vec!['😀', 'x'], vec![2, 1])
+            .expect("rectangular RunMat characters");
+        let error = block_on(convert_value(Value::CharArray(source)))
+            .expect_err("two-dimensional MAT units cannot represent scalar-width rows");
+        assert_eq!(error.identifier(), Some("RunMat:save:Unsupported"));
+        assert!(error.message().contains("UTF-16 geometry"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

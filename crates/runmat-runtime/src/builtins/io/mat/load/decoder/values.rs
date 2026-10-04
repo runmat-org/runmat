@@ -96,12 +96,35 @@ pub(in super::super) fn mat_array_to_value(array: MatArray) -> BuiltinResult<Val
             }
         }
         MatData::Char { data } => {
-            let mut chars = Vec::with_capacity(data.len());
-            for code in data {
-                let ch = char::from_u32(code as u32).unwrap_or('\u{FFFD}');
-                chars.push(ch);
+            let unit_count = if array.dims.contains(&0) {
+                0
+            } else {
+                array
+                    .dims
+                    .iter()
+                    .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+                    .ok_or_else(|| load_error("load: character shape exceeds platform limits"))?
+            };
+            if data.len() != unit_count {
+                return Err(load_error("load: character data length mismatch"));
             }
-            let char_array = CharArray::from_column_major(chars, array.dims.clone())
+            let (chars, shape) = if array.dims.len() == 2 && array.dims[0] == 1 {
+                let chars: Vec<char> = String::from_utf16_lossy(&data).chars().collect();
+                let shape = vec![1, chars.len()];
+                (chars, shape)
+            } else {
+                let mut chars = Vec::with_capacity(data.len());
+                for code in data {
+                    let Some(ch) = char::from_u32(code as u32) else {
+                        return Err(load_error(
+                            "load: non-BMP multidimensional MAT character arrays cannot retain rectangular UTF-16 geometry",
+                        ));
+                    };
+                    chars.push(ch);
+                }
+                (chars, array.dims)
+            };
+            let char_array = CharArray::from_column_major(chars, shape)
                 .map_err(|e| load_error(format!("load: {e}")))?;
             Ok(Value::CharArray(char_array))
         }

@@ -406,6 +406,34 @@ fn mat_string_cell_roundtrip_decodes_utf16_surrogate_pairs() {
     assert_eq!(actual.data, source.data);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mat_unicode_char_row_roundtrip_restores_scalar_geometry() {
+    let source = CharArray::new_row("A😀");
+    let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+        "text".into(),
+        Value::CharArray(source.clone()),
+    )]))
+    .expect("encode Unicode character row");
+    let entries = load_entries_from_bytes(bytes);
+    assert_eq!(entries[0].1, Value::CharArray(source));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn external_non_bmp_char_matrix_rejects_unrepresentable_geometry() {
+    let error = mat_array_to_value(MatArray {
+        class: MatClass::Char,
+        dims: vec![2, 1],
+        data: MatData::Char {
+            data: vec![0xd83d, 0xde00],
+        },
+    })
+    .expect_err("surrogate pair cannot fit two rectangular scalar rows");
+    assert_eq!(error.identifier(), Some("RunMat:load:InvalidArgument"));
+    assert!(error.message().contains("UTF-16 geometry"));
+}
+
 #[test]
 fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
     let _guard = workspace_guard();
