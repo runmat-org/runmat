@@ -5,6 +5,7 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod preferences;
 mod host_document;
 pub mod host_effect;
 pub(crate) mod host_presentation;
@@ -25,6 +26,9 @@ pub mod preparation;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
+pub use preferences::{
+    PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService,
+};
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, RuntimeContext,
     RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard, RuntimeLanguageMode,

@@ -1,4 +1,4 @@
-use super::{RuntimeCapability, RuntimeCapabilityError};
+use super::{RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService};
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
 use crate::warning_store::RuntimeWarning;
@@ -718,6 +718,7 @@ pub struct RuntimeServicePorts {
     object: Option<Rc<dyn RuntimeObjectService>>,
     host: Option<Rc<dyn RuntimeHostService>>,
     http: Option<Rc<dyn RuntimeHttpService>>,
+    preferences: Option<Rc<dyn RuntimePreferenceService>>,
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
@@ -740,6 +741,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("object", &self.object.is_some())
             .field("host", &self.host.is_some())
             .field("http", &self.http.is_some())
+            .field("preferences", &self.preferences.is_some())
             .field("error", &self.error.is_some())
             .field("acceleration", &self.acceleration.is_some())
             .field("placement", &self.placement.is_some())
@@ -850,6 +852,14 @@ impl RuntimeServicePorts {
         http,
         RuntimeHttpService,
         Http
+    );
+    port_accessors!(
+        with_preferences,
+        preferences,
+        require_preferences,
+        preferences,
+        RuntimePreferenceService,
+        Preferences
     );
     port_accessors!(
         with_error,
@@ -1002,6 +1012,7 @@ mod tests {
             missing(ports.require_object("class lookup")),
             missing(ports.require_host("console write")),
             missing(ports.require_http("HTTP request")),
+            missing(ports.require_preferences("read preference")),
             missing(ports.require_error("report error")),
             missing(ports.require_acceleration("resident operation")),
             missing(ports.require_placement("placement plan")),
@@ -1023,6 +1034,7 @@ mod tests {
                 RuntimeCapability::Object,
                 RuntimeCapability::Host,
                 RuntimeCapability::Http,
+                RuntimeCapability::Preferences,
                 RuntimeCapability::Error,
                 RuntimeCapability::Acceleration,
                 RuntimeCapability::Placement,
