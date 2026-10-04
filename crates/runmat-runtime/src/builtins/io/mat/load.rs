@@ -597,23 +597,44 @@ pub(crate) async fn read_mat_file_on(source: &MatFsPath) -> BuiltinResult<Vec<(S
     })?;
     let mut reader = BufReader::new(file);
     let entries = read_mat_reader(&mut reader)?;
-    restore_loaded_entries(entries).await
+    check_source_current(source)?;
+    restore_loaded_entries(entries, Some(source)).await
 }
 
 pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
     let mut cursor = Cursor::new(bytes);
     let entries = read_mat_reader(&mut cursor)?;
-    futures::executor::block_on(restore_loaded_entries(entries))
+    futures::executor::block_on(restore_loaded_entries(entries, None))
 }
 
 async fn restore_loaded_entries(
     entries: Vec<(String, Value)>,
+    source: Option<&MatFsPath>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     let mut restored = Vec::with_capacity(entries.len());
     for (name, value) in entries {
+        if let Some(source) = source {
+            check_source_current(source)?;
+        }
         restored.push((name, restore_value_from_mat_load(value).await?));
+        if let Some(source) = source {
+            check_source_current(source)?;
+        }
     }
     Ok(restored)
+}
+
+fn check_source_current(source: &MatFsPath) -> BuiltinResult<()> {
+    source.check_current().map_err(|err| {
+        load_error_with_source(
+            &LOAD_ERROR_IO,
+            format!(
+                "load: MAT source authority for '{}' changed: {err}",
+                source.path().display()
+            ),
+            err,
+        )
+    })
 }
 
 #[derive(Clone, Copy, Debug)]

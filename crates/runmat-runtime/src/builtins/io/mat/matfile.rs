@@ -242,6 +242,10 @@ pub async fn matfile_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
+    preflight_writable_options(&rest)?;
+    if !matches!(&filename, Value::GpuTensor(_)) {
+        normalise_path(&filename)?;
+    }
     let host_filename = gather_if_needed_async(&filename).await?;
     let host_rest = gather_rest(rest).await?;
     let writable = parse_writable_option(&host_rest)?;
@@ -396,8 +400,10 @@ async fn matfile_write_step(
         ));
     }
 
-    let mut entries = read_existing_entries_for_assignment(&owner.source).await?;
+    let mut entries = read_existing_entries_for_assignment(runtime, &object, &owner.source).await?;
+    resolve_matfile(runtime, &object)?;
     let value = gather_if_needed_async(&rhs).await?;
+    resolve_matfile(runtime, &object)?;
     replace_or_append(&mut entries, field, value);
     let bytes = encode_workspace_to_mat_bytes(&entries).await?;
     resolve_matfile(runtime, &object)?;
@@ -411,6 +417,7 @@ async fn matfile_write_step(
             err,
         )
     })?;
+    resolve_matfile(runtime, &object)?;
     Ok(Value::Object(object))
 }
 
@@ -497,10 +504,17 @@ fn into_matfile_object(value: Value, builtin: &str) -> BuiltinResult<ObjectInsta
 }
 
 async fn read_existing_entries_for_assignment(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &ObjectInstance,
     path: &MatFsPath,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     match path.metadata().await {
-        Ok(_) => read_mat_file_for_builtin_on(path, BUILTIN_NAME).await,
+        Ok(_) => {
+            resolve_matfile(runtime, object)?;
+            let entries = read_mat_file_for_builtin_on(path, BUILTIN_NAME).await?;
+            resolve_matfile(runtime, object)?;
+            Ok(entries)
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(err) => Err(matfile_error_with_source(
             &MATFILE_ERROR_IO,
@@ -553,6 +567,38 @@ fn parse_writable_option(rest: &[Value]) -> BuiltinResult<bool> {
         })?;
     }
     Ok(writable)
+}
+
+fn preflight_writable_options(rest: &[Value]) -> BuiltinResult<()> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(matfile_error_with(
+            &MATFILE_ERROR_INVALID_OPTION,
+            "matfile: name-value arguments must come in pairs",
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        if !matches!(&pair[0], Value::GpuTensor(_)) {
+            let name = value_to_string_scalar(&pair[0]).ok_or_else(|| {
+                matfile_error_with(
+                    &MATFILE_ERROR_INVALID_OPTION,
+                    "matfile: option names must be character vectors or string scalars",
+                )
+            })?;
+            if !name.eq_ignore_ascii_case(WRITABLE_FIELD) {
+                return Err(matfile_error_with(
+                    &MATFILE_ERROR_INVALID_OPTION,
+                    format!("matfile: unsupported option '{name}'"),
+                ));
+            }
+        }
+        if !matches!(&pair[1], Value::GpuTensor(_)) && value_to_bool_scalar(&pair[1]).is_none() {
+            return Err(matfile_error_with(
+                &MATFILE_ERROR_INVALID_OPTION,
+                "matfile: Writable must be a scalar logical or numeric value",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
@@ -672,6 +718,8 @@ fn matfile_error_with_source(
 mod tests {
     use super::super::load::read_mat_file_for_builtin;
     use super::*;
+    use runmat_filesystem::{self as fs, FsProvider};
+    use std::sync::Arc;
 
     async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         super::matfile_builtin(None, filename, rest).await
@@ -834,6 +882,63 @@ mod tests {
         assert_eq!(by_name.get("B"), Some(&Value::Num(42.0)));
         assert_eq!(by_name.get("flag"), Some(&Value::Bool(true)));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn matfile_receiver_keeps_original_provider_and_cwd_after_swap() {
+        let _lock = fs::provider_override_lock();
+        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
+        let selected_bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "A".into(),
+            Value::Num(7.0),
+        )]))
+        .expect("selected MAT");
+        let replacement_bytes = block_on(encode_workspace_to_mat_bytes(&[(
+            "A".into(),
+            Value::Num(9.0),
+        )]))
+        .expect("replacement MAT");
+        selected
+            .write_project_path("/selected/fixture.mat", &selected_bytes)
+            .expect("selected file");
+        replacement
+            .write_project_path("/replacement/fixture.mat", &replacement_bytes)
+            .expect("replacement file");
+        let _selected = fs::replace_provider(selected.clone());
+        fs::set_current_dir("/selected").expect("selected cwd");
+        let object = block_on(matfile_builtin(
+            Value::String("fixture.mat".into()),
+            vec![Value::String("Writable".into()), Value::Bool(true)],
+        ))
+        .expect("selected receiver");
+        let _replacement = fs::replace_provider(replacement.clone());
+        fs::set_current_dir("/replacement").expect("replacement cwd");
+        let value = block_on(matfile_subsref(
+            object.clone(),
+            ".".into(),
+            Value::String("A".into()),
+        ))
+        .expect("read original owner");
+        assert_eq!(value, Value::Num(7.0));
+        block_on(matfile_subsasgn(
+            object,
+            ".".into(),
+            Value::String("A".into()),
+            Value::Num(11.0),
+        ))
+        .expect("write original owner");
+        let original = block_on(selected.read(Path::new("/selected/fixture.mat")))
+            .expect("read selected bytes");
+        let competing = block_on(replacement.read(Path::new("/replacement/fixture.mat")))
+            .expect("read replacement bytes");
+        let original = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(&original)
+            .expect("decode original");
+        let competing = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(&competing)
+            .expect("decode replacement");
+        assert_eq!(original, vec![("A".into(), Value::Num(11.0))]);
+        assert_eq!(competing, vec![("A".into(), Value::Num(9.0))]);
     }
 
     #[test]
