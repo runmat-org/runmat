@@ -14,7 +14,7 @@ pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
             "`-append` reads an existing Level-5 file, merges the new entries by name, and writes a refreshed file. A new value replaces an existing value of the same name. ASCII/text format switches such as `-ascii` and `-double` are not accepted.",
         ] },
         BuiltinDocumentationSection { heading: "Values", paragraphs: &[
-            "Dense real/complex single and double arrays; all eight signed/unsigned integer classes; logical, character, string, cell, struct, and real sparse arrays retain their available shapes and storage semantics. RunMat object envelopes may invoke registered `saveobj` hooks. Function handles are unsupported.",
+            "Dense real/complex single and double arrays; all eight signed/unsigned integer classes; logical, character, string, cell, struct, and real sparse arrays retain their available shapes and storage semantics. RunMat object envelopes may invoke registered `saveobj` hooks. Function handles and opaque graphics handles are unsupported and raise errors.",
             "Resident array values are gathered from their owning provider before encoding. The MAT file holds host bytes; saving does not mutate the original resident value. Large arrays, append, object callbacks, and full-file encoding may require substantial host memory.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
@@ -54,6 +54,8 @@ pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "MAT save entry and selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save.rs") },
+            BuiltinDocumentationLink { label: "MAT value conversion and writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save/encoding.rs") },
+            BuiltinDocumentationLink { label: "MAT byte writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save/encoding/writer.rs") },
             BuiltinDocumentationLink { label: "Captured MAT filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "MAT writer and exact classes", location: "builtins::io::mat::save::tests" }],

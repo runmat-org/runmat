@@ -18,7 +18,7 @@ pub(in super::super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
             "Decoded values are host-resident. Saving a GPU value materializes it through its owner; loading that file does not create a GPU allocation. Use `gpuArray` explicitly if a device result is required.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "Input bytes are obtained from the captured filesystem provider. Reading, decompression, restoration callbacks, and workspace publication can allocate substantial host memory. Whole-call resource admission and feedback for these routes remain incomplete; a finite resource certificate must not be inferred from file length alone.",
+            "Input bytes are obtained from the captured filesystem provider. Large or compressed files, restoration callbacks, and workspace publication can use substantially more host memory than the file size. Check available memory before loading large or untrusted MAT files.",
         ] },
     ],
     examples: &[
@@ -52,6 +52,8 @@ pub(in super::super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "MAT load entry and selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load.rs") },
+            BuiltinDocumentationLink { label: "MAT element decoder and typed values", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load/decoder.rs") },
+            BuiltinDocumentationLink { label: "MAT tag and payload validation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load/decoder/tagged.rs") },
             BuiltinDocumentationLink { label: "Captured MAT filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "MAT load decoder and values", location: "builtins::io::mat::load::tests" }],
