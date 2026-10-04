@@ -290,6 +290,90 @@ mod tests {
 
     #[test]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn readstruct_many_distinct_and_repeated_fields_keep_first_seen_order() {
+        let mut document = String::from("<root>");
+        for index in 0..64 {
+            document.push_str(&format!("<n{index}>first{index}</n{index}>"));
+        }
+        for index in (0..64).rev() {
+            document.push_str(&format!("<n{index}>second{index}</n{index}>"));
+        }
+        document.push_str("</root>");
+        let root = parse(&document).expect("valid XML with many fields");
+        let mut cooperation = XmlCooperation::new(None, XmlOperation::ReadStruct);
+        let projected = futures::executor::block_on(xml_node_to_struct_value(
+            &root,
+            &ReadStructOptions::default(),
+            &mut cooperation,
+        ))
+        .expect("grouped projection");
+        let Value::Struct(projected) = projected else {
+            panic!("expected structured root with child elements");
+        };
+        let names: Vec<_> = projected.field_names().map(String::as_str).collect();
+        let expected: Vec<_> = (0..64).map(|index| format!("n{index}")).collect();
+        assert_eq!(
+            names,
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        for index in 0..64 {
+            let Some(Value::Cell(values)) = projected.fields.get(&format!("n{index}")) else {
+                panic!("expected repeated element cell");
+            };
+            assert_eq!(
+                values.data,
+                vec![
+                    char_value(&format!("first{index}")),
+                    char_value(&format!("second{index}")),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn readstruct_parent_projection_observes_service_cancellation() {
+        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::num::NonZeroU64;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let mut document = String::from("<root>");
+        for index in 0..128 {
+            document.push_str(&format!("<n{index}/>"));
+        }
+        document.push_str("</root>");
+        let root = parse(&document).expect("valid XML with many empty children");
+        let source = CancellationSource::new();
+        let canceller = source.clone();
+        let turns = Arc::new(AtomicUsize::new(0));
+        let observed = turns.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                if observed.fetch_add(1, Ordering::Relaxed) >= 64 {
+                    canceller.cancel(CancellationReason::User);
+                }
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::ReadStruct);
+        let error = futures::executor::block_on(xml_node_to_struct_value(
+            &root,
+            &ReadStructOptions::default(),
+            &mut cooperation,
+        ))
+        .expect_err("parent projection must observe a cancelled service turn");
+        assert_eq!(error.identifier(), Some("RunMat:readstruct:Cancelled"));
+        assert!(turns.load(Ordering::Relaxed) >= 65);
+        assert!(cooperation.budget_owner().unwrap().borrow().is_some());
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn malformed_tails_external_text_and_dtd_are_typed_parser_failures() {
         for source in [
             "<root attr/>",

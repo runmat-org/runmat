@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::identifiers::is_valid_varname;
 use runmat_value::CellArray;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 pub(super) struct ReadStructOptions {
     attribute_suffix: String,
     text_node_name: String,
@@ -175,7 +175,10 @@ pub(super) async fn xml_node_to_struct(
         );
     }
 
+    // The vector owns first-seen field order. This lookup is only a local
+    // projection index; it is not another XML content or field authority.
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
+    let mut group_index = HashMap::<String, usize>::new();
     for item in &node.content {
         cooperation.completed(1).await?;
         let XmlContent::Element(child) = item else {
@@ -183,19 +186,46 @@ pub(super) async fn xml_node_to_struct(
         };
         let field = xml_struct_field_name(&child.name);
         let value = xml_node_to_struct_value(child, options, cooperation).await?;
-        let mut existing = None;
-        for (index, (name, _)) in groups.iter().enumerate() {
-            cooperation.completed(1).await?;
-            if *name == field {
-                existing = Some(index);
-                break;
-            }
-        }
-        if let Some(index) = existing {
+        if let Some(index) = group_index.get(field.as_str()).copied() {
             let values = &mut groups[index].1;
+            values.try_reserve(1).map_err(|error| {
+                build_runtime_error("readstruct: cannot reserve repeated XML field")
+                    .with_builtin("readstruct")
+                    .with_source(error)
+                    .build()
+            })?;
             values.push(value);
         } else {
-            groups.push((field, vec![value]));
+            groups.try_reserve(1).map_err(|error| {
+                build_runtime_error("readstruct: cannot reserve XML field groups")
+                    .with_builtin("readstruct")
+                    .with_source(error)
+                    .build()
+            })?;
+            group_index.try_reserve(1).map_err(|error| {
+                build_runtime_error("readstruct: cannot reserve XML field index")
+                    .with_builtin("readstruct")
+                    .with_source(error)
+                    .build()
+            })?;
+            let mut index_key = String::new();
+            index_key.try_reserve(field.len()).map_err(|error| {
+                build_runtime_error("readstruct: cannot reserve XML field name")
+                    .with_builtin("readstruct")
+                    .with_source(error)
+                    .build()
+            })?;
+            index_key.push_str(&field);
+            let mut values = Vec::new();
+            values.try_reserve(1).map_err(|error| {
+                build_runtime_error("readstruct: cannot reserve XML field value")
+                    .with_builtin("readstruct")
+                    .with_source(error)
+                    .build()
+            })?;
+            values.push(value);
+            group_index.insert(index_key, groups.len());
+            groups.push((field, values));
         }
     }
     for (field, values) in groups {
