@@ -91,6 +91,7 @@ fn jsonencode_complex_tensor_outputs_objects() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -155,6 +156,7 @@ fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_complex_input_is_rejected_by_compatibility_gate() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -166,6 +168,7 @@ fn jsonencode_complex_input_is_rejected_by_compatibility_gate() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_nested_complex_and_sparse_inputs_are_compatibility_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -191,6 +194,7 @@ fn jsonencode_nested_complex_and_sparse_inputs_are_compatibility_gated() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_resident_gate_precedes_provider_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -227,6 +231,7 @@ fn jsonencode_resident_gate_precedes_provider_access() {
     assert_eq!(allocation.probe.retirements(), 1);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_integer_metadata_distinguishes_public_real_and_extended_complex() {
     assert_eq!(JSONENCODE_INTEGER_CAPABILITIES.len(), 3);

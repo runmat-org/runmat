@@ -69,6 +69,7 @@ pub(crate) fn row_to_column_major<T>(values: Vec<T>, shape: &[usize]) -> Result<
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asymmetric_matrix_moves_from_row_to_column_major() {
         assert_eq!(
@@ -77,6 +78,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_shape_overflow_before_mapping() {
         assert!(row_to_column_major(Vec::<u8>::new(), &[usize::MAX, 2]).is_err());

@@ -95,6 +95,7 @@ fn jsonencode_integer_tensor_preserves_exact_uint64_values() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_integer_tensor_serializes_all_eight_classes_exactly() {
     let cases = [
@@ -115,6 +116,7 @@ fn jsonencode_integer_tensor_serializes_all_eight_classes_exactly() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_real_integer_payload_remains_public_and_exact_in_strict_mode() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -150,6 +152,7 @@ fn jsonencode_struct_round_trip() {
     assert_eq!(as_string(encoded), "{\"name\":\"RunMat\",\"year\":2025}");
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_struct_array_canonicalizes_keys_and_erases_empty_schema() {
     let mut first = StructValue::new();
@@ -223,6 +226,7 @@ fn jsonencode_options_read_wide_uint64_storage_exactly() {
     assert_eq!(as_string(pretty), "[\n    [1,2],\n    [3,4]\n]");
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_option_coercions_are_independently_gated() {
     let cases = [
@@ -250,6 +254,7 @@ fn jsonencode_option_coercions_are_independently_gated() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_documented_convert_inf_numeric_bool_remains_public() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -268,6 +273,7 @@ fn jsonencode_documented_convert_inf_numeric_bool_remains_public() {
     assert_eq!(error.message(), JSONENCODE_ERROR_INF_NAN.message);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_option_errors_precede_irrelevant_extension_gates() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);

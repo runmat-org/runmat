@@ -207,6 +207,7 @@ fn jsondecode_array_of_objects_returns_typed_column_vector() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_rectangular_object_array_uses_column_major_order() {
     let text = "[[{\"id\":1},{\"id\":2}],[{\"id\":3},{\"id\":4}]]";
@@ -231,6 +232,7 @@ fn jsondecode_rectangular_object_array_uses_column_major_order() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_nd_object_array_uses_column_major_order() {
     let text = concat!(
@@ -262,6 +264,7 @@ fn jsondecode_nd_object_array_uses_column_major_order() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_heterogeneous_object_fields_remain_a_cell() {
     let text = "[{\"left\":1},{\"right\":2}]";
@@ -277,6 +280,7 @@ fn jsondecode_heterogeneous_object_fields_remain_a_cell() {
     ));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn json_object_array_schema_uses_deterministic_canonical_key_order() {
     let text = concat!(
@@ -378,6 +382,7 @@ fn jsondecode_round_trip_with_jsonencode() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_integer_audit_is_explicitly_inapplicable() {
     assert_eq!(
@@ -388,6 +393,7 @@ fn jsondecode_integer_audit_is_explicitly_inapplicable() {
     assert!(JSONDECODE_INTEGER_AUDIT.notes.contains("text only"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_rejects_integer_and_resident_numeric_before_provider_access() {
     let integer = block_on(jsondecode_builtin(Value::Int(IntValue::U64(u64::MAX))))
