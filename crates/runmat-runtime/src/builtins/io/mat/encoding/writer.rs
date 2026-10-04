@@ -38,8 +38,9 @@ pub(super) async fn write_mat_bytes_cooperative(
     mut cooperation: Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u8>> {
     completed(&mut cooperation, 0).await?;
+    let plan = plan::plan_workspace(vars, owner, &mut cooperation).await?;
     let mut bytes = Vec::new();
-    reserve(&mut bytes, MAT_HEADER_LEN, owner)?;
+    reserve(&mut bytes, plan.total_bytes, owner)?;
     bytes.resize(MAT_HEADER_LEN, 0);
     let desc = b"MATLAB 5.0 MAT-file, RunMat save";
     bytes[..desc.len()].copy_from_slice(desc);
@@ -47,15 +48,22 @@ pub(super) async fn write_mat_bytes_cooperative(
     bytes[125] = 0x01;
     bytes[126] = b'I';
     bytes[127] = b'M';
-    for var in vars {
+    for (var, matrix_plan) in vars.iter().zip(&plan.matrices) {
         append_matrix(
             &mut bytes,
             &var.array,
             Some(&var.name),
+            matrix_plan,
             owner,
             &mut cooperation,
         )
         .await?;
+    }
+    if bytes.len() != plan.total_bytes {
+        return Err(owner.error(
+            MatEncodingFailure::Io,
+            "MAT encoded length changed after preflight",
+        ));
     }
     completed(&mut cooperation, 0).await?;
     Ok(bytes)
@@ -71,29 +79,24 @@ fn write_mat_bytes(vars: &[MatVar]) -> BuiltinResult<Vec<u8>> {
 }
 
 mod buffer;
+mod plan;
 mod validation;
 use buffer::{
     append_bytes, append_indices, append_numeric, append_scalars, append_tagged_bytes,
     append_zeroes, begin_tag, completed, end_tag, reserve,
 };
-use validation::validate_matrix;
+use plan::MatrixPlan;
 
 fn append_matrix<'a, 'b>(
     bytes: &'a mut Vec<u8>,
     array: &'a MatArray,
     name: Option<&'a str>,
+    plan: &'a MatrixPlan,
     owner: MatEncodingOwner,
     cooperation: &'a mut Option<&mut MatCodecCooperation<'b>>,
 ) -> LocalBoxFuture<'a, BuiltinResult<()>> {
     Box::pin(async move {
         completed(cooperation, 0).await?;
-        validate_matrix(array, owner, cooperation).await?;
-        if name.is_some_and(|name| name.len() > u32::MAX as usize) {
-            return Err(owner.error(
-                MatEncodingFailure::Io,
-                "MAT variable name exceeds uint32 length",
-            ));
-        }
         let matrix = begin_tag(bytes, MI_MATRIX, owner)?;
         let (flags0, flags1) = match &array.data {
             MatData::Numeric { imag, .. } => (
@@ -166,41 +169,32 @@ fn append_matrix<'a, 'b>(
                     .await?;
             }
             MatData::Cell { elements } => {
-                for element in elements {
-                    append_matrix(bytes, element, None, owner, cooperation).await?;
+                if elements.len() != plan.children.len() {
+                    return Err(owner.error(
+                        MatEncodingFailure::Io,
+                        "MAT cell layout changed after preflight",
+                    ));
+                }
+                for (element, child_plan) in elements.iter().zip(&plan.children) {
+                    append_matrix(bytes, element, None, child_plan, owner, cooperation).await?;
                 }
             }
             MatData::Struct {
                 field_names,
                 field_values,
             } => {
-                let width = field_names
-                    .iter()
-                    .map(String::len)
-                    .max()
-                    .unwrap_or(0)
-                    .checked_add(1)
-                    .ok_or_else(|| {
-                        owner.error(
-                            MatEncodingFailure::Io,
-                            "MAT field name width exceeds platform limits",
-                        )
-                    })?;
-                let width = i32::try_from(width).map_err(|_| {
+                if field_values.len() != plan.children.len() {
+                    return Err(owner.error(
+                        MatEncodingFailure::Io,
+                        "MAT struct layout changed after preflight",
+                    ));
+                }
+                let width = plan.field_name_width.ok_or_else(|| {
                     owner.error(
                         MatEncodingFailure::Io,
-                        "MAT field name width exceeds int32 range",
+                        "MAT struct width missing from preflight",
                     )
                 })?;
-                (width as usize)
-                    .checked_mul(field_names.len())
-                    .and_then(|length| u32::try_from(length).ok())
-                    .ok_or_else(|| {
-                        owner.error(
-                            MatEncodingFailure::Io,
-                            "MAT field name table exceeds uint32 length",
-                        )
-                    })?;
                 append_tagged_bytes(bytes, MI_INT32, &width.to_le_bytes(), owner, cooperation)
                     .await?;
                 let names = begin_tag(bytes, MI_INT8, owner)?;
@@ -209,8 +203,8 @@ fn append_matrix<'a, 'b>(
                     append_zeroes(bytes, width as usize - name.len(), owner, cooperation).await?;
                 }
                 end_tag(bytes, names, owner)?;
-                for value in field_values {
-                    append_matrix(bytes, value, None, owner, cooperation).await?;
+                for (value, child_plan) in field_values.iter().zip(&plan.children) {
+                    append_matrix(bytes, value, None, child_plan, owner, cooperation).await?;
                 }
             }
             MatData::Sparse {
@@ -224,6 +218,12 @@ fn append_matrix<'a, 'b>(
                     .await?;
                 append_numeric(bytes, values, owner, cooperation).await?;
             }
+        }
+        if bytes.len().checked_sub(matrix + 8) != Some(plan.payload_bytes as usize) {
+            return Err(owner.error(
+                MatEncodingFailure::Io,
+                "MAT encoded matrix disagrees with preflight",
+            ));
         }
         end_tag(bytes, matrix, owner)
     })

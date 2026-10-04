@@ -217,6 +217,86 @@ fn matrix_rank_rejects_before_mat_bytes() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn checked_plan_matches_encoded_bytes_across_nested_mat_classes() {
+    let scalar = MatArray {
+        class: MatClass::Single,
+        dims: vec![1, 1],
+        data: MatData::Numeric {
+            real: NumericStorage::F32(vec![1.25]),
+            imag: Some(NumericStorage::F32(vec![-2.5])),
+        },
+    };
+    let vars = vec![
+        MatVar {
+            name: "numeric".into(),
+            array: scalar.clone(),
+        },
+        MatVar {
+            name: "logical".into(),
+            array: MatArray {
+                class: MatClass::Logical,
+                dims: vec![1, 2],
+                data: MatData::Logical { data: vec![1, 0] },
+            },
+        },
+        MatVar {
+            name: "unicode".into(),
+            array: MatArray {
+                class: MatClass::Char,
+                dims: vec![1, 2],
+                data: MatData::Char {
+                    data: vec![0xd83d, 0xde00],
+                },
+            },
+        },
+        MatVar {
+            name: "nested".into(),
+            array: MatArray {
+                class: MatClass::Cell,
+                dims: vec![1, 1],
+                data: MatData::Cell {
+                    elements: vec![MatArray {
+                        class: MatClass::Struct,
+                        dims: vec![1, 1],
+                        data: MatData::Struct {
+                            field_names: vec!["value".into()],
+                            field_values: vec![scalar],
+                        },
+                    }],
+                },
+            },
+        },
+        MatVar {
+            name: "sparse".into(),
+            array: MatArray {
+                class: MatClass::Sparse,
+                dims: vec![3, 2],
+                data: MatData::Sparse {
+                    rows: 3,
+                    cols: 2,
+                    col_ptrs: vec![0, 1, 2],
+                    row_indices: vec![0, 2],
+                    values: NumericStorage::F64(vec![4.0, 5.0]),
+                    logical: false,
+                },
+            },
+        },
+    ];
+    let mut cooperation = None;
+    let planned = block_on(plan::plan_workspace(
+        &vars,
+        MatEncodingOwner::Save,
+        &mut cooperation,
+    ))
+    .expect("checked MAT layout");
+    let bytes = write_mat_bytes(&vars).expect("same values encode");
+    assert_eq!(planned.total_bytes, bytes.len());
+    assert_eq!(planned.matrices.len(), vars.len());
+    assert_eq!(planned.matrices[3].children[0].children.len(), 1);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn cancelled_encoding_never_publishes_to_captured_owner() {
     let _lock = runmat_filesystem::provider_override_lock();
     let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(

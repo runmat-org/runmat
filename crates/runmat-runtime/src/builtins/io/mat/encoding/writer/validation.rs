@@ -1,4 +1,4 @@
-//! Structural MAT invariants checked before each matrix tag allocates bytes.
+//! Structural MAT invariants checked by the layout plan before output allocation.
 
 use super::super::super::cooperation::MatCodecCooperation;
 use super::super::super::format::{MatArray, MatClass, MatData};
