@@ -60,11 +60,35 @@ pub(super) fn finish_error(receipt: Option<HostEffectReceipt>, error: &RuntimeEr
 }
 
 fn typed_cancelled(error: &RuntimeError) -> bool {
-    matches!(
-        error
-            .source
-            .as_deref()
-            .and_then(|cause| cause.downcast_ref::<crate::execution::ExecutionServiceError>()),
-        Some(crate::execution::ExecutionServiceError::Cancelled)
-    )
+    let mut cause = error.source.as_deref();
+    while let Some(current) = cause {
+        if matches!(
+            current.downcast_ref::<crate::execution::ExecutionServiceError>(),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ) {
+            return true;
+        }
+        cause = current.source();
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::build_runtime_error;
+
+    #[test]
+    fn cancellation_is_classified_through_wrapped_typed_causes() {
+        let inner = build_runtime_error("codec cancelled")
+            .with_source(crate::execution::ExecutionServiceError::Cancelled)
+            .build();
+        let outer = build_runtime_error("load: wrapped codec error")
+            .with_source(inner)
+            .build();
+        assert!(typed_cancelled(&outer));
+        assert!(!typed_cancelled(
+            &build_runtime_error("ordinary failure").build()
+        ));
+    }
 }

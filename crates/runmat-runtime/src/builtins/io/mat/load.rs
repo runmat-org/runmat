@@ -11,7 +11,7 @@ use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
 use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use runmat_builtins::{
     LOAD_ERROR_FILENAME, LOAD_ERROR_INVALID_ARGUMENT, LOAD_ERROR_INVALID_OPTION, LOAD_ERROR_IO,
@@ -160,20 +160,16 @@ async fn evaluate_with_context(
     runtime: Option<&crate::context::RuntimeContext>,
     output: MatDecodeOutput,
 ) -> BuiltinResult<LoadExecution> {
-    if args
-        .iter()
-        .any(crate::builtins::common::validation::value_contains_explicit_gpu)
-    {
+    if args.iter().any(crate::dispatcher::value_contains_gpu) {
         return Err(load_error_with(
             &LOAD_ERROR_INVALID_ARGUMENT,
             "load: filename, options, and variable selectors must be host text values",
         ));
     }
     preflight_known_options(args)?;
-    let mut host_args = Vec::with_capacity(args.len());
-    for arg in args {
-        host_args.push(gather_if_needed_async(arg).await?);
-    }
+    // Filename/options/selectors are text controls. A numeric resident handle
+    // cannot become an admitted text control by downloading it first.
+    let host_args = args.to_vec();
 
     let invocation = parse_invocation(&host_args).await?;
 

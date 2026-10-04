@@ -5,6 +5,19 @@ use runmat_value::{CellArray, ComplexTensor, IntValue, NumericStorage, SparseTen
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn numeric_resident_text_control_rejects_without_download() {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    let resident = owner.resident();
+    let error = block_on(evaluate(&[Value::GpuTensor(resident)]))
+        .expect_err("numeric resident handle cannot be a MAT filename");
+    assert_eq!(error.identifier(), Some("RunMat:load:InvalidArgument"));
+    assert_eq!(owner.downloads(), 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn known_invalid_option_rejects_before_resident_preparation() {
     let args = [Value::from("case.mat"), Value::from("-unsupported")];
     let error = preflight_known_options(&args).expect_err("unsupported flag");
