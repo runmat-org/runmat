@@ -4,6 +4,7 @@ mod array;
 mod dataset;
 mod execution;
 mod handle_admission;
+mod handle_identity;
 mod kernel;
 mod path;
 mod path_authority;

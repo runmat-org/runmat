@@ -58,6 +58,15 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
     assert!(handle_admission::input(&Value::Struct(options))
         .identity_digest
         .is_some());
+    assert!(
+        handle_admission::input(&Value::String("x".repeat(1_048_577)))
+            .identity_digest
+            .is_none(),
+        "oversized scalar text cannot monopolize admission"
+    );
+    let nested =
+        Value::Cell(CellArray::new(vec![Value::String("x".repeat(1_048_577))], 1, 1).unwrap());
+    assert!(handle_admission::input(&nested).identity_digest.is_none());
 }
 
 #[test]
