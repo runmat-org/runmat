@@ -54,7 +54,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             display_output: None,
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::NativeFilesystem,
-            fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "write-rewind" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: &[] }),
+            fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(written == 3); assert(isequal(values(:), [1;2;3])); assert(status == 0);" },
         },

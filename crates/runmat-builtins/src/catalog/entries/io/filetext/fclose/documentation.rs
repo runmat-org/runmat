@@ -24,11 +24,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             display_output: Some("status = 0"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::NativeFilesystem,
-            fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-                id: BuiltinExampleFixtureId { local_name: "write-result" },
-                root: BuiltinFilesystemRoot::IsolatedWorkspace,
-                entries: &[],
-            }),
+            fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(status == 0); assert(strcmp(fileread('results.txt'), sprintf('Simulation complete\\n')));" },
         },
