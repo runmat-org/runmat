@@ -1,10 +1,11 @@
-//! Production-linked authority checks for the native FFI and JSON cutovers.
+//! Production-linked authority checks for interop, JSON, HTTP, and Data cutovers.
 
 use runmat_builtins::{
-    builtin_function_by_name, BuiltinCatalogEntry, CALLLIB_CATALOG_ENTRY, JSONDECODE_CATALOG_ENTRY,
-    JSONENCODE_CATALOG_ENTRY, LIBFUNCTIONS_CATALOG_ENTRY, LIBISLOADED_CATALOG_ENTRY,
-    LIBPOINTER_CATALOG_ENTRY, LIBSTRUCT_CATALOG_ENTRY, LOADLIBRARY_CATALOG_ENTRY,
-    SETDATATYPE_CATALOG_ENTRY, UNLOADLIBRARY_CATALOG_ENTRY,
+    builtin_catalog_entries, builtin_function_by_name, BuiltinCatalogEntry, CALLLIB_CATALOG_ENTRY,
+    JSONDECODE_CATALOG_ENTRY, JSONENCODE_CATALOG_ENTRY, LIBFUNCTIONS_CATALOG_ENTRY,
+    LIBISLOADED_CATALOG_ENTRY, LIBPOINTER_CATALOG_ENTRY, LIBSTRUCT_CATALOG_ENTRY,
+    LOADLIBRARY_CATALOG_ENTRY, SETDATATYPE_CATALOG_ENTRY, UNLOADLIBRARY_CATALOG_ENTRY,
+    WEBOPTIONS_CATALOG_ENTRY,
 };
 use runmat_runtime::builtin::migration_inventory::migration_inventory;
 
@@ -22,8 +23,21 @@ fn migrated_identities_have_one_production_binding_and_no_legacy_authority() {
         &UNLOADLIBRARY_CATALOG_ENTRY,
         &JSONDECODE_CATALOG_ENTRY,
         &JSONENCODE_CATALOG_ENTRY,
+        &WEBOPTIONS_CATALOG_ENTRY,
     ];
-    for entry in entries {
+    // This is an inventory scope, not runtime class or operation dispatch.
+    let data_entries: Vec<_> = builtin_catalog_entries()
+        .iter()
+        .copied()
+        .filter(|entry| {
+            ["data.", "Dataset.", "DataArray.", "DataTransaction."]
+                .iter()
+                .any(|prefix| entry.identity.name.starts_with(prefix))
+                || entry.identity.name == "commit"
+        })
+        .collect();
+    assert_eq!(data_entries.len(), 45, "complete Data cutover inventory");
+    for entry in entries.iter().copied().chain(data_entries) {
         let name = entry.identity.name;
         let bindings = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name);
         assert_eq!(entry.bindings.len(), 1, "{name}");

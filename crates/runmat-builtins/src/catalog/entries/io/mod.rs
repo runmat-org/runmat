@@ -35,5 +35,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(audio::ENTRIES.iter().copied());
     values.extend(json::ENTRIES.iter().copied());
     values.extend(data_path::ENTRIES.iter().copied());
-    values.extend(data_handle::ENTRIES.iter().copied());
+    data_handle::extend_entries(values);
 }
