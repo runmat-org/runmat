@@ -59,6 +59,10 @@ fn parser_and_serializer_observe_execution_service_cancellation() {
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:xmlread:Cancelled"));
+    assert!(std::error::Error::source(&error)
+        .expect("typed cancellation source")
+        .downcast_ref::<crate::execution::ExecutionServiceError>()
+        .is_some());
 
     let source = CancellationSource::new();
     let cancelled = source.clone();
@@ -99,6 +103,49 @@ fn execution_service_failure_is_not_relabelled_as_malformed_xml() {
     assert_eq!(error.identifier(), Some("RunMat:xmlread:ExecutionFailed"));
     assert!(std::error::Error::source(&error)
         .expect("typed service source")
+        .downcast_ref::<ExecutionServiceError>()
+        .is_some());
+
+    let wrapped = build_runtime_error("outer XML operation")
+        .with_source(error)
+        .build();
+    assert!(cooperation.is_execution_error(&wrapped));
+    let forged = build_runtime_error("ordinary malformed source")
+        .with_identifier("RunMat:xmlread:ExecutionFailed")
+        .build();
+    assert!(!cooperation.is_execution_error(&forged));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn precancelled_xml_io_does_not_poll_provider_future() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::task::Poll;
+
+    let source = CancellationSource::new();
+    source.cancel(CancellationReason::User);
+    let polled = Rc::new(Cell::new(false));
+    let marked = polled.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::NeverYield,
+        source.token(),
+        || Box::pin(async { Ok(()) }),
+    );
+    let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::XmlRead);
+    let error =
+        futures::executor::block_on(cooperation.await_io(futures::future::poll_fn(move |_| {
+            marked.set(true);
+            Poll::<Result<(), std::io::Error>>::Pending
+        })))
+        .expect_err("pre-cancelled invocation");
+    assert_eq!(error.identifier(), Some("RunMat:xmlread:Cancelled"));
+    assert!(!polled.get());
+    assert!(std::error::Error::source(&error)
+        .expect("typed cancellation cause")
         .downcast_ref::<ExecutionServiceError>()
         .is_some());
 }

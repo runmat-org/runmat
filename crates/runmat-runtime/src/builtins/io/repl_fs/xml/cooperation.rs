@@ -19,8 +19,14 @@ impl XmlCooperation {
     }
 
     pub(super) fn is_execution_error(&self, error: &RuntimeError) -> bool {
-        error.identifier() == Some(self.operation.identifier(XmlDiagnosticKind::Cancelled))
-            || error.identifier() == Some(self.operation.identifier(XmlDiagnosticKind::Execution))
+        let mut source = std::error::Error::source(error);
+        while let Some(cause) = source {
+            if cause.downcast_ref::<ExecutionServiceError>().is_some() {
+                return true;
+            }
+            source = cause.source();
+        }
+        false
     }
     pub(super) fn new(runtime: Option<&RuntimeContext>, operation: XmlOperation) -> Self {
         Self {
@@ -51,6 +57,9 @@ impl XmlCooperation {
     where
         F: Future<Output = Result<T, E>>,
     {
+        // Check the invocation before polling an I/O future, including an
+        // implementation that would otherwise complete in its first poll.
+        self.completed(0).await?;
         match self.budget.as_ref() {
             Some(budget) => budget
                 .await_cancellable(future)
@@ -62,12 +71,13 @@ impl XmlCooperation {
 
     fn map_error(&self, error: ExecutionServiceError) -> RuntimeError {
         match error {
-            ExecutionServiceError::Cancelled => build_runtime_error(format!(
+            cancelled @ ExecutionServiceError::Cancelled => build_runtime_error(format!(
                 "{}: execution was cancelled",
                 self.operation.name()
             ))
             .with_identifier(self.operation.identifier(XmlDiagnosticKind::Cancelled))
             .with_builtin(self.operation.name())
+            .with_source(cancelled)
             .build(),
             other => {
                 let message = format!(
