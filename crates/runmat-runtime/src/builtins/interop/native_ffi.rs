@@ -16,13 +16,14 @@ use runmat_value::Value;
 use crate::{build_runtime_error, BuiltinResult};
 
 async fn invoke_native(
+    context: Option<crate::context::RuntimeContext>,
     operation: crate::foreign::NativeFfiOperation,
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (operation, arguments, requested_outputs);
+        let _ = (context, operation, arguments, requested_outputs);
         Err(native_error(
             &ERROR_UNAVAILABLE,
             "native_ffi",
@@ -31,7 +32,7 @@ async fn invoke_native(
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let context = crate::context::legacy::active().ok_or_else(|| {
+        let context = context.ok_or_else(|| {
             native_error(
                 &ERROR_HOST_UNAVAILABLE,
                 "native_ffi",
@@ -63,9 +64,13 @@ async fn invoke_native(
 #[runtime_builtin(
     name = "loadlibrary",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn loadlibrary_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    mut arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     if arguments.len() == 1 {
         let library = String::try_from(&arguments[0]).map_err(|error| {
             native_error(
@@ -128,8 +133,13 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
         arguments.push(Value::String(alias));
     }
     arguments.extend(preparation_options);
-    let report =
-        invoke_native(crate::foreign::NativeFfiOperation::LoadReport, arguments, 2).await?;
+    let report = invoke_native(
+        context,
+        crate::foreign::NativeFfiOperation::LoadReport,
+        arguments,
+        2,
+    )
+    .await?;
     let Value::OutputList(mut report) = report else {
         return Err(invalid_builtin_call(
             "native library loader returned an invalid preparation report",
@@ -151,11 +161,16 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "calllib",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn calllib_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn calllib_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count().unwrap_or(1);
     invoke_native(
+        context,
         crate::foreign::NativeFfiOperation::Call,
         arguments,
         requested,
@@ -166,46 +181,90 @@ async fn calllib_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "unloadlibrary",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn unloadlibrary_builtin(alias: Value) -> BuiltinResult<Value> {
-    invoke_native(crate::foreign::NativeFfiOperation::Unload, vec![alias], 1).await?;
+async fn unloadlibrary_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    alias: Value,
+) -> BuiltinResult<Value> {
+    invoke_native(
+        context,
+        crate::foreign::NativeFfiOperation::Unload,
+        vec![alias],
+        1,
+    )
+    .await?;
     Ok(Value::OutputList(Vec::new()))
 }
 
 #[runtime_builtin(
     name = "libisloaded",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn libisloaded_builtin(alias: Value) -> BuiltinResult<Value> {
-    invoke_native(crate::foreign::NativeFfiOperation::IsLoaded, vec![alias], 1).await
+async fn libisloaded_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    alias: Value,
+) -> BuiltinResult<Value> {
+    invoke_native(
+        context,
+        crate::foreign::NativeFfiOperation::IsLoaded,
+        vec![alias],
+        1,
+    )
+    .await
 }
 
 #[runtime_builtin(
     name = "libfunctions",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn libfunctions_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke_native(crate::foreign::NativeFfiOperation::Functions, arguments, 1).await
+async fn libfunctions_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    invoke_native(
+        context,
+        crate::foreign::NativeFfiOperation::Functions,
+        arguments,
+        1,
+    )
+    .await
 }
 
 #[runtime_builtin(
     name = "libpointer",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn libpointer_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke_native(crate::foreign::NativeFfiOperation::Pointer, arguments, 1).await
+async fn libpointer_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    invoke_native(
+        context,
+        crate::foreign::NativeFfiOperation::Pointer,
+        arguments,
+        1,
+    )
+    .await
 }
 
 #[runtime_builtin(
     name = "setdatatype",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
+async fn setdatatype_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    mut arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
     if arguments.len() < 3 {
         return Err(invalid_builtin_call(
             "setdatatype expects a pointer, type, and one or more dimensions",
@@ -213,6 +272,7 @@ async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
     }
     arguments.insert(1, Value::String("setdatatype".into()));
     invoke_native(
+        context,
         crate::foreign::NativeFfiOperation::InvokeMember,
         arguments,
         1,
@@ -224,10 +284,20 @@ async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "libstruct",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
-async fn libstruct_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke_native(crate::foreign::NativeFfiOperation::Structure, arguments, 1).await
+async fn libstruct_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    invoke_native(
+        context,
+        crate::foreign::NativeFfiOperation::Structure,
+        arguments,
+        1,
+    )
+    .await
 }
 
 fn invalid_builtin_call(message: impl Into<String>) -> crate::RuntimeError {
