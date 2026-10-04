@@ -23,6 +23,7 @@ enum NativeObjectPayload {
     DatasetAuthority(ForeignRef),
     MatFileAuthority(ForeignRef),
     MemmapReceiver(MemmapReceiverState),
+    TcpAuthority(ForeignRef),
 }
 
 /// Whether a value object carries host- or session-owned native state.
@@ -35,6 +36,7 @@ pub enum ObjectPersistencePayloadKind {
     DatasetAuthority,
     MatFileAuthority,
     MemmapReceiver,
+    TcpAuthority,
 }
 
 impl Trace for NativeObjectPayload {
@@ -49,6 +51,7 @@ impl Trace for NativeObjectPayload {
                     snapshot.trace(tracer);
                 }
             }
+            Self::TcpAuthority(_) => {}
         }
     }
 }
@@ -71,6 +74,9 @@ impl ObjectInstance {
             }
             Some(NativeObjectPayload::MemmapReceiver(_)) => {
                 ObjectPersistencePayloadKind::MemmapReceiver
+            }
+            Some(NativeObjectPayload::TcpAuthority(_)) => {
+                ObjectPersistencePayloadKind::TcpAuthority
             }
         }
     }
@@ -109,6 +115,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -125,6 +132,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -141,8 +149,26 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
+            | None => None,
+    }
+
+    pub fn with_tcp_authority(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::TcpAuthority(reference)));
+        self
+    }
+
+    pub fn tcp_authority(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::TcpAuthority(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
         }
+    }
     }
 
     pub fn with_memmap_receiver(mut self, receiver: MemmapReceiverState) -> Self {
@@ -157,6 +183,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -168,6 +195,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -179,6 +207,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -190,6 +219,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -206,6 +236,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => {}
             Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
                 if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
