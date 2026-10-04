@@ -23,12 +23,12 @@ impl NativeFfiAdapter {
             })
             .cloned()
             .ok_or_else(|| invalid_call(format!("unknown native symbol `{symbol_name}`")))?;
-        let call_arguments = arguments[2..].to_vec();
-        if call_arguments.len() != prototype.parameters.len() {
+        let argument_count = arguments.len() - 2;
+        if argument_count != prototype.parameters.len() {
             return Err(invalid_call(format!(
                 "native symbol `{symbol_name}` expects {} arguments, received {}",
                 prototype.parameters.len(),
-                call_arguments.len()
+                argument_count
             )));
         }
         let declared_outputs = prototype.public_output_count();
@@ -37,6 +37,7 @@ impl NativeFfiAdapter {
                 "native call provides {declared_outputs} outputs, but {requested_outputs} were requested"
             )));
         }
+        let call_arguments = arguments[2..].to_vec();
 
         let mut pointer_entries = Vec::new();
         let mut callback_entries = Vec::new();
