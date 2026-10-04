@@ -10,18 +10,18 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue,
     Value,
 };
 
+use super::authority::MatFsPath;
 use super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT16,
     MI_INT32, MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8,
 };
-use super::load::read_mat_file;
+use super::load::read_mat_file_on;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -250,6 +250,14 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     let request = parse_arguments(&host_args[option_start..]).await?;
+    let path = normalise_path(&path_value)?;
+    let destination = MatFsPath::capture(path).map_err(|err| {
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            format!("save: failed to resolve MAT path: {err}"),
+            err,
+        )
+    })?;
 
     let mut workspace_entries: Option<Vec<(String, Value)>> = None;
     let mut entries: Vec<(String, Value)> = Vec::new();
@@ -337,10 +345,9 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         ));
     }
 
-    let path = normalise_path(&path_value)?;
     let mut unique_entries = deduplicate_entries(entries);
     if request.append {
-        unique_entries = append_existing_entries(&path, unique_entries).await?;
+        unique_entries = append_existing_entries(&destination, unique_entries).await?;
     }
 
     let mut mat_vars = Vec::with_capacity(unique_entries.len());
@@ -352,7 +359,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         });
     }
 
-    write_mat_file(&path, &mat_vars).await?;
+    write_mat_file(&destination, &mat_vars).await?;
 
     Ok(Value::Num(0.0))
 }
@@ -540,7 +547,7 @@ fn deduplicate_entries(entries: Vec<(String, Value)>) -> Vec<(String, Value)> {
 }
 
 async fn append_existing_entries(
-    path: &Path,
+    path: &MatFsPath,
     new_entries: Vec<(String, Value)>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     let mut entries = read_existing_entries_for_append(path).await?;
@@ -548,8 +555,8 @@ async fn append_existing_entries(
     Ok(deduplicate_entries(entries))
 }
 
-async fn read_existing_entries_for_append(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
-    match metadata_async(path).await {
+async fn read_existing_entries_for_append(path: &MatFsPath) -> BuiltinResult<Vec<(String, Value)>> {
+    match path.metadata().await {
         Ok(_) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => {
@@ -557,19 +564,19 @@ async fn read_existing_entries_for_append(path: &Path) -> BuiltinResult<Vec<(Str
                 &SAVE_ERROR_IO,
                 format!(
                     "save: failed to inspect existing MAT-file '{}': {err}",
-                    path.display()
+                    path.path().display()
                 ),
                 err,
             ));
         }
     }
-    match read_mat_file(path).await {
+    match read_mat_file_on(path).await {
         Ok(entries) => Ok(entries),
         Err(err) => Err(save_error_with_source(
             &SAVE_ERROR_IO,
             format!(
                 "save: failed to read existing MAT-file '{}': {}",
-                path.display(),
+                path.path().display(),
                 err.message()
             ),
             err,
@@ -1022,12 +1029,12 @@ fn tensor_dtype_mat_class(dtype: NumericDType) -> MatClass {
     }
 }
 
-async fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
+async fn write_mat_file(path: &MatFsPath, vars: &[MatVar]) -> BuiltinResult<()> {
     let bytes = write_mat_bytes(vars)?;
-    write_async(path, &bytes).await.map_err(|e| {
+    path.write(&bytes).await.map_err(|e| {
         save_error_with_source(
             &SAVE_ERROR_IO,
-            format!("save: failed to write '{}': {e}", path.display()),
+            format!("save: failed to write '{}': {e}", path.path().display()),
             e,
         )
     })

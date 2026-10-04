@@ -14,7 +14,6 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
@@ -22,6 +21,7 @@ use runmat_value::{
     Value,
 };
 
+use super::authority::MatFsPath;
 use super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_COMPRESSED,
     MI_DOUBLE, MI_INT16, MI_INT32, MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32,
@@ -241,8 +241,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args).await?;
-
     // current_output_count() is set by the dispatcher only for multi-output Unpack patterns
     // like `[a, b] = load(...)`. Guard against requesting more than one struct output.
     if let Some(n) = crate::output_count::current_output_count() {
@@ -253,6 +251,7 @@ async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             ));
         }
     }
+    let eval = evaluate(&args).await?;
 
     // The VM sets output_context::requested_output_count() at every call site before
     // dispatching:
@@ -376,7 +375,14 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
         regex_patterns,
     };
     let path = normalise_path(&path_value)?;
-    let entries = read_mat_file(&path).await?;
+    let source = MatFsPath::capture(path).map_err(|err| {
+        load_error_with_source(
+            &LOAD_ERROR_IO,
+            format!("load: failed to resolve MAT path: {err}"),
+            err,
+        )
+    })?;
+    let entries = read_mat_file_on(&source).await?;
 
     let selected = select_variables(&entries, &request)?;
     Ok(LoadEval {
@@ -553,11 +559,39 @@ pub(crate) async fn read_mat_file_for_builtin(
     }
 }
 
+pub(crate) async fn read_mat_file_for_builtin_on(
+    source: &MatFsPath,
+    builtin: &str,
+) -> crate::BuiltinResult<Vec<(String, Value)>> {
+    match read_mat_file_on(source).await {
+        Ok(entries) => Ok(entries),
+        Err(err) => {
+            let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
+            let mut builder = build_runtime_error(message).with_builtin(builtin);
+            if let Some(identifier) = err.identifier() {
+                builder = builder.with_identifier(identifier);
+            }
+            Err(builder.with_source(err).build())
+        }
+    }
+}
+
 pub(crate) async fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
-    let file = File::open_async(path).await.map_err(|err| {
+    let source = MatFsPath::capture(path.to_path_buf()).map_err(|err| {
         load_error_with_source(
             &LOAD_ERROR_IO,
-            format!("load: failed to open '{}': {err}", path.display()),
+            format!("load: failed to resolve MAT path: {err}"),
+            err,
+        )
+    })?;
+    read_mat_file_on(&source).await
+}
+
+pub(crate) async fn read_mat_file_on(source: &MatFsPath) -> BuiltinResult<Vec<(String, Value)>> {
+    let file = source.open().await.map_err(|err| {
+        load_error_with_source(
+            &LOAD_ERROR_IO,
+            format!("load: failed to open '{}': {err}", source.path().display()),
             err,
         )
     })?;
