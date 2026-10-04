@@ -1,7 +1,12 @@
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-const EFFECTS: &[EffectKind] = &[EffectKind::EnvironmentRead, EffectKind::MayThrow];
+const EFFECTS: &[EffectKind] = &[
+    EffectKind::EnvironmentRead,
+    EffectKind::EnvironmentWrite,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
+];
 
 pub const GETPREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -15,7 +20,7 @@ pub const GETPREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             IoReplFsInferenceRule::Preference(PreferenceInferenceRule::Read),
         )),
         compatibility: BuiltinCompatibility::RunMat,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

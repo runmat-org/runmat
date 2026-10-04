@@ -93,19 +93,67 @@ pub const GETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: GET_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[GETPREF_ERROR_TOO_MANY_OUTPUTS],
+    errors: &[
+        GETPREF_ERROR_TOO_MANY_OUTPUTS,
+        GETPREF_ERROR_SERVICE_UNAVAILABLE,
+        GETPREF_ERROR_STORAGE,
+    ],
 };
 pub const ISPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: IS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[ISPREF_ERROR_TOO_MANY_OUTPUTS],
+    errors: &[
+        ISPREF_ERROR_TOO_MANY_OUTPUTS,
+        ISPREF_ERROR_SERVICE_UNAVAILABLE,
+        ISPREF_ERROR_STORAGE,
+    ],
 };
 pub const SETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SET_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[SETPREF_ERROR_TOO_MANY_OUTPUTS],
+    errors: &[
+        SETPREF_ERROR_TOO_MANY_OUTPUTS,
+        SETPREF_ERROR_SERVICE_UNAVAILABLE,
+        SETPREF_ERROR_STORAGE,
+    ],
+};
+pub const GETPREF_ERROR_SERVICE_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETPREF.SERVICE_UNAVAILABLE",
+    identifier: Some("RunMat:RuntimeContext:CapabilityUnavailable"),
+    when: "The host has not installed an application preference service.",
+    message: "getpref: application preference service is unavailable",
+};
+pub const ISPREF_ERROR_SERVICE_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISPREF.SERVICE_UNAVAILABLE",
+    identifier: Some("RunMat:RuntimeContext:CapabilityUnavailable"),
+    when: "The host has not installed an application preference service.",
+    message: "ispref: application preference service is unavailable",
+};
+pub const SETPREF_ERROR_SERVICE_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETPREF.SERVICE_UNAVAILABLE",
+    identifier: Some("RunMat:RuntimeContext:CapabilityUnavailable"),
+    when: "The host has not installed an application preference service.",
+    message: "setpref: application preference service is unavailable",
+};
+pub const GETPREF_ERROR_STORAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETPREF.STORAGE",
+    identifier: Some("RunMat:getpref:Storage"),
+    when: "The application setting cannot be read, created, decoded, or committed.",
+    message: "getpref: application preferences failed",
+};
+pub const ISPREF_ERROR_STORAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISPREF.STORAGE",
+    identifier: Some("RunMat:ispref:Storage"),
+    when: "The application setting cannot be read or decoded.",
+    message: "ispref: application preferences failed",
+};
+pub const SETPREF_ERROR_STORAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETPREF.STORAGE",
+    identifier: Some("RunMat:setpref:Storage"),
+    when: "The application setting cannot be encoded or committed.",
+    message: "setpref: application preferences failed",
 };
 pub const GETPREF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GETPREF.TOO_MANY_OUTPUTS",

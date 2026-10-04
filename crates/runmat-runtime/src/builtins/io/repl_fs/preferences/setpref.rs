@@ -4,15 +4,21 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::controls::{error, map_control_flow, preference_names, scalar_text, PreferenceNames};
-use crate::{gather_if_needed_async, BuiltinResult};
+use super::controls::{error, preference_names, scalar_text, PreferenceNames};
+use super::{preparation, service};
+use crate::context::RuntimeContext;
+use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "setpref",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::preferences::setpref"
 )]
-pub(super) async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn setpref_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SETPREF_DESCRIPTOR,
         &SETPREF_ERROR_TOO_MANY_OUTPUTS,
@@ -46,13 +52,12 @@ pub(super) async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             }
         },
     };
-    let mut prepared = Vec::with_capacity(entries.len());
-    for (name, value) in entries {
-        let gathered = gather_if_needed_async(&value)
-            .await
-            .map_err(|source| map_control_flow("setpref", source))?;
-        prepared.push((name, gathered));
-    }
-    super::set_many(group, prepared);
+    let (runtime, preferences) = service::required(runtime, "setpref")?;
+    let (names, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+    let prepared = preparation::durable_values(&runtime, "setpref", values).await?;
+    preferences
+        .set_many(runtime, group, names.into_iter().zip(prepared).collect())
+        .await
+        .map_err(|source| service::service_error("setpref", source))?;
     Ok(Value::Num(0.0))
 }
