@@ -12,6 +12,18 @@ fn known_invalid_option_rejects_before_resident_preparation() {
     let error = preflight_known_options(&args).expect_err("unsupported flag");
     assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn regexp_followed_by_another_option_has_no_pattern() {
+    let args = [
+        Value::from("case.mat"),
+        Value::from("-regexp"),
+        Value::from("-mat"),
+    ];
+    let error = preflight_known_options(&args).expect_err("missing regexp pattern");
+    assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
+}
 use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
 use crate::workspace::WorkspaceResolver;
 use flate2::write::ZlibEncoder;

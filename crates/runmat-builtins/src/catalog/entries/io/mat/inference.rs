@@ -95,7 +95,13 @@ pub(super) fn load(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
             continue;
         }
         match super::MatLoadOption::parse(&token) {
-            Some(super::MatLoadOption::Regexp) if index + 1 == request.arguments.len() => {
+            Some(super::MatLoadOption::Regexp)
+                if index + 1 == request.arguments.len()
+                    || request
+                        .literals
+                        .literal_string_at(index + 1)
+                        .is_some_and(|next| next.starts_with('-')) =>
+            {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-LOAD-REGEXP",
                     "load: '-regexp' requires at least one pattern",
@@ -150,6 +156,18 @@ pub(super) fn save(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
                 diagnostics.push(argument_error(
                     "RM-CATALOG-SAVE-OPTION-VALUE",
                     "save option requires a following value",
+                    index,
+                ));
+            }
+            Some(super::MatSaveOption::Regexp)
+                if request
+                    .literals
+                    .literal_string_at(index + 1)
+                    .is_some_and(|next| next.starts_with('-')) =>
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-SAVE-REGEXP",
+                    "save: '-regexp' requires at least one pattern",
                     index,
                 ));
             }

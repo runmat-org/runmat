@@ -219,6 +219,17 @@ fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {
                 };
                 return Err(save_error_with(&SAVE_ERROR_INVALID_OPTION, message));
             }
+            Some(runmat_builtins::MatSaveOption::Regexp)
+                if args
+                    .get(index + 1)
+                    .and_then(value_to_string_scalar)
+                    .is_some_and(|next| next.starts_with('-')) =>
+            {
+                return Err(save_error_with(
+                    &SAVE_ERROR_INVALID_OPTION,
+                    "save: '-regexp' requires at least one pattern",
+                ));
+            }
             None => {
                 return Err(save_error_with(
                     &SAVE_ERROR_INVALID_OPTION,

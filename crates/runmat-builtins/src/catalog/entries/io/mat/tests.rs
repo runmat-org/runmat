@@ -188,3 +188,32 @@ fn repeated_writable_and_literal_mat_options_match_runtime_grammar() {
         .diagnostics
         .is_empty());
 }
+
+#[test]
+fn option_first_mat_calls_use_the_default_filename_without_false_path_diagnostics() {
+    let load = literal_request(
+        vec![text(), text()],
+        vec![
+            LiteralValue::String("-regexp".into()),
+            LiteralValue::String("^x$".into()),
+        ],
+        1,
+    );
+    assert!(inference::load(&load, &LOAD_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+    let save = literal_request(
+        vec![text(), text()],
+        vec![
+            LiteralValue::String("-struct".into()),
+            LiteralValue::String("state".into()),
+        ],
+        0,
+    );
+    assert!(inference::save(&save, &SAVE_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+    assert!(inference::save(&save, &SAVE_CATALOG_ENTRY)
+        .outputs
+        .is_empty());
+}

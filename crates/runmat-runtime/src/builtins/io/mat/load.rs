@@ -213,7 +213,13 @@ fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {
             continue;
         }
         match runmat_builtins::MatLoadOption::parse(&token) {
-            Some(runmat_builtins::MatLoadOption::Regexp) if index + 1 == args.len() => {
+            Some(runmat_builtins::MatLoadOption::Regexp)
+                if index + 1 == args.len()
+                    || args
+                        .get(index + 1)
+                        .and_then(value_to_string_scalar)
+                        .is_some_and(|next| next.starts_with('-')) =>
+            {
                 return Err(load_error_with(
                     &LOAD_ERROR_INVALID_OPTION,
                     "load: '-regexp' requires at least one pattern",
@@ -259,6 +265,7 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                             "load: '-regexp' requires at least one pattern",
                         ));
                     }
+                    let prior_patterns = regex_tokens.len();
                     while idx < values.len() {
                         if option_token(&values[idx])?.is_some() {
                             break;
@@ -272,6 +279,12 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                         }
                         regex_tokens.extend(names);
                         idx += 1;
+                    }
+                    if regex_tokens.len() == prior_patterns {
+                        return Err(load_error_with(
+                            &LOAD_ERROR_INVALID_OPTION,
+                            "load: '-regexp' requires at least one pattern",
+                        ));
                     }
                     continue;
                 }

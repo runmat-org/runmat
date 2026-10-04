@@ -95,7 +95,7 @@ const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
         outputs: &LOAD_OUTPUT,
     },
 ];
-const SAVE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+const SAVE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     BuiltinSignatureDescriptor {
         label: "status = save()",
         inputs: &[],
@@ -119,6 +119,11 @@ const SAVE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "status = save(filename, '-regexp', pattern1, ...)",
         inputs: &[PATH, OPTION, PATTERN],
+        outputs: &SAVE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "save(option, value, ...)",
+        inputs: &[OPTION, VARIABLE],
         outputs: &SAVE_OUTPUT,
     },
 ];

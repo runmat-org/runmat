@@ -11,6 +11,18 @@ fn known_invalid_option_rejects_before_resident_preparation() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn regexp_followed_by_another_option_has_no_pattern() {
+    let args = [
+        Value::from("case.mat"),
+        Value::from("-regexp"),
+        Value::from("-append"),
+    ];
+    let error = preflight_known_options(&args).expect_err("missing regexp pattern");
+    assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn known_invalid_option_does_not_download_prior_resident_argument() {
     let _lock = test_support::accel_test_lock();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
