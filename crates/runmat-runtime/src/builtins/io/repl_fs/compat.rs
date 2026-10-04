@@ -16,8 +16,8 @@ use runmat_builtins::{
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntegerStorage, NumericDType, NumericScalar, ObjectInstance, StructValue,
-    Tensor, Value,
+    CellArray, CharArray, IntegerStorage, LogicalArray, NumericDType, NumericScalar,
+    ObjectInstance, StructValue, Tensor, Value,
 };
 
 use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
@@ -760,7 +760,7 @@ enum PreferenceNames {
 
 fn getpref_named(args: &[Value]) -> BuiltinResult<Value> {
     let group = scalar_text(&args[0], "getpref", "group")?;
-    let preferences = preference_names(&args[1])?;
+    let preferences = preference_names(&args[1], "getpref")?;
     if args
         .get(2)
         .is_some_and(crate::dispatcher::value_contains_gpu)
@@ -815,7 +815,7 @@ fn getpref_scalar(group: &str, preference: &str, default: Option<Value>) -> Buil
     })
 }
 
-fn preference_names(value: &Value) -> BuiltinResult<PreferenceNames> {
+fn preference_names(value: &Value, builtin: &'static str) -> BuiltinResult<PreferenceNames> {
     match value {
         Value::String(text) => Ok(PreferenceNames::Scalar(text.clone())),
         Value::CharArray(array) if array.rows == 1 => Ok(PreferenceNames::Scalar(
@@ -837,8 +837,8 @@ fn preference_names(value: &Value) -> BuiltinResult<PreferenceNames> {
                     }
                     _ => {
                         return Err(compat_error(
-                            "getpref",
-                            "getpref: preference cell entries must be character vectors",
+                            builtin,
+                            format!("{builtin}: preference cell entries must be character vectors"),
                         ))
                     }
                 }
@@ -849,8 +849,8 @@ fn preference_names(value: &Value) -> BuiltinResult<PreferenceNames> {
             })
         }
         _ => Err(compat_error(
-            "getpref",
-            "getpref: preference must be a character vector, string scalar, cell array of character vectors, or string array",
+            builtin,
+            format!("{builtin}: preference must be a character vector, string scalar, cell array of character vectors, or string array"),
         )),
     }
 }
@@ -867,7 +867,6 @@ fn preference_names(value: &Value) -> BuiltinResult<PreferenceNames> {
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("setpref", &args).await?;
     if args.len() != 3 {
         return Err(compat_error(
             "setpref",
@@ -875,8 +874,27 @@ async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let group = scalar_text(&args[0], "setpref", "group")?;
-    let pref = scalar_text(&args[1], "setpref", "preference")?;
-    super::preferences::set_many(group, vec![(pref, args[2].clone())]);
+    let names = preference_names(&args[1], "setpref")?;
+    let entries = match names {
+        PreferenceNames::Scalar(name) => vec![(name, args[2].clone())],
+        PreferenceNames::Array { names, shape } => match &args[2] {
+            Value::Cell(values) if values.shape == shape => {
+                names.into_iter().zip(values.data.iter().cloned()).collect()
+            }
+            _ => return Err(compat_error(
+                "setpref",
+                "setpref: values for multiple preferences must be a cell array with matching shape",
+            )),
+        },
+    };
+    let mut prepared = Vec::with_capacity(entries.len());
+    for (name, value) in entries {
+        let gathered = gather_if_needed_async(&value)
+            .await
+            .map_err(|err| map_control_flow("setpref", err))?;
+        prepared.push((name, gathered));
+    }
+    super::preferences::set_many(group, prepared);
     Ok(Value::Num(0.0))
 }
 
@@ -902,10 +920,20 @@ async fn ispref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() == 1 {
         return Ok(Value::Bool(super::preferences::has_group(&group)));
     }
-    let pref = scalar_text(&args[1], "ispref", "preference")?;
-    Ok(Value::Bool(super::preferences::has_preference(
-        &group, &pref,
-    )))
+    match preference_names(&args[1], "ispref")? {
+        PreferenceNames::Scalar(name) => Ok(Value::Bool(super::preferences::has_preference(
+            &group, &name,
+        ))),
+        PreferenceNames::Array { names, shape } => {
+            let values = names
+                .iter()
+                .map(|name| u8::from(super::preferences::has_preference(&group, name)))
+                .collect();
+            LogicalArray::new(values, shape)
+                .map(Value::LogicalArray)
+                .map_err(|err| compat_error("ispref", format!("ispref: {err}")))
+        }
+    }
 }
 
 #[runtime_builtin(
@@ -1644,6 +1672,84 @@ mod tests {
             .unwrap(),
             Value::Num(42.0)
         );
+    }
+
+    #[test]
+    fn multi_name_setpref_and_ispref_keep_shape_and_missing_positions() {
+        let group = Value::String("runmatMultiPreferenceForms".into());
+        let names = Value::StringArray(
+            runmat_value::StringArray::new(vec!["first".into(), "second".into()], vec![2, 1])
+                .expect("names shape"),
+        );
+        let values = Value::Cell(
+            CellArray::new_with_shape(
+                vec![
+                    Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+                    Value::Num(2.0),
+                ],
+                vec![2, 1],
+            )
+            .expect("values shape"),
+        );
+        assert_eq!(
+            run(setpref_builtin(vec![
+                group.clone(),
+                names.clone(),
+                values.clone()
+            ]))
+            .expect("set both"),
+            Value::Num(0.0)
+        );
+        let queried =
+            run(getpref_builtin(vec![group.clone(), names.clone()])).expect("retrieve both");
+        assert_eq!(queried, values);
+        let flags = run(ispref_builtin(vec![group.clone(), names])).expect("query both");
+        let Value::LogicalArray(flags) = flags else {
+            panic!("logical array");
+        };
+        assert_eq!(flags.shape, vec![2, 1]);
+        assert_eq!(flags.data.as_slice(), &[1, 1]);
+
+        let mixed = Value::StringArray(
+            runmat_value::StringArray::new(vec!["first".into(), "missing".into()], vec![1, 2])
+                .expect("mixed shape"),
+        );
+        let flags = run(ispref_builtin(vec![group, mixed])).expect("mixed query");
+        let Value::LogicalArray(flags) = flags else {
+            panic!("logical array");
+        };
+        assert_eq!(flags.shape, vec![1, 2]);
+        assert_eq!(flags.data.as_slice(), &[1, 0]);
+    }
+
+    #[test]
+    fn invalid_multi_value_shape_rejects_before_resident_download_or_store_mutation() {
+        let group = Value::String("runmatMultiPreferenceAdmission".into());
+        let names = Value::StringArray(
+            runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
+                .expect("names shape"),
+        );
+        let wrong_shape = Value::Cell(
+            CellArray::new_with_shape(
+                vec![unregistered_resident_value(), Value::Num(2.0)],
+                vec![2, 1],
+            )
+            .expect("wrong shape"),
+        );
+        let error = run(setpref_builtin(vec![
+            group.clone(),
+            names.clone(),
+            wrong_shape,
+        ]))
+        .expect_err("shape must reject before any gather");
+        assert!(error.message().contains("matching shape"));
+        assert_eq!(
+            run(ispref_builtin(vec![group.clone()])).expect("group query"),
+            Value::Bool(false)
+        );
+        let error = run(setpref_builtin(vec![group, names, Value::Num(1.0)]))
+            .expect_err("scalar cannot fill multiple settings");
+        assert!(error.message().contains("matching shape"));
     }
 
     #[test]
