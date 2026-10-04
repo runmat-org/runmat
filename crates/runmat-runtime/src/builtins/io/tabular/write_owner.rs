@@ -10,6 +10,7 @@ use super::path::TabularFsPath;
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
 use futures::lock::Mutex as AsyncMutex;
+use runmat_filesystem::FsStagedOutput;
 
 pub(super) type WriteLock = Arc<AsyncMutex<()>>;
 type WeakWriteLock = Weak<AsyncMutex<()>>;
@@ -96,12 +97,29 @@ pub(super) async fn safe_replace_file(
     selected: &TabularFsPath,
     bytes: &[u8],
 ) -> Result<(), StagedWriteError> {
+    let mut stage = begin_stage(cooperation, selected).await?;
+    write_stage_bytes(
+        runtime,
+        cooperation,
+        builtin,
+        selected,
+        stage.as_mut(),
+        bytes,
+    )
+    .await?;
+    finish_stage(runtime, cooperation, builtin, selected, stage).await
+}
+
+pub(super) async fn begin_stage(
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> Result<Box<dyn FsStagedOutput>, StagedWriteError> {
     cooperation
         .completed(0)
         .await
         .map_err(StagedWriteError::Control)?;
     selected.check().map_err(StagedWriteError::Io)?;
-    let mut stage = selected
+    selected
         .begin_staged_replace()
         .map_err(StagedWriteError::Io)?
         .ok_or_else(|| {
@@ -109,7 +127,17 @@ pub(super) async fn safe_replace_file(
                 io::ErrorKind::Unsupported,
                 "selected filesystem provider cannot stage a tabular replacement",
             ))
-        })?;
+        })
+}
+
+pub(super) async fn write_stage_bytes(
+    runtime: Option<&RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    builtin: &'static str,
+    selected: &TabularFsPath,
+    stage: &mut dyn FsStagedOutput,
+    bytes: &[u8],
+) -> Result<(), StagedWriteError> {
     for chunk in bytes.chunks(4096) {
         let mut remaining = chunk;
         while !remaining.is_empty() {
@@ -140,6 +168,16 @@ pub(super) async fn safe_replace_file(
             }
         }
     }
+    Ok(())
+}
+
+pub(super) async fn finish_stage(
+    runtime: Option<&RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    builtin: &'static str,
+    selected: &TabularFsPath,
+    mut stage: Box<dyn FsStagedOutput>,
+) -> Result<(), StagedWriteError> {
     cooperation
         .completed(0)
         .await

@@ -51,6 +51,33 @@ fn cell(values: Vec<Value>, rows: usize, cols: usize) -> Value {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn overwrite_streams_long_quoted_cells_through_selected_memory_owner() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let root = if cfg!(windows) {
+        r"C:\tabular"
+    } else {
+        "/tabular"
+    };
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(root));
+    let _guard = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(root).expect("memory working directory");
+    let path = PathBuf::from(root).join("quoted.csv");
+    let text = format!("{}\"tail", "a".repeat(8193));
+    let value = cell(vec![Value::from(text.clone())], 1, 1);
+    block_on(writecell_builtin(
+        value,
+        vec![Value::from(path.to_string_lossy().as_ref())],
+    ))
+    .expect("staged overwrite");
+    let expected = format!("\"{}\"\n", text.replace('"', "\"\""));
+    assert_eq!(
+        provider.read_project_path(&path).expect("selected output"),
+        expected.as_bytes()
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn writecell_descriptor_signatures_cover_core_forms() {
     let labels: Vec<&str> = WRITECELL_DESCRIPTOR
         .signatures

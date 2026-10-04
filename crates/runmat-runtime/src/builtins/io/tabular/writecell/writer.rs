@@ -26,18 +26,16 @@ pub(super) async fn write_delimited_cells(
     let _write_guard = await_io(runtime, BUILTIN_NAME, write_lock.lock()).await?;
 
     if options.write_mode == WriteMode::Overwrite {
-        let payload = build_delimited_payload(table, options, &delimiter, line_ending);
-        write_owner::safe_replace_file(runtime, cooperation, BUILTIN_NAME, selected, &payload)
-            .await
-            .map_err(|source| match source {
-                write_owner::StagedWriteError::Control(error) => error,
-                write_owner::StagedWriteError::Io(source) => writecell_error_with_source(
-                    &WRITECELL_ERROR_IO,
-                    "writecell: failed to replace delimited text file",
-                    source,
-                ),
-            })?;
-        return Ok(payload.len());
+        return write_staged_delimited(
+            runtime,
+            cooperation,
+            selected,
+            table,
+            options,
+            &delimiter,
+            line_ending,
+        )
+        .await;
     }
 
     let mut open_options = OpenOptions::new();
@@ -224,26 +222,155 @@ async fn write_append_bytes(
     Ok(())
 }
 
-fn build_delimited_payload(
+async fn write_staged_delimited(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
     table: &CellTable,
     options: &WriteCellOptions,
     delimiter: &str,
     line_ending: &str,
-) -> Vec<u8> {
-    let mut payload = Vec::new();
+) -> BuiltinResult<usize> {
+    let mut stage = write_owner::begin_stage(cooperation, selected)
+        .await
+        .map_err(map_staged_write_error)?;
+    let mut bytes_written = 0usize;
     for row in 0..table.rows {
         for col in 0..table.cols {
             if col > 0 {
-                payload.extend_from_slice(delimiter.as_bytes());
+                write_staged_segment(
+                    runtime,
+                    cooperation,
+                    selected,
+                    stage.as_mut(),
+                    delimiter.as_bytes(),
+                    &mut bytes_written,
+                )
+                .await?;
             }
-            let rendered = format_cell_for_text(table.get(row, col), options, delimiter);
-            if !rendered.is_empty() {
-                payload.extend_from_slice(rendered.as_bytes());
-            }
+            write_staged_cell(
+                runtime,
+                cooperation,
+                selected,
+                stage.as_mut(),
+                table.get(row, col),
+                options,
+                delimiter,
+                &mut bytes_written,
+            )
+            .await?;
         }
-        payload.extend_from_slice(line_ending.as_bytes());
+        write_staged_segment(
+            runtime,
+            cooperation,
+            selected,
+            stage.as_mut(),
+            line_ending.as_bytes(),
+            &mut bytes_written,
+        )
+        .await?;
     }
-    payload
+    write_owner::finish_stage(runtime, cooperation, BUILTIN_NAME, selected, stage)
+        .await
+        .map_err(map_staged_write_error)?;
+    Ok(bytes_written)
+}
+
+async fn write_staged_cell(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    stage: &mut dyn runmat_filesystem::FsStagedOutput,
+    cell: &CellValue,
+    options: &WriteCellOptions,
+    delimiter: &str,
+    total: &mut usize,
+) -> BuiltinResult<()> {
+    if let CellValue::Text(text) = cell {
+        if !options.quote_strings {
+            return write_staged_segment(
+                runtime,
+                cooperation,
+                selected,
+                stage,
+                text.as_bytes(),
+                total,
+            )
+            .await;
+        }
+        write_staged_segment(runtime, cooperation, selected, stage, b"\"", total).await?;
+        for chunk in text.as_bytes().chunks(4096) {
+            let mut start = 0usize;
+            for (index, byte) in chunk.iter().enumerate() {
+                if *byte == b'"' {
+                    write_staged_segment(
+                        runtime,
+                        cooperation,
+                        selected,
+                        stage,
+                        &chunk[start..index],
+                        total,
+                    )
+                    .await?;
+                    write_staged_segment(runtime, cooperation, selected, stage, b"\"\"", total)
+                        .await?;
+                    start = index + 1;
+                }
+            }
+            write_staged_segment(
+                runtime,
+                cooperation,
+                selected,
+                stage,
+                &chunk[start..],
+                total,
+            )
+            .await?;
+        }
+        return write_staged_segment(runtime, cooperation, selected, stage, b"\"", total).await;
+    }
+    let rendered = format_cell_for_text(cell, options, delimiter);
+    write_staged_segment(
+        runtime,
+        cooperation,
+        selected,
+        stage,
+        rendered.as_bytes(),
+        total,
+    )
+    .await
+}
+
+async fn write_staged_segment(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    stage: &mut dyn runmat_filesystem::FsStagedOutput,
+    bytes: &[u8],
+    total: &mut usize,
+) -> BuiltinResult<()> {
+    let next = total.checked_add(bytes.len()).ok_or_else(|| {
+        writecell_error_with(
+            &WRITECELL_ERROR_IO,
+            "writecell: output byte count exceeds platform limits",
+        )
+    })?;
+    write_owner::write_stage_bytes(runtime, cooperation, BUILTIN_NAME, selected, stage, bytes)
+        .await
+        .map_err(map_staged_write_error)?;
+    *total = next;
+    Ok(())
+}
+
+fn map_staged_write_error(source: write_owner::StagedWriteError) -> RuntimeError {
+    match source {
+        write_owner::StagedWriteError::Control(error) => error,
+        write_owner::StagedWriteError::Io(source) => writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            "writecell: failed to replace delimited text file",
+            source,
+        ),
+    }
 }
 
 async fn append_needs_line_ending(selected: &TabularFsPath) -> BuiltinResult<bool> {
