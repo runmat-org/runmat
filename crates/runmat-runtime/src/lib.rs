@@ -56,6 +56,7 @@ pub mod output_context;
 pub mod output_count;
 pub mod parallel;
 pub mod source_context;
+pub mod tcp;
 pub mod testing;
 pub mod value_fact;
 

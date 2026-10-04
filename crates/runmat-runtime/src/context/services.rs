@@ -1,5 +1,6 @@
 use super::{
-    RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService, RuntimeUserPathService,
+    RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService, RuntimeTcpService,
+    RuntimeUserPathService,
 };
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
@@ -754,6 +755,7 @@ pub struct RuntimeServicePorts {
     user_path: Option<Rc<dyn RuntimeUserPathService>>,
     #[cfg(not(target_arch = "wasm32"))]
     process: Option<Rc<dyn RuntimeProcessService>>,
+    tcp: Option<Rc<dyn RuntimeTcpService>>,
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
@@ -778,6 +780,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("http", &self.http.is_some())
             .field("preferences", &self.preferences.is_some())
             .field("user_path", &self.user_path.is_some())
+            .field("tcp", &self.tcp.is_some())
             .field("error", &self.error.is_some())
             .field("acceleration", &self.acceleration.is_some())
             .field("placement", &self.placement.is_some())
@@ -916,6 +919,7 @@ impl RuntimeServicePorts {
         RuntimeUserPathService,
         UserPath
     );
+    port_accessors!(with_tcp, tcp, require_tcp, tcp, RuntimeTcpService, Tcp);
     port_accessors!(
         with_error,
         error,
