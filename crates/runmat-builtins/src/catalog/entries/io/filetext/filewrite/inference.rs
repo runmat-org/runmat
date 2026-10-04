@@ -61,20 +61,19 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
         Some(_) => first_name.is_none(),
         None => tail % 2 == 1,
     };
-    if positional {
-        if first_literal
+    if positional
+        && first_literal
             .as_deref()
             .is_some_and(|label| FilewriteEncoding::from_label(label).is_none())
-        {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-FILEWRITE-ENCODING",
-                "unsupported positional encoding",
-                2,
-            ));
-        }
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FILEWRITE-ENCODING",
+            "unsupported positional encoding",
+            2,
+        ));
     }
     let start = if positional { 3 } else { 2 };
-    if (request.arguments.len() - start) % 2 != 0 {
+    if !(request.arguments.len() - start).is_multiple_of(2) {
         diagnostics.push(argument_error(
             "RM-CATALOG-FILEWRITE-OPTION-ARITY",
             "filewrite options require name/value pairs",
