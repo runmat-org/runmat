@@ -1,0 +1,425 @@
+//! MATLAB-compatible HDF5 structured file I/O builtins and native backend.
+
+use std::path::{Path, PathBuf};
+
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+};
+use runmat_macros::runtime_builtin;
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_value::NumericStorage;
+use runmat_value::{
+    IntValue, IntegerStorage, LogicalArray, NumericScalar, StringArray, Tensor, Value,
+};
+
+use crate::builtins::common::fs::expand_user_path;
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const H5READ_NAME: &str = "h5read";
+const H5WRITE_NAME: &str = "h5write";
+const H5WRITEATT_NAME: &str = "h5writeatt";
+const H5INFO_NAME: &str = "h5info";
+const H5DISP_NAME: &str = "h5disp";
+const HDF5READ_NAME: &str = "hdf5read";
+const HDF5WRITE_NAME: &str = "hdf5write";
+const HDF5INFO_NAME: &str = "hdf5info";
+
+mod legacy_contract;
+use legacy_contract::*;
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::hdf5")]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "hdf5",
+    op_kind: GpuOpKind::Custom("io-hdf5"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::GatherImmediately,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "Runs on the host; HDF5 parsing and serialization are native file I/O operations.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::hdf5")]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "hdf5",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "Not eligible for fusion; performs host-side HDF5 file I/O.",
+};
+
+fn hdf5_type(_args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
+    Type::Unknown
+}
+
+fn hdf5_error(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(builtin);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_control_flow(builtin: &'static str, err: RuntimeError) -> RuntimeError {
+    let identifier = err.identifier().map(|value| value.to_string());
+    let message = err.message().to_string();
+    let mut builder = build_runtime_error(message)
+        .with_builtin(builtin)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn string_scalar(value: &Value, builtin: &'static str, label: &str) -> BuiltinResult<String> {
+    match value {
+        Value::String(s) => Ok(s.clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        _ => Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: expected {label} as a string scalar or character vector"),
+        )),
+    }
+}
+
+fn resolve_path(value: &Value, builtin: &'static str) -> BuiltinResult<PathBuf> {
+    let raw = string_scalar(value, builtin, "filename")?;
+    if raw.trim().is_empty() {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: filename must not be empty"),
+        ));
+    }
+    let expanded = expand_user_path(raw.trim(), builtin)
+        .map_err(|msg| hdf5_error(builtin, &ERR_ARGUMENT, msg))?;
+    Ok(Path::new(&expanded).to_path_buf())
+}
+
+fn hdf5_path(value: &Value, builtin: &'static str, label: &str) -> BuiltinResult<String> {
+    let raw = string_scalar(value, builtin, label)?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: {label} must not be empty"),
+        ));
+    }
+    Ok(if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    })
+}
+
+async fn gather_args(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
+    let mut gathered = Vec::with_capacity(args.len());
+    for arg in args {
+        gathered.push(
+            gather_if_needed_async(arg)
+                .await
+                .map_err(|err| map_control_flow(builtin, err))?,
+        );
+    }
+    Ok(gathered)
+}
+
+#[runtime_builtin(
+    name = "h5read",
+    category = "io/hdf5",
+    summary = "Read a dataset from an HDF5 file.",
+    keywords = "h5read,hdf5,dataset,file,io",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::H5READ_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn h5read_builtin(filename: Value, dataset: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(H5READ_NAME, err))?;
+    let dataset = gather_if_needed_async(&dataset)
+        .await
+        .map_err(|err| map_control_flow(H5READ_NAME, err))?;
+    let rest = gather_args(H5READ_NAME, &rest).await?;
+    let path = resolve_path(&filename, H5READ_NAME)?;
+    let dataset_path = hdf5_path(&dataset, H5READ_NAME, "dataset")?;
+    imp::read_dataset(H5READ_NAME, path, dataset_path, rest)
+}
+
+#[runtime_builtin(
+    name = "hdf5read",
+    category = "io/hdf5",
+    summary = "Read a dataset from an HDF5 file using the legacy HDF5 API name.",
+    keywords = "hdf5read,h5read,hdf5,dataset,file,io,legacy",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::HDF5READ_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn hdf5read_builtin(
+    filename: Value,
+    dataset: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(HDF5READ_NAME, err))?;
+    let dataset = gather_if_needed_async(&dataset)
+        .await
+        .map_err(|err| map_control_flow(HDF5READ_NAME, err))?;
+    let rest = gather_args(HDF5READ_NAME, &rest).await?;
+    let path = resolve_path(&filename, HDF5READ_NAME)?;
+    let dataset_path = hdf5_path(&dataset, HDF5READ_NAME, "dataset")?;
+    imp::read_dataset(HDF5READ_NAME, path, dataset_path, rest)
+}
+
+#[runtime_builtin(
+    name = "h5write",
+    category = "io/hdf5",
+    summary = "Write a dense dataset to an HDF5 file.",
+    keywords = "h5write,hdf5,dataset,file,io",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::H5WRITE_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn h5write_builtin(
+    filename: Value,
+    dataset: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
+    let dataset = gather_if_needed_async(&dataset)
+        .await
+        .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
+    let data = gather_if_needed_async(&data)
+        .await
+        .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
+    let rest = gather_args(H5WRITE_NAME, &rest).await?;
+    let path = resolve_path(&filename, H5WRITE_NAME)?;
+    let dataset_path = hdf5_path(&dataset, H5WRITE_NAME, "dataset")?;
+    imp::write_dataset(H5WRITE_NAME, path, dataset_path, data, rest)?;
+    Ok(Value::OutputList(Vec::new()))
+}
+
+#[runtime_builtin(
+    name = "hdf5write",
+    category = "io/hdf5",
+    summary = "Write a dense dataset to an HDF5 file using the legacy HDF5 API name.",
+    keywords = "hdf5write,h5write,hdf5,dataset,file,io,legacy",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::HDF5WRITE_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn hdf5write_builtin(
+    filename: Value,
+    dataset: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
+    let dataset = gather_if_needed_async(&dataset)
+        .await
+        .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
+    let data = gather_if_needed_async(&data)
+        .await
+        .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
+    let rest = gather_args(HDF5WRITE_NAME, &rest).await?;
+    let path = resolve_path(&filename, HDF5WRITE_NAME)?;
+    let dataset_path = hdf5_path(&dataset, HDF5WRITE_NAME, "dataset")?;
+    imp::write_dataset(HDF5WRITE_NAME, path, dataset_path, data, rest)?;
+    Ok(Value::OutputList(Vec::new()))
+}
+
+#[runtime_builtin(
+    name = "h5writeatt",
+    category = "io/hdf5",
+    summary = "Write an attribute on an HDF5 file, group, or dataset.",
+    keywords = "h5writeatt,hdf5,attribute,dataset,group,file,io",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::H5WRITEATT_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn h5writeatt_builtin(
+    filename: Value,
+    location: Value,
+    attribute: Value,
+    data: Value,
+) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
+    let location = gather_if_needed_async(&location)
+        .await
+        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
+    let attribute = gather_if_needed_async(&attribute)
+        .await
+        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
+    let data = gather_if_needed_async(&data)
+        .await
+        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
+    let path = resolve_path(&filename, H5WRITEATT_NAME)?;
+    let location_path = hdf5_path(&location, H5WRITEATT_NAME, "location")?;
+    let attr_name = string_scalar(&attribute, H5WRITEATT_NAME, "attribute")?;
+    if attr_name.trim().is_empty() {
+        return Err(hdf5_error(
+            H5WRITEATT_NAME,
+            &ERR_ARGUMENT,
+            "h5writeatt: attribute must not be empty",
+        ));
+    }
+    imp::write_attribute(H5WRITEATT_NAME, path, location_path, attr_name, data)?;
+    Ok(Value::OutputList(Vec::new()))
+}
+
+#[runtime_builtin(
+    name = "h5info",
+    category = "io/hdf5",
+    summary = "Return metadata for an HDF5 file object.",
+    keywords = "h5info,hdf5,metadata,dataset,group,file,io",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::H5INFO_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(H5INFO_NAME, err))?;
+    let rest = gather_args(H5INFO_NAME, &rest).await?;
+    let path = resolve_path(&filename, H5INFO_NAME)?;
+    let location = optional_location(rest, H5INFO_NAME)?;
+    imp::info(H5INFO_NAME, path, location)
+}
+
+#[runtime_builtin(
+    name = "hdf5info",
+    category = "io/hdf5",
+    summary = "Return metadata for an HDF5 file object using the legacy HDF5 API name.",
+    keywords = "hdf5info,h5info,hdf5,metadata,dataset,group,file,io,legacy",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::HDF5INFO_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(HDF5INFO_NAME, err))?;
+    let rest = gather_args(HDF5INFO_NAME, &rest).await?;
+    let path = resolve_path(&filename, HDF5INFO_NAME)?;
+    let location = optional_location(rest, HDF5INFO_NAME)?;
+    imp::info(HDF5INFO_NAME, path, location)
+}
+
+#[runtime_builtin(
+    name = "h5disp",
+    category = "io/hdf5",
+    summary = "Return a textual summary of an HDF5 file object.",
+    keywords = "h5disp,hdf5,metadata,display,dataset,group,file,io",
+    accel = "cpu",
+    type_resolver(crate::builtins::io::hdf5::hdf5_type),
+    descriptor(crate::builtins::io::hdf5::H5DISP_DESCRIPTOR),
+    builtin_path = "crate::builtins::io::hdf5"
+)]
+async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let filename = gather_if_needed_async(&filename)
+        .await
+        .map_err(|err| map_control_flow(H5DISP_NAME, err))?;
+    let rest = gather_args(H5DISP_NAME, &rest).await?;
+    let path = resolve_path(&filename, H5DISP_NAME)?;
+    let location = optional_location(rest, H5DISP_NAME)?;
+    imp::disp(H5DISP_NAME, path, location).map(Value::String)
+}
+
+fn optional_location(rest: Vec<Value>, builtin: &'static str) -> BuiltinResult<String> {
+    match rest.len() {
+        0 => Ok("/".to_string()),
+        1 => hdf5_path(&rest[0], builtin, "location"),
+        _ => Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: expected at most one location argument"),
+        )),
+    }
+}
+
+mod geometry;
+use geometry::*;
+
+#[cfg(target_arch = "wasm32")]
+mod imp {
+    use super::*;
+
+    pub fn read_dataset(
+        builtin: &'static str,
+        _path: PathBuf,
+        _dataset_path: String,
+        _rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
+    }
+
+    pub fn write_dataset(
+        builtin: &'static str,
+        _path: PathBuf,
+        _dataset_path: String,
+        _data: Value,
+        _rest: Vec<Value>,
+    ) -> BuiltinResult<()> {
+        Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
+    }
+
+    pub fn write_attribute(
+        builtin: &'static str,
+        _path: PathBuf,
+        _location: String,
+        _attribute: String,
+        _data: Value,
+    ) -> BuiltinResult<()> {
+        Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
+    }
+
+    pub fn info(builtin: &'static str, _path: PathBuf, _location: String) -> BuiltinResult<Value> {
+        Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
+    }
+
+    pub fn disp(builtin: &'static str, _path: PathBuf, _location: String) -> BuiltinResult<String> {
+        Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
+#[cfg(not(target_arch = "wasm32"))]
+use native as imp;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
