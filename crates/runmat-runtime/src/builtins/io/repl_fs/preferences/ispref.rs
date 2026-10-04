@@ -13,7 +13,7 @@ use crate::BuiltinResult;
     context = true,
     builtin_path = "crate::builtins::io::repl_fs::preferences::ispref"
 )]
-pub(super) async fn ispref_builtin(
+pub(in crate::builtins::io::repl_fs) async fn ispref_builtin(
     runtime: Option<RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {

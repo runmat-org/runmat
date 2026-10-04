@@ -15,7 +15,7 @@ use crate::BuiltinResult;
     context = true,
     builtin_path = "crate::builtins::io::repl_fs::preferences::setpref"
 )]
-pub(super) async fn setpref_builtin(
+pub(in crate::builtins::io::repl_fs) async fn setpref_builtin(
     runtime: Option<RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {

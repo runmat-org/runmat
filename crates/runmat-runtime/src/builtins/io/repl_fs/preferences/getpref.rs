@@ -15,7 +15,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
     context = true,
     builtin_path = "crate::builtins::io::repl_fs::preferences::getpref"
 )]
-pub(super) async fn getpref_builtin(
+pub(in crate::builtins::io::repl_fs) async fn getpref_builtin(
     runtime: Option<RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
