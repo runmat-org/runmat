@@ -222,7 +222,7 @@ mod position_tests {
     #[test]
     fn malformed_continuation_run_rejects_without_unbounded_extension() {
         let mut bytes = vec![b'a'; 4095];
-        bytes.extend(std::iter::repeat(0x80).take(8192));
+        bytes.extend(std::iter::repeat_n(0x80, 8192));
         let mut cooperation = TextscanCooperation::new(None);
         let error = block_on(DecodedFileText::decode(&bytes, "UTF-8", &mut cooperation))
             .expect_err("invalid UTF-8");
