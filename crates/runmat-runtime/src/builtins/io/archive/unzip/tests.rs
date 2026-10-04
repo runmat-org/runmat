@@ -326,6 +326,38 @@ fn numeric_resident_path_is_rejected_without_provider_download_or_filesystem_eff
 }
 
 #[test]
+fn paged_character_controls_reject_at_public_dispatch_before_effects() {
+    let root = tempdir().expect("output fixture");
+    let destination = root.path().join("never-created");
+    let paged = Value::CharArray(
+        CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .expect("real paged character value"),
+    );
+    let source_error = run_unzip(
+        vec![
+            paged.clone(),
+            Value::String(destination.to_string_lossy().into_owned()),
+        ],
+        Some(1),
+    )
+    .expect_err("paged source must be rejected before filesystem access");
+    assert_eq!(source_error.identifier(), UNZIP_ERROR_FILENAME.identifier);
+    let destination_error = run_unzip(
+        vec![
+            Value::String("https://example.invalid/archive.zip".into()),
+            paged,
+        ],
+        Some(1),
+    )
+    .expect_err("paged destination must be rejected before HTTP access");
+    assert_eq!(
+        destination_error.identifier(),
+        UNZIP_ERROR_OUTPUT_FOLDER.identifier
+    );
+    assert!(!destination.exists());
+}
+
+#[test]
 fn cancelled_runtime_context_stops_before_destination_creation() {
     let _provider_lock = runmat_filesystem::provider_override_lock();
     let root = tempdir().unwrap();

@@ -77,9 +77,15 @@ fn could_be_scalar_text(value: &ValueFact) -> bool {
     match value.kind {
         ValueKindFact::String => value.shape.element_count().is_none_or(|count| count == 1),
         ValueKindFact::Character => match &value.shape {
-            ShapeFact::Shaped { dims } => !dims
-                .first()
-                .is_some_and(|dim| matches!(dim, DimensionFact::Known(rows) if *rows != 1)),
+            ShapeFact::Shaped { dims } => {
+                !dims
+                    .first()
+                    .is_some_and(|dim| matches!(dim, DimensionFact::Known(rows) if *rows != 1))
+                    && !dims
+                        .iter()
+                        .skip(2)
+                        .any(|dim| matches!(dim, DimensionFact::Known(extent) if *extent != 1))
+            }
             _ => true,
         },
         ValueKindFact::Unknown => true,

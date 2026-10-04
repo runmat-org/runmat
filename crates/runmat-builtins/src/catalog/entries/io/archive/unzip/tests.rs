@@ -88,16 +88,30 @@ fn invalid_text_and_empty_literal_are_diagnosed_without_rejecting_possible_char_
             .diagnostics
             .is_empty()
     );
-    let character = ValueFact::proven(
+    let paged = ValueFact::proven(
         ValueKindFact::Character,
         ShapeFact::from(vec![Some(1), Some(7), Some(2)]),
         StorageFact::Dense,
     );
     assert!(
-        inference::infer(&request(character, None, 1), &UNZIP_CATALOG_ENTRY)
+        !inference::infer(&request(paged, None, 1), &UNZIP_CATALOG_ENTRY)
             .diagnostics
             .is_empty()
     );
+    for shape in [
+        ShapeFact::from(vec![Some(1), Some(7), Some(1)]),
+        ShapeFact::from(vec![Some(1), None, None]),
+        ShapeFact::Ranked { rank: 3 },
+        ShapeFact::Unknown,
+    ] {
+        let possible = ValueFact::proven(ValueKindFact::Character, shape, StorageFact::Dense);
+        let inferred = inference::infer(&request(possible, None, 1), &UNZIP_CATALOG_ENTRY);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+    }
     let empty = inference::infer(
         &request(ValueFact::scalar(ValueKindFact::String), Some(" "), 1),
         &UNZIP_CATALOG_ENTRY,
