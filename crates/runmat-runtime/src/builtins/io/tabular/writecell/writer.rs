@@ -179,13 +179,31 @@ async fn write_append_bytes(
                     source,
                 )
             })?;
-            let count = file.write(remaining).map_err(|source| {
-                writecell_error_with_source(
+            let count = match file.write(remaining) {
+                Ok(count) => count,
+                Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {
+                    cooperation.completed(1).await?;
+                    continue;
+                }
+                Err(source) => {
+                    return Err(writecell_error_with_source(
+                        &WRITECELL_ERROR_IO,
+                        format!("writecell: failed to write delimited text ({source})"),
+                        source,
+                    ));
+                }
+            };
+            if count > remaining.len() {
+                let source = std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "writecell: provider reported more bytes than requested",
+                );
+                return Err(writecell_error_with_source(
                     &WRITECELL_ERROR_IO,
-                    format!("writecell: failed to write delimited text ({source})"),
+                    source.to_string(),
                     source,
-                )
-            })?;
+                ));
+            }
             if count == 0 {
                 let source = std::io::Error::new(
                     std::io::ErrorKind::WriteZero,

@@ -159,13 +159,31 @@ async fn write_bounded(
         let mut remaining = chunk;
         while !remaining.is_empty() {
             check_owner(selected)?;
-            let count = file.write(remaining).map_err(|source| {
-                writematrix_error_with_source(
+            let count = match file.write(remaining) {
+                Ok(count) => count,
+                Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {
+                    cooperation.completed(1).await?;
+                    continue;
+                }
+                Err(source) => {
+                    return Err(writematrix_error_with_source(
+                        &WRITEMATRIX_ERROR_IO,
+                        format!("writematrix: failed to write output ({source})"),
+                        source,
+                    ));
+                }
+            };
+            if count > remaining.len() {
+                let source = std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "writematrix: provider reported more bytes than requested",
+                );
+                return Err(writematrix_error_with_source(
                     &WRITEMATRIX_ERROR_IO,
-                    format!("writematrix: failed to write output ({source})"),
+                    source.to_string(),
                     source,
-                )
-            })?;
+                ));
+            }
             if count == 0 {
                 let source = std::io::Error::new(
                     std::io::ErrorKind::WriteZero,

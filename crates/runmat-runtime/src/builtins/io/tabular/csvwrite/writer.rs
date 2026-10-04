@@ -135,13 +135,31 @@ async fn write_csv_bytes(
         let mut remaining = chunk;
         while !remaining.is_empty() {
             check_csv_owner(selected)?;
-            let count = file.write(remaining).map_err(|source| {
-                csvwrite_error_with_source(
+            let count = match file.write(remaining) {
+                Ok(count) => count,
+                Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {
+                    cooperation.completed(1).await?;
+                    continue;
+                }
+                Err(source) => {
+                    return Err(csvwrite_error_with_source(
+                        &CSVWRITE_ERROR_IO_WRITE,
+                        format!("csvwrite: failed to write output ({source})"),
+                        source,
+                    ));
+                }
+            };
+            if count > remaining.len() {
+                let source = std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "csvwrite: provider reported more bytes than requested",
+                );
+                return Err(csvwrite_error_with_source(
                     &CSVWRITE_ERROR_IO_WRITE,
-                    format!("csvwrite: failed to write output ({source})"),
+                    source.to_string(),
                     source,
-                )
-            })?;
+                ));
+            }
             if count == 0 {
                 let source = std::io::Error::new(
                     std::io::ErrorKind::WriteZero,

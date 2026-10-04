@@ -29,6 +29,9 @@ struct RevokeAfterFirstWrite {
     inner: Box<dyn FileHandle>,
     valid: Arc<AtomicBool>,
     writes: Arc<AtomicUsize>,
+    interrupt_once: Arc<AtomicBool>,
+    revoke_on_interrupt: bool,
+    revoke_after_success: bool,
 }
 
 impl Read for RevokeAfterFirstWrite {
@@ -39,9 +42,20 @@ impl Read for RevokeAfterFirstWrite {
 
 impl Write for RevokeAfterFirstWrite {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.interrupt_once.swap(false, Ordering::SeqCst) {
+            if self.revoke_on_interrupt {
+                self.valid.store(false, Ordering::SeqCst);
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "fixture interrupt",
+            ));
+        }
         let result = self.inner.write(&bytes[..bytes.len().min(1)])?;
         self.writes.fetch_add(1, Ordering::SeqCst);
-        self.valid.store(false, Ordering::SeqCst);
+        if self.revoke_after_success {
+            self.valid.store(false, Ordering::SeqCst);
+        }
         Ok(result)
     }
 
@@ -63,6 +77,9 @@ struct RevokingProvider {
     memory: MemoryFsProvider,
     valid: Arc<AtomicBool>,
     writes: Arc<AtomicUsize>,
+    interrupt_once: Arc<AtomicBool>,
+    revoke_on_interrupt: bool,
+    revoke_after_success: bool,
 }
 
 #[async_trait(?Send)]
@@ -82,6 +99,9 @@ impl FsProvider for RevokingProvider {
                 inner,
                 valid: self.valid.clone(),
                 writes: self.writes.clone(),
+                interrupt_once: self.interrupt_once.clone(),
+                revoke_on_interrupt: self.revoke_on_interrupt,
+                revoke_after_success: self.revoke_after_success,
             }))
         } else {
             Ok(inner)
@@ -139,6 +159,9 @@ fn revoked_owner_after_partial_first_write_prevents_retry_and_success() {
         memory,
         valid: Arc::new(AtomicBool::new(true)),
         writes: writes.clone(),
+        interrupt_once: Arc::new(AtomicBool::new(false)),
+        revoke_on_interrupt: false,
+        revoke_after_success: true,
     });
     let _guard = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir("/tabular").expect("cwd");
@@ -151,4 +174,61 @@ fn revoked_owner_after_partial_first_write_prevents_retry_and_success() {
     .expect_err("revoked owner");
     assert!(error.message().contains("authority was revoked"));
     assert_eq!(writes.load(Ordering::SeqCst), 1);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn interrupted_then_partial_writes_preserve_output() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let writes = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(RevokingProvider {
+        memory: MemoryFsProvider::with_current_dir("/tabular"),
+        valid: Arc::new(AtomicBool::new(true)),
+        writes: writes.clone(),
+        interrupt_once: Arc::new(AtomicBool::new(true)),
+        revoke_on_interrupt: false,
+        revoke_after_success: false,
+    });
+    let _guard = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir("/tabular").expect("cwd");
+    let matrix = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("matrix");
+    block_on(super::super::writematrix_builtin(
+        None,
+        Value::Tensor(matrix),
+        vec![Value::from("interrupted.csv")],
+    ))
+    .expect("interrupted write retries");
+    assert_eq!(
+        provider
+            .memory
+            .read_project_path("/tabular/interrupted.csv")
+            .expect("written bytes"),
+        b"1,2\n"
+    );
+    assert!(writes.load(Ordering::SeqCst) > 1);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn revoked_owner_on_interrupted_write_prevents_retry() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let writes = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(RevokingProvider {
+        memory: MemoryFsProvider::with_current_dir("/tabular"),
+        valid: Arc::new(AtomicBool::new(true)),
+        writes: writes.clone(),
+        interrupt_once: Arc::new(AtomicBool::new(true)),
+        revoke_on_interrupt: true,
+        revoke_after_success: false,
+    });
+    let _guard = runmat_filesystem::replace_provider(provider);
+    runmat_filesystem::set_current_dir("/tabular").expect("cwd");
+    let error = block_on(super::super::writematrix_builtin(
+        None,
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        vec![Value::from("revoked-interrupt.csv")],
+    ))
+    .expect_err("revocation wins before retry");
+    assert!(error.message().contains("authority was revoked"));
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
 }

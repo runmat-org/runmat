@@ -219,13 +219,31 @@ async fn write_dlm_bytes(
         let mut remaining = chunk;
         while !remaining.is_empty() {
             check_dlm_owner(selected)?;
-            let count = file.write(remaining).map_err(|source| {
-                dlmwrite_error_with_source(
+            let count = match file.write(remaining) {
+                Ok(count) => count,
+                Err(source) if source.kind() == io::ErrorKind::Interrupted => {
+                    cooperation.completed(1).await?;
+                    continue;
+                }
+                Err(source) => {
+                    return Err(dlmwrite_error_with_source(
+                        &DLMWRITE_ERROR_IO,
+                        format!("dlmwrite: failed to write output ({source})"),
+                        source,
+                    ));
+                }
+            };
+            if count > remaining.len() {
+                let source = io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "dlmwrite: provider reported more bytes than requested",
+                );
+                return Err(dlmwrite_error_with_source(
                     &DLMWRITE_ERROR_IO,
-                    format!("dlmwrite: failed to write output ({source})"),
+                    source.to_string(),
                     source,
-                )
-            })?;
+                ));
+            }
             if count == 0 {
                 let source = io::Error::new(
                     io::ErrorKind::WriteZero,
