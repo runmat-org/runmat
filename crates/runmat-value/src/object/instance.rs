@@ -151,6 +151,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
+        }
     }
 
     pub fn with_tcp_authority(mut self, reference: ForeignRef) -> Self {
@@ -168,7 +169,6 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
         }
-    }
     }
 
     pub fn with_memmap_receiver(mut self, receiver: MemmapReceiverState) -> Self {
