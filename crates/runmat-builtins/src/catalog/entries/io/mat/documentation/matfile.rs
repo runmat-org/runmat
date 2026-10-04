@@ -33,8 +33,8 @@ pub(super) const MATFILE: BuiltinDocumentation = BuiltinDocumentation {
         ] },
     ],
     examples: &[
-        example("read", "Read a whole variable", "A = [1 2; 3 4];\nsave('data.mat', 'A');\nm = matfile('data.mat');\nloaded = m.A", None, "assert(isequal(loaded, A)); assert(~m.Properties.Writable);"),
-        example("write", "Write whole variables", "m = matfile('data.mat', 'Writable', true);\nm.A = ones(3);\nm.flag = true;\nS = load('data.mat')", None, "assert(isequal(S.A, ones(3))); assert(S.flag); assert(m.Properties.Writable);"),
+        example("read", "Read a whole variable", "A = [1 2; 3 4];\nsave('data.mat', 'A');\nm = matfile('data.mat');\nloaded = m.A", Some("A contains the variable loaded from data.mat."), "assert(isequal(loaded, A)); assert(~m.Properties.Writable);"),
+        example("write", "Write whole variables", "m = matfile('data.mat', 'Writable', true);\nm.A = ones(3);\nm.flag = true;\nS = load('data.mat')", Some("The MAT-file is rewritten with updated whole variables."), "assert(isequal(S.A, ones(3))); assert(S.flag); assert(m.Properties.Writable);"),
     ],
     example_exemption: None,
     faqs: &[

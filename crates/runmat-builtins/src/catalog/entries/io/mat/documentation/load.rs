@@ -43,6 +43,7 @@ pub(super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
     ],
     links: &[
         BuiltinDocumentationLink { label: "save", target: BuiltinDocumentationLinkTarget::Builtin("save") },
+        BuiltinDocumentationLink { label: "who", target: BuiltinDocumentationLinkTarget::Builtin("who") },
         BuiltinDocumentationLink { label: "matfile", target: BuiltinDocumentationLinkTarget::Builtin("matfile") },
         BuiltinDocumentationLink { label: "fileread", target: BuiltinDocumentationLinkTarget::Builtin("fileread") },
         BuiltinDocumentationLink { label: "loadobj", target: BuiltinDocumentationLinkTarget::Builtin("loadobj") },

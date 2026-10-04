@@ -47,6 +47,7 @@ pub(super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
         BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
         BuiltinDocumentationLink { label: "fileread", target: BuiltinDocumentationLinkTarget::Builtin("fileread") },
+        BuiltinDocumentationLink { label: "fopen", target: BuiltinDocumentationLinkTarget::Builtin("fopen") },
         BuiltinDocumentationLink { label: "saveobj", target: BuiltinDocumentationLinkTarget::Builtin("saveobj") },
     ],
     media: &[],
