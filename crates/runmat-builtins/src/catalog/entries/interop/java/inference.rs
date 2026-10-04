@@ -194,6 +194,7 @@ pub(super) fn infer(
                 && request
                     .literals
                     .literal_string_at(0)
+                    .as_deref()
                     .and_then(super::JavaInsertionPosition::from_public_terminal)
                     .is_some()
             {
@@ -230,6 +231,7 @@ pub(super) fn infer(
                 match request
                     .literals
                     .literal_string_at(0)
+                    .as_deref()
                     .map(super::JavaClasspathControl::parse_public)
                 {
                     Some(super::JavaClasspathControl::Query(_)) => vec![classpath()],
@@ -292,7 +294,7 @@ pub(super) fn infer(
             if request
                 .literals
                 .literal_string_at(0)
-                .is_some_and(|feature| super::JavaFeature::parse(feature).is_none())
+                .is_some_and(|feature| super::JavaFeature::parse(&feature).is_none())
             {
                 diagnostics.push(argument_error(
                     "RM-JAVA-FEATURE",

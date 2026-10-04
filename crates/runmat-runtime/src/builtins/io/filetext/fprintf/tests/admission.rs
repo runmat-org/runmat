@@ -227,7 +227,8 @@ fn unambiguous_invalid_fid_never_falls_back_to_stdout_or_downloads_data() {
         drop(call);
     }
     let exact_overflow = Value::Int(runmat_value::IntValue::U64(u64::MAX));
-    let error = evaluate(&[exact_overflow, Value::from("%d")]);
+    let args = [exact_overflow, Value::from("%d")];
+    let error = evaluate(&args);
     let error = futures::executor::block_on(error).expect_err("wide fid invalid");
     assert_eq!(error.identifier(), Some("RunMat:fprintf:InvalidInput"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
