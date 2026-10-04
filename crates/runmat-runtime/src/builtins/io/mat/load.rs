@@ -18,6 +18,8 @@ use runmat_builtins::{
     LOAD_ERROR_OUTPUT_COUNT, LOAD_ERROR_SELECTION, LOAD_ERROR_WORKSPACE,
 };
 
+mod admission;
+use crate::context::host_effect::{HostEffectReceipt, MatDecodeOutput};
 #[runtime_builtin(
     name = "load",
     binding_variant = "default",
@@ -41,19 +43,45 @@ async fn load_builtin(
             "load supports at most one output argument",
         ));
     }
-    let eval = evaluate_with_context(&args, runtime.as_ref()).await?;
+    let execution = evaluate_with_context(
+        &args,
+        runtime.as_ref(),
+        if requested_outputs == Some(0) {
+            MatDecodeOutput::Workspace
+        } else {
+            MatDecodeOutput::Struct
+        },
+    )
+    .await?;
+    let LoadExecution { eval, receipt } = execution;
 
     // The same invocation-owned output request remains authoritative across
     // the awaited decode/restoration work.
-    if requested_outputs == Some(0) {
-        for (name, value) in eval.variables() {
-            crate::workspace::assign(name, value.clone())
-                .map_err(|err| load_error_with(&LOAD_ERROR_WORKSPACE, err))?;
+    let result = (|| {
+        if requested_outputs == Some(0) {
+            for (name, value) in eval.variables() {
+                if let Some(receipt) = receipt.as_ref() {
+                    receipt.checkpoint()?;
+                }
+                crate::workspace::assign(name, value.clone())
+                    .map_err(|err| load_error_with(&LOAD_ERROR_WORKSPACE, err))?;
+            }
+            Ok(Value::OutputList(Vec::new()))
+        } else {
+            if let Some(receipt) = receipt.as_ref() {
+                receipt.checkpoint()?;
+            }
+            Ok(eval.first_output())
         }
-        return Ok(Value::OutputList(Vec::new()));
-    }
-
-    Ok(eval.first_output())
+    })()
+    .and_then(|value| {
+        if let Some(receipt) = receipt.as_ref() {
+            receipt.checkpoint()?;
+        }
+        Ok(value)
+    });
+    admission::finish(receipt, &result);
+    result
 }
 
 #[derive(Clone, Debug)]
@@ -82,6 +110,12 @@ impl LoadEval {
 struct LoadRequest {
     variables: Vec<String>,
     regex_patterns: Vec<Regex>,
+    regex_tokens: Vec<String>,
+}
+
+struct LoadExecution {
+    eval: LoadEval,
+    receipt: Option<HostEffectReceipt>,
 }
 
 const BUILTIN_NAME: &str = "load";
@@ -116,13 +150,16 @@ fn load_error_with_source(
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
-    evaluate_with_context(args, None).await
+    evaluate_with_context(args, None, MatDecodeOutput::Struct)
+        .await
+        .map(|execution| execution.eval)
 }
 
 async fn evaluate_with_context(
     args: &[Value],
     runtime: Option<&crate::context::RuntimeContext>,
-) -> BuiltinResult<LoadEval> {
+    output: MatDecodeOutput,
+) -> BuiltinResult<LoadExecution> {
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -153,7 +190,7 @@ async fn evaluate_with_context(
     }
 
     let mut regex_patterns = Vec::with_capacity(invocation.regex_tokens.len());
-    for pattern in invocation.regex_tokens {
+    for pattern in &invocation.regex_tokens {
         let regex = Regex::new(&pattern).map_err(|err| {
             load_error_with_source(
                 &LOAD_ERROR_INVALID_OPTION,
@@ -167,6 +204,7 @@ async fn evaluate_with_context(
     let request = LoadRequest {
         variables: invocation.variables,
         regex_patterns,
+        regex_tokens: invocation.regex_tokens,
     };
     let path = normalise_path(&path_value)?;
     let source = MatFsPath::capture(path).map_err(|err| {
@@ -176,12 +214,22 @@ async fn evaluate_with_context(
             err,
         )
     })?;
-    let entries = read_mat_file_on_with_context(&source, runtime).await?;
-
-    let selected = select_variables(&entries, &request)?;
-    Ok(LoadEval {
-        variables: selected,
-    })
+    let receipt = admission::select(runtime, &source, &request, output)?;
+    let result = async {
+        let entries = read_mat_file_on_with_context(&source, runtime).await?;
+        let selected = select_variables(&entries, &request)?;
+        Ok(LoadEval {
+            variables: selected,
+        })
+    }
+    .await;
+    match result {
+        Ok(eval) => Ok(LoadExecution { eval, receipt }),
+        Err(error) => {
+            admission::finish_error(receipt, &error);
+            Err(error)
+        }
+    }
 }
 
 fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {

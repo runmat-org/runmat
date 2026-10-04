@@ -36,6 +36,10 @@ impl MatFsPath {
         &self.path
     }
 
+    pub(crate) fn provider(&self) -> &Arc<dyn FsProvider> {
+        &self.provider
+    }
+
     pub(crate) fn check_current(&self) -> io::Result<()> {
         if self
             .resource

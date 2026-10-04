@@ -91,3 +91,31 @@ fn mat_identity_preserves_non_utf8_path_bytes() {
     };
     assert_ne!(identity(&first), identity(&second));
 }
+
+#[test]
+fn finite_mat_decode_without_a_resource_producer_rejects_before_selection() {
+    let placement = Rc::new(Placement::default());
+    let runtime = runtime_context(placement.clone(), None, Some(64));
+    let workload = HostEffectWorkload::MatDecode {
+        source: Path::new("/fixture.mat"),
+        selection: MatDecodeSelection::All,
+        output: MatDecodeOutput::Workspace,
+    };
+    let error = select_host_effect(
+        Some(&runtime),
+        HostEffectRequest {
+            operation: "load",
+            workload,
+            domain_facts: Digest::sha256(workload.identity_bytes()),
+            filesystem: fixture_fs(),
+        },
+    )
+    .err()
+    .expect("unknown MAT codec peak rejects finite quota");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(placement.selections.get(), 0);
+    assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
+}
