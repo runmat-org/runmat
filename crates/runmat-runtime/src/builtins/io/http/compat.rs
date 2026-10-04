@@ -358,10 +358,18 @@ async fn sendmail_builtin(
 
     if let Some(command) = selected_sendmail_command() {
         #[cfg(not(target_arch = "wasm32"))]
-        sendmail_process::run(context.as_ref(), command, &recipients, message).await?;
+        {
+            sendmail_process::run(context.as_ref(), command, &recipients, message).await?;
+            return Ok(Value::Num(0.0));
+        }
         #[cfg(target_arch = "wasm32")]
-        let _ = command;
-        return Ok(Value::Num(0.0));
+        {
+            let _ = command;
+            return Err(sendmail_error(
+                SendmailFailure::Command,
+                "sendmail: local command transport is unavailable in WebAssembly",
+            ));
+        }
     }
 
     let smtp_server = read_smtp_server(context)

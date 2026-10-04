@@ -2,12 +2,11 @@
 
 use std::path::PathBuf;
 
-use futures::future::{select, Either};
-use runmat_filesystem::{NativePathIntent, NativeProcessRevocation};
 use runmat_process_host::environment::EnvironmentPolicy;
 use runmat_process_host::HostCommand;
 
 use super::{sendmail_error, sendmail_error_with_source, BuiltinResult, SendmailFailure};
+use crate::context::process_invocation::{self, ProcessInvocationError};
 use crate::context::RuntimeContext;
 
 pub(super) async fn run(
@@ -16,109 +15,12 @@ pub(super) async fn run(
     recipients: &[String],
     message: String,
 ) -> BuiltinResult<()> {
-    // The child may emit unbounded output; no finite peak is certified here.
-    if runtime
-        .and_then(|runtime| runtime.service_ports().parallel())
-        .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some())
-    {
-        return Err(crate::build_runtime_error(
-            "sendmail: complete command output has no certified finite resource bound",
-        )
-        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
-        .with_builtin("sendmail")
-        .build());
-    }
-    let runtime = runtime.ok_or_else(|| {
-        crate::context::RuntimeCapabilityError::new(
-            crate::context::RuntimeCapability::Process,
-            "send mail with the local command",
-        )
-        .into_runtime_error()
-    })?;
-    let service = runtime
-        .service_ports()
-        .require_process("send mail with the local command")
-        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
-    let cwd =
-        runmat_filesystem::capture_native_path(".", NativePathIntent::ProcessWorkingDirectory)
-            .map_err(|source| {
-                sendmail_error_with_source(
-                    SendmailFailure::Command,
-                    format!("sendmail: cannot capture process directory: {source}"),
-                    source,
-                )
-            })?
-            .ok_or_else(|| {
-                sendmail_error(
-                    SendmailFailure::Command,
-                    "sendmail: selected filesystem cannot issue a native process directory",
-                )
-            })?;
-    cwd.check_current().map_err(|source| {
-        sendmail_error_with_source(
-            SendmailFailure::Command,
-            format!("sendmail: process directory authority revoked: {source}"),
-            source,
-        )
-    })?;
-    let revocation = cwd.process_revocation();
-    if matches!(revocation, NativeProcessRevocation::Unavailable) {
-        return Err(sendmail_error(
-            SendmailFailure::Command,
-            "sendmail: selected process directory has no revocation observation",
-        ));
-    }
     let mut command = HostCommand::new(executable.clone());
     command.arguments = vec!["-t".into(), "-oi".into()];
-    command.working_directory = Some(cwd.path().to_path_buf());
     command.environment_policy = EnvironmentPolicy::Inherit;
-    let execute = async {
-        match revocation {
-            NativeProcessRevocation::Stable => {
-                service
-                    .output_complete_with_input(command, message.into_bytes())
-                    .await
-            }
-            NativeProcessRevocation::Watch(watch) => {
-                match select(
-                    watch,
-                    service.output_complete_with_input(command, message.into_bytes()),
-                )
-                .await
-                {
-                    Either::Right((result, _watch)) => result,
-                    Either::Left(((), _process)) => {
-                        return Err(runmat_process_host::ProcessHostError::Io(
-                            std::io::Error::new(
-                                std::io::ErrorKind::PermissionDenied,
-                                "process directory authority revoked",
-                            ),
-                        ));
-                    }
-                }
-            }
-            NativeProcessRevocation::Unavailable => unreachable!("rejected before spawn"),
-        }
-    };
-    let output = runtime
-        .cpu_cooperation()
-        .await_cancellable(execute)
+    let output = process_invocation::output_complete(runtime, command, Some(message.into_bytes()))
         .await
-        .map_err(|source| source.into_runtime_error())?
-        .map_err(|source| {
-            sendmail_error_with_source(
-                SendmailFailure::Command,
-                format!("sendmail: {source}"),
-                source,
-            )
-        })?;
-    cwd.check_current().map_err(|source| {
-        sendmail_error_with_source(
-            SendmailFailure::Command,
-            format!("sendmail: process directory authority revoked: {source}"),
-            source,
-        )
-    })?;
+        .map_err(mail_process_error)?;
     if output.exit.success {
         return Ok(());
     }
@@ -132,6 +34,33 @@ pub(super) async fn run(
             detail.trim()
         ),
     ))
+}
+
+fn mail_process_error(source: ProcessInvocationError) -> crate::RuntimeError {
+    match source {
+        ProcessInvocationError::ResourceEvidence => crate::build_runtime_error(
+            "sendmail: complete command output has no certified finite resource bound",
+        )
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .with_builtin("sendmail")
+        .build(),
+        ProcessInvocationError::Capability(source) => source.into_runtime_error(),
+        ProcessInvocationError::Execution(source) => source.into_runtime_error(),
+        ProcessInvocationError::DirectoryCapture(source)
+        | ProcessInvocationError::StaleDirectory(source) => sendmail_error_with_source(
+            SendmailFailure::Command,
+            format!("sendmail: process directory unavailable: {source}"),
+            source,
+        ),
+        ProcessInvocationError::Host(source) => sendmail_error_with_source(
+            SendmailFailure::Command,
+            format!("sendmail: {source}"),
+            source,
+        ),
+        ProcessInvocationError::NoNativeDirectory | ProcessInvocationError::NoRevocation => {
+            sendmail_error(SendmailFailure::Command, format!("sendmail: {source}"))
+        }
+    }
 }
 
 #[cfg(test)]

@@ -205,6 +205,16 @@ pub trait RuntimeProcessService {
     >;
 }
 
+/// Complete native child output is not currently physically bounded. Keep
+/// this admission fact at the service boundary for all process consumers.
+pub(crate) fn complete_process_output_requires_evidence(
+    runtime: Option<&super::RuntimeContext>,
+) -> bool {
+    runtime
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .is_some_and(|port| port.placement_resources().memory_available_bytes.is_some())
+}
+
 pub trait RuntimeErrorService {
     fn report(&self, error: &RuntimeError);
 }

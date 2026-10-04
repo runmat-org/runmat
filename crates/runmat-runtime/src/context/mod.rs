@@ -6,6 +6,8 @@
 
 mod capability;
 mod preferences;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod process_invocation;
 mod user_path;
 mod host_document;
 pub mod host_effect;
@@ -41,6 +43,7 @@ pub use runtime::{
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{ContextFuture, RuntimeContextGuard};
+pub(crate) use services::complete_process_output_requires_evidence;
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::RuntimeProcessService;
 pub use services::{
