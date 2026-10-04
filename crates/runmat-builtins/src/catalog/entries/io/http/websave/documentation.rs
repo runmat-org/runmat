@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         "Downloads HTTP or HTTPS URL content through the shared RunMat HTTP transport and writes it through the active filesystem provider.",
         "The filename and URL are host text values. Native integer and resident numeric values are rejected for these roles.",
         "Query names are text. Query values may be text, numeric, or logical scalars or vectors; native integers are formatted exactly and vectors use comma-separated formatting.",
-        "An options structure immediately after the URL can supply `Timeout`, `UserAgent`, and `HeaderFields`. The default timeout is 5 seconds, and an integer timeout is read exactly.",
+        "An options structure immediately after the URL can supply `Timeout`, `UserAgent`, `HeaderFields`, and the paired `KeyName`/`KeyValue` HTTP header. Empty default key fields add no header or query parameter. The default timeout is 5 seconds, and an integer timeout is read exactly.",
         "RunMat also recognizes direct `Timeout` and `UserAgent` name-value pairs as request options.",
         "Rejects unpaired or unsupported option shapes instead of silently ignoring them.",
         ] },

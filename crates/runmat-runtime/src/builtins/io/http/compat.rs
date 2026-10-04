@@ -315,12 +315,23 @@ async fn websave_builtin(
     let url_text = scalar_text(&args[1], "websave", "url")?;
     let mut url = Url::parse(&url_text)
         .map_err(|err| compat_error("websave", format!("websave: invalid URL ({err})")))?;
-    preflight_websave_rest(&args[2..])?;
+    let prepared_api_key = match args.get(2) {
+        Some(Value::Struct(source)) => Some(super::api_key::PreparedApiKey::parse(source)),
+        _ => None,
+    };
+    preflight_websave_rest(&args[2..], prepared_api_key.as_ref())?;
     let rest = gather_args("websave", &args[2..]).await?;
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;
     let mut user_agent = USER_AGENT.to_string();
-    parse_websave_rest(&mut url, &mut headers, &mut timeout, &mut user_agent, &rest)?;
+    parse_websave_rest(
+        &mut url,
+        &mut headers,
+        &mut timeout,
+        &mut user_agent,
+        &rest,
+        prepared_api_key.as_ref(),
+    )?;
     let response = transport::send_request(
         HttpRequest {
             url,

@@ -111,6 +111,7 @@ fn websave_rest_applies_options_and_query_pairs() {
             Value::String("q".to_string()),
             Value::String("hello world".to_string()),
         ],
+        None,
     )
     .unwrap();
 
@@ -118,6 +119,47 @@ fn websave_rest_applies_options_and_query_pairs() {
     assert_eq!(headers, vec![("XRunMat".to_string(), "yes".to_string())]);
     assert_eq!(timeout, Duration::from_secs(7));
     assert_eq!(user_agent, "agent");
+}
+
+#[test]
+fn websave_options_api_key_is_header_not_query_and_known_invalid_name_preflights() {
+    let mut source = runmat_value::StructValue::new();
+    source.insert("KeyName", Value::from("X-API-Key"));
+    source.insert("KeyValue", Value::from("secret"));
+    let prepared = super::super::api_key::PreparedApiKey::parse(&source);
+    let mut url = Url::parse("https://example.test/data").unwrap();
+    let mut headers = Vec::new();
+    let mut timeout = DEFAULT_TIMEOUT;
+    let mut user_agent = USER_AGENT.to_string();
+    let args = [Value::Struct(source)];
+    preflight_websave_rest(&args, Some(&prepared)).unwrap();
+    parse_websave_rest(
+        &mut url,
+        &mut headers,
+        &mut timeout,
+        &mut user_agent,
+        &args,
+        Some(&prepared),
+    )
+    .unwrap();
+    assert_eq!(url.query(), None);
+    assert_eq!(headers, vec![("X-API-Key".into(), "secret".into())]);
+
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let mut invalid = runmat_value::StructValue::new();
+    invalid.insert("KeyName", Value::from("bad\nname"));
+    invalid.insert("KeyValue", Value::GpuTensor(allocation.handle.clone()));
+    let prepared = super::super::api_key::PreparedApiKey::parse(&invalid);
+    let error = preflight_websave_rest(&[Value::Struct(invalid)], Some(&prepared))
+        .expect_err("known malformed header must reject before a resident value is gathered");
+    assert!(error.message().contains("KeyName"));
+    assert_eq!(allocation.probe.retirements(), 0);
 }
 
 #[test]

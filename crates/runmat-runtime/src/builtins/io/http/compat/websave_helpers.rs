@@ -1,10 +1,18 @@
 use super::*;
-pub(super) fn preflight_websave_rest(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_websave_rest(
+    args: &[Value],
+    prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
+) -> BuiltinResult<()> {
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;
     let mut user_agent = USER_AGENT.to_string();
     let mut index = 0;
     if let Some(Value::Struct(options)) = args.first() {
+        if let Some(prepared) = prepared_api_key {
+            prepared.preflight_known(options).map_err(|err| {
+                compat_error_with_source("websave", format!("websave: {err}"), err)
+            })?;
+        }
         if !crate::dispatcher::value_contains_gpu(&args[0]) {
             apply_websave_options(options, &mut headers, &mut timeout, &mut user_agent)?;
         }
@@ -51,9 +59,17 @@ pub(super) fn parse_websave_rest(
     timeout: &mut Duration,
     user_agent: &mut String,
     args: &[Value],
+    prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
 ) -> BuiltinResult<()> {
     let mut idx = 0usize;
     if let Some(Value::Struct(options)) = args.first() {
+        if let Some(prepared) = prepared_api_key {
+            if let Some(header) = prepared.finish(options).map_err(|err| {
+                compat_error_with_source("websave", format!("websave: {err}"), err)
+            })? {
+                headers.push(header);
+            }
+        }
         apply_websave_options(options, headers, timeout, user_agent)?;
         idx = 1;
     }

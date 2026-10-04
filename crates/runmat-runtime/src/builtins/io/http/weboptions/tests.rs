@@ -435,7 +435,9 @@ fn webread_and_webwrite_apply_exact_integer_api_key_header() {
         args.push(key.clone());
         run_call_builtin(builtin, &args).expect("HTTP request with API key");
         let headers = rx.recv().expect("captured headers");
-        assert!(headers.contains(&format!("X-Sequence: {}", u64::MAX)));
+        assert!(headers
+            .to_ascii_lowercase()
+            .contains(&format!("x-sequence: {}", u64::MAX)));
         assert!(!headers.contains("KeyName="));
         assert!(!headers.contains("KeyValue="));
     }
