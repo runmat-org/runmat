@@ -27,8 +27,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    for index in 1..args.len().min(3) {
-        if !text(&args[index]) {
+    for (index, argument) in args.iter().enumerate().take(3).skip(1) {
+        if !text(argument) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SENDMAIL-TEXT",
                 "subject and message must be character rows or string scalars",
