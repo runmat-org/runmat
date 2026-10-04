@@ -271,7 +271,7 @@ fn cellstr(values: Vec<String>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fileattrib",
-    binding_variant = "Default",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -367,7 +367,7 @@ fn error_struct(message: &str) -> StructValue {
 
 #[runtime_builtin(
     name = "rehash",
-    binding_variant = "Default",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -550,6 +550,9 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 mod captured_fs_path;
+#[cfg(test)]
+#[path = "compat/tests/bindings.rs"]
+mod binding_tests;
 #[path = "compat/user_path.rs"]
 mod user_path;
 #[path = "compat/system.rs"]
