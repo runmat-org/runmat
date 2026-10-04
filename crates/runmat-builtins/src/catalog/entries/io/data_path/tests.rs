@@ -162,3 +162,30 @@ fn list_inspect_and_logical_results_have_precise_host_facts() {
         assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Logical));
     }
 }
+
+#[test]
+fn move_effects_and_shared_admission_failures_match_runtime() {
+    let moved = call(&DATA_MOVE_CATALOG_ENTRY, vec![text(), text()], 1);
+    assert!(moved.effects.0.contains(&EffectKind::FilesystemRead));
+    assert!(moved.effects.0.contains(&EffectKind::FilesystemWrite));
+
+    let expected = [
+        "RUNMAT:Data:Error",
+        "RunMat:Placement:InsufficientResourceEvidence",
+        "RunMat:Placement:StaleResourceAuthority",
+        "RunMat:Placement:ResourceLimit",
+        "RunMat:Placement:Unavailable",
+        "RunMat:Placement:InvalidRevision",
+        "RunMat:Placement:InvalidDecision",
+        "RunMat:Cancelled",
+    ];
+    for entry in ENTRIES {
+        let identifiers: Vec<_> = entry
+            .descriptor
+            .errors
+            .iter()
+            .filter_map(|error| error.identifier)
+            .collect();
+        assert_eq!(identifiers, expected, "{}", entry.identity.name);
+    }
+}

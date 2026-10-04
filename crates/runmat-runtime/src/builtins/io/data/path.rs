@@ -33,17 +33,21 @@ async fn data_create_builtin(
         None,
         admission::facts(&(&path, &schema.arrays)),
     )?;
+    let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);
     admission::execute(runtime.as_ref(), receipt, async {
         let now = now_rfc3339();
         let mut arrays = BTreeMap::new();
         for (name, mut meta) in schema.arrays {
+            crate::data::cooperate_data_work(&mut budget, 0).await?;
             let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
+            crate::data::cooperate_data_work(&mut budget, 0).await?;
             let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
                 authority.provider(),
                 &root,
                 &name,
                 &payload,
                 &meta.chunk_shape,
+                &mut budget,
             )
             .await?;
             meta.data_path = make_rel_data_path(&root, &payload_path)?;
@@ -148,10 +152,10 @@ async fn data_delete_builtin(runtime: Option<RuntimeContext>, path: Value) -> Bu
             .remove_dir_all(&root)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "data.delete: failed to remove '{}': {err}",
-                    root.display()
-                ))
+                crate::data::data_error_with_source(
+                    format!("data.delete: failed to remove '{}': {err}", root.display()),
+                    err,
+                )
             })?;
         Ok(Value::Bool(true))
     })
@@ -185,8 +189,9 @@ async fn data_copy_builtin(
         Some(&to_root),
         admission::facts(&(&from, &to)),
     )?;
+    let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);
     admission::execute(runtime.as_ref(), receipt, async {
-        copy_dir_recursive_on(authority.provider(), &from_root, &to_root).await?;
+        copy_dir_recursive_on(authority.provider(), &from_root, &to_root, &mut budget).await?;
         Ok(Value::Bool(true))
     })
     .await
@@ -225,9 +230,10 @@ async fn data_move_builtin(
             .rename(&from_root, &to_root)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "data.move: failed to move dataset '{from}' -> '{to}': {err}"
-                ))
+                crate::data::data_error_with_source(
+                    format!("data.move: failed to move dataset '{from}' -> '{to}': {err}"),
+                    err,
+                )
             })?;
         Ok(Value::Bool(true))
     })
@@ -268,8 +274,9 @@ async fn data_import_builtin(
         Some(&root),
         admission::facts(&(&path, &format, &source_path)),
     )?;
+    let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);
     admission::execute(runtime.as_ref(), receipt, async {
-        copy_dir_recursive_on(authority.provider(), &source_root, &root).await?;
+        copy_dir_recursive_on(authority.provider(), &source_root, &root, &mut budget).await?;
         let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
         Ok(dataset_object(&path, &manifest))
     })
@@ -310,8 +317,15 @@ async fn data_export_builtin(
         Some(&target_root),
         admission::facts(&(&path, &format, &target_path)),
     )?;
+    let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);
     admission::execute(runtime.as_ref(), receipt, async {
-        copy_dir_recursive_on(authority.provider(), &source_root, &target_root).await?;
+        copy_dir_recursive_on(
+            authority.provider(),
+            &source_root,
+            &target_root,
+            &mut budget,
+        )
+        .await?;
         Ok(Value::Bool(true))
     })
     .await
@@ -340,10 +354,10 @@ async fn data_list_builtin(
     )?;
     admission::execute(runtime.as_ref(), receipt, async {
         let entries = authority.provider().read_dir(&root).await.map_err(|err| {
-            data_error(format!(
-                "data.list: failed to read '{}': {err}",
-                root.display()
-            ))
+            crate::data::data_error_with_source(
+                format!("data.list: failed to read '{}': {err}", root.display()),
+                err,
+            )
         })?;
         let mut values = Vec::new();
         for entry in entries {

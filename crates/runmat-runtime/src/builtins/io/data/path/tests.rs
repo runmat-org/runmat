@@ -3,6 +3,30 @@ use crate::dispatcher::call_builtin;
 use runmat_filesystem::{self as fs, FsProvider};
 use std::sync::Arc;
 
+#[test]
+fn path_and_manifest_failures_retain_typed_source_causes() {
+    use std::error::Error;
+
+    let _serial = fs::provider_override_lock();
+    let provider = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
+    let _provider = fs::replace_provider(provider.clone() as Arc<dyn FsProvider>);
+    let missing = call_builtin("data.open", &[Value::String("missing.data".into())])
+        .expect_err("missing manifest");
+    assert_eq!(missing.identifier.as_deref(), Some("RUNMAT:Data:Error"));
+    assert!(missing
+        .source()
+        .is_some_and(|cause| cause.downcast_ref::<std::io::Error>().is_some()));
+
+    provider
+        .write_project_path("/selected/bad.data/manifest.json", b"{not-json")
+        .expect("malformed manifest fixture");
+    let malformed = call_builtin("data.open", &[Value::String("bad.data".into())])
+        .expect_err("malformed manifest");
+    assert!(malformed
+        .source()
+        .is_some_and(|cause| cause.downcast_ref::<serde_json::Error>().is_some()));
+}
+
 #[path = "tests/receipt.rs"]
 mod receipt;
 
@@ -78,6 +102,59 @@ fn cancelled_create_does_not_publish_any_array_or_manifest() {
     assert!(provider
         .list_project_path("/selected/cancelled.data")
         .is_err());
+}
+
+#[test]
+fn immediately_ready_recursive_copy_cooperates_before_next_entry() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::num::NonZeroU64;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    let provider = fs::MemoryFsProvider::with_current_dir("/data");
+    provider
+        .write_project_path("/data/source.data/a.bin", b"first")
+        .unwrap();
+    provider
+        .write_project_path("/data/source.data/b.bin", b"second")
+        .unwrap();
+    let cancellation = Rc::new(CancellationSource::new());
+    let cancel = cancellation.clone();
+    let turns = Rc::new(Cell::new(0));
+    let counted = turns.clone();
+    let mut budget = Some(CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        cancellation.token(),
+        move || {
+            counted.set(counted.get() + 1);
+            cancel.cancel(CancellationReason::User);
+            Box::pin(async { Ok(()) })
+        },
+    ));
+    let error = futures::executor::block_on(copy_dir_recursive_on(
+        &provider,
+        &PathBuf::from("/data/source.data"),
+        &PathBuf::from("/data/copied.data"),
+        &mut budget,
+    ))
+    .expect_err("cancelled traversal must not continue through immediately-ready entries");
+    assert_eq!(error.identifier.as_deref(), Some("RunMat:Cancelled"));
+    assert_eq!(turns.get(), 1);
+    assert!(provider
+        .read_project_path("/data/copied.data/a.bin")
+        .is_err());
+    assert!(provider
+        .read_project_path("/data/copied.data/b.bin")
+        .is_err());
+    assert_eq!(
+        provider
+            .read_project_path("/data/source.data/a.bin")
+            .unwrap(),
+        b"first"
+    );
 }
 
 #[test]

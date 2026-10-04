@@ -2170,35 +2170,47 @@ async fn copy_file(
 ) -> BuiltinResult<()> {
     let src = authority.resolve(src)?;
     let dst = authority.resolve(dst)?;
-    copy_file_on(authority.provider(), &src, &dst).await
+    let mut unmetered = None;
+    copy_file_on(authority.provider(), &src, &dst, &mut unmetered).await
 }
 
 async fn copy_file_on(
     provider: &dyn runmat_filesystem::FsProvider,
     src: &PathBuf,
     dst: &PathBuf,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
-    let bytes = provider
-        .read(src)
-        .await
-        .map_err(|err| data_error(format!("failed to open '{}': {err}", src.display())))?;
+    crate::data::cooperate_data_work(budget, 0).await?;
+    let bytes = provider.read(src).await.map_err(|err| {
+        crate::data::data_error_with_source(
+            format!("failed to open '{}': {err}", src.display()),
+            err,
+        )
+    })?;
+    crate::data::cooperate_data_work(budget, bytes.len() as u64).await?;
     let parent = dst.parent().ok_or_else(|| {
         data_error(format!(
             "invalid destination path '{}': missing parent",
             dst.display()
         ))
     })?;
-    provider
-        .create_dir_all(parent)
-        .await
-        .map_err(|err| data_error(format!("failed to create '{}': {err}", parent.display())))?;
-    provider.write(dst, &bytes).await.map_err(|err| {
-        data_error(format!(
-            "failed to copy '{}' -> '{}': {err}",
-            src.display(),
-            dst.display()
-        ))
+    provider.create_dir_all(parent).await.map_err(|err| {
+        crate::data::data_error_with_source(
+            format!("failed to create '{}': {err}", parent.display()),
+            err,
+        )
     })?;
+    provider.write(dst, &bytes).await.map_err(|err| {
+        crate::data::data_error_with_source(
+            format!(
+                "failed to copy '{}' -> '{}': {err}",
+                src.display(),
+                dst.display()
+            ),
+            err,
+        )
+    })?;
+    crate::data::cooperate_data_work(budget, bytes.len() as u64).await?;
     Ok(())
 }
 
@@ -2376,34 +2388,45 @@ async fn copy_dir_recursive_on(
     provider: &dyn runmat_filesystem::FsProvider,
     src: &PathBuf,
     dst: &PathBuf,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
-    let metadata = provider
-        .metadata(src)
-        .await
-        .map_err(|err| data_error(format!("failed to stat '{}': {err}", src.display())))?;
+    crate::data::cooperate_data_work(budget, 0).await?;
+    let metadata = provider.metadata(src).await.map_err(|err| {
+        crate::data::data_error_with_source(
+            format!("failed to stat '{}': {err}", src.display()),
+            err,
+        )
+    })?;
     if !metadata.is_dir() {
         return Err(data_error(format!(
             "expected dataset directory at '{}'",
             src.display()
         )));
     }
-    provider
-        .create_dir_all(dst)
-        .await
-        .map_err(|err| data_error(format!("failed to create '{}': {err}", dst.display())))?;
-    for entry in provider
-        .read_dir(src)
-        .await
-        .map_err(|err| data_error(format!("failed to read '{}': {err}", src.display())))?
-    {
+    provider.create_dir_all(dst).await.map_err(|err| {
+        crate::data::data_error_with_source(
+            format!("failed to create '{}': {err}", dst.display()),
+            err,
+        )
+    })?;
+    for entry in provider.read_dir(src).await.map_err(|err| {
+        crate::data::data_error_with_source(
+            format!("failed to read '{}': {err}", src.display()),
+            err,
+        )
+    })? {
+        crate::data::cooperate_data_work(budget, 1).await?;
         let entry_src = entry.path().to_path_buf();
         let entry_dst = dst.join(entry.file_name());
         if entry.is_dir() {
             let own_metadata = provider.symlink_metadata(&entry_src).await.map_err(|err| {
-                data_error(format!(
-                    "failed to inspect directory entry '{}': {err}",
-                    entry_src.display()
-                ))
+                crate::data::data_error_with_source(
+                    format!(
+                        "failed to inspect directory entry '{}': {err}",
+                        entry_src.display()
+                    ),
+                    err,
+                )
             })?;
             if own_metadata.is_symlink() {
                 return Err(data_error(format!(
@@ -2411,10 +2434,10 @@ async fn copy_dir_recursive_on(
                     entry_src.display()
                 )));
             }
-            copy_dir_recursive_on(provider, &entry_src, &entry_dst).await?;
+            copy_dir_recursive_on(provider, &entry_src, &entry_dst, budget).await?;
             continue;
         }
-        copy_file_on(provider, &entry_src, &entry_dst).await?;
+        copy_file_on(provider, &entry_src, &entry_dst, budget).await?;
     }
     Ok(())
 }

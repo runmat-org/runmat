@@ -68,7 +68,58 @@ pub const DATA_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "A path, schema, format, manifest, or filesystem operation fails during the requested data call.",
     message: "data: operation failed",
 };
-const ERRORS: &[BuiltinErrorDescriptor] = &[DATA_ERROR];
+const RESOURCE_EVIDENCE_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.RESOURCE_EVIDENCE",
+    identifier: Some("RunMat:Placement:InsufficientResourceEvidence"),
+    when: "A finite resource budget is active but no complete dataset-path host-effect bound is certified before filesystem work.",
+    message: "data: complete-call resource evidence is unavailable",
+};
+const RESOURCE_AUTHORITY_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.RESOURCE_AUTHORITY",
+    identifier: Some("RunMat:Placement:StaleResourceAuthority"),
+    when: "The certifying host-effect resource authority is revoked before result publication.",
+    message: "data: resource authority changed",
+};
+const RESOURCE_LIMIT_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.RESOURCE_LIMIT",
+    identifier: Some("RunMat:Placement:ResourceLimit"),
+    when: "A certified complete-call demand exceeds the available placement resources.",
+    message: "data: placement resource limit was exceeded",
+};
+const PLACEMENT_UNAVAILABLE_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.PLACEMENT_UNAVAILABLE",
+    identifier: Some("RunMat:Placement:Unavailable"),
+    when: "The installed placement service cannot select an admitted host-effect route.",
+    message: "data: placement route is unavailable",
+};
+const PLACEMENT_REVISION_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.PLACEMENT_REVISION",
+    identifier: Some("RunMat:Placement:InvalidRevision"),
+    when: "The selected host-effect revision does not belong to the certifying authority.",
+    message: "data: placement revision is invalid",
+};
+const PLACEMENT_DECISION_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.PLACEMENT_DECISION",
+    identifier: Some("RunMat:Placement:InvalidDecision"),
+    when: "Placement returns a route other than the admitted dataset-path host effect.",
+    message: "data: placement decision is invalid",
+};
+const CANCELLED_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.CANCELLED",
+    identifier: Some("RunMat:Cancelled"),
+    when: "The invocation is cancelled before the dataset-path result is published.",
+    message: "data invocation was cancelled",
+};
+const ERRORS: &[BuiltinErrorDescriptor] = &[
+    DATA_ERROR,
+    RESOURCE_EVIDENCE_ERROR,
+    RESOURCE_AUTHORITY_ERROR,
+    RESOURCE_LIMIT_ERROR,
+    PLACEMENT_UNAVAILABLE_ERROR,
+    PLACEMENT_REVISION_ERROR,
+    PLACEMENT_DECISION_ERROR,
+    CANCELLED_ERROR,
+];
 
 const fn signature(
     label: &'static str,

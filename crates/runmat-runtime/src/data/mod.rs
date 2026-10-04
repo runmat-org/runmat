@@ -19,6 +19,9 @@ use sha2::{Digest, Sha256};
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod cooperation;
+pub(crate) use cooperation::cooperate_data_work;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataManifest {
     pub schema_version: u32,
@@ -794,7 +797,10 @@ pub fn data_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
-pub fn data_error_with_source(message: impl Into<String>, source: std::io::Error) -> RuntimeError {
+pub fn data_error_with_source(
+    message: impl Into<String>,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier("RUNMAT:Data:Error")
         .with_builtin("data")
@@ -848,19 +854,20 @@ pub async fn write_manifest_on(
     manifest: &DataManifest,
 ) -> BuiltinResult<()> {
     provider.create_dir_all(root).await.map_err(|err| {
-        data_error(format!(
-            "failed to create dataset root '{}': {err}",
-            root.display()
-        ))
+        data_error_with_source(
+            format!("failed to create dataset root '{}': {err}", root.display()),
+            err,
+        )
     })?;
     let path = manifest_path(root);
-    let bytes = serde_json::to_vec_pretty(manifest)
-        .map_err(|err| data_error(format!("failed to encode manifest json: {err}")))?;
+    let bytes = serde_json::to_vec_pretty(manifest).map_err(|err| {
+        data_error_with_source(format!("failed to encode manifest json: {err}"), err)
+    })?;
     provider.write(&path, &bytes).await.map_err(|err| {
-        data_error(format!(
-            "failed to write manifest '{}': {err}",
-            path.display()
-        ))
+        data_error_with_source(
+            format!("failed to write manifest '{}': {err}", path.display()),
+            err,
+        )
     })?;
     Ok(())
 }
@@ -876,16 +883,16 @@ pub async fn read_manifest_on(
 ) -> BuiltinResult<DataManifest> {
     let path = manifest_path(root);
     let bytes = provider.read(&path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read manifest '{}': {err}",
-            path.display()
-        ))
+        data_error_with_source(
+            format!("failed to read manifest '{}': {err}", path.display()),
+            err,
+        )
     })?;
     let manifest = serde_json::from_slice::<DataManifest>(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse manifest '{}': {err}",
-            path.display()
-        ))
+        data_error_with_source(
+            format!("failed to parse manifest '{}': {err}", path.display()),
+            err,
+        )
     })?;
     Ok(manifest)
 }
@@ -897,8 +904,16 @@ pub async fn write_array_payload_async(
     chunk_shape: &[usize],
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
     let (provider, resolved) = captured_storage_root(root)?;
-    let (payload_path, index_path) =
-        write_array_payload_on(provider.as_ref(), &resolved, array, payload, chunk_shape).await?;
+    let mut unmetered = None;
+    let (payload_path, index_path) = write_array_payload_on(
+        provider.as_ref(),
+        &resolved,
+        array,
+        payload,
+        chunk_shape,
+        &mut unmetered,
+    )
+    .await?;
     let rebase = |path: PathBuf| {
         path.strip_prefix(&resolved)
             .map(|relative| root.join(relative))
@@ -928,30 +943,42 @@ pub async fn write_array_payload_on(
     array: &str,
     payload: &DataArrayPayload,
     chunk_shape: &[usize],
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
+    cooperate_data_work(budget, 0).await?;
     let array_dir = arrays_root(root).join(array);
     provider.create_dir_all(&array_dir).await.map_err(|err| {
-        data_error(format!(
-            "failed to create array dir '{}': {err}",
-            array_dir.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to create array dir '{}': {err}",
+                array_dir.display()
+            ),
+            err,
+        )
     })?;
     let payload_path = array_dir.join("data.f64.json");
-    let bytes = serde_json::to_vec(payload)
-        .map_err(|err| data_error(format!("failed to encode array payload json: {err}")))?;
+    let bytes = serde_json::to_vec(payload).map_err(|err| {
+        data_error_with_source(format!("failed to encode array payload json: {err}"), err)
+    })?;
     provider.write(&payload_path, &bytes).await.map_err(|err| {
-        data_error(format!(
-            "failed to write payload '{}': {err}",
-            payload_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to write payload '{}': {err}",
+                payload_path.display()
+            ),
+            err,
+        )
     })?;
 
     let chunk_dir = array_dir.join("chunks");
     provider.create_dir_all(&chunk_dir).await.map_err(|err| {
-        data_error(format!(
-            "failed to create chunk dir '{}': {err}",
-            chunk_dir.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to create chunk dir '{}': {err}",
+                chunk_dir.display()
+            ),
+            err,
+        )
     })?;
 
     let mut index = DataChunkIndex {
@@ -963,44 +990,50 @@ pub async fn write_array_payload_on(
     let grid_shape = chunk_grid_shape(&payload.shape, chunk_shape);
     let mut coords = vec![0usize; payload.shape.len()];
     loop {
+        cooperate_data_work(budget, 0).await?;
         let chunk_start = chunk_start_for_coords(&coords, chunk_shape);
         let chunk_extent = chunk_extent_for_start(&chunk_start, chunk_shape, &payload.shape);
         let chunk_payload = DataArrayPayload {
             dtype: payload.dtype.clone(),
             shape: chunk_extent.clone(),
-            values: collect_chunk_values(payload, &chunk_start, &chunk_extent)?,
-            imaginary_values: payload
-                .imaginary_values
-                .as_ref()
-                .map(|values| {
+            values: collect_chunk_values(payload, &chunk_start, &chunk_extent, budget).await?,
+            imaginary_values: if let Some(values) = payload.imaginary_values.as_ref() {
+                Some(
                     collect_chunk_component_values(
                         values,
                         &payload.dtype,
                         &payload.shape,
                         &chunk_start,
                         &chunk_extent,
+                        budget,
                     )
-                })
-                .transpose()?,
+                    .await?,
+                )
+            } else {
+                None
+            },
         };
         let key = chunk_key(&coords);
         let object_id = format!("obj_{}", key.replace('.', "_"));
-        let chunk_bytes = serde_json::to_vec(&chunk_payload)
-            .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
+        let chunk_bytes = serde_json::to_vec(&chunk_payload).map_err(|err| {
+            data_error_with_source(format!("failed to encode chunk payload: {err}"), err)
+        })?;
         let data_path = chunk_dir.join(format!("{object_id}.json"));
         provider
             .write(&data_path, &chunk_bytes)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to write chunk '{}': {err}",
-                    data_path.display()
-                ))
+                data_error_with_source(
+                    format!("failed to write chunk '{}': {err}", data_path.display()),
+                    err,
+                )
             })?;
         let hash = sha256_hex(&chunk_bytes);
         let rel_chunk_path = data_path
             .strip_prefix(root)
-            .map_err(|err| data_error(format!("failed to compute chunk relative path: {err}")))?
+            .map_err(|err| {
+                data_error_with_source(format!("failed to compute chunk relative path: {err}"), err)
+            })?
             .to_string_lossy()
             .to_string();
         index.chunks.push(DataChunkIndexEntry {
@@ -1023,12 +1056,13 @@ pub async fn write_array_payload_on(
             },
             chunk_bytes,
         ));
+        cooperate_data_work(budget, 1).await?;
         if !advance_index(&mut coords, &grid_shape) {
             break;
         }
     }
 
-    maybe_upload_chunks_on(provider, root, array, upload_chunks).await?;
+    maybe_upload_chunks_on(provider, root, array, upload_chunks, budget).await?;
 
     tracing::info!(
         target: "runmat.data",
@@ -1040,16 +1074,20 @@ pub async fn write_array_payload_on(
     );
 
     let chunk_index_path = chunk_dir.join("index.json");
-    let chunk_index_bytes = serde_json::to_vec(&index)
-        .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
+    let chunk_index_bytes = serde_json::to_vec(&index).map_err(|err| {
+        data_error_with_source(format!("failed to encode chunk index json: {err}"), err)
+    })?;
     provider
         .write(&chunk_index_path, &chunk_index_bytes)
         .await
         .map_err(|err| {
-            data_error(format!(
-                "failed to write chunk index '{}': {err}",
-                chunk_index_path.display()
-            ))
+            data_error_with_source(
+                format!(
+                    "failed to write chunk index '{}': {err}",
+                    chunk_index_path.display()
+                ),
+                err,
+            )
         })?;
     Ok((payload_path, chunk_index_path))
 }
@@ -1287,6 +1325,7 @@ async fn maybe_upload_chunks_on(
     root: &Path,
     array: &str,
     chunks: Vec<(DataChunkDescriptor, Vec<u8>)>,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
     if chunks.is_empty() {
         return Ok(());
@@ -1300,21 +1339,23 @@ async fn maybe_upload_chunks_on(
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
-            return Err(data_error(format!(
-                "failed to request data chunk upload targets: {err}"
-            )))
+            return Err(data_error_with_source(
+                format!("failed to request data chunk upload targets: {err}"),
+                err,
+            ))
         }
     };
     for (descriptor, bytes) in chunks {
+        cooperate_data_work(budget, 1).await?;
         let target = find_chunk_target(&targets, &descriptor.key)?;
         provider
             .data_upload_chunk(target, &bytes)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to upload chunk '{}': {err}",
-                    descriptor.key
-                ))
+                data_error_with_source(
+                    format!("failed to upload chunk '{}': {err}", descriptor.key),
+                    err,
+                )
             })?;
         tracing::info!(
             target: "runmat.data",
@@ -1388,10 +1429,11 @@ fn chunk_extent_for_start(
         .collect()
 }
 
-fn collect_chunk_values(
+async fn collect_chunk_values(
     payload: &DataArrayPayload,
     chunk_start: &[usize],
     chunk_extent: &[usize],
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayValues> {
     collect_chunk_component_values(
         &payload.values,
@@ -1399,19 +1441,23 @@ fn collect_chunk_values(
         &payload.shape,
         chunk_start,
         chunk_extent,
+        budget,
     )
+    .await
 }
 
-fn collect_chunk_component_values(
+async fn collect_chunk_component_values(
     source: &DataArrayValues,
     dtype: &str,
     full_shape: &[usize],
     chunk_start: &[usize],
     chunk_extent: &[usize],
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayValues> {
     let mut local = vec![0usize; chunk_extent.len()];
     let mut values = DataArrayValues::zeros(dtype, 0)?;
     loop {
+        cooperate_data_work(budget, 1).await?;
         let mut global = Vec::with_capacity(chunk_extent.len());
         for dim in 0..chunk_extent.len() {
             global.push(chunk_start[dim] + local[dim]);
@@ -1884,6 +1930,9 @@ pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[path = "cooperation.rs"]
+    mod cooperation;
 
     #[test]
     fn schema_dimensions_preserve_large_typed_unsigned_values() {

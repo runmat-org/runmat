@@ -29,7 +29,7 @@ pub const DATA_MOVE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &super::descriptor::DATA_MOVE_DESCRIPTOR,
     infer,
     PathEntryBehavior {
-        effects: WRITE_EFFECTS,
+        effects: COPY_EFFECTS,
         purity: BuiltinPurity::Impure,
         integer_capabilities: &[],
         integer_audit: Some(&DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
