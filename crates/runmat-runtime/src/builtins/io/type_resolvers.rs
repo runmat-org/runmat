@@ -8,10 +8,6 @@ pub(crate) fn num_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Num
 }
 
-pub(crate) fn bool_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Bool
-}
-
 pub(crate) fn tensor_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::tensor()
 }

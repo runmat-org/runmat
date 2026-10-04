@@ -202,7 +202,7 @@ impl MemmapFormat {
                 if cell.data.is_empty() {
                     return Err(format_error("memmapfile: Format cell is empty"));
                 }
-                if cell.shape.as_slice() != &[cell.rows, cell.cols]
+                if cell.shape.as_slice() != [cell.rows, cell.cols]
                     || cell.rows.checked_mul(cell.cols) != Some(cell.data.len())
                     || cell.cols > 3
                     || (cell.rows > 1 && cell.cols != 3)

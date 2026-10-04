@@ -26,22 +26,6 @@ use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "input1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input argument.",
-    },
-];
 const INPUTS_THREE: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "input1",
@@ -503,7 +487,7 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             .build()
     })?;
     let option_args = &args[1..];
-    if option_args.len() % 2 != 0 {
+    if !option_args.len().is_multiple_of(2) {
         return Err(memmapfile::typed_error(
             &MEMMAPFILE_ERROR_INVALID_CALL,
             "memmapfile: name-value options must be paired",
