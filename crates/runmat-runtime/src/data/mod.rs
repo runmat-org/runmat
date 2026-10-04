@@ -182,6 +182,39 @@ impl DataArrayValues {
         })
     }
 
+    fn append_zeroes(&mut self, count: usize) {
+        let next = self.len().checked_add(count).expect("validated data shape");
+        match self {
+            Self::F64(values) => values.resize(next, 0.0),
+            Self::F32(values) => values.resize(next, 0.0),
+            Self::I8(values) => values.resize(next, 0),
+            Self::I16(values) => values.resize(next, 0),
+            Self::I32(values) => values.resize(next, 0),
+            Self::I64(values) => values.resize(next, 0),
+            Self::U8(values) => values.resize(next, 0),
+            Self::U16(values) => values.resize(next, 0),
+            Self::U32(values) => values.resize(next, 0),
+            Self::U64(values) => values.resize(next, 0),
+        }
+    }
+
+    pub async fn zeros_cooperative(
+        dtype: &str,
+        len: usize,
+        budget: &mut Option<crate::execution::CpuCooperationBudget>,
+    ) -> BuiltinResult<Self> {
+        const WORK_CHUNK: usize = 4_096;
+        let mut values = Self::zeros(dtype, 0)?;
+        let mut remaining = len;
+        while remaining != 0 {
+            let count = remaining.min(WORK_CHUNK);
+            values.append_zeroes(count);
+            remaining -= count;
+            cooperate_data_work(budget, count as u64).await?;
+        }
+        Ok(values)
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Self::F64(values) => values.len(),
@@ -506,6 +539,21 @@ impl DataArrayPayload {
         })
     }
 
+    pub async fn zeros_cooperative(
+        dtype: String,
+        shape: Vec<usize>,
+        budget: &mut Option<crate::execution::CpuCooperationBudget>,
+    ) -> BuiltinResult<Self> {
+        let len = checked_shape_element_count(&shape)?;
+        let values = DataArrayValues::zeros_cooperative(&dtype, len, budget).await?;
+        Ok(Self {
+            dtype,
+            shape,
+            values,
+            imaginary_values: None,
+        })
+    }
+
     pub fn from_value(dtype: String, value: &Value) -> BuiltinResult<Self> {
         let (shape, values, imaginary_values) = data_values_from_value(value)?;
         Ok(Self {
@@ -539,6 +587,43 @@ impl DataArrayPayload {
             if let (Some(values), Some(scalar)) = (&mut imaginary_values, imaginary_scalar) {
                 values.set(index, scalar)?;
             }
+        }
+        Ok(Self {
+            dtype,
+            shape,
+            values,
+            imaginary_values,
+        })
+    }
+
+    pub async fn filled_cooperative(
+        dtype: String,
+        shape: Vec<usize>,
+        value: &Value,
+        budget: &mut Option<crate::execution::CpuCooperationBudget>,
+    ) -> BuiltinResult<Self> {
+        let scalar = Self::from_value(dtype.clone(), value)?;
+        if scalar.values.len() != 1 {
+            return Err(data_error("expected numeric scalar"));
+        }
+        let imaginary_scalar = scalar
+            .imaginary_values
+            .as_ref()
+            .map(|values| values.get(0))
+            .transpose()?;
+        let scalar = scalar.values.get(0)?;
+        let len = checked_shape_element_count(&shape)?;
+        let mut values = DataArrayValues::zeros_cooperative(&dtype, len, budget).await?;
+        let mut imaginary_values = match imaginary_scalar {
+            Some(_) => Some(DataArrayValues::zeros_cooperative(&dtype, len, budget).await?),
+            None => None,
+        };
+        for index in 0..len {
+            values.set(index, scalar)?;
+            if let (Some(values), Some(scalar)) = (&mut imaginary_values, imaginary_scalar) {
+                values.set(index, scalar)?;
+            }
+            cooperate_data_work(budget, 1).await?;
         }
         Ok(Self {
             dtype,
@@ -1107,10 +1192,23 @@ pub async fn read_array_payload_on(
     root: &Path,
     meta: &DataArrayMeta,
 ) -> BuiltinResult<DataArrayPayload> {
+    let mut budget = None;
+    read_array_payload_with_budget_on(provider, root, meta, &mut budget).await
+}
+
+/// The invocation-owned budget follows the same provider and decoding route;
+/// callers without an execution context use the compatibility wrapper above.
+pub async fn read_array_payload_with_budget_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    meta: &DataArrayMeta,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
+) -> BuiltinResult<DataArrayPayload> {
+    cooperate_data_work(budget, 0).await?;
     if let Some(index_path) = &meta.chunk_index_path {
         let path = root.join(index_path);
         if provider.metadata(&path).await.is_ok() {
-            return read_array_payload_chunked_on(provider, root, meta, &path).await;
+            return read_array_payload_chunked_on(provider, root, meta, &path, budget).await;
         }
     }
     let payload_path = root.join(&meta.data_path);
@@ -1120,7 +1218,8 @@ pub async fn read_array_payload_on(
             err,
         )
     })?;
-    serde_json::from_slice::<DataArrayPayload>(&bytes)
+    cooperate_data_work(budget, bytes.len() as u64).await?;
+    let payload = serde_json::from_slice::<DataArrayPayload>(&bytes)
         .map_err(|err| {
             data_error_with_source(
                 format!(
@@ -1130,7 +1229,9 @@ pub async fn read_array_payload_on(
                 err,
             )
         })?
-        .normalize_for_dtype(&meta.dtype)
+        .normalize_for_dtype(&meta.dtype)?;
+    cooperate_data_work(budget, 0).await?;
+    Ok(payload)
 }
 
 pub async fn read_array_slice_payload_async(
@@ -1283,7 +1384,9 @@ async fn read_array_payload_chunked_on(
     root: &Path,
     meta: &DataArrayMeta,
     index_path: &Path,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayPayload> {
+    cooperate_data_work(budget, 0).await?;
     let bytes = provider.read(index_path).await.map_err(|err| {
         data_error_with_source(
             format!(
@@ -1302,10 +1405,16 @@ async fn read_array_payload_chunked_on(
             err,
         )
     })?;
-    let mut values =
-        DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(&meta.shape)?)?;
+    cooperate_data_work(budget, bytes.len() as u64).await?;
+    let mut values = DataArrayValues::zeros_cooperative(
+        &meta.dtype,
+        checked_shape_element_count(&meta.shape)?,
+        budget,
+    )
+    .await?;
     let mut imaginary_values: Option<DataArrayValues> = None;
     for chunk in index.chunks {
+        cooperate_data_work(budget, 0).await?;
         let chunk_path = root.join(&chunk.data_path);
         let bytes = provider.read(&chunk_path).await.map_err(|err| {
             data_error_with_source(
@@ -1327,6 +1436,7 @@ async fn read_array_payload_chunked_on(
                 )
             })?
             .normalize_for_dtype(&meta.dtype)?;
+        cooperate_data_work(budget, bytes.len() as u64).await?;
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
         let chunk_extent = if chunk.shape.is_empty() {
@@ -1342,6 +1452,7 @@ async fn read_array_payload_chunked_on(
         }
         let mut local = vec![0usize; chunk_extent.len()];
         loop {
+            cooperate_data_work(budget, 1).await?;
             let mut global = Vec::with_capacity(chunk_extent.len());
             for dim in 0..chunk_extent.len() {
                 global.push(chunk_start[dim] + local[dim]);
@@ -1350,13 +1461,19 @@ async fn read_array_payload_chunked_on(
             let dst_linear = linear_index_column_major(&global, &meta.shape)?;
             values.set(dst_linear, payload.values.get(src_linear)?)?;
             if let Some(payload_imaginary) = &payload.imaginary_values {
-                let target = match &mut imaginary_values {
-                    Some(values) => values,
-                    None => imaginary_values.insert(DataArrayValues::zeros(
-                        &meta.dtype,
-                        checked_shape_element_count(&meta.shape)?,
-                    )?),
-                };
+                if imaginary_values.is_none() {
+                    imaginary_values = Some(
+                        DataArrayValues::zeros_cooperative(
+                            &meta.dtype,
+                            checked_shape_element_count(&meta.shape)?,
+                            budget,
+                        )
+                        .await?,
+                    );
+                }
+                let target = imaginary_values
+                    .as_mut()
+                    .expect("imaginary storage initialized");
                 target.set(dst_linear, payload_imaginary.get(src_linear)?)?;
             }
             if !advance_index(&mut local, &chunk_extent) {

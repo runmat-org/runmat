@@ -135,17 +135,22 @@ async fn data_array_read_builtin(
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     let inputs = rest.iter().collect::<Vec<_>>();
     handle_admission::execute(runtime.as_ref(), &owner, Op::ArrayRead, &inputs, async {
+        let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);
         let manifest =
             crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
         let meta = manifest
             .arrays
             .get(&name)
             .ok_or_else(|| data_error(format!("DataArray.read: array '{name}' not found")))?;
-        let payload =
-            crate::data::read_array_payload_on(owner.filesystem.as_ref(), &owner.root, meta)
-                .await?;
+        let payload = crate::data::read_array_payload_with_budget_on(
+            owner.filesystem.as_ref(),
+            &owner.root,
+            meta,
+            &mut budget,
+        )
+        .await?;
         let sliced = if let Some(slice_spec) = rest.first() {
-            read_slice_payload(&payload, slice_spec)?
+            read_slice_payload(&payload, slice_spec, &mut budget).await?
         } else {
             payload
         };
@@ -225,7 +230,9 @@ async fn data_array_resize_builtin(
                 .ok_or_else(|| data_error(format!("DataArray.resize: array '{name}' not found")))?;
             meta.shape = shape.clone();
             crate::data::cooperate_data_work(&mut budget, 0).await?;
-            let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
+            let payload =
+                DataArrayPayload::zeros_cooperative(meta.dtype.clone(), shape.clone(), &mut budget)
+                    .await?;
             let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
                 owner.filesystem.as_ref(),
                 &owner.root,
@@ -291,7 +298,13 @@ async fn data_array_fill_builtin(
             .get_mut(&name)
             .ok_or_else(|| data_error(format!("DataArray.fill: array '{name}' not found")))?;
         crate::data::cooperate_data_work(&mut budget, 0).await?;
-        let payload = DataArrayPayload::filled(meta.dtype.clone(), meta.shape.clone(), &value)?;
+        let payload = DataArrayPayload::filled_cooperative(
+            meta.dtype.clone(),
+            meta.shape.clone(),
+            &value,
+            &mut budget,
+        )
+        .await?;
         let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
             owner.filesystem.as_ref(),
             &owner.root,

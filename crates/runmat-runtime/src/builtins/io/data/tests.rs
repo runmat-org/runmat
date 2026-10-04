@@ -4,6 +4,8 @@ use runmat_value::{ComplexTensor, IntegerComplexStorage};
 
 #[path = "tests/handle_receipt.rs"]
 mod handle_receipt;
+#[path = "tests/slice_cooperation.rs"]
+mod slice_cooperation;
 
 fn tensor_values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()

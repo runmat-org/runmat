@@ -184,3 +184,60 @@ fn selected_open_keeps_original_provider_and_cwd_through_await_and_publication()
         WholeWorkObservationOutcome::Success
     );
 }
+
+#[test]
+fn typed_cooperation_cancellation_reports_cancelled_receipt_without_token_mark() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::num::NonZeroU64;
+
+    let _serial = fs::provider_override_lock();
+    let original = Arc::new(fs::MemoryFsProvider::with_current_dir("/original"));
+    let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
+    let _original_guard = fs::replace_provider(original.clone() as Arc<dyn FsProvider>);
+    let evidence = Rc::new(Evidence {
+        original: original.clone(),
+        seen: Cell::new(0),
+    });
+    let placement = Rc::new(SwappingPlacement {
+        replacement,
+        guard: RefCell::new(None),
+        selected: Cell::new(0),
+        observations: RefCell::new(Vec::new()),
+    });
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_host_effect_resources(evidence)
+                .with_placement(placement.clone()),
+        );
+    let authority = DataPathAuthority::capture(&["same.data"]).unwrap();
+    let source = authority.resolve("same.data").unwrap();
+    let receipt = admission::select(
+        Some(&runtime),
+        &authority,
+        DatasetPathOperation::Open,
+        &source,
+        None,
+        admission::facts(&"same.data"),
+    )
+    .unwrap();
+    let mut budget = Some(CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        CancellationSource::new().token(),
+        || Box::pin(async { Err(ExecutionServiceError::Cancelled) }),
+    ));
+    let error = futures::executor::block_on(admission::execute(Some(&runtime), receipt, async {
+        crate::data::cooperate_data_work(&mut budget, 1).await?;
+        Ok(Value::Bool(true))
+    }))
+    .expect_err("typed cancellation must abort publication");
+    assert_eq!(error.identifier.as_deref(), Some("RunMat:Cancelled"));
+    assert!(
+        !runtime.is_cancelled(),
+        "the test isolates typed error provenance"
+    );
+    let observed = placement.observations.borrow();
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0].outcome, WholeWorkObservationOutcome::Cancelled);
+}

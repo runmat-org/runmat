@@ -36,6 +36,16 @@ pub(in crate::builtins::io::data) async fn execute<T>(
     } else {
         effect.await
     };
+    if result.as_ref().err().is_some_and(|error| {
+        error.source.as_deref().is_some_and(|source| {
+            matches!(
+                source.downcast_ref::<ExecutionServiceError>(),
+                Some(ExecutionServiceError::Cancelled)
+            )
+        })
+    }) {
+        cancelled = true;
+    }
     let result = if result.is_ok() {
         if let Some(receipt) = receipt.as_ref() {
             receipt.checkpoint()?;

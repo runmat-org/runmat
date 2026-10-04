@@ -16,7 +16,8 @@ pub(in crate::builtins::io::data) async fn create_array_in_manifest(
             "DataTransaction.create_array: array '{array_name}' already exists"
         )));
     }
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
+    let payload =
+        DataArrayPayload::zeros_cooperative(meta.dtype.clone(), meta.shape.clone(), budget).await?;
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,
         root,
@@ -46,7 +47,8 @@ pub(in crate::builtins::io::data) async fn resize_array_in_manifest(
         .get_mut(array_name)
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     meta.shape = shape.clone();
-    let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
+    let payload =
+        DataArrayPayload::zeros_cooperative(meta.dtype.clone(), shape.clone(), budget).await?;
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,
         root,
@@ -76,19 +78,32 @@ pub(in crate::builtins::io::data) async fn fill_array_in_manifest(
         .get(array_name)
         .cloned()
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
-    let payload = crate::data::read_array_payload_on(provider, root, &meta).await?;
+    let payload =
+        crate::data::read_array_payload_with_budget_on(provider, root, &meta, budget).await?;
     let next_payload = if let Some(slice_spec) = slice_spec {
         let ranges = parse_slice_spec(slice_spec, &payload.shape)?;
         let target_shape: Vec<usize> = ranges
             .iter()
             .map(|r| r.end.saturating_sub(r.start))
             .collect();
-        let rhs = DataArrayPayload::filled(payload.dtype.clone(), target_shape, value)?
-            .into_value()
-            .map_err(|err| data_error(format!("DataTransaction.fill: {err}")))?;
-        write_slice_payload(&payload, slice_spec, &rhs)?
+        let rhs = DataArrayPayload::filled_cooperative(
+            payload.dtype.clone(),
+            target_shape,
+            value,
+            budget,
+        )
+        .await?
+        .into_value()
+        .map_err(|err| data_error(format!("DataTransaction.fill: {err}")))?;
+        write_slice_payload(&payload, slice_spec, &rhs, budget).await?
     } else {
-        DataArrayPayload::filled(payload.dtype.clone(), payload.shape.clone(), value)?
+        DataArrayPayload::filled_cooperative(
+            payload.dtype.clone(),
+            payload.shape.clone(),
+            value,
+            budget,
+        )
+        .await?
     };
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,

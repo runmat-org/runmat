@@ -81,36 +81,44 @@ pub(super) async fn execute_facts<T>(
 }
 
 pub(super) fn input(value: &Value) -> DatasetHandleInput {
-    use runmat_value::Value;
-
-    let scalar_digest = match value {
-        Value::String(text) => Some(Digest::sha256(
-            serde_json::to_vec(&("string", text)).expect("typed string control serializes"),
-        )),
-        Value::CharArray(chars) => Some(Digest::sha256(
-            serde_json::to_vec(&("char", &chars.shape, &chars.data))
-                .expect("typed character control serializes"),
-        )),
-        Value::Bool(boolean) => Some(Digest::sha256(
-            serde_json::to_vec(&("logical", boolean)).expect("typed logical control serializes"),
-        )),
-        Value::Int(integer) => Some(Digest::sha256(
-            serde_json::to_vec(&("integer", integer)).expect("typed integer control serializes"),
-        )),
-        Value::Num(number) => Some(Digest::sha256(
-            serde_json::to_vec(&("double_bits", number.to_bits()))
-                .expect("typed double control serializes"),
-        )),
-        Value::Complex(real, imaginary) => Some(Digest::sha256(
-            serde_json::to_vec(&("complex_double_bits", real.to_bits(), imaginary.to_bits()))
-                .expect("typed complex control serializes"),
-        )),
+    let scalar = match value {
+        Value::String(text) => Some(ScalarControl::Text(text)),
+        Value::CharArray(chars) => Some(ScalarControl::Character {
+            shape: &chars.shape,
+            data: &chars.data,
+        }),
+        Value::Bool(boolean) => Some(ScalarControl::Logical(*boolean)),
+        Value::Int(integer) => Some(ScalarControl::Integer(integer)),
+        Value::Num(number) => Some(ScalarControl::DoubleBits(number.to_bits())),
+        Value::Complex(real, imaginary) => Some(ScalarControl::ComplexDoubleBits {
+            real: real.to_bits(),
+            imaginary: imaginary.to_bits(),
+        }),
         _ => None,
     };
+    let scalar_digest = scalar.map(|scalar| {
+        Digest::sha256(serde_json::to_vec(&scalar).expect("typed scalar control serializes"))
+    });
     DatasetHandleInput {
         fact: crate::value_fact::value_fact(value),
         scalar_digest,
     }
+}
+
+#[derive(serde::Serialize)]
+enum ScalarControl<'a> {
+    Text(&'a str),
+    Character {
+        shape: &'a [usize],
+        data: &'a [char],
+    },
+    Logical(bool),
+    Integer(&'a runmat_value::IntValue),
+    DoubleBits(u64),
+    ComplexDoubleBits {
+        real: u64,
+        imaginary: u64,
+    },
 }
 
 pub(super) async fn execute<T>(

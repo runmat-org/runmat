@@ -53,9 +53,10 @@ pub(in crate::builtins::io::data) async fn apply_write_to_manifest_on(
         }
     }
 
-    let payload = crate::data::read_array_payload_on(provider, root, &meta).await?;
+    let payload =
+        crate::data::read_array_payload_with_budget_on(provider, root, &meta, budget).await?;
     let next_payload = if let Some(slice_spec) = slice_spec {
-        write_slice_payload(&payload, slice_spec, value)?
+        write_slice_payload(&payload, slice_spec, value, budget).await?
     } else {
         DataArrayPayload::from_value(payload.dtype.clone(), value)?
     };
@@ -154,13 +155,18 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
             &meta.dtype,
             &pos_by_key,
             &chunk_index,
+            budget,
         )
         .await?;
         if chunk_payload.imaginary_values.is_none() && rhs.imaginary_values.is_some() {
-            chunk_payload.imaginary_values = Some(crate::data::DataArrayValues::zeros(
-                &meta.dtype,
-                chunk_payload.values.len(),
-            )?);
+            chunk_payload.imaginary_values = Some(
+                crate::data::DataArrayValues::zeros_cooperative(
+                    &meta.dtype,
+                    chunk_payload.values.len(),
+                    budget,
+                )
+                .await?,
+            );
         } else if chunk_payload.imaginary_values.is_some() && rhs.imaginary_values.is_none() {
             return Err(data_error(
                 "CLASS_MISMATCH: real and complex data-array slices cannot be assigned to one another",
@@ -353,7 +359,9 @@ pub(in crate::builtins::io::data) async fn load_or_init_chunk_on(
     dtype: &str,
     pos_by_key: &HashMap<String, usize>,
     chunk_index: &DataChunkIndex,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<(usize, bool, DataChunkIndexEntry, DataArrayPayload)> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     if let Some(index) = pos_by_key.get(key).copied() {
         let entry = chunk_index
             .chunks
@@ -391,6 +399,8 @@ pub(in crate::builtins::io::data) async fn load_or_init_chunk_on(
         shape: chunk_extent.to_vec(),
         data_path: chunk_rel_path(array_name, &object_id),
     };
-    let payload = DataArrayPayload::zeros(dtype.to_string(), chunk_extent.to_vec())?;
+    let payload =
+        DataArrayPayload::zeros_cooperative(dtype.to_string(), chunk_extent.to_vec(), budget)
+            .await?;
     Ok((chunk_index.chunks.len(), false, entry, payload))
 }

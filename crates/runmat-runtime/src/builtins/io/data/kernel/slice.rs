@@ -7,10 +7,12 @@ pub(in crate::builtins::io::data) struct DimRange {
     pub(in crate::builtins::io::data) end: usize,
 }
 
-pub(in crate::builtins::io::data) fn read_slice_payload(
+pub(in crate::builtins::io::data) async fn read_slice_payload(
     payload: &DataArrayPayload,
     slice_spec: &Value,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayPayload> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let ranges = parse_slice_spec(slice_spec, &payload.shape)?;
     let out_shape: Vec<usize> = ranges
         .iter()
@@ -24,6 +26,7 @@ pub(in crate::builtins::io::data) fn read_slice_payload(
         .transpose()?;
     let mut out_index = vec![0usize; out_shape.len()];
     loop {
+        crate::data::cooperate_data_work(budget, 1).await?;
         let source_index: Vec<usize> = out_index
             .iter()
             .enumerate()
@@ -48,11 +51,13 @@ pub(in crate::builtins::io::data) fn read_slice_payload(
     })
 }
 
-pub(in crate::builtins::io::data) fn write_slice_payload(
+pub(in crate::builtins::io::data) async fn write_slice_payload(
     payload: &DataArrayPayload,
     slice_spec: &Value,
     rhs: &Value,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<DataArrayPayload> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let ranges = parse_slice_spec(slice_spec, &payload.shape)?;
     let target_shape: Vec<usize> = ranges
         .iter()
@@ -76,6 +81,7 @@ pub(in crate::builtins::io::data) fn write_slice_payload(
     let mut rhs_index = vec![0usize; target_shape.len()];
     let mut rhs_linear = 0usize;
     loop {
+        crate::data::cooperate_data_work(budget, 1).await?;
         let target_index: Vec<usize> = rhs_index
             .iter()
             .enumerate()

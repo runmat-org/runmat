@@ -39,7 +39,12 @@ async fn data_create_builtin(
         let mut arrays = BTreeMap::new();
         for (name, mut meta) in schema.arrays {
             crate::data::cooperate_data_work(&mut budget, 0).await?;
-            let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
+            let payload = DataArrayPayload::zeros_cooperative(
+                meta.dtype.clone(),
+                meta.shape.clone(),
+                &mut budget,
+            )
+            .await?;
             crate::data::cooperate_data_work(&mut budget, 0).await?;
             let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
                 authority.provider(),
