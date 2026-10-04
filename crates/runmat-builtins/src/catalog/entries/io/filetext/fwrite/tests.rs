@@ -98,3 +98,41 @@ fn character_precision_requires_proven_single_row_without_guessing_unknown_rows(
     );
     assert!(unknown.diagnostics.is_empty());
 }
+
+#[test]
+fn character_precision_rejects_known_pages_but_preserves_unknown_and_singleton_pages() {
+    let fid = numeric_scalar(NumericClass::Double, NumericDomain::Real);
+    let data = numeric_scalar(NumericClass::Double, NumericDomain::Real);
+    let character = |dims| ValueFact {
+        kind: ValueKindFact::Character,
+        shape: ShapeFact::Shaped { dims },
+        ..ValueFact::unknown(DynamicReason::RuntimeValue)
+    };
+    let infer = |shape| {
+        inference::infer(
+            &request(vec![fid.clone(), data.clone(), character(shape)]),
+            &FWRITE_CATALOG_ENTRY,
+        )
+    };
+    assert!(!infer(vec![
+        DimensionFact::Known(1),
+        DimensionFact::Known(5),
+        DimensionFact::Known(2),
+    ])
+    .diagnostics
+    .is_empty());
+    assert!(infer(vec![
+        DimensionFact::Known(1),
+        DimensionFact::Known(5),
+        DimensionFact::Known(1),
+    ])
+    .diagnostics
+    .is_empty());
+    assert!(infer(vec![
+        DimensionFact::Known(1),
+        DimensionFact::Known(5),
+        DimensionFact::Unknown,
+    ])
+    .diagnostics
+    .is_empty());
+}

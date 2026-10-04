@@ -79,10 +79,13 @@ fn definitely_invalid_data(value: &ValueFact) -> bool {
 fn definitely_invalid_text_control(value: &ValueFact) -> bool {
     match &value.kind {
         ValueKindFact::Character => match &value.shape {
-            ShapeFact::Shaped { dims } => matches!(
-                dims.first(),
-                Some(DimensionFact::Known(rows)) if *rows != 1
-            ),
+            ShapeFact::Shaped { dims } => {
+                matches!(dims.first(), Some(DimensionFact::Known(rows)) if *rows != 1)
+                    || dims
+                        .iter()
+                        .skip(2)
+                        .any(|dim| matches!(dim, DimensionFact::Known(extent) if *extent != 1))
+            }
             _ => false,
         },
         ValueKindFact::Unknown => false,
