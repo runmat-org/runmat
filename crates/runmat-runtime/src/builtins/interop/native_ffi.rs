@@ -343,12 +343,7 @@ async fn unloadlibrary_builtin(alias: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "libisloaded",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Test whether a named C shared library is loaded in this session.",
-    keywords = "libisloaded,shared library,c,ffi,native",
-    descriptor(crate::builtins::interop::native_ffi::ONE_TEXT_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libisloaded_builtin(alias: Value) -> BuiltinResult<Value> {
@@ -357,12 +352,7 @@ async fn libisloaded_builtin(alias: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "libfunctions",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "List functions declared by a loaded C shared library interface.",
-    keywords = "libfunctions,shared library,c,ffi,native",
-    descriptor(crate::builtins::interop::native_ffi::FUNCTIONS_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libfunctions_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {

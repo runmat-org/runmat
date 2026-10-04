@@ -60,6 +60,23 @@ const UNLOAD_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescr
     inputs: &[TEXT],
     outputs: &[],
 }];
+const IS_LOADED_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
+    label: "loaded = libisloaded(library)",
+    inputs: &[TEXT],
+    outputs: &[RESULT],
+}];
+const FUNCTIONS_SIGNATURES: &[BuiltinSignatureDescriptor] = &[
+    BuiltinSignatureDescriptor {
+        label: "names = libfunctions(library)",
+        inputs: &[TEXT],
+        outputs: &[RESULT],
+    },
+    BuiltinSignatureDescriptor {
+        label: "signatures = libfunctions(library, '-full')",
+        inputs: &[ANY],
+        outputs: &[RESULT],
+    },
+];
 
 pub const LOADLIBRARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: LOAD_SIGNATURES,
@@ -69,6 +86,18 @@ pub const LOADLIBRARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const UNLOADLIBRARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: UNLOAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+pub const LIBISLOADED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: IS_LOADED_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+pub const LIBFUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: FUNCTIONS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: ERRORS,
