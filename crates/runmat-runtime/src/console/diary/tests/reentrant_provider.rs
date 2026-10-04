@@ -55,7 +55,7 @@ impl Write for ReentrantHandle {
                     crate::console::record_console_line(ConsoleStream::Stdout, "from provider");
                 }
                 Callback::ReplaceOwnerAndFail => {
-                    set_diary_filename_checked("replacement.log").expect("nested replacement");
+                    set_diary_filename_checked("/replacement.log").expect("nested replacement");
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
                         "original handle failed after owner replacement",
@@ -152,8 +152,7 @@ fn file_write_reentry_returns_would_block_without_borrow_panic() {
     let _ = take_diary_error();
     let provider = Arc::new(ReentrantProvider::new(Callback::ConsoleLine));
     let _owner = fs::replace_provider(provider);
-    fs::set_current_dir("/").expect("fixture directory");
-    set_diary_filename_checked("original.log").expect("enable");
+    set_diary_filename_checked("/original.log").expect("enable");
     record_diary_command("outer");
     assert!(!diary_enabled());
     assert_eq!(
@@ -169,11 +168,10 @@ fn old_handle_failure_cannot_disable_reentrant_replacement_owner() {
     let _ = take_diary_error();
     let provider = Arc::new(ReentrantProvider::new(Callback::ReplaceOwnerAndFail));
     let _owner = fs::replace_provider(provider.clone());
-    fs::set_current_dir("/").expect("fixture directory");
-    set_diary_filename_checked("original.log").expect("enable");
+    set_diary_filename_checked("/original.log").expect("enable");
     record_diary_command("failed outer");
     assert!(diary_enabled());
-    assert_eq!(diary_filename(), PathBuf::from("replacement.log"));
+    assert_eq!(diary_filename(), PathBuf::from("/replacement.log"));
     assert!(take_diary_error().is_none());
     record_diary_command("after");
     let bytes = block_on(provider.read(Path::new("/replacement.log"))).expect("replacement log");
