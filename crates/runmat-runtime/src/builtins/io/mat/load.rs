@@ -474,7 +474,8 @@ pub(crate) async fn read_mat_file_on_with_context(
     source: &MatFsPath,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    let mut cooperation = decoder::MatDecodeCooperation::new(runtime, Some(source));
+    let mut cooperation =
+        decoder::MatCodecCooperation::new(runtime, Some(source), "load", &LOAD_ERROR_IO);
     let file = cooperation.await_io(source.open()).await?.map_err(|err| {
         load_error_with_source(
             &LOAD_ERROR_IO,
@@ -497,7 +498,7 @@ pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(Strin
 async fn restore_loaded_entries(
     entries: Vec<(String, Value)>,
     source: Option<&MatFsPath>,
-    mut cooperation: Option<&mut decoder::MatDecodeCooperation<'_>>,
+    mut cooperation: Option<&mut decoder::MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     let mut restored = Vec::new();
     restored.try_reserve_exact(entries.len()).map_err(|error| {

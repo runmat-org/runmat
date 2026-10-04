@@ -7,8 +7,7 @@ use flate2::read::ZlibDecoder;
 use runmat_value::Value;
 use std::io::{Cursor, Read};
 
-mod cooperation;
-pub(super) use cooperation::MatDecodeCooperation;
+pub(super) use super::super::cooperation::MatCodecCooperation;
 
 #[derive(Clone, Copy, Debug)]
 enum Endian {
@@ -140,7 +139,7 @@ fn read_variables_from_elements<R: Read>(
 /// expanding its entire payload into an unbounded second byte vector.
 pub(super) async fn read_mat_reader_cooperative<R: Read>(
     reader: &mut R,
-    cooperation: &mut MatDecodeCooperation<'_>,
+    cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     cooperation.completed(0).await?;
     let endian = read_mat_header(reader)?;

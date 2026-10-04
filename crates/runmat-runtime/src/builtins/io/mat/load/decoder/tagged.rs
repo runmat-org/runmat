@@ -2,8 +2,8 @@
 
 use super::super::super::format::MI_COMPRESSED;
 use super::super::{load_error_with_source, LOAD_ERROR_IO};
-use super::cooperation::MatDecodeCooperation;
 use super::Endian;
+use super::MatCodecCooperation;
 use crate::BuiltinResult;
 use std::io::Read;
 
@@ -191,7 +191,7 @@ pub(super) async fn read_tagged_cooperative<R: Read + ?Sized>(
     reader: &mut R,
     allow_eof: bool,
     endian: Endian,
-    cooperation: &mut MatDecodeCooperation<'_>,
+    cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Option<TaggedData>> {
     let Some(header) = read_header(reader, allow_eof, endian)? else {
         return Ok(None);

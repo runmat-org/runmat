@@ -37,7 +37,8 @@ fn compressed_stream_matches_plain_numeric_class_and_value() {
     wrapped.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
     wrapped.extend_from_slice(&compressed);
     let expected = read_mat_reader(&mut Cursor::new(plain)).expect("plain decode");
-    let mut cooperation = MatDecodeCooperation::new(None, None);
+    let mut cooperation =
+        MatCodecCooperation::new(None, None, "load", &runmat_builtins::LOAD_ERROR_IO);
     let actual = block_on(read_mat_reader_cooperative(
         &mut Cursor::new(wrapped),
         &mut cooperation,
@@ -71,7 +72,8 @@ fn service_cancellation_interrupts_a_large_tag_before_its_tail_is_read() {
         },
     );
     let mut reader = Cursor::new(bytes.clone());
-    let mut cooperation = MatDecodeCooperation::with_budget(budget);
+    let mut cooperation =
+        MatCodecCooperation::with_budget(budget, "load", &runmat_builtins::LOAD_ERROR_IO);
     let error = block_on(read_mat_reader_cooperative(&mut reader, &mut cooperation))
         .expect_err("service cancels inside declared tag body");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -97,7 +99,8 @@ fn preexisting_cancellation_reads_no_header_bytes() {
         || Box::pin(async { Ok(()) }),
     );
     let mut reader = Cursor::new(header());
-    let mut cooperation = MatDecodeCooperation::with_budget(budget);
+    let mut cooperation =
+        MatCodecCooperation::with_budget(budget, "load", &runmat_builtins::LOAD_ERROR_IO);
     let error = block_on(read_mat_reader_cooperative(&mut reader, &mut cooperation))
         .expect_err("cancel before codec read");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -117,7 +120,8 @@ fn restoration_cancellation_drops_all_unpublished_entries() {
         ("first".into(), Value::Num(1.0)),
         ("second".into(), Value::Num(2.0)),
     ];
-    let mut cooperation = MatDecodeCooperation::with_budget(budget);
+    let mut cooperation =
+        MatCodecCooperation::with_budget(budget, "load", &runmat_builtins::LOAD_ERROR_IO);
     let error = block_on(super::super::restore_loaded_entries(
         entries,
         None,
