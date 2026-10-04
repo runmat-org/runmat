@@ -197,7 +197,10 @@ fn cancelled_generation_cannot_publish_or_reuse_another_authority() {
         vec![("name".into(), Value::Num(1.0))],
     ))
     .unwrap_err();
-    assert!(matches!(error, PreferenceServiceError::Storage(_)));
+    assert!(matches!(
+        error,
+        PreferenceServiceError::Execution(crate::execution::ExecutionServiceError::Cancelled)
+    ));
     assert!(block_on(service.group_values(runtime(), "app".into()))
         .unwrap()
         .is_none());

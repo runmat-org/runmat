@@ -42,12 +42,19 @@ impl UserPathMutation {
 pub enum UserPathServiceError {
     #[error("a custom user path cannot be empty; use Clear instead")]
     EmptyCustomPath,
+    #[error("application user-path execution failed: {0}")]
+    Execution(#[source] crate::execution::ExecutionServiceError),
     #[error("application user-path storage failed: {0}")]
-    Storage(
-        #[from]
-        #[source]
-        super::PreferenceServiceError,
-    ),
+    Storage(#[source] super::PreferenceServiceError),
+}
+
+impl From<super::PreferenceServiceError> for UserPathServiceError {
+    fn from(error: super::PreferenceServiceError) -> Self {
+        match error {
+            super::PreferenceServiceError::Execution(source) => Self::Execution(source),
+            other => Self::Storage(other),
+        }
+    }
 }
 
 /// Hosts install one shared application-settings authority. Reads must be

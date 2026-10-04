@@ -287,7 +287,7 @@ async fn checkpoint(
 }
 
 fn storage(source: crate::execution::ExecutionServiceError) -> PreferenceServiceError {
-    PreferenceServiceError::Storage(source.into_runtime_error())
+    PreferenceServiceError::Execution(source)
 }
 
 #[cfg(test)]

@@ -28,6 +28,8 @@ pub enum PreferenceServiceError {
     ),
     #[error("preference storage failed: {0}")]
     Storage(#[source] RuntimeError),
+    #[error("preference execution failed: {0}")]
+    Execution(#[source] crate::execution::ExecutionServiceError),
     #[error("preference commit outcome could not be determined: {0}")]
     CommitIndeterminate(#[source] RuntimeError),
     #[error("unsupported preference document version {0}")]
