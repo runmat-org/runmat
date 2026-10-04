@@ -106,7 +106,7 @@ fn proven_output(request: &CallRequest) -> ProvenOutput {
     let Some(label) = request.literals.literal_string_at(index) else {
         return ProvenOutput::Dynamic;
     };
-    match parse_fread_precision(label) {
+    match parse_fread_precision(&label) {
         Ok(spec) => match spec.output {
             FreadOutputKind::Numeric(class) => ProvenOutput::Numeric(class),
             FreadOutputKind::Char => ProvenOutput::Character,
