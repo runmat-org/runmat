@@ -187,7 +187,7 @@ pub async fn evaluate(
         &FWRITE_ERROR_INVALID_OPTION,
     )?;
     let data_host = gather_value(data_value).await?;
-    let elements = map_string_result(flatten_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
+    let elements = map_string_result(borrow_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
 
     let mut guard = handle.lock().map_err(|_| {
         fwrite_error_with_detail(
@@ -202,7 +202,7 @@ pub async fn evaluate(
         )
     })?;
 
-    let count = write_elements(file, &elements, precision_spec, skip_bytes, machine_format)?;
+    let count = write_elements(file, elements, precision_spec, skip_bytes, machine_format)?;
     Ok(FwriteEval::new(count))
 }
 

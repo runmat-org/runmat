@@ -55,6 +55,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink { label: "Binary file write owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs") },
             BuiltinDocumentationLink { label: "Precision and control admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite/controls.rs") },
             BuiltinDocumentationLink { label: "Binary encoder and writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite/writing.rs") },
+            BuiltinDocumentationLink { label: "Borrowed typed element traversal", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite/writing/elements.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Native endian binary write", location: "builtins::io::filetext::fwrite::tests::writing::fwrite_double_precision_writes_native_endian" },

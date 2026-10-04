@@ -83,7 +83,7 @@ fn typed_integer_precision_conversions_stay_in_integer_domain() {
 }
 
 #[test]
-fn fwrite_flattens_each_integer_storage_class_without_reading_f64_mirror() {
+fn fwrite_borrows_each_integer_storage_class_without_reading_f64_mirror() {
     let cases = [
         (IntegerStorage::I8(vec![-8]), -8_i128),
         (IntegerStorage::I16(vec![-16]), -16),
@@ -97,7 +97,8 @@ fn fwrite_flattens_each_integer_storage_class_without_reading_f64_mirror() {
 
     for (storage, expected) in cases {
         let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed tensor");
-        let elements = flatten_elements(&Value::Tensor(tensor)).expect("typed elements");
+        let value = Value::Tensor(tensor);
+        let elements: Vec<_> = borrow_elements(&value).expect("typed elements").collect();
         assert_eq!(elements.len(), 1);
         assert_eq!(integer_raw(&elements[0]), Some(expected));
     }

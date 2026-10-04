@@ -6,7 +6,10 @@ fn nd_character_payload_flattens_every_page_in_column_first_order() {
     let chars =
         runmat_value::CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
             .unwrap();
-    let values = flatten_char_array(&chars);
+    let values: Vec<_> = borrow_elements(&Value::CharArray(chars))
+        .expect("character elements")
+        .map(|element| element.as_f64())
+        .collect();
     assert_eq!(
         values,
         "acbdegfh"
@@ -14,6 +17,109 @@ fn nd_character_payload_flattens_every_page_in_column_first_order() {
             .map(|ch| ch as u32 as f64)
             .collect::<Vec<_>>()
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn borrowed_integer_storage_writes_exact_bytes_for_every_class() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let cases = vec![
+        ("int8", IntegerStorage::I8(vec![-7]), vec![249]),
+        ("uint8", IntegerStorage::U8(vec![250]), vec![250]),
+        (
+            "int16",
+            IntegerStorage::I16(vec![-258]),
+            (-258_i16).to_be_bytes().to_vec(),
+        ),
+        (
+            "uint16",
+            IntegerStorage::U16(vec![0x1234]),
+            0x1234_u16.to_be_bytes().to_vec(),
+        ),
+        (
+            "int32",
+            IntegerStorage::I32(vec![-0x123456]),
+            (-0x123456_i32).to_be_bytes().to_vec(),
+        ),
+        (
+            "uint32",
+            IntegerStorage::U32(vec![0x89abcdef]),
+            0x89abcdef_u32.to_be_bytes().to_vec(),
+        ),
+        (
+            "int64",
+            IntegerStorage::I64(vec![i64::MIN + 1]),
+            (i64::MIN + 1).to_be_bytes().to_vec(),
+        ),
+        (
+            "uint64",
+            IntegerStorage::U64(vec![9_007_199_254_740_993]),
+            9_007_199_254_740_993_u64.to_be_bytes().to_vec(),
+        ),
+        (
+            "integer*8",
+            IntegerStorage::I64(vec![-4]),
+            (-4_i64).to_be_bytes().to_vec(),
+        ),
+    ];
+    for (precision, storage, expected) in cases {
+        let path = unique_path(&format!("fwrite_borrowed_{precision}"));
+        let opened = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+            Value::from("ieee-be"),
+        ])
+        .expect("fopen");
+        let fid = Value::Num(opened.as_open().unwrap().fid as f64);
+        let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("typed storage");
+        let result =
+            run_evaluate(&fid, &Value::Tensor(tensor), &[Value::from(precision)]).expect("fwrite");
+        assert_eq!(result.count(), 1, "{precision}");
+        run_fclose(&[fid]).expect("fclose");
+        assert_eq!(
+            test_support::fs::read(&path).expect("read"),
+            expected,
+            "{precision}"
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn borrowed_character_pages_strings_and_logical_values_write_exact_bytes() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let chars =
+        runmat_value::CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+            .unwrap();
+    let strings =
+        runmat_value::StringArray::new(vec!["ab".into(), "".into(), "c".into()], vec![1, 3])
+            .unwrap();
+    let logical = runmat_value::LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
+    for (label, value, expected) in [
+        ("pages", Value::CharArray(chars), b"acbdegfh".to_vec()),
+        ("strings", Value::StringArray(strings), b"ab\n\nc".to_vec()),
+        ("logical", Value::LogicalArray(logical), vec![0, 1, 1]),
+    ] {
+        let path = unique_path(&format!("fwrite_borrowed_{label}"));
+        let opened = run_fopen(&[
+            Value::from(path.to_string_lossy().to_string()),
+            Value::from("w+b"),
+        ])
+        .expect("fopen");
+        let fid = Value::Num(opened.as_open().unwrap().fid as f64);
+        let result = run_evaluate(&fid, &value, &[Value::from("uint8")]).expect("fwrite");
+        assert_eq!(result.count(), expected.len(), "{label}");
+        run_fclose(&[fid]).expect("fclose");
+        assert_eq!(
+            test_support::fs::read(&path).expect("read"),
+            expected,
+            "{label}"
+        );
+        test_support::fs::remove_file(path).expect("remove file");
+    }
 }
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]

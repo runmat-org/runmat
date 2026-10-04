@@ -1,101 +1,20 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(super) enum WriteElement {
-    Floating(f64),
-    Integer(IntValue),
-}
-
-impl WriteElement {
-    fn as_f64(&self) -> f64 {
-        match self {
-            Self::Floating(value) => *value,
-            Self::Integer(value) => value.to_f64(),
-        }
-    }
-}
-
-pub(super) fn flatten_elements(value: &Value) -> Result<Vec<WriteElement>, String> {
-    match value {
-        Value::Tensor(tensor) => Ok((0..tensor.len())
-            .map(|index| {
-                let value = tensor
-                    .numeric_value_at(index)
-                    .expect("index within authoritative numeric storage");
-                value.into_int_value().map_or_else(
-                    || WriteElement::Floating(value.materialize_f64()),
-                    WriteElement::Integer,
-                )
-            })
-            .collect()),
-        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
-        Value::Int(int) => Ok(vec![WriteElement::Integer(int.clone())]),
-        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
-        Value::LogicalArray(array) => Ok(array
-            .data
-            .iter()
-            .map(|bit| WriteElement::Floating(if *bit != 0 { 1.0 } else { 0.0 }))
-            .collect()),
-        Value::CharArray(ca) => Ok(flatten_char_array(ca)
-            .into_iter()
-            .map(WriteElement::Floating)
-            .collect()),
-        Value::String(text) => Ok(text
-            .chars()
-            .map(|ch| WriteElement::Floating(ch as u32 as f64))
-            .collect()),
-        Value::StringArray(sa) => Ok(flatten_string_array(sa)
-            .into_iter()
-            .map(WriteElement::Floating)
-            .collect()),
-        Value::GpuTensor(_) => Err("fwrite: expected host tensor data after gathering".to_string()),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("fwrite: complex values are not supported yet".to_string())
-        }
-        _ => Err(format!("fwrite: unsupported data type {:?}", value)),
-    }
-}
-
-pub(super) fn flatten_char_array(ca: &CharArray) -> Vec<f64> {
-    let mut values = Vec::with_capacity(ca.data.len());
-    let Some(page_len) = ca.rows.checked_mul(ca.cols).filter(|len| *len > 0) else {
-        return values;
-    };
-    for page in ca.data.chunks(page_len) {
-        for c in 0..ca.cols {
-            for r in 0..ca.rows {
-                let idx = r * ca.cols + c;
-                values.push(page[idx] as u32 as f64);
-            }
-        }
-    }
-    values
-}
-
-pub(super) fn flatten_string_array(sa: &runmat_value::StringArray) -> Vec<f64> {
-    if sa.data.is_empty() {
-        return Vec::new();
-    }
-    let mut values = Vec::new();
-    for (idx, text) in sa.data.iter().enumerate() {
-        if idx > 0 {
-            values.push('\n' as u32 as f64);
-        }
-        values.extend(text.chars().map(|ch| ch as u32 as f64));
-    }
-    values
-}
+mod elements;
+pub(super) use elements::{borrow_elements, WriteElement};
 
 pub(super) fn write_elements(
     file: &mut File,
-    values: &[WriteElement],
+    values: impl IntoIterator<Item = WriteElement>,
     spec: WriteSpec,
     skip: usize,
     machine: MachineFormat,
 ) -> BuiltinResult<usize> {
     let endianness = machine.to_endianness();
     let skip_offset = skip as i64;
+    let mut count = 0;
     for value in values {
+        let value = &value;
         match spec.input {
             InputType::UInt8 => {
                 let byte = match integer_unsigned(value, u8::MAX as u64) {
@@ -177,8 +96,9 @@ pub(super) fn write_elements(
                 )
             })?;
         }
+        count += 1;
     }
-    Ok(values.len())
+    Ok(count)
 }
 
 pub(super) fn integer_raw(value: &WriteElement) -> Option<i128> {
