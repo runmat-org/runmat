@@ -112,7 +112,8 @@ pub(super) async fn validate_matrix(
             values,
             ..
         } => {
-            if array.class != MatClass::Sparse || array.dims.as_slice() != [*rows, *cols] {
+            if array.class != MatClass::Sparse || array.dims.as_slice() != [*rows, *cols].as_slice()
+            {
                 return Err(invalid(owner, "sparse MAT class or shape is invalid"));
             }
             if cols.checked_add(1) != Some(col_ptrs.len())
