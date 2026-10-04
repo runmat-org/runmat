@@ -87,53 +87,6 @@ pub const URLDECODE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "urldecode accepts host text only; integer and resident numeric values reject before provider access or decoding.",
     };
-const SENDMAIL_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "to",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Recipient address or collection of addresses.",
-    },
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Message subject text.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some(""),
-        description: "Message body text.",
-    },
-    BuiltinParamDescriptor {
-        name: "attachments",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional attachment path or collection of paths.",
-    },
-];
-const SENDMAIL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = sendmail(to, subject, message, attachments)",
-    inputs: &SENDMAIL_INPUTS,
-    outputs: &OUTPUT_VALUE,
-}];
-pub const SENDMAIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SENDMAIL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-pub const SENDMAIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "sendmail accepts textual recipients, subject, message, and attachment paths. Numeric character codes may be embedded in an already constructed character vector, but direct integer scalar, array, nested, or resident numeric arguments are not mail inputs and reject before provider access or transport side effects.",
-};
-
 fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
@@ -357,13 +310,7 @@ async fn websave_builtin(
 
 #[runtime_builtin(
     name = "sendmail",
-    category = "io/http",
-    summary = "Create an email message using MATLAB sendmail-compatible arguments.",
-    keywords = "sendmail,email,mail,notification",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::http::compat::SENDMAIL_DESCRIPTOR),
-    integer_audit(crate::builtins::io::http::compat::SENDMAIL_INTEGER_AUDIT),
+    binding_variant = "default",
     context = true,
     builtin_path = "crate::builtins::io::http::compat"
 )]
@@ -375,10 +322,12 @@ async fn sendmail_builtin(
         crate::builtins::common::validation::value_contains_native_integer_class(value)
             || value_contains_resident(value)
     }) {
-        return Err(compat_error(
-            "sendmail",
+        return Err(build_runtime_error(
             "sendmail: mail arguments must be text, not numeric or resident values",
-        ));
+        )
+        .with_builtin("sendmail")
+        .with_identifier("RunMat:sendmail:InvalidMailInput")
+        .build());
     }
     let (recipients, subject, body) = parse_sendmail_args(&args)?;
     let message = format_mail_message(&recipients, &subject, &body);
