@@ -105,6 +105,8 @@ fn invalidated_provider_resource_lease_stops_before_next_write() {
     set_diary_enabled(false);
     let _ = take_diary_error();
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir("/journal"));
+    block_on(provider.write(Path::new("/journal/session.log"), b""))
+        .expect("persist empty fixture before installing revocable sink");
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     let file = options
