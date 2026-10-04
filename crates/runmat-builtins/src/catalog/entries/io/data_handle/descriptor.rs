@@ -89,6 +89,18 @@ pub(super) const NEW_SHAPE: BuiltinParamDescriptor = param(
     BuiltinParamArity::Required,
     "New checked numeric dimension vector.",
 );
+pub(super) const META: BuiltinParamDescriptor = param(
+    "meta",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Array metadata structure.",
+);
+pub(super) const COMMIT_OPTIONS: BuiltinParamDescriptor = param(
+    "options",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Optional,
+    "Optional scalar structure with an if_manifest precondition.",
+);
 pub(super) const OPTIONS: BuiltinParamDescriptor = param(
     "options",
     BuiltinParamType::Any,
