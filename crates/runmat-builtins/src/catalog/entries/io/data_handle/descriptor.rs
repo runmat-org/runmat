@@ -1,0 +1,149 @@
+//! Shared public receiver slots and stable data/placement diagnostics.
+
+use crate::*;
+
+pub(super) const fn param(
+    name: &'static str,
+    ty: BuiltinParamType,
+    arity: BuiltinParamArity,
+    description: &'static str,
+) -> BuiltinParamDescriptor {
+    BuiltinParamDescriptor {
+        name,
+        ty,
+        arity,
+        default: None,
+        description,
+    }
+}
+
+pub(super) const DATASET: BuiltinParamDescriptor = param(
+    "ds",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Managed Dataset receiver.",
+);
+pub(super) const ARRAY: BuiltinParamDescriptor = param(
+    "arr",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Managed DataArray receiver.",
+);
+pub(super) const TRANSACTION: BuiltinParamDescriptor = param(
+    "tx",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Managed DataTransaction receiver.",
+);
+pub(super) const NAME: BuiltinParamDescriptor = param(
+    "name",
+    BuiltinParamType::StringScalar,
+    BuiltinParamArity::Required,
+    "Array name.",
+);
+pub(super) const KEY: BuiltinParamDescriptor = param(
+    "key",
+    BuiltinParamType::StringScalar,
+    BuiltinParamArity::Required,
+    "Attribute key.",
+);
+pub(super) const VALUE: BuiltinParamDescriptor = param(
+    "value",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Value to store.",
+);
+pub(super) const ATTRS: BuiltinParamDescriptor = param(
+    "attrs",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Attribute structure.",
+);
+pub(super) const LABEL: BuiltinParamDescriptor = param(
+    "label",
+    BuiltinParamType::StringScalar,
+    BuiltinParamArity::Required,
+    "Snapshot label.",
+);
+pub(super) const OPTIONS: BuiltinParamDescriptor = param(
+    "options",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Variadic,
+    "Reserved name/value options.",
+);
+pub(super) const DEFAULT: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "defaultValue",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0"),
+    description: "Fallback when the attribute is absent.",
+};
+pub(super) const OUT_STRING: BuiltinParamDescriptor = param(
+    "s",
+    BuiltinParamType::StringScalar,
+    BuiltinParamArity::Required,
+    "Text result.",
+);
+pub(super) const OUT_BOOL: BuiltinParamDescriptor = param(
+    "tf",
+    BuiltinParamType::LogicalArray,
+    BuiltinParamArity::Required,
+    "Logical result.",
+);
+pub(super) const OUT_VALUE: BuiltinParamDescriptor = param(
+    "value",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Value result.",
+);
+pub(super) const OUT_DATASET: BuiltinParamDescriptor = param(
+    "ds",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Managed Dataset handle.",
+);
+pub(super) const OUT_ARRAY: BuiltinParamDescriptor = param(
+    "arr",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Managed DataArray handle.",
+);
+pub(super) const OUT_TRANSACTION: BuiltinParamDescriptor = param(
+    "tx",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Managed DataTransaction handle.",
+);
+pub(super) const OUT_CELL: BuiltinParamDescriptor = param(
+    "C",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Cell array of names.",
+);
+pub(super) const OUT_STRUCT: BuiltinParamDescriptor = param(
+    "S",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Attribute structure.",
+);
+
+pub(super) const DATA_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.ERROR",
+    identifier: Some("RUNMAT:Data:Error"),
+    when: "A Dataset family receiver, argument, manifest, payload, or filesystem operation fails.",
+    message: "data: operation failed",
+};
+pub(super) const MANIFEST_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.MANIFEST_CONFLICT",
+    identifier: Some("RunMat:data:ManifestConflict"),
+    when: "A transaction's expected manifest sequence no longer matches the stored manifest.",
+    message: "data: manifest conflict",
+};
+pub(super) const TRANSACTION_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.TRANSACTION_NOT_FOUND",
+    identifier: Some("RunMat:data:TransactionNotFound"),
+    when: "The transaction is absent from the process-local registry.",
+    message: "data: transaction not found",
+};
+pub(super) const ERRORS: &[BuiltinErrorDescriptor] =
+    &[DATA_ERROR, MANIFEST_CONFLICT, TRANSACTION_NOT_FOUND];

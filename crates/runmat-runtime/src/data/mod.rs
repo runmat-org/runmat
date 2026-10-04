@@ -1833,7 +1833,8 @@ pub fn ensure_manifest_sequence(expected: u64, manifest: &DataManifest) -> Built
 
 pub fn array_object(dataset_path: &str, array_name: &str, authority: ForeignRef) -> Value {
     let mut obj =
-        ObjectInstance::new(authority::DATA_ARRAY_CLASS.owned()).with_dataset_authority(authority);
+        ObjectInstance::new(runmat_builtins::DATA_ARRAY_CLASS.owned())
+            .with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),
         Value::String(dataset_path.to_string()),
@@ -1846,7 +1847,7 @@ pub fn array_object(dataset_path: &str, array_name: &str, authority: ForeignRef)
 }
 
 pub fn transaction_object(dataset_path: &str, tx_id: &str, authority: ForeignRef) -> Value {
-    let mut obj = ObjectInstance::new(authority::DATA_TRANSACTION_CLASS.owned())
+    let mut obj = ObjectInstance::new(runmat_builtins::DATA_TRANSACTION_CLASS.owned())
         .with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),

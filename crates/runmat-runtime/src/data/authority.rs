@@ -3,19 +3,13 @@
 use super::data_error;
 use crate::BuiltinResult;
 use runmat_filesystem::FsProvider;
-use runmat_types::{
-    ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity, StaticClassIdentity,
-};
+use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity, StaticClassIdentity};
 use runmat_value::{
     ForeignRef, ForeignResourceKey, ForeignResourceRelease, ObjectInstance, Value, WeakForeignRef,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-
-pub(crate) const DATA_ARRAY_CLASS: StaticClassIdentity = StaticClassIdentity::new("DataArray");
-pub(crate) const DATA_TRANSACTION_CLASS: StaticClassIdentity =
-    StaticClassIdentity::new("DataTransaction");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HandleRole {
@@ -28,8 +22,8 @@ impl HandleRole {
     fn class(&self) -> StaticClassIdentity {
         match self {
             Self::Dataset => runmat_builtins::DATASET_CLASS,
-            Self::Array(_) => DATA_ARRAY_CLASS,
-            Self::Transaction(_) => DATA_TRANSACTION_CLASS,
+            Self::Array(_) => runmat_builtins::DATA_ARRAY_CLASS,
+            Self::Transaction(_) => runmat_builtins::DATA_TRANSACTION_CLASS,
         }
     }
 }

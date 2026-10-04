@@ -3,8 +3,7 @@
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
-pub const DATASET_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("Dataset");
+pub use super::super::data_family::DATASET_CLASS;
 
 pub(super) const READ_EFFECTS: &[EffectKind] = &[
     EffectKind::EnvironmentRead,

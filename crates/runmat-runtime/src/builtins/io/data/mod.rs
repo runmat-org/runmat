@@ -4270,6 +4270,35 @@ mod tests {
         )
         .expect("create finishes on original authority after ambient swap");
         assert!(matches!(result, Value::Object(_)));
+        assert_eq!(
+            call_builtin("Dataset.path", std::slice::from_ref(&result))
+                .expect("sealed public path"),
+            Value::String("pinned.data".into())
+        );
+        for method in ["Dataset.id", "Dataset.version"] {
+            let Value::String(value) = call_builtin(method, std::slice::from_ref(&result))
+                .expect("sealed Dataset identity accessor")
+            else {
+                panic!("{method} must return text");
+            };
+            assert!(!value.is_empty());
+        }
+        assert_eq!(
+            call_builtin(
+                "Dataset.has_array",
+                &[result.clone(), Value::String("sample".into())]
+            )
+            .expect("pinned membership"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            call_builtin(
+                "Dataset.has_array",
+                &[result.clone(), Value::String("other".into())]
+            )
+            .expect("pinned non-membership"),
+            Value::Bool(false)
+        );
         let arrays = call_builtin("Dataset.arrays", std::slice::from_ref(&result))
             .expect("follow-on Dataset read retains selected provider");
         let Value::Cell(arrays) = arrays else {
