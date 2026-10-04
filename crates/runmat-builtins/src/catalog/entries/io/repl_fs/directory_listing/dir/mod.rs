@@ -5,7 +5,7 @@ mod faqs;
 pub(super) mod inference;
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub use contract::*;
 
@@ -24,7 +24,7 @@ pub const DIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     documentation: documentation::DOCUMENTATION,
     descriptor: &DIR_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Complete,
+        maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
             IoReplFsInferenceRule::directory(DirectoryInferenceRule::Listing(
                 DirectoryListingInferenceRule::Metadata,
@@ -37,7 +37,7 @@ pub const DIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: EFFECTS,
-        capabilities: &[],
+        capabilities: &[CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,

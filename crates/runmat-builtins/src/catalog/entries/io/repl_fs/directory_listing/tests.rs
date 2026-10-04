@@ -12,12 +12,16 @@ fn request(arguments: Vec<ValueFact>) -> CallRequest {
 }
 
 #[test]
-fn entries_are_complete_identity_local_catalog_authorities() {
+fn entries_are_identity_local_catalog_authorities_with_reviewed_maturity() {
+    assert_eq!(
+        DIR_CATALOG_ENTRY.contract.maturity,
+        crate::BuiltinContractMaturity::Incomplete
+    );
+    assert_eq!(
+        LS_CATALOG_ENTRY.contract.maturity,
+        crate::BuiltinContractMaturity::Complete
+    );
     for entry in ENTRIES {
-        assert_eq!(
-            entry.contract.maturity,
-            crate::BuiltinContractMaturity::Complete
-        );
         assert_eq!(
             entry.documentation.authority,
             crate::BuiltinDocumentationAuthority::Catalog
@@ -25,6 +29,14 @@ fn entries_are_complete_identity_local_catalog_authorities() {
         assert!(!entry.documentation.examples.is_empty());
         assert!(entry.integer_audit.is_some());
     }
+}
+
+#[test]
+fn directory_listing_requires_installed_filesystem_service() {
+    assert_eq!(
+        DIR_CATALOG_ENTRY.contract.capabilities,
+        &[runmat_types::CapabilityRequirement::Filesystem]
+    );
 }
 
 #[test]

@@ -6,6 +6,14 @@ use runmat_types::{
 
 #[test]
 fn entries_are_canonical_and_use_typed_family_rules() {
+    assert_eq!(
+        COPYFILE_CATALOG_ENTRY.contract.maturity,
+        crate::BuiltinContractMaturity::Incomplete
+    );
+    assert_eq!(
+        COPYFILE_CATALOG_ENTRY.contract.capabilities,
+        &[runmat_types::CapabilityRequirement::Filesystem]
+    );
     for (name, expected) in [
         ("copyfile", FileTransferInferenceRule::Copy),
         ("movefile", FileTransferInferenceRule::Move),
