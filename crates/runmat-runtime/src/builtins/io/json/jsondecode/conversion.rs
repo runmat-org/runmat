@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::io::json::layout;
 
 pub(crate) fn value_from_json(value: &JsonValue) -> BuiltinResult<Value> {
     match value {
@@ -121,7 +122,7 @@ fn decode_json_array(values: &[JsonValue]) -> BuiltinResult<Value> {
 }
 
 fn parse_struct_array(values: &[JsonValue]) -> BuiltinResult<Option<Value>> {
-    let Some((json_shape, leaves)) = super::layout::rectangular_leaves(values) else {
+    let Some((json_shape, leaves)) = layout::rectangular_leaves(values) else {
         return Ok(None);
     };
     let Some(first) = leaves.first().and_then(|value| value.as_object()) else {
@@ -150,7 +151,7 @@ fn parse_struct_array(values: &[JsonValue]) -> BuiltinResult<Option<Value>> {
     } else {
         json_shape
     };
-    let column_major = super::layout::row_to_column_major(row_major, &shape)
+    let column_major = layout::row_to_column_major(row_major, &shape)
         .map_err(|error| jsondecode_error_with(&JSONDECODE_ERROR_INTERNAL, error))?;
     runmat_value::StructArray::normalize(field_names, column_major, shape)
         .map(Some)
