@@ -1,5 +1,6 @@
 use super::super::REPL_FS_TEST_LOCK;
 use super::*;
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_value::{CharArray, IntegerStorage, StringArray, Tensor, Value};
 use std::fs::File;
 use std::sync::Arc;

@@ -229,8 +229,15 @@ fn textscan_shift_jis_alias_restores_source_byte_position() {
         ],
         "あ",
     );
-    assert!(is_shift_jis_encoding("ms932"));
-    assert!(is_shift_jis_encoding("x-sjis"));
+    for alias in ["ms932", "x-sjis"] {
+        shift_jis_registered_file_restores_source_byte_position(
+            alias,
+            &[
+                b'1', b' ', 0x82, 0xA0, b'\n', b'2', b' ', b'n', b'e', b'x', b't', b'\n',
+            ],
+            "あ",
+        );
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

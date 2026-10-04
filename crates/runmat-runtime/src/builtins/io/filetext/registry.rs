@@ -129,7 +129,7 @@ impl Entry {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct FileInfo {
     pub id: i32,
     pub name: String,
