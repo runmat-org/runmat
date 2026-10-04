@@ -56,6 +56,11 @@ mod tests {
         let known = infer(&request, entry);
         assert!(known.diagnostics.is_empty());
         assert_eq!(known.outputs.len(), 1);
+        let mixed_case = CallRequest {
+            literals: LiteralContext::new(vec![LiteralValue::String("ToolBoxCache".into())]),
+            ..request.clone()
+        };
+        assert!(infer(&mixed_case, entry).diagnostics.is_empty());
         let invalid = CallRequest {
             literals: LiteralContext::new(vec![LiteralValue::String("bogus".into())]),
             ..request
