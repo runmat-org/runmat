@@ -1126,18 +1126,13 @@ fn default_provider() -> Arc<dyn FsProvider> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
     use std::collections::{HashMap, HashSet};
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
-    static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
     fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-        TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        provider_override_lock()
     }
 
     fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
@@ -1621,7 +1616,7 @@ mod tests {
 
     #[test]
     fn sync_helpers_work_inside_async_executor() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = test_lock();
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("file.txt");
         let parent = path.parent().unwrap().to_path_buf();
