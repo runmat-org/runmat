@@ -122,6 +122,49 @@ fn read_only_target_precedes_pending_resident_format_download() {
 }
 
 #[test]
+fn later_stream_label_data_cannot_override_known_target_before_resident_format() {
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let path = unique_path("fprintf_later_stream_data");
+    test_support::fs::write(&path, "unchanged").expect("fixture");
+    let opened = run_fopen(&[
+        Value::from(path.to_string_lossy().to_string()),
+        Value::from("r"),
+    ])
+    .expect("read-only fopen");
+    let fid = opened.as_open().expect("file form").fid as i32;
+    let provider = Box::leak(Box::new(PendingDataProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident format");
+    let args = [
+        Value::Num(fid as f64),
+        Value::GpuTensor(resident.handle.clone()),
+        Value::from("stderr"),
+    ];
+    let mut call = Box::pin(evaluate(&args));
+    let error = match futures::poll!(call.as_mut()) {
+        std::task::Poll::Ready(Err(error)) => error,
+        other => panic!("later data cannot defer known target error: {other:?}"),
+    };
+    assert_eq!(error.identifier(), Some("RunMat:fprintf:InvalidIdentifier"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(resident.probe.retirements(), 0);
+    drop(call);
+    run_fclose(&[Value::Num(fid as f64)]).expect("close");
+    assert_eq!(
+        test_support::fs::read_to_string(&path).unwrap(),
+        "unchanged"
+    );
+    test_support::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn known_invalid_character_matrix_format_precedes_resident_data() {
     let provider = Box::leak(Box::new(PendingDataProvider {
         owner: TestAllocationOwner::new(),

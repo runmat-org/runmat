@@ -65,7 +65,11 @@ pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall
 fn validate_unambiguous_host_target(args: &[Value], format_index: usize) -> BuiltinResult<()> {
     // A stream label encountered before a later actual format would outrank a
     // numeric fid. Only inspect a host fid when that override is impossible.
-    if args.iter().any(|value| match_stream_label(value).is_some()) {
+    if args
+        .iter()
+        .take(format_index)
+        .any(|value| match_stream_label(value).is_some())
+    {
         return Ok(());
     }
     for value in args.iter().take(format_index) {
