@@ -41,9 +41,17 @@ mod tests {
             crate::abi::HostExecutionPolicy::default(),
             session.workspace_handle(),
         );
-        futures::executor::block_on(session.execute_request(request))
+        let outcome = futures::executor::block_on(session.execute_request(request))
             .result
             .expect("public engine execution");
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::abi::DiagnosticSeverity::Error),
+            "unexpected runtime diagnostics: {:?}",
+            outcome.diagnostics
+        );
     }
 
     #[test]
