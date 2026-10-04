@@ -103,7 +103,7 @@ pub(super) fn create_integer_dataset(
     }
 }
 
-fn create_typed_dataset<T>(
+pub(super) fn create_typed_dataset<T>(
     builtin: &'static str,
     file: &File,
     dataset_path: &str,
@@ -226,7 +226,7 @@ pub(super) fn validate_full_write_shape(
     ))
 }
 
-fn write_hyperslab<T>(
+pub(super) fn write_hyperslab<T>(
     builtin: &'static str,
     ds: &Dataset,
     selection: &MatlabSelection,
