@@ -2,7 +2,7 @@
 
 use super::super::super::format::{
     MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MI_INT16, MI_INT32, MI_INT64, MI_INT8,
-    MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8, MI_UTF16, MI_UTF8,
+    MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8, MI_UTF16,
 };
 use super::super::load_error;
 use super::{

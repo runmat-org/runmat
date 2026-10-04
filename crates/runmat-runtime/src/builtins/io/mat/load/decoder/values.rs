@@ -8,7 +8,7 @@ use runmat_value::{
     LogicalArray, NumericStorage, SparseTensor, StringArray, StructArray, Tensor, Value,
 };
 
-pub(super) fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
+pub(in super::super) fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
     match array.data {
         MatData::Numeric { real, imag } => {
             let len = real.len();

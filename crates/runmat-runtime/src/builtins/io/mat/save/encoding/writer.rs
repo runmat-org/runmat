@@ -6,12 +6,15 @@ use super::super::super::format::{
     MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8,
 };
 use super::super::{save_error_with, save_error_with_source, SAVE_ERROR_IO};
-use super::MatVar;
+use super::{tensor_dtype_mat_class, MatVar};
 use crate::BuiltinResult;
 use runmat_value::NumericStorage;
 use std::io::{BufWriter, Cursor, Write};
 
-pub(super) async fn write_mat_file(path: &MatFsPath, vars: &[MatVar]) -> BuiltinResult<()> {
+pub(in super::super) async fn write_mat_file(
+    path: &MatFsPath,
+    vars: &[MatVar],
+) -> BuiltinResult<()> {
     let bytes = write_mat_bytes(vars)?;
     path.write(&bytes).await.map_err(|e| {
         save_error_with_source(

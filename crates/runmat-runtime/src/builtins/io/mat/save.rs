@@ -1,7 +1,7 @@
 //! MATLAB-compatible `save` builtin for RunMat.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use regex::Regex;
 use runmat_builtins::BuiltinErrorDescriptor;

@@ -2,7 +2,7 @@
 use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use runmat_builtins::{BuiltinErrorDescriptor, MatFileOptionName};
 use runmat_macros::runtime_builtin;

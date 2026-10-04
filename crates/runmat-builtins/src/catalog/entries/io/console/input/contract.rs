@@ -90,49 +90,49 @@ const INPUT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         outputs: &INPUT_OUTPUT,
     },
 ];
-const INPUT_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.TOO_MANY_INPUTS",
     identifier: Some("RunMat:input:TooManyInputs"),
     when: "More than two input arguments are passed to input.",
     message: "input: too many inputs",
 };
-const INPUT_ERROR_INVALID_STRING_FLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_INVALID_STRING_FLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.INVALID_STRING_FLAG",
     identifier: Some("RunMat:input:InvalidStringFlag"),
     when: "The string mode flag is not a scalar string/char 's'.",
     message: "input: invalid string flag",
 };
-const INPUT_ERROR_PROMPT_ROW_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_PROMPT_ROW_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.PROMPT_ROW_VECTOR",
     identifier: Some("RunMat:input:PromptMustBeRowVector"),
     when: "Prompt char array is not 1-by-N.",
     message: "input: prompt must be a row vector",
 };
-const INPUT_ERROR_PROMPT_SCALAR_STRING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_PROMPT_SCALAR_STRING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.PROMPT_SCALAR_STRING",
     identifier: Some("RunMat:input:PromptMustBeScalarString"),
     when: "Prompt string array is not scalar.",
     message: "input: prompt must be a scalar string",
 };
-const INPUT_ERROR_INVALID_PROMPT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_INVALID_PROMPT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.INVALID_PROMPT_TYPE",
     identifier: Some("RunMat:input:InvalidPromptType"),
     when: "Prompt is not a string scalar or row char vector.",
     message: "input: invalid prompt type",
 };
-const INPUT_ERROR_INTERACTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_INTERACTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.INTERACTION_FAILED",
     identifier: Some("RunMat:input:InteractionFailed"),
     when: "Interactive prompt callback fails.",
     message: "input: interaction failed",
 };
-const INPUT_ERROR_EVAL_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_EVAL_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.EVAL_FAILED",
     identifier: Some("RunMat:input:EvalFailed"),
     when: "Expression evaluation hook rejects the input expression.",
     message: "input: invalid expression",
 };
-const INPUT_ERROR_INVALID_NUMERIC_EXPRESSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const INPUT_ERROR_INVALID_NUMERIC_EXPRESSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.INPUT.INVALID_NUMERIC_EXPRESSION",
     identifier: Some("RunMat:input:InvalidNumericExpression"),
     when: "Numeric fallback parser rejects the input expression.",

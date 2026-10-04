@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, StructValue, Value};
+use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
 use crate::builtins::common::spec::{
