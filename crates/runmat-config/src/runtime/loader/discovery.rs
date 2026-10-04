@@ -24,6 +24,12 @@ impl ApplicationSettingsDirectory {
     pub fn path(&self) -> &Path {
         &self.0
     }
+
+    /// One application-owned versioned settings document, never project VFS.
+    /// Looking up the path does not create a directory or file.
+    pub fn settings_file(&self) -> PathBuf {
+        self.0.join("settings-v1.json")
+    }
 }
 
 /// Walk up from the provided directory looking for the first project config file.
@@ -70,5 +76,9 @@ mod settings_tests {
         let home = std::env::temp_dir().join("runmat-settings-location-only");
         let location = ApplicationSettingsDirectory::from_absolute_home(home.clone()).unwrap();
         assert_eq!(location.path(), home.join(".config/runmat"));
+        assert_eq!(
+            location.settings_file(),
+            home.join(".config/runmat/settings-v1.json")
+        );
     }
 }
