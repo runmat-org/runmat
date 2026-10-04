@@ -57,6 +57,11 @@ fn tcpclient_flow(
     tcpclient_error_with_detail(error, message)
 }
 
+fn tcpclient_internal_source(err: RuntimeError) -> RuntimeError {
+    let detail = err.message().to_owned();
+    super::error::with_source(BUILTIN_NAME, &TCPCLIENT_ERROR_INTERNAL, detail, err)
+}
+
 #[runtime_builtin(
     name = "tcpclient",
     binding_variant = "default",
@@ -80,23 +85,37 @@ pub(crate) async fn tcpclient_builtin(
     ensure_integer_extension(&port, &INTEGER_PORT_EXTENSION)?;
     preflight_name_value_extensions(&rest).await?;
     super::transport::require_native_tcp(BUILTIN_NAME)?;
-    let host = gather_if_needed_async(&host)
-        .await
-        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
-    let port = gather_if_needed_async(&port)
-        .await
-        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+    let host = gather_if_needed_async(&host).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INTERNAL,
+            format!("tcpclient: {}", err.message()),
+            err,
+        )
+    })?;
+    let port = gather_if_needed_async(&port).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INTERNAL,
+            format!("tcpclient: {}", err.message()),
+            err,
+        )
+    })?;
 
     let host_text = string_scalar(&host, "tcpclient host").map_err(|err| {
-        tcpclient_flow(
+        super::error::with_source(
+            BUILTIN_NAME,
             &TCPCLIENT_ERROR_INVALID_ADDRESS,
             format!("tcpclient: invalid host argument ({err})"),
+            err,
         )
     })?;
     let port_num = parse_port(&port).map_err(|err| {
-        tcpclient_flow(
+        super::error::with_source(
+            BUILTIN_NAME,
             &TCPCLIENT_ERROR_INVALID_PORT,
             format!("tcpclient: invalid port argument ({err})"),
+            err,
         )
     })?;
     if port_num == 0 {
@@ -107,28 +126,39 @@ pub(crate) async fn tcpclient_builtin(
 
     let (stream, resolved_addr) =
         connect_with_timeout(&host_text, port_num, options.connect_timeout).map_err(|err| {
-            tcpclient_flow(
+            super::error::with_source(
+                BUILTIN_NAME,
                 &TCPCLIENT_ERROR_CONNECT_FAILED,
                 format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
+                err,
             )
         })?;
 
     if let Err(err) = configure_stream(&stream, options.timeout) {
-        return Err(tcpclient_flow(
+        return Err(super::error::with_source(
+            BUILTIN_NAME,
             &TCPCLIENT_ERROR_INTERNAL,
             format!("tcpclient: failed to configure stream timeouts ({err})"),
+            err,
         ));
     }
 
     let peer_addr = stream.peer_addr().map_err(|err| {
-        tcpclient_flow(
+        super::error::with_source(
+            BUILTIN_NAME,
             &TCPCLIENT_ERROR_INTERNAL,
             format!("tcpclient: failed to query peer address for {resolved_addr} ({err})"),
+            err,
         )
     })?;
-    let local_addr = stream
-        .local_addr()
-        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, format!("tcpclient: {err}")))?;
+    let local_addr = stream.local_addr().map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INTERNAL,
+            format!("tcpclient: {err}"),
+            err,
+        )
+    })?;
 
     let client_id = insert_client(
         stream,
@@ -302,7 +332,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
             .expect("even-length vec ensures paired name/value");
         let name_value = gather_if_needed_async(&name_raw)
             .await
-            .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+            .map_err(tcpclient_internal_source)?;
         let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
             tcpclient_flow(
                 &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -320,7 +350,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 .await?;
                 let timeout_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.timeout = parse_timeout_value(&timeout_value).map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -338,7 +368,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 .await?;
                 let connect_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.connect_timeout = parse_timeout_value(&connect_value).map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -353,7 +383,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 )?;
                 let order_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -382,7 +412,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 )?;
                 let name_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpclient_flow(
                         &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -398,7 +428,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 )?;
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.input_buffer_size = parse_buffer_size(&gathered, "InputBufferSize")?;
             }
             Some(NetConstructorOption::OutputBufferSize) => {
@@ -408,7 +438,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 )?;
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpclient_internal_source)?;
                 options.output_buffer_size = parse_buffer_size(&gathered, "OutputBufferSize")?;
             }
             None => {
@@ -607,6 +637,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::test_support::CountingDownloadProvider;
     use runmat_builtins::TCPCLIENT_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
+    use std::error::Error;
     use std::net::TcpListener;
     use std::thread;
     use std::time::Duration;
@@ -864,6 +895,12 @@ pub(crate) mod tests {
             vec![Value::from("ConnectTimeout"), Value::Num(0.05)],
         )
         .unwrap_err();
+        assert!(
+            Error::source(&err)
+                .and_then(|source| source.downcast_ref::<io::Error>())
+                .is_some(),
+            "connect failure retains its socket cause"
+        );
         assert_error_identifier(err, TCPCLIENT_ERROR_CONNECT_FAILED.identifier.unwrap());
     }
 }

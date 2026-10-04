@@ -96,9 +96,11 @@ pub(super) async fn readline_builtin(
             return Err(readline_error(&READLINE_ERROR_NOT_CONNECTED));
         }
         let stream = guard.stream.try_clone().map_err(|err| {
-            readline_flow(
+            super::error::with_source(
+                BUILTIN_NAME,
                 &READLINE_ERROR_INTERNAL,
                 format!("readline: unable to clone socket ({err})"),
+                err,
             )
         })?;
         let timeout = guard.timeout;
@@ -110,9 +112,11 @@ pub(super) async fn readline_builtin(
         if let Ok(mut guard) = handle.lock() {
             guard.readline_buffer = buffer;
         }
-        return Err(readline_flow(
+        return Err(super::error::with_source(
+            BUILTIN_NAME,
             &READLINE_ERROR_INTERNAL,
             format!("readline: unable to configure socket timeout ({err})"),
+            err,
         ));
     }
 
@@ -127,9 +131,11 @@ pub(super) async fn readline_builtin(
             if let Ok(mut guard) = handle.lock() {
                 guard.readline_buffer = buffer;
             }
-            return Err(readline_flow(
+            return Err(super::error::with_source(
+                BUILTIN_NAME,
                 &READLINE_ERROR_INTERNAL,
                 format!("readline: socket error ({err})"),
+                err,
             ));
         }
     };

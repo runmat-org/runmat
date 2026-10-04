@@ -31,9 +31,14 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
     }
     preflight_accept_options(&rest)?;
     super::transport::require_native_tcp(BUILTIN_NAME)?;
-    let server = gather_if_needed_async(&server)
-        .await
-        .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
+    let server = gather_if_needed_async(&server).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &ACCEPT_ERROR_INTERNAL,
+            format!("accept: {}", err.message()),
+            err,
+        )
+    })?;
     let server_id = extract_server_id(&server)?;
 
     let options = parse_accept_options(rest).await?;
@@ -56,9 +61,11 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
         Ok((stream, peer_addr)) => {
             if let Err(err) = configure_stream(&stream, timeout) {
                 drop(server_guard);
-                return Err(accept_flow(
+                return Err(super::error::with_source(
+                    BUILTIN_NAME,
                     &ACCEPT_ERROR_INTERNAL,
                     format!("accept: failed to configure stream timeouts ({err})"),
+                    err,
                 ));
             }
             let byte_order = server_guard.byte_order.clone();
@@ -84,9 +91,11 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
                         timeout
                     ),
                 ),
-                _ => accept_flow(
+                _ => super::error::with_source(
+                    BUILTIN_NAME,
                     &ACCEPT_ERROR_ACCEPT_FAILED,
                     format!("accept: failed to accept client ({err})"),
+                    err,
                 ),
             };
             Err(message)
@@ -188,7 +197,7 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
             .expect("paired iteration guarantees value exists");
         let name_value = gather_if_needed_async(&name_raw)
             .await
-            .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
+            .map_err(accept_internal_source)?;
         let name = match name_value {
             Value::String(ref s) => s.clone(),
             Value::CharArray(ref ca) if ca.rows == 1 => ca.data.iter().collect(),
@@ -204,7 +213,7 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
             Some(NetConstructorOption::Timeout) => {
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
+                    .map_err(accept_internal_source)?;
                 let timeout = parse_timeout_value(&gathered).map_err(|msg| {
                     accept_flow(
                         &ACCEPT_ERROR_INVALID_NAME_VALUE,
@@ -366,6 +375,11 @@ fn accept_error_with_detail(
 
 fn accept_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -> RuntimeError {
     accept_error_with_detail(error, message)
+}
+
+fn accept_internal_source(err: RuntimeError) -> RuntimeError {
+    let detail = err.message().to_owned();
+    super::error::with_source(BUILTIN_NAME, &ACCEPT_ERROR_INTERNAL, detail, err)
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

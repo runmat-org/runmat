@@ -3,6 +3,7 @@
 pub mod accept;
 pub(crate) mod client_state;
 pub(crate) mod control;
+mod error;
 pub mod close;
 pub mod read;
 pub mod readline;

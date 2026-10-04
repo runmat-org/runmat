@@ -97,7 +97,12 @@ pub(super) async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::Buil
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
         let stream = guard.stream.try_clone().map_err(|err| {
-            read_flow(&READ_ERROR_INTERNAL, format!("read: clone failed ({err})"))
+            super::error::with_source(
+                BUILTIN_NAME,
+                &READ_ERROR_INTERNAL,
+                format!("read: clone failed ({err})"),
+                err,
+            )
         })?;
         (stream, timeout, byte_order, guard.connected)
     };
@@ -105,9 +110,11 @@ pub(super) async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::Buil
     // Ensure cloned descriptor uses the configured timeout.
     if connected {
         if let Err(err) = configure_stream(&stream, timeout) {
-            return Err(read_flow(
+            return Err(super::error::with_source(
+                BUILTIN_NAME,
                 &READ_ERROR_INTERNAL,
                 format!("read: unable to configure socket timeout ({err})"),
+                err,
             ));
         }
     }
@@ -182,9 +189,11 @@ fn perform_read(
         Ok(outcome) => Ok(outcome),
         Err(ReadError::Timeout) => Err(read_error(&READ_ERROR_TIMEOUT)),
         Err(ReadError::ConnectionClosed) => Err(read_error(&READ_ERROR_CONNECTION_CLOSED)),
-        Err(ReadError::Io(err)) => Err(read_flow(
+        Err(ReadError::Io(err)) => Err(super::error::with_source(
+            BUILTIN_NAME,
             &READ_ERROR_INTERNAL,
             format!("read: socket error ({err})"),
+            err,
         )),
     }
 }

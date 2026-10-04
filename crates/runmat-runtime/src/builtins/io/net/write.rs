@@ -113,18 +113,22 @@ pub(super) async fn write_builtin(
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
         let stream = guard.stream.try_clone().map_err(|err| {
-            write_flow(
+            super::error::with_source(
+                BUILTIN_NAME,
                 &WRITE_ERROR_INTERNAL,
                 format!("write: clone failed ({err})"),
+                err,
             )
         })?;
         (stream, timeout, byte_order)
     };
 
     if let Err(err) = configure_stream(&stream, timeout) {
-        return Err(write_flow(
+        return Err(super::error::with_source(
+            BUILTIN_NAME,
             &WRITE_ERROR_INTERNAL,
             format!("write: unable to configure socket timeout ({err})"),
+            err,
         ));
     }
 
@@ -145,9 +149,11 @@ pub(super) async fn write_builtin(
             }
             Err(write_error(&WRITE_ERROR_CONNECTION_CLOSED))
         }
-        Err(WriteError::Io(err)) => Err(write_flow(
+        Err(WriteError::Io(err)) => Err(super::error::with_source(
+            BUILTIN_NAME,
             &WRITE_ERROR_INTERNAL,
             format!("write: socket error ({err})"),
+            err,
         )),
     }
 }

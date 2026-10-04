@@ -49,6 +49,11 @@ fn tcpserver_flow(
     tcpserver_error_with_detail(error, message)
 }
 
+fn tcpserver_internal_source(err: RuntimeError) -> RuntimeError {
+    let detail = err.message().to_owned();
+    super::error::with_source(BUILTIN_NAME, &TCPSERVER_ERROR_INTERNAL, detail, err)
+}
+
 #[runtime_builtin(
     name = "tcpserver",
     binding_variant = "default",
@@ -77,13 +82,39 @@ pub(crate) async fn tcpserver_builtin(
     }
     preflight_name_value_extensions(&rest).await?;
     super::transport::require_native_tcp(BUILTIN_NAME)?;
-    let address = gather_if_needed_async(&address).await?;
-    let port = gather_if_needed_async(&port).await?;
+    let address = gather_if_needed_async(&address).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INTERNAL,
+            format!("tcpserver: {}", err.message()),
+            err,
+        )
+    })?;
+    let port = gather_if_needed_async(&port).await.map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INTERNAL,
+            format!("tcpserver: {}", err.message()),
+            err,
+        )
+    })?;
 
-    let host = string_scalar(&address, "tcpserver address")
-        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_ADDRESS, err.to_string()))?;
-    let port = parse_port(&port)
-        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INVALID_PORT, err.to_string()))?;
+    let host = string_scalar(&address, "tcpserver address").map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INVALID_ADDRESS,
+            err.to_string(),
+            err,
+        )
+    })?;
+    let port = parse_port(&port).map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INVALID_PORT,
+            err.to_string(),
+            err,
+        )
+    })?;
     if port == 0 {
         crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
     }
@@ -91,14 +122,21 @@ pub(crate) async fn tcpserver_builtin(
     let options = parse_name_value_pairs(rest).await?;
 
     let listener = TcpListener::bind((host.as_str(), port)).map_err(|err| {
-        tcpserver_flow(
+        super::error::with_source(
+            BUILTIN_NAME,
             &TCPSERVER_ERROR_BIND_FAILED,
             format!("tcpserver: unable to bind {host}:{port} ({err})"),
+            err,
         )
     })?;
-    let local_addr = listener
-        .local_addr()
-        .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, format!("tcpserver: {err}")))?;
+    let local_addr = listener.local_addr().map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INTERNAL,
+            format!("tcpserver: {err}"),
+            err,
+        )
+    })?;
 
     let id = insert_server(
         listener,
@@ -246,7 +284,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
             .expect("even-length vector ensures paired name/value");
         let name_value = gather_if_needed_async(&name_raw)
             .await
-            .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+            .map_err(tcpserver_internal_source)?;
 
         let name = string_scalar(&name_value, "OptionName").map_err(|err| {
             tcpserver_flow(
@@ -265,7 +303,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 .await?;
                 let timeout_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpserver_internal_source)?;
                 options.timeout = parse_timeout(&timeout_value).map_err(|err| {
                     tcpserver_flow(
                         &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -287,7 +325,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 )?;
                 let name_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpserver_internal_source)?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpserver_flow(
                         &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -299,7 +337,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
             Some(NetConstructorOption::ByteOrder) => {
                 let order_value = gather_if_needed_async(&value_raw)
                     .await
-                    .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
+                    .map_err(tcpserver_internal_source)?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpserver_flow(
                         &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -443,7 +481,8 @@ pub(crate) mod tests {
     use crate::builtins::io::net::test_support::CountingDownloadProvider;
     use runmat_builtins::TCPSERVER_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
-    use std::net::TcpStream;
+    use std::error::Error;
+    use std::net::{TcpListener, TcpStream};
     use std::time::Duration;
 
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
@@ -735,6 +774,26 @@ pub(crate) mod tests {
         )
         .unwrap_err();
         assert_error_identifier(err, TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier.unwrap());
+    }
+
+    #[test]
+    fn occupied_port_bind_failure_retains_io_cause() {
+        let _guard = net_guard();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve loopback port");
+        let port = listener.local_addr().expect("local port").port();
+        let error = run_tcpserver(
+            Value::from("127.0.0.1"),
+            Value::Num(f64::from(port)),
+            vec![],
+        )
+        .expect_err("occupied port rejects bind");
+        assert_eq!(error.identifier(), TCPSERVER_ERROR_BIND_FAILED.identifier);
+        assert!(
+            Error::source(&error)
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .is_some(),
+            "bind failure retains the operating-system cause"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
