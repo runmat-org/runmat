@@ -62,6 +62,16 @@ impl SearchPath {
         self.generation.load(Ordering::Acquire)
     }
 
+    /// Invalidate lookup facts even when the textual search path is unchanged.
+    pub fn refresh_generation(&self) -> Result<u64, PathGenerationExhausted> {
+        self.generation
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1)
+            })
+            .map(|previous| previous + 1)
+            .map_err(|_| PathGenerationExhausted)
+    }
+
     fn replace(&self, new_path: &str) {
         let mut guard = self
             .current
@@ -90,6 +100,17 @@ impl SearchPath {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct PathGenerationExhausted;
+
+impl std::fmt::Display for PathGenerationExhausted {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("search-path revision space exhausted")
+    }
+}
+
+impl std::error::Error for PathGenerationExhausted {}
 
 fn initial_path_string() -> String {
     let mut parts = Vec::<String>::new();
@@ -226,5 +247,14 @@ pub(crate) mod tests {
             assert_eq!(current_path_string(), "second");
         }
         assert_eq!(current_path_string(), updated);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn refresh_advances_revision_without_changing_path_text() {
+        let path = SearchPath::new("functions".to_string());
+        assert_eq!(path.refresh_generation().unwrap(), 1);
+        assert_eq!(path.current_string(), "functions");
+        assert_eq!(path.generation(), 1);
     }
 }

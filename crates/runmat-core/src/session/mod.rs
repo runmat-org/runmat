@@ -185,6 +185,16 @@ struct DynamicFunctionCacheEntry {
     registry: Arc<runmat_vm::FunctionRegistry>,
 }
 
+#[cfg(test)]
+impl RunMatSession {
+    pub(crate) fn cached_source_count(&self) -> usize {
+        self.dynamic_function_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .len()
+    }
+}
+
 struct ActiveExecutionGuard {
     flag: *mut bool,
 }

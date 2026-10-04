@@ -11513,6 +11513,58 @@ fn path_function_cache_recompiles_changed_source() {
 }
 
 #[test]
+fn rehash_path_invalidates_session_source_cache_without_clearing_workspace() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    let source = functions.join("changing_value.m");
+    std::fs::write(&source, "function y = changing_value()\n  y = 1;\nend\n")
+        .expect("initial function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "addpath('functions'); kept = 9; y = changing_value();",
+    )
+    .expect("populate source cache");
+    assert_eq!(session.cached_source_count(), 1);
+    let before = session
+        .runtime_context()
+        .search_path()
+        .expect("session search path")
+        .generation();
+    std::fs::write(&source, "function y = changing_value()\n  y = 2;\nend\n")
+        .expect("updated function");
+    execute_text_request(&mut session, "rehash('path');").expect("refresh source cache");
+    assert_eq!(session.cached_source_count(), 0);
+    let outcome = execute_text_request(&mut session, "y = changing_value();")
+        .expect("call updated function after refresh");
+    assert_eq!(session.cached_source_count(), 1);
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_value::Value::Num(2.0)
+    ));
+    assert_eq!(
+        session
+            .runtime_context()
+            .search_path()
+            .expect("session search path")
+            .generation(),
+        before + 1,
+    );
+    let outcome = execute_text_request(&mut session, "kept_out = kept;")
+        .expect("rehash must not clear workspace values");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "kept_out",
+        &runmat_value::Value::Num(9.0)
+    ));
+}
+
+#[test]
 fn path_function_cache_recompiles_changed_project_companion() {
     let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");

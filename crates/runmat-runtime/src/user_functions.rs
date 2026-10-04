@@ -53,6 +53,20 @@ pub enum DynamicFunctionClearRequest {
     Named(String),
 }
 
+/// Refresh the source lookup inventory without clearing live native modules or workspace values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicFunctionRefreshRequest {
+    Default,
+    Path,
+    Toolbox,
+    ToolboxCache,
+}
+
+pub type DynamicFunctionRefresher = dyn Fn(
+    crate::context::RuntimeContext,
+    DynamicFunctionRefreshRequest,
+) -> DynamicFunctionClearFuture;
+
 pub type DynamicFunctionClearer = dyn Fn(
     crate::context::RuntimeContext,
     DynamicFunctionClearRequest,
@@ -483,6 +497,14 @@ pub async fn try_clear_dynamic_functions(
     let context = crate::context::legacy::active()?;
     let clearer = context.state().call.borrow().dynamic_clearer.clone()?;
     Some(clearer(context, request).await)
+}
+
+pub async fn try_refresh_dynamic_functions(
+    request: DynamicFunctionRefreshRequest,
+) -> Option<Result<(), RuntimeError>> {
+    let context = crate::context::legacy::active()?;
+    let refresher = context.state().call.borrow().dynamic_refresher.clone()?;
+    Some(refresher(context, request).await)
 }
 
 fn source_functions_in_catalog(

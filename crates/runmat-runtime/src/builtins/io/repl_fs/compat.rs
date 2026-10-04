@@ -156,14 +156,6 @@ pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
     notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
 };
 simple_descriptor!(
-    REHASH_SIGNATURES,
-    REHASH_DESCRIPTOR,
-    "rehash()",
-    &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
     USERPATH_SIGNATURES,
     USERPATH_DESCRIPTOR,
     "path = userpath(option)",
@@ -474,15 +466,44 @@ fn error_struct(message: &str) -> StructValue {
 
 #[runtime_builtin(
     name = "rehash",
-    category = "io/repl_fs",
-    summary = "Refresh function/path caches.",
-    keywords = "rehash,path,cache,refresh",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::repl_fs::compat::REHASH_DESCRIPTOR),
+    binding_variant = "Default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn rehash_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
+async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    use crate::user_functions::DynamicFunctionRefreshRequest;
+
+    if output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(build_runtime_error("rehash: too many output arguments")
+            .with_builtin("rehash")
+            .with_identifier("RunMat:rehash:TooManyOutputs")
+            .build());
+    }
+    let request = match args.as_slice() {
+        [] => DynamicFunctionRefreshRequest::Default,
+        [argument] => {
+            let mode = scalar_text(argument, "rehash", "mode")?;
+            match mode.to_ascii_lowercase().as_str() {
+                "path" => DynamicFunctionRefreshRequest::Path,
+                "toolbox" => DynamicFunctionRefreshRequest::Toolbox,
+                "toolboxcache" => DynamicFunctionRefreshRequest::ToolboxCache,
+                _ => {
+                    return Err(compat_error(
+                        "rehash",
+                        "rehash: expected path, toolbox, or toolboxcache",
+                    ));
+                }
+            }
+        }
+        _ => return Err(compat_error("rehash", "rehash: too many input arguments")),
+    };
+    crate::user_functions::try_refresh_dynamic_functions(request)
+        .await
+        .ok_or_else(|| {
+            build_runtime_error("rehash: no source-cache refresh service is installed")
+                .with_builtin("rehash")
+                .with_identifier("RunMat:rehash:Unavailable")
+                .build()
+        })??;
     Ok(Value::Num(0.0))
 }
 
@@ -1941,5 +1962,69 @@ mod tests {
             .message()
             .to_ascii_lowercase()
             .contains("provider"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rehash_routes_typed_modes_to_source_refresh_without_clearing_values() {
+        use crate::user_functions::DynamicFunctionRefreshRequest;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let calls = Rc::clone(&observed);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_runtime, request| {
+            let calls = Rc::clone(&calls);
+            Box::pin(async move {
+                calls.borrow_mut().push(request);
+                Ok(())
+            })
+        })));
+        let _active = context.enter();
+        for arguments in [
+            vec![],
+            vec![char_value("path")],
+            vec![Value::String("toolbox".into())],
+            vec![char_value("toolboxcache")],
+        ] {
+            assert_eq!(run(rehash_builtin(arguments)).unwrap(), Value::Num(0.0));
+        }
+        assert_eq!(
+            observed.borrow().as_slice(),
+            &[
+                DynamicFunctionRefreshRequest::Default,
+                DynamicFunctionRefreshRequest::Path,
+                DynamicFunctionRefreshRequest::Toolbox,
+                DynamicFunctionRefreshRequest::ToolboxCache,
+            ]
+        );
+        let error = run(rehash_builtin(vec![char_value("not-a-mode")]))
+            .expect_err("invalid mode must fail before cache callback");
+        assert!(error.message().contains("expected path"));
+        assert_eq!(observed.borrow().len(), 4);
+        let error = run(rehash_builtin(vec![Value::Num(1.0)]))
+            .expect_err("numeric mode must fail before cache callback");
+        assert!(error.message().contains("mode must be"));
+        assert_eq!(observed.borrow().len(), 4);
+        let _outputs = output_count::push_output_count(Some(2));
+        let error = run(rehash_builtin(Vec::new()))
+            .expect_err("unsupported output count must fail before cache callback");
+        assert_eq!(error.identifier(), "RunMat:rehash:TooManyOutputs");
+        assert_eq!(observed.borrow().len(), 4);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rehash_without_an_installed_source_refresh_service_is_not_a_noop_success() {
+        use std::rc::Rc;
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _active = context.enter();
+        let error = run(rehash_builtin(Vec::new())).expect_err("no cache owner exists");
+        assert_eq!(error.identifier(), "RunMat:rehash:Unavailable");
     }
 }

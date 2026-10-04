@@ -250,6 +250,13 @@ impl RuntimeContext {
         self.state.call.borrow_mut().dynamic_clearer = clearer;
     }
 
+    pub fn set_dynamic_function_refresher(
+        &self,
+        refresher: Option<Rc<crate::user_functions::DynamicFunctionRefresher>>,
+    ) {
+        self.state.call.borrow_mut().dynamic_refresher = refresher;
+    }
+
     pub fn runmat_extensions_enabled(&self) -> bool {
         self.state.runmat_extensions_enabled.get()
     }

@@ -377,6 +377,33 @@ impl RunMatSession {
             });
         self.runtime_context
             .set_dynamic_function_clearer(Some(clearer));
+
+        let refresh_cache = Arc::clone(&self.dynamic_function_cache);
+        let refresher: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionRefresher> =
+            std::rc::Rc::new(move |runtime, _request| {
+                let cache = Arc::clone(&refresh_cache);
+                Box::pin(async move {
+                    // RunMat has one live source cache, not a separate persisted
+                    // matlabroot/toolbox cache. All four public requests refresh
+                    // its lookup revision and compiled source entries; none
+                    // unload a MEX module or clear workspace values.
+                    if let Some(path) = runtime.search_path() {
+                        path.refresh_generation().map_err(|source| {
+                            build_runtime_error(format!("rehash: {source}"))
+                                .with_builtin("rehash")
+                                .with_source(source)
+                                .build()
+                        })?;
+                    }
+                    cache
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())
+                        .clear();
+                    Ok(())
+                })
+            });
+        self.runtime_context
+            .set_dynamic_function_refresher(Some(refresher));
     }
 
     async fn run(
