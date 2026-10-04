@@ -518,46 +518,12 @@ fn catalog_entries_keep_domain_modules_out_of_the_root() {
     }
 }
 
+#[path = "tests/topology.rs"]
+mod topology;
+
 #[test]
 fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
-    fn declares_catalog_entry(source: &str) -> bool {
-        let concrete = source.lines().any(|line| {
-            line.trim_start()
-                .strip_prefix("pub const ")
-                .is_some_and(|declaration| {
-                    !declaration.starts_with('$') && declaration.contains(": BuiltinCatalogEntry")
-                })
-        }) || source.contains("_CATALOG_ENTRY:");
-        let instantiated_local_macro = source.contains("pub const $entry: BuiltinCatalogEntry")
-            && source
-                .lines()
-                .filter_map(|line| {
-                    line.trim_start()
-                        .strip_prefix("macro_rules!")
-                        .and_then(|rest| rest.trim().split_once(' '))
-                        .map(|(name, _)| name)
-                })
-                .any(|name| {
-                    let invocation = format!("{name}!(");
-                    source
-                        .lines()
-                        .any(|line| line.trim_start().starts_with(&invocation))
-                });
-        concrete || instantiated_local_macro
-    }
-
-    assert!(declares_catalog_entry(
-        "pub const SAMPLE_CATALOG_ENTRY: BuiltinCatalogEntry = entry();"
-    ));
-    assert!(declares_catalog_entry(
-        "macro_rules! entry {\n        pub const $entry: BuiltinCatalogEntry = contract::entry();\n}\nentry!(SAMPLE_CATALOG_ENTRY);"
-    ));
-    assert!(!declares_catalog_entry(
-        "macro_rules! entry {\n        pub const $entry: BuiltinCatalogEntry = contract::entry();\n}"
-    ));
-    assert!(!declares_catalog_entry(
-        "pub const DOCUMENTATION: BuiltinDocumentation = documentation();"
-    ));
+    use topology::declares_catalog_entry;
 
     fn visit(directory: &std::path::Path) {
         for entry in std::fs::read_dir(directory)
@@ -574,9 +540,7 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
             let source = std::fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
             if path.file_name().and_then(|name| name.to_str()) == Some("mod.rs") {
-                let defines_family_entries = source
-                    .lines()
-                    .any(|line| line.starts_with("pub const ") && line.contains("_CATALOG_ENTRY:"));
+                let defines_family_entries = declares_catalog_entry(&source);
                 let composes_local_contracts =
                     std::fs::read_dir(path.parent().expect("catalog module directory"))
                         .expect("catalog module directory")
@@ -634,18 +598,48 @@ fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
                     }
                     continue;
                 }
-                assert!(
-                    family_module.contains("const ENTRIES"),
-                    "grouped catalog family must own one local entry slice: {}",
-                    family_module_path.display()
-                );
-                for declaration in source.lines().filter_map(|line| {
-                    line.strip_prefix("pub const ")
-                        .and_then(|rest| rest.split_once("_CATALOG_ENTRY:"))
-                        .map(|(prefix, _)| format!("&{prefix}_CATALOG_ENTRY"))
-                }) {
+                // Nested identity packages can re-export through a bounded
+                // composition child; the nearest ancestor family owns the
+                // one registration slice, not another copy in each child.
+                let (family_module_path, family_module) = path
+                    .parent()
+                    .expect("family directory")
+                    .ancestors()
+                    .take_while(|directory| {
+                        directory.starts_with(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .join("src/catalog/entries"),
+                        )
+                    })
+                    .map(|directory| directory.join("mod.rs"))
+                    .filter_map(|candidate| {
+                        let source = std::fs::read_to_string(&candidate).ok()?;
+                        if source.contains("const ENTRIES") {
+                            return Some((candidate, source));
+                        }
+                        // Generated composition can delegate its ordered
+                        // registration to a dedicated declaration child.
+                        if source.contains("declarations::ENTRIES") {
+                            let declarations = candidate.parent()?.join("declarations.rs");
+                            let source = std::fs::read_to_string(&declarations).ok()?;
+                            if source.contains("const ENTRIES") {
+                                return Some((declarations, source));
+                            }
+                        }
+                        None
+                    })
+                    .next()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "catalog family must own one entry slice for {}",
+                            path.display()
+                        )
+                    });
+                let registered = topology::registered_entry_names(&family_module);
+                for name in topology::catalog_entry_names(&source) {
+                    let declaration = format!("&{name}");
                     assert!(
-                        family_module.contains(&declaration),
+                        registered.contains(&name),
                         "{} does not register {declaration} from {}",
                         family_module_path.display(),
                         path.display()

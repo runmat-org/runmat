@@ -20,3 +20,4 @@ url = { workspace = true }
 
 [dev-dependencies]
 runmat-macros = { workspace = true }
+syn = { workspace = true }
