@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "cooperation/full_call.rs"]
+mod full_call;
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn abandoned_cooperative_file_read_restores_registered_owner_and_cursor() {
