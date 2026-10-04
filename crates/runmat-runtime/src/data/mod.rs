@@ -821,7 +821,16 @@ pub fn arrays_root(root: &Path) -> PathBuf {
 }
 
 pub async fn write_manifest_async(root: &Path, manifest: &DataManifest) -> BuiltinResult<()> {
-    fs::create_dir_all_async(root).await.map_err(|err| {
+    let (provider, resolved) = captured_storage_root(root)?;
+    write_manifest_on(provider.as_ref(), &resolved, manifest).await
+}
+
+pub async fn write_manifest_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    manifest: &DataManifest,
+) -> BuiltinResult<()> {
+    provider.create_dir_all(root).await.map_err(|err| {
         data_error(format!(
             "failed to create dataset root '{}': {err}",
             root.display()
@@ -830,7 +839,7 @@ pub async fn write_manifest_async(root: &Path, manifest: &DataManifest) -> Built
     let path = manifest_path(root);
     let bytes = serde_json::to_vec_pretty(manifest)
         .map_err(|err| data_error(format!("failed to encode manifest json: {err}")))?;
-    fs::write_async(&path, &bytes).await.map_err(|err| {
+    provider.write(&path, &bytes).await.map_err(|err| {
         data_error(format!(
             "failed to write manifest '{}': {err}",
             path.display()
@@ -840,8 +849,16 @@ pub async fn write_manifest_async(root: &Path, manifest: &DataManifest) -> Built
 }
 
 pub async fn read_manifest_async(root: &Path) -> BuiltinResult<DataManifest> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    read_manifest_on(provider.as_ref(), &resolved).await
+}
+
+pub async fn read_manifest_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+) -> BuiltinResult<DataManifest> {
     let path = manifest_path(root);
-    let bytes = fs::read_async(&path).await.map_err(|err| {
+    let bytes = provider.read(&path).await.map_err(|err| {
         data_error(format!(
             "failed to read manifest '{}': {err}",
             path.display()
@@ -862,8 +879,40 @@ pub async fn write_array_payload_async(
     payload: &DataArrayPayload,
     chunk_shape: &[usize],
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
+    let (provider, resolved) = captured_storage_root(root)?;
+    let (payload_path, index_path) =
+        write_array_payload_on(provider.as_ref(), &resolved, array, payload, chunk_shape).await?;
+    let rebase = |path: PathBuf| {
+        path.strip_prefix(&resolved)
+            .map(|relative| root.join(relative))
+            .map_err(|_| data_error("written array path escaped its dataset root"))
+    };
+    Ok((rebase(payload_path)?, rebase(index_path)?))
+}
+
+fn captured_storage_root(
+    root: &Path,
+) -> BuiltinResult<(std::sync::Arc<dyn fs::FsProvider>, PathBuf)> {
+    let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|error| {
+        data_error(format!("failed to capture data storage directory: {error}"))
+    })?;
+    let resolved = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        cwd.join(root)
+    };
+    Ok((provider, resolved))
+}
+
+pub async fn write_array_payload_on(
+    provider: &dyn fs::FsProvider,
+    root: &Path,
+    array: &str,
+    payload: &DataArrayPayload,
+    chunk_shape: &[usize],
+) -> BuiltinResult<(PathBuf, PathBuf)> {
     let array_dir = arrays_root(root).join(array);
-    fs::create_dir_all_async(&array_dir).await.map_err(|err| {
+    provider.create_dir_all(&array_dir).await.map_err(|err| {
         data_error(format!(
             "failed to create array dir '{}': {err}",
             array_dir.display()
@@ -872,17 +921,15 @@ pub async fn write_array_payload_async(
     let payload_path = array_dir.join("data.f64.json");
     let bytes = serde_json::to_vec(payload)
         .map_err(|err| data_error(format!("failed to encode array payload json: {err}")))?;
-    fs::write_async(&payload_path, &bytes)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "failed to write payload '{}': {err}",
-                payload_path.display()
-            ))
-        })?;
+    provider.write(&payload_path, &bytes).await.map_err(|err| {
+        data_error(format!(
+            "failed to write payload '{}': {err}",
+            payload_path.display()
+        ))
+    })?;
 
     let chunk_dir = array_dir.join("chunks");
-    fs::create_dir_all_async(&chunk_dir).await.map_err(|err| {
+    provider.create_dir_all(&chunk_dir).await.map_err(|err| {
         data_error(format!(
             "failed to create chunk dir '{}': {err}",
             chunk_dir.display()
@@ -923,7 +970,8 @@ pub async fn write_array_payload_async(
         let chunk_bytes = serde_json::to_vec(&chunk_payload)
             .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
         let data_path = chunk_dir.join(format!("{object_id}.json"));
-        fs::write_async(&data_path, &chunk_bytes)
+        provider
+            .write(&data_path, &chunk_bytes)
             .await
             .map_err(|err| {
                 data_error(format!(
@@ -962,7 +1010,7 @@ pub async fn write_array_payload_async(
         }
     }
 
-    maybe_upload_chunks_async(root, array, upload_chunks).await?;
+    maybe_upload_chunks_on(provider, root, array, upload_chunks).await?;
 
     tracing::info!(
         target: "runmat.data",
@@ -976,7 +1024,8 @@ pub async fn write_array_payload_async(
     let chunk_index_path = chunk_dir.join("index.json");
     let chunk_index_bytes = serde_json::to_vec(&index)
         .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    fs::write_async(&chunk_index_path, &chunk_index_bytes)
+    provider
+        .write(&chunk_index_path, &chunk_index_bytes)
         .await
         .map_err(|err| {
             data_error(format!(
@@ -1215,7 +1264,8 @@ async fn read_array_payload_chunked_async(
     })
 }
 
-async fn maybe_upload_chunks_async(
+async fn maybe_upload_chunks_on(
+    provider: &dyn fs::FsProvider,
     root: &Path,
     array: &str,
     chunks: Vec<(DataChunkDescriptor, Vec<u8>)>,
@@ -1228,7 +1278,7 @@ async fn maybe_upload_chunks_async(
         array: array.to_string(),
         chunks: chunks.iter().map(|(desc, _)| desc.clone()).collect(),
     };
-    let targets = match fs::data_chunk_upload_targets_async(&request).await {
+    let targets = match provider.data_chunk_upload_targets(&request).await {
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
@@ -1239,7 +1289,8 @@ async fn maybe_upload_chunks_async(
     };
     for (descriptor, bytes) in chunks {
         let target = find_chunk_target(&targets, &descriptor.key)?;
-        fs::data_upload_chunk_async(target, &bytes)
+        provider
+            .data_upload_chunk(target, &bytes)
             .await
             .map_err(|err| {
                 data_error(format!(

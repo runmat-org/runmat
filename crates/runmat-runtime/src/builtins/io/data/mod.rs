@@ -1,5 +1,8 @@
 //! Cloud-ready dataset persistence builtins (`data.*`).
 
+mod path_authority;
+use path_authority::DataPathAuthority;
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -1407,14 +1410,21 @@ one_sig_descriptor!(
 )]
 async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.create path")?;
-    let root = dataset_root(&path);
     let schema = parse_schema(&schema)?;
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&path);
     let now = now_rfc3339();
     let mut arrays = BTreeMap::new();
     for (name, mut meta) in schema.arrays {
         let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
-        let (payload_path, chunk_index_path) =
-            write_array_payload_async(&root, &name, &payload, &meta.chunk_shape).await?;
+        let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+            authority.provider(),
+            &root,
+            &name,
+            &payload,
+            &meta.chunk_shape,
+        )
+        .await?;
         meta.data_path = make_rel_data_path(&root, &payload_path)?;
         meta.chunk_index_path = Some(make_rel_data_path(&root, &chunk_index_path)?);
         arrays.insert(name, meta);
@@ -1431,7 +1441,7 @@ async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value>
         attrs: BTreeMap::new(),
         txn_sequence: 0,
     };
-    write_manifest_async(&root, &manifest).await?;
+    crate::data::write_manifest_on(authority.provider(), &root, &manifest).await?;
     Ok(dataset_object(&path, &manifest))
 }
 
@@ -1447,10 +1457,11 @@ async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value>
 )]
 async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.open path")?;
-    let root = dataset_root(&path);
-    let manifest = read_manifest_async(&root).await?;
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&path);
+    let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     let mut ds = dataset_object(&path, &manifest);
-    hydrate_dataset_descriptor_async(&path, &mut ds).await;
+    hydrate_dataset_descriptor_on(authority.provider(), &root, &mut ds).await;
     Ok(ds)
 }
 
@@ -1466,8 +1477,11 @@ async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.exists path")?;
-    let root = dataset_root(&path);
-    let exists = runmat_filesystem::metadata_async(manifest_path(&root))
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&path);
+    let exists = authority
+        .provider()
+        .metadata(&manifest_path(&root))
         .await
         .is_ok();
     Ok(Value::Bool(exists))
@@ -1486,8 +1500,11 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
 )]
 async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.delete path")?;
-    let root = dataset_root(&path);
-    runmat_filesystem::remove_dir_all_async(&root)
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&path);
+    authority
+        .provider()
+        .remove_dir_all(&root)
         .await
         .map_err(|err| {
             data_error(format!(
@@ -1512,7 +1529,13 @@ async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
 async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.copy fromPath")?;
     let to = parse_string(&to_path, "data.copy toPath")?;
-    copy_dir_recursive(&dataset_root(&from), &dataset_root(&to)).await?;
+    let authority = DataPathAuthority::capture()?;
+    copy_dir_recursive_on(
+        authority.provider(),
+        &authority.resolve(&from),
+        &authority.resolve(&to),
+    )
+    .await?;
     Ok(Value::Bool(true))
 }
 
@@ -1530,7 +1553,10 @@ async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Va
 async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.move fromPath")?;
     let to = parse_string(&to_path, "data.move toPath")?;
-    runmat_filesystem::rename_async(dataset_root(&from), dataset_root(&to))
+    let authority = DataPathAuthority::capture()?;
+    authority
+        .provider()
+        .rename(&authority.resolve(&from), &authority.resolve(&to))
         .await
         .map_err(|err| {
             data_error(format!(
@@ -1564,8 +1590,15 @@ async fn data_import_builtin(
         ));
     }
     let source_path = parse_string(&source_path, "data.import sourcePath")?;
-    copy_dir_recursive(&dataset_root(&source_path), &dataset_root(&path)).await?;
-    let manifest = read_manifest_async(&dataset_root(&path)).await?;
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&path);
+    copy_dir_recursive_on(
+        authority.provider(),
+        &authority.resolve(&source_path),
+        &root,
+    )
+    .await?;
+    let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     Ok(dataset_object(&path, &manifest))
 }
 
@@ -1593,7 +1626,13 @@ async fn data_export_builtin(
         ));
     }
     let target_path = parse_string(&target_path, "data.export targetPath")?;
-    copy_dir_recursive(&dataset_root(&path), &dataset_root(&target_path)).await?;
+    let authority = DataPathAuthority::capture()?;
+    copy_dir_recursive_on(
+        authority.provider(),
+        &authority.resolve(&path),
+        &authority.resolve(&target_path),
+    )
+    .await?;
     Ok(Value::Bool(true))
 }
 
@@ -1609,15 +1648,14 @@ async fn data_export_builtin(
 )]
 async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
     let prefix = parse_string(&path_prefix, "data.list prefix")?;
-    let root = PathBuf::from(prefix);
-    let entries = runmat_filesystem::read_dir_async(&root)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "data.list: failed to read '{}': {err}",
-                root.display()
-            ))
-        })?;
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&prefix);
+    let entries = authority.provider().read_dir(&root).await.map_err(|err| {
+        data_error(format!(
+            "data.list: failed to read '{}': {err}",
+            root.display()
+        ))
+    })?;
     let mut values = Vec::new();
     for entry in entries {
         if !entry.is_dir() {
@@ -1627,11 +1665,18 @@ async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
         if candidate.extension().and_then(|s| s.to_str()) != Some("data") {
             continue;
         }
-        if runmat_filesystem::metadata_async(candidate.join("manifest.json"))
+        if authority
+            .provider()
+            .metadata(&candidate.join("manifest.json"))
             .await
             .is_ok()
         {
-            values.push(Value::String(candidate.to_string_lossy().to_string()));
+            values.push(Value::String(
+                PathBuf::from(&prefix)
+                    .join(entry.file_name())
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
         }
     }
     let cols = values.len();
@@ -1650,8 +1695,9 @@ async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.inspect path")?;
-    let root = dataset_root(&path);
-    let manifest = read_manifest_async(&root).await?;
+    let authority = DataPathAuthority::capture()?;
+    let root = authority.resolve(&path);
+    let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     let mut out = StructValue::new();
     out.fields.insert("path".to_string(), Value::String(path));
     out.fields
@@ -2581,11 +2627,20 @@ fn as_object<'a>(value: &'a Value, context: &str) -> BuiltinResult<&'a ObjectIns
 }
 
 async fn hydrate_dataset_descriptor_async(path: &str, dataset: &mut Value) {
+    let provider = runmat_filesystem::current_provider();
+    hydrate_dataset_descriptor_on(provider.as_ref(), std::path::Path::new(path), dataset).await;
+}
+
+async fn hydrate_dataset_descriptor_on(
+    provider: &dyn runmat_filesystem::FsProvider,
+    path: &std::path::Path,
+    dataset: &mut Value,
+) {
     let request = runmat_filesystem::data_contract::DataManifestRequest {
-        path: path.to_string(),
+        path: path.to_string_lossy().into_owned(),
         version: None,
     };
-    let descriptor = match runmat_filesystem::data_manifest_descriptor_async(&request).await {
+    let descriptor = match provider.data_manifest_descriptor(&request).await {
         Ok(descriptor) => descriptor,
         Err(_) => return,
     };
@@ -2621,7 +2676,22 @@ fn sanitize_label(label: &str) -> String {
 }
 
 async fn copy_file(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
-    let bytes = runmat_filesystem::read_async(src)
+    let authority = DataPathAuthority::capture()?;
+    copy_file_on(
+        authority.provider(),
+        &authority.resolve(src),
+        &authority.resolve(dst),
+    )
+    .await
+}
+
+async fn copy_file_on(
+    provider: &dyn runmat_filesystem::FsProvider,
+    src: &PathBuf,
+    dst: &PathBuf,
+) -> BuiltinResult<()> {
+    let bytes = provider
+        .read(src)
         .await
         .map_err(|err| data_error(format!("failed to open '{}': {err}", src.display())))?;
     let parent = dst.parent().ok_or_else(|| {
@@ -2630,18 +2700,17 @@ async fn copy_file(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
             dst.display()
         ))
     })?;
-    runmat_filesystem::create_dir_all_async(parent)
+    provider
+        .create_dir_all(parent)
         .await
         .map_err(|err| data_error(format!("failed to create '{}': {err}", parent.display())))?;
-    runmat_filesystem::write_async(dst, &bytes)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "failed to copy '{}' -> '{}': {err}",
-                src.display(),
-                dst.display()
-            ))
-        })?;
+    provider.write(dst, &bytes).await.map_err(|err| {
+        data_error(format!(
+            "failed to copy '{}' -> '{}': {err}",
+            src.display(),
+            dst.display()
+        ))
+    })?;
     Ok(())
 }
 
@@ -2815,8 +2884,13 @@ fn default_chunk_shape(shape: &[usize]) -> Vec<usize> {
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
-    let metadata = runmat_filesystem::metadata_async(src)
+async fn copy_dir_recursive_on(
+    provider: &dyn runmat_filesystem::FsProvider,
+    src: &PathBuf,
+    dst: &PathBuf,
+) -> BuiltinResult<()> {
+    let metadata = provider
+        .metadata(src)
         .await
         .map_err(|err| data_error(format!("failed to stat '{}': {err}", src.display())))?;
     if !metadata.is_dir() {
@@ -2825,20 +2899,22 @@ async fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
             src.display()
         )));
     }
-    runmat_filesystem::create_dir_all_async(dst)
+    provider
+        .create_dir_all(dst)
         .await
         .map_err(|err| data_error(format!("failed to create '{}': {err}", dst.display())))?;
-    for entry in runmat_filesystem::read_dir_async(src)
+    for entry in provider
+        .read_dir(src)
         .await
         .map_err(|err| data_error(format!("failed to read '{}': {err}", src.display())))?
     {
         let entry_src = entry.path().to_path_buf();
         let entry_dst = dst.join(entry.file_name());
         if entry.is_dir() {
-            copy_dir_recursive(&entry_src, &entry_dst).await?;
+            copy_dir_recursive_on(provider, &entry_src, &entry_dst).await?;
             continue;
         }
-        copy_file(&entry_src, &entry_dst).await?;
+        copy_file_on(provider, &entry_src, &entry_dst).await?;
     }
     Ok(())
 }
@@ -4222,6 +4298,10 @@ mod tests {
     struct CountingDataUploadProvider {
         inner: NativeFsProvider,
         uploaded_keys: Arc<Mutex<Vec<String>>>,
+        default_current_dir: Option<PathBuf>,
+        swap_on_write: Mutex<Option<Arc<dyn FsProvider>>>,
+        suspend_after_swap: bool,
+        suspensions: Arc<Mutex<usize>>,
     }
 
     struct HttpDataUploadProvider {
@@ -4447,6 +4527,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for CountingDataUploadProvider {
+        fn current_dir_override(&self) -> Option<PathBuf> {
+            self.default_current_dir.clone()
+        }
+
         fn open(&self, path: &Path, flags: &OpenFlags) -> std::io::Result<Box<dyn FileHandle>> {
             self.inner.open(path, flags)
         }
@@ -4456,6 +4540,26 @@ mod tests {
         }
 
         async fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
+            let replacement = self.swap_on_write.lock().expect("swap lock").take();
+            if let Some(replacement) = replacement {
+                runmat_filesystem::set_provider(replacement);
+                runmat_filesystem::set_current_dir("/replacement")
+                    .expect("replacement fixture working directory");
+                if self.suspend_after_swap {
+                    let mut yielded = false;
+                    futures::future::poll_fn(|cx| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            *self.suspensions.lock().expect("suspension count") += 1;
+                            cx.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                }
+            }
             self.inner.write(path, data).await
         }
 
@@ -4538,6 +4642,59 @@ mod tests {
             guard.push(target.key.clone());
             Ok(())
         }
+    }
+
+    #[test]
+    fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
+        let _serial = serial_test_guard();
+        let dir = tempfile::tempdir().expect("selected data directory");
+        let selected = Arc::new(CountingDataUploadProvider {
+            default_current_dir: Some(dir.path().to_path_buf()),
+            suspend_after_swap: true,
+            ..Default::default()
+        });
+        let suspensions = selected.suspensions.clone();
+        let replacement = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+            "/replacement",
+        ));
+        *selected.swap_on_write.lock().expect("swap lock") =
+            Some(replacement.clone() as Arc<dyn FsProvider>);
+        let _guard = runmat_filesystem::replace_provider(selected);
+        runmat_filesystem::set_current_dir(dir.path()).expect("selected fixture directory");
+
+        let mut array = StructValue::new();
+        array
+            .fields
+            .insert("dtype".into(), Value::String("uint64".into()));
+        array.fields.insert(
+            "shape".into(),
+            Value::Tensor(
+                Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1, 1]), vec![1, 2])
+                    .expect("shape"),
+            ),
+        );
+        let mut arrays = StructValue::new();
+        arrays.fields.insert("sample".into(), Value::Struct(array));
+        let mut schema = StructValue::new();
+        schema.fields.insert("arrays".into(), Value::Struct(arrays));
+
+        let result = call_builtin(
+            "data.create",
+            &[Value::String("pinned.data".into()), Value::Struct(schema)],
+        )
+        .expect("create finishes on original authority after ambient swap");
+        assert!(matches!(result, Value::Object(_)));
+        assert_eq!(*suspensions.lock().expect("suspension count"), 1);
+        let root = dir.path().join("pinned.data");
+        assert!(root.join("manifest.json").is_file());
+        assert!(root.join("arrays/sample/data.f64.json").is_file());
+        assert!(root.join("arrays/sample/chunks/obj_0_0.json").is_file());
+        assert!(
+            futures::executor::block_on(replacement.read(std::path::Path::new(
+                "/replacement/pinned.data/manifest.json"
+            )))
+            .is_err()
+        );
     }
 
     #[test]
