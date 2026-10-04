@@ -1,6 +1,6 @@
 //! HTTP API-key metadata from a leading options structure.
 
-use reqwest::header::{HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue};
+use http::header::{HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue};
 use runmat_value::{NumericScalar, StructValue, Value};
 use std::fmt;
 

@@ -1,14 +1,14 @@
 //! Cloud-ready dataset persistence builtins (`data.*`).
 
-mod array;
-mod dataset;
+pub(crate) mod array;
+pub(crate) mod dataset;
 mod execution;
 mod handle_admission;
 mod handle_identity;
 mod kernel;
-mod path;
+pub(crate) mod path;
 mod path_authority;
-mod transaction;
+pub(crate) mod transaction;
 
 use kernel::*;
 

@@ -7,7 +7,7 @@ use crate::context::{host_effect::DatasetHandleOperation as Op, RuntimeContext};
     name = "DataArray.name",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_name_builtin(
     runtime: Option<RuntimeContext>,
@@ -24,7 +24,7 @@ async fn data_array_name_builtin(
     name = "DataArray.dtype",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_dtype_builtin(
     runtime: Option<RuntimeContext>,
@@ -41,7 +41,7 @@ async fn data_array_dtype_builtin(
     name = "DataArray.shape",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_shape_builtin(
     runtime: Option<RuntimeContext>,
@@ -61,7 +61,7 @@ async fn data_array_shape_builtin(
     name = "DataArray.rank",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_rank_builtin(
     runtime: Option<RuntimeContext>,
@@ -78,7 +78,7 @@ async fn data_array_rank_builtin(
     name = "DataArray.chunk_shape",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_chunk_shape_builtin(
     runtime: Option<RuntimeContext>,
@@ -108,7 +108,7 @@ async fn data_array_chunk_shape_builtin(
     name = "DataArray.codec",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_codec_builtin(
     runtime: Option<RuntimeContext>,
@@ -125,7 +125,7 @@ async fn data_array_codec_builtin(
     name = "DataArray.read",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_read_builtin(
     runtime: Option<RuntimeContext>,
@@ -168,7 +168,7 @@ async fn data_array_read_builtin(
     name = "DataArray.write",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_write_builtin(
     runtime: Option<RuntimeContext>,
@@ -206,7 +206,7 @@ async fn data_array_write_builtin(
     name = "DataArray.resize",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_resize_builtin(
     runtime: Option<RuntimeContext>,
@@ -285,7 +285,7 @@ async fn metadata(
     name = "DataArray.fill",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::array"
 )]
 async fn data_array_fill_builtin(
     runtime: Option<RuntimeContext>,

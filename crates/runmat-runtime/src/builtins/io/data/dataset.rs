@@ -7,7 +7,7 @@ use crate::context::{host_effect::DatasetHandleOperation as Op, RuntimeContext};
     name = "Dataset.path",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_path_builtin(
     runtime: Option<RuntimeContext>,
@@ -25,7 +25,7 @@ async fn dataset_path_builtin(
     name = "Dataset.id",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_id_builtin(runtime: Option<RuntimeContext>, base: Value) -> BuiltinResult<Value> {
     let owner = authority::resolve_object(runtime.as_ref(), &base, HandleRole::Dataset)?;
@@ -40,7 +40,7 @@ async fn dataset_id_builtin(runtime: Option<RuntimeContext>, base: Value) -> Bui
     name = "Dataset.version",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_version_builtin(
     runtime: Option<RuntimeContext>,
@@ -58,7 +58,7 @@ async fn dataset_version_builtin(
     name = "Dataset.arrays",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_arrays_builtin(
     runtime: Option<RuntimeContext>,
@@ -82,7 +82,7 @@ async fn dataset_arrays_builtin(
     name = "Dataset.has_array",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_has_array_builtin(
     runtime: Option<RuntimeContext>,
@@ -109,7 +109,7 @@ async fn dataset_has_array_builtin(
     name = "Dataset.array",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_array_builtin(
     runtime: Option<RuntimeContext>,
@@ -142,7 +142,7 @@ async fn dataset_array_builtin(
     name = "Dataset.attrs",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_attrs_builtin(
     runtime: Option<RuntimeContext>,
@@ -161,7 +161,7 @@ async fn dataset_attrs_builtin(
     name = "Dataset.get_attr",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_get_attr_builtin(
     runtime: Option<RuntimeContext>,
@@ -199,7 +199,7 @@ async fn dataset_get_attr_builtin(
     name = "Dataset.set_attr",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_set_attr_builtin(
     runtime: Option<RuntimeContext>,
@@ -232,7 +232,7 @@ async fn dataset_set_attr_builtin(
     name = "Dataset.set_attrs",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_set_attrs_builtin(
     runtime: Option<RuntimeContext>,
@@ -268,7 +268,7 @@ async fn dataset_set_attrs_builtin(
     name = "Dataset.begin",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_begin_builtin(
     runtime: Option<RuntimeContext>,
@@ -305,7 +305,7 @@ async fn dataset_begin_builtin(
     name = "Dataset.snapshot",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_snapshot_builtin(
     runtime: Option<RuntimeContext>,
@@ -351,7 +351,7 @@ async fn dataset_snapshot_builtin(
     name = "Dataset.refresh",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::dataset"
 )]
 async fn dataset_refresh_builtin(
     runtime: Option<RuntimeContext>,

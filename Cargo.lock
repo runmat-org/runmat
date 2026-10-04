@@ -7276,6 +7276,7 @@ dependencies = [
  "glam",
  "glob",
  "hdf5-metno",
+ "http 1.4.2",
  "image",
  "inventory",
  "js-sys",

@@ -11,7 +11,7 @@ mod admission;
     name = "data.create",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_create_builtin(
     runtime: Option<RuntimeContext>,
@@ -87,7 +87,7 @@ async fn data_create_builtin(
     name = "data.open",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_open_builtin(runtime: Option<RuntimeContext>, path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.open path")?;
@@ -120,7 +120,7 @@ async fn data_open_builtin(runtime: Option<RuntimeContext>, path: Value) -> Buil
     name = "data.exists",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_exists_builtin(runtime: Option<RuntimeContext>, path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.exists path")?;
@@ -149,7 +149,7 @@ async fn data_exists_builtin(runtime: Option<RuntimeContext>, path: Value) -> Bu
     name = "data.delete",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_delete_builtin(runtime: Option<RuntimeContext>, path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.delete path")?;
@@ -183,7 +183,7 @@ async fn data_delete_builtin(runtime: Option<RuntimeContext>, path: Value) -> Bu
     name = "data.copy",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_copy_builtin(
     runtime: Option<RuntimeContext>,
@@ -218,7 +218,7 @@ async fn data_copy_builtin(
     name = "data.move",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_move_builtin(
     runtime: Option<RuntimeContext>,
@@ -261,7 +261,7 @@ async fn data_move_builtin(
     name = "data.import",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_import_builtin(
     runtime: Option<RuntimeContext>,
@@ -310,7 +310,7 @@ async fn data_import_builtin(
     name = "data.export",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_export_builtin(
     runtime: Option<RuntimeContext>,
@@ -358,7 +358,7 @@ async fn data_export_builtin(
     name = "data.list",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_list_builtin(
     runtime: Option<RuntimeContext>,
@@ -415,7 +415,7 @@ async fn data_list_builtin(
     name = "data.inspect",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::io::data"
+    builtin_path = "crate::builtins::io::data::path"
 )]
 async fn data_inspect_builtin(
     runtime: Option<RuntimeContext>,
