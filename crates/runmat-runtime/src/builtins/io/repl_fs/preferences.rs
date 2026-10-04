@@ -1,11 +1,11 @@
 //! Preference controls over one application-owned settings service.
 
 mod controls;
-mod getpref;
-mod ispref;
+pub(crate) mod getpref;
+pub(crate) mod ispref;
 mod preparation;
 mod service;
-mod setpref;
+pub(crate) mod setpref;
 
 #[cfg(test)]
 pub(super) use getpref::getpref_builtin;
