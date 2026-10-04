@@ -61,6 +61,10 @@ fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> Builti
             })
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
+    // A native target is a prerequisite to touching CWD, sources, or the SDK.
+    // The compiler adapter still validates the exact target and artifact at
+    // plan/publication time; this preflight only fixes unsupported-host order.
+    runmat_mex::MexTarget::current().map_err(|error| map_mex_build_error(builtin, error))?;
     let working_directory = runmat_filesystem::current_dir().map_err(|error| {
         build_runtime_error(format!(
             "{builtin}: could not resolve the current directory: {error}"
@@ -105,7 +109,8 @@ fn map_mex_build_error(
 ) -> crate::RuntimeError {
     match error {
         error @ (runmat_mex::MexBuildError::UnsupportedTarget
-        | runmat_mex::MexBuildError::UnsupportedCudaTarget) => {
+        | runmat_mex::MexBuildError::UnsupportedCudaTarget
+        | runmat_mex::MexBuildError::UnsupportedTargetIdentity { .. }) => {
             mex_build_error_with_source(builtin, &MEX_ERROR_UNAVAILABLE, error)
         }
         other => mex_build_error_with_source(builtin, &MEX_ERROR_BUILD_FAILED, other),
@@ -193,6 +198,14 @@ mod tests {
     fn scalar_numeric_and_logical_build_arguments_still_convert_to_text() {
         assert_eq!(String::try_from(&Value::Num(17.0)).unwrap(), "17");
         assert_eq!(String::try_from(&Value::Bool(true)).unwrap(), "true");
+    }
+
+    #[cfg(target_family = "wasm")]
+    #[test]
+    fn valid_build_text_rejects_unsupported_target_before_source_access() {
+        let error = mex_builtin(vec![Value::from("missing.c")]).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:MEX:UnsupportedTarget"));
+        assert!(error.source.is_some());
     }
 
     #[test]
