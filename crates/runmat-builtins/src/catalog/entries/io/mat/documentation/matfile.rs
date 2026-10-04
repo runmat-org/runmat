@@ -2,8 +2,11 @@ use super::*;
 
 const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink { label: "MAT object methods and whole-variable protocol", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/matfile.rs") },
+    BuiltinDocumentationLink { label: "MAT receiver and Writable option admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/matfile/receiver.rs") },
+    BuiltinDocumentationLink { label: "MAT member read and write steps", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/matfile/steps.rs") },
     BuiltinDocumentationLink { label: "Sealed receiver and filesystem owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority/handle.rs") },
     BuiltinDocumentationLink { label: "Shared MAT value conversion and writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding.rs") },
+    BuiltinDocumentationLink { label: "MAT value conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/value.rs") },
 ];
 const MAT_LINKS: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink {

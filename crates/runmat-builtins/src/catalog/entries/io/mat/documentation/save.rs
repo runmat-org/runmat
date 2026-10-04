@@ -54,7 +54,11 @@ pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "MAT save entry and selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save.rs") },
+            BuiltinDocumentationLink { label: "MAT save controls and selections", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save/controls.rs") },
+            BuiltinDocumentationLink { label: "MAT save workspace and append read", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/save/workspace.rs") },
             BuiltinDocumentationLink { label: "Shared MAT value conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding.rs") },
+            BuiltinDocumentationLink { label: "Shared MAT value conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/value.rs") },
+            BuiltinDocumentationLink { label: "MAT text and scalar coding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/scalars.rs") },
             BuiltinDocumentationLink { label: "Checked MAT byte writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding/writer.rs") },
             BuiltinDocumentationLink { label: "Captured MAT filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority.rs") },
         ],
