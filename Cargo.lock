@@ -7343,6 +7343,7 @@ dependencies = [
  "web-sys",
  "wgpu 0.19.4",
  "wgpu 24.0.5",
+ "windows-sys 0.59.0",
  "zip",
 ]
 
