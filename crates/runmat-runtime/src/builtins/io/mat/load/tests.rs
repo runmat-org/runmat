@@ -220,7 +220,7 @@ fn load_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"S = load()"));
     assert!(labels.contains(&"S = load(filename)"));
     assert!(labels.contains(&"S = load(filename, varName1, varName2, ...)"));
-    assert!(labels.contains(&"S = load(filename, \"-regexp\", pattern1, ...)"));
+    assert!(labels.contains(&"S = load(filename, '-regexp', pattern1, ...)"));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

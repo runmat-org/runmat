@@ -23,9 +23,13 @@ fn known_invalid_writable_pair_does_not_download_resident_filename() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn invalid_read_index_precedes_detached_receiver_authority() {
-    let subscript =
-        crate::object::indexing::standard_substruct_fixture_from_parts("()", Value::Num(1.0))
-            .expect("fixture");
+    let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(
+        "()",
+        Value::Cell(
+            runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("selector cell"),
+        ),
+    )
+    .expect("fixture");
     let path =
         crate::object::indexing::parse_standard_substruct(&subscript).expect("parsed fixture");
     let step = path

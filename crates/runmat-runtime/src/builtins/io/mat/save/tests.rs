@@ -160,7 +160,7 @@ fn save_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"status = save()"));
     assert!(labels.contains(&"status = save(filename)"));
     assert!(labels.contains(&"status = save(filename, varName1, varName2, ...)"));
-    assert!(labels.contains(&"status = save(filename, \"-struct\", structVar, field1, ...)"));
+    assert!(labels.contains(&"status = save(filename, '-struct', structVar, field1, ...)"));
 }
 
 fn lock_env_override() -> std::sync::MutexGuard<'static, ()> {
