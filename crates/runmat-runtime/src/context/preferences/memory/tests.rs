@@ -7,6 +7,9 @@ use runmat_value::{
     CellArray, CharArray, DynamicPropertyDef, IntValue, ObjectInstance, StructValue,
 };
 
+#[path = "tests/lifecycle.rs"]
+mod lifecycle;
+
 fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
 }
