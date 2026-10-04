@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod python;
+mod java;
 
+pub use self::java::*;
 pub use self::python::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(python::ENTRIES.iter().copied());
+    values.extend(java::ENTRIES.iter().copied());
 }
