@@ -144,7 +144,16 @@ async fn writecell_builtin(
     let table = CellTable::from_value(runtime.as_ref(), &mut cooperation, gathered).await?;
 
     let bytes_written = match options.resolve_file_type(selected.path())? {
-        OutputFileType::DelimitedText => write_delimited_cells(&selected, &table, &options).await?,
+        OutputFileType::DelimitedText => {
+            write_delimited_cells(
+                runtime.as_ref(),
+                &mut cooperation,
+                &selected,
+                &table,
+                &options,
+            )
+            .await?
+        }
         OutputFileType::Spreadsheet => write_spreadsheet_cells(&selected, &table, &options).await?,
     };
     cooperation.completed(0).await?;

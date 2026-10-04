@@ -1,6 +1,8 @@
 use super::*;
 
 pub(super) async fn write_delimited_cells(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
     table: &CellTable,
     options: &WriteCellOptions,
@@ -8,19 +10,23 @@ pub(super) async fn write_delimited_cells(
     let path = selected.path();
     let delimiter = options.resolve_delimiter(path);
     let line_ending = options.line_ending.as_str();
-    let payload = build_delimited_payload(table, options, &delimiter, line_ending);
-    let write_lock = write_owner::write_lock_for_path(selected)
-        .await
-        .map_err(|source| {
-            writecell_error_with_source(
-                &WRITECELL_ERROR_IO,
-                "writecell: write authority unavailable",
-                source,
-            )
-        })?;
-    let _write_guard = write_lock.lock().await;
+    let write_lock = await_io(
+        runtime,
+        BUILTIN_NAME,
+        write_owner::write_lock_for_path(selected),
+    )
+    .await?
+    .map_err(|source| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            "writecell: write authority unavailable",
+            source,
+        )
+    })?;
+    let _write_guard = await_io(runtime, BUILTIN_NAME, write_lock.lock()).await?;
 
     if options.write_mode == WriteMode::Overwrite {
+        let payload = build_delimited_payload(table, options, &delimiter, line_ending);
         write_owner::safe_replace_file(selected, &payload)
             .await
             .map_err(|source| {
@@ -36,44 +42,167 @@ pub(super) async fn write_delimited_cells(
     let mut open_options = OpenOptions::new();
     open_options.create(true).write(true).append(true);
 
-    let mut file = selected.open_with(&open_options).await.map_err(|err| {
-        writecell_error_with_source(
-            &WRITECELL_ERROR_IO,
-            format!(
-                "writecell: unable to open \"{}\" for writing ({err})",
-                path.display()
-            ),
-            err,
-        )
-    })?;
-
-    let mut bytes_written = 0usize;
-    if append_needs_line_ending(selected).await? {
-        file.write_all(line_ending.as_bytes()).map_err(|err| {
+    let mut file = await_io(runtime, BUILTIN_NAME, selected.open_with(&open_options))
+        .await?
+        .map_err(|err| {
             writecell_error_with_source(
                 &WRITECELL_ERROR_IO,
-                format!("writecell: failed to write append line ending ({err})"),
+                format!(
+                    "writecell: unable to open \"{}\" for writing ({err})",
+                    path.display()
+                ),
                 err,
             )
         })?;
-        bytes_written += line_ending.len();
+
+    let mut bytes_written = 0usize;
+    if await_io(runtime, BUILTIN_NAME, append_needs_line_ending(selected)).await?? {
+        write_append_bytes(
+            &mut file,
+            cooperation,
+            selected,
+            line_ending.as_bytes(),
+            &mut bytes_written,
+        )
+        .await?;
     }
-    file.write_all(&payload).map_err(|err| {
+    for row in 0..table.rows {
+        for col in 0..table.cols {
+            if col > 0 {
+                write_append_bytes(
+                    &mut file,
+                    cooperation,
+                    selected,
+                    delimiter.as_bytes(),
+                    &mut bytes_written,
+                )
+                .await?;
+            }
+            write_append_cell(
+                &mut file,
+                cooperation,
+                selected,
+                table.get(row, col),
+                options,
+                &delimiter,
+                &mut bytes_written,
+            )
+            .await?;
+        }
+        write_append_bytes(
+            &mut file,
+            cooperation,
+            selected,
+            line_ending.as_bytes(),
+            &mut bytes_written,
+        )
+        .await?;
+    }
+    selected.check().map_err(|source| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
-            format!("writecell: failed to write delimited text ({err})"),
-            err,
+            "writecell: captured filesystem authority was revoked",
+            source,
         )
     })?;
-    bytes_written += payload.len();
-    file.flush_async().await.map_err(|err| {
+    await_io(runtime, BUILTIN_NAME, file.flush_async())
+        .await?
+        .map_err(|err| {
+            writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                format!("writecell: failed to flush output ({err})"),
+                err,
+            )
+        })?;
+    selected.check().map_err(|source| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
-            format!("writecell: failed to flush output ({err})"),
-            err,
+            "writecell: captured filesystem authority was revoked",
+            source,
         )
     })?;
     Ok(bytes_written)
+}
+
+async fn write_append_cell(
+    file: &mut runmat_filesystem::File,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    cell: &CellValue,
+    options: &WriteCellOptions,
+    delimiter: &str,
+    total: &mut usize,
+) -> BuiltinResult<()> {
+    if let CellValue::Text(text) = cell {
+        if !options.quote_strings {
+            return write_append_bytes(file, cooperation, selected, text.as_bytes(), total).await;
+        }
+        write_append_bytes(file, cooperation, selected, b"\"", total).await?;
+        for chunk in text.as_bytes().chunks(4096) {
+            let mut start = 0usize;
+            for (index, byte) in chunk.iter().enumerate() {
+                if *byte == b'"' {
+                    write_append_bytes(file, cooperation, selected, &chunk[start..index], total)
+                        .await?;
+                    write_append_bytes(file, cooperation, selected, b"\"\"", total).await?;
+                    start = index + 1;
+                }
+            }
+            write_append_bytes(file, cooperation, selected, &chunk[start..], total).await?;
+        }
+        return write_append_bytes(file, cooperation, selected, b"\"", total).await;
+    }
+    let rendered = format_cell_for_text(cell, options, delimiter);
+    write_append_bytes(file, cooperation, selected, rendered.as_bytes(), total).await
+}
+
+async fn write_append_bytes(
+    file: &mut runmat_filesystem::File,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    bytes: &[u8],
+    total: &mut usize,
+) -> BuiltinResult<()> {
+    for chunk in bytes.chunks(4096) {
+        (*total).checked_add(chunk.len()).ok_or_else(|| {
+            writecell_error_with(
+                &WRITECELL_ERROR_IO,
+                "writecell: output byte count exceeds platform limits",
+            )
+        })?;
+        let mut remaining = chunk;
+        while !remaining.is_empty() {
+            selected.check().map_err(|source| {
+                writecell_error_with_source(
+                    &WRITECELL_ERROR_IO,
+                    "writecell: captured filesystem authority was revoked",
+                    source,
+                )
+            })?;
+            let count = file.write(remaining).map_err(|source| {
+                writecell_error_with_source(
+                    &WRITECELL_ERROR_IO,
+                    format!("writecell: failed to write delimited text ({source})"),
+                    source,
+                )
+            })?;
+            if count == 0 {
+                let source = std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "writecell: provider made no progress writing output",
+                );
+                return Err(writecell_error_with_source(
+                    &WRITECELL_ERROR_IO,
+                    source.to_string(),
+                    source,
+                ));
+            }
+            *total += count;
+            remaining = &remaining[count..];
+            cooperation.completed(count).await?;
+        }
+    }
+    Ok(())
 }
 
 fn build_delimited_payload(
