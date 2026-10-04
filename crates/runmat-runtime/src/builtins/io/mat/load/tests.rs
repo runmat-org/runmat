@@ -174,6 +174,7 @@ fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
     assert_eq!(result, Value::OutputList(Vec::new()));
     TEST_WORKSPACE.with(|slot| assert_eq!(slot.borrow().get("x"), Some(&Value::Num(9.0))));
 }
+use crate::builtins::common::test_support::filesystem::tempdir;
 use crate::builtins::io::mat::encoding::encode_workspace_to_mat_bytes;
 use crate::workspace::WorkspaceResolver;
 use flate2::write::ZlibEncoder;
@@ -184,7 +185,6 @@ use runmat_value::{IntegerComplexStorage, IntegerStorage, NumericDType, StringAr
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
-use tempfile::tempdir;
 
 runmat_thread_local! {
     static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
@@ -887,7 +887,7 @@ fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
     .expect("encode sparse integer");
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("sparse_integer.mat");
-    std::fs::write(&path, bytes).expect("write MAT file");
+    crate::builtins::common::test_support::fs::write(&path, bytes).expect("write MAT file");
     let args = [Value::String(path.to_string_lossy().into_owned())];
 
     {

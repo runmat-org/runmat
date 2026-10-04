@@ -388,8 +388,10 @@ fn invalid_regexp_rejects_before_workspace_gather() {
     assert_eq!(owner.downloads(), 0);
 }
 use crate::builtins::common::test_support;
+use crate::builtins::common::test_support::filesystem::{exists, tempdir};
 use crate::workspace::WorkspaceResolver;
 use futures::executor::block_on;
+#[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::HostTensorView;
 use runmat_filesystem::{File, FsProvider};
@@ -397,8 +399,8 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::{IntValue, IntegerStorage, NumericDType, StringArray, Tensor};
 use std::cell::RefCell;
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
-use tempfile::tempdir;
 
 runmat_thread_local! {
     static TEST_WORKSPACE: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
@@ -472,7 +474,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
         error.identifier(),
         Some("RunMat:compatibility:SaveStatusOutputExtension")
     );
-    assert!(!path.exists(), "rejection precedes MAT file publication");
+    assert!(!exists(&path), "rejection precedes MAT file publication");
     drop(_outputs);
     let _statement = crate::output_count::push_output_count(Some(0));
     let status = block_on(save_builtin(vec![Value::String(
@@ -498,15 +500,18 @@ fn save_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"status = save(filename, '-struct', structVar, field1, ...)"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn lock_env_override() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceCell<Mutex<()>> = OnceCell::new();
     LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct EnvOverride {
     key: &'static str,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl EnvOverride {
     fn set(key: &'static str, value: &str) -> Self {
         std::env::set_var(key, value);
@@ -514,6 +519,7 @@ impl EnvOverride {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for EnvOverride {
     fn drop(&mut self) {
         std::env::remove_var(self.key);
@@ -861,16 +867,22 @@ fn save_unsupported_option_errors() {
 fn save_defaults_to_matlab_mat() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
+    #[cfg(not(target_arch = "wasm32"))]
     let _lock = lock_env_override();
     set_workspace(&[("answer", Value::Num(7.0))]);
     let dir = tempdir().unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
     let target = dir.path().join("matlab_default.mat");
+    #[cfg(target_arch = "wasm32")]
+    let target = dir.path().join("matlab.mat");
+    #[cfg(not(target_arch = "wasm32"))]
     let target_str = target.to_string_lossy().to_string();
+    #[cfg(not(target_arch = "wasm32"))]
     let _env = EnvOverride::set("RUNMAT_SAVE_DEFAULT_PATH", &target_str);
     block_on(save_builtin(Vec::new())).unwrap();
 
     assert!(
-        target.exists(),
+        exists(&target),
         "expected {} to be created",
         target.display()
     );
@@ -888,6 +900,7 @@ fn save_defaults_to_matlab_mat() {
 fn save_struct_without_filename_defaults_to_matlab_mat() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
+    #[cfg(not(target_arch = "wasm32"))]
     let _lock = lock_env_override();
     let mut payload_struct = StructValue::new();
     payload_struct
@@ -895,8 +908,13 @@ fn save_struct_without_filename_defaults_to_matlab_mat() {
         .insert("alpha".to_string(), Value::Num(3.0));
     set_workspace(&[("payload", Value::Struct(payload_struct))]);
     let dir = tempdir().unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
     let target = dir.path().join("matlab_struct.mat");
+    #[cfg(target_arch = "wasm32")]
+    let target = dir.path().join("matlab.mat");
+    #[cfg(not(target_arch = "wasm32"))]
     let target_str = target.to_string_lossy().to_string();
+    #[cfg(not(target_arch = "wasm32"))]
     let _env = EnvOverride::set("RUNMAT_SAVE_DEFAULT_PATH", &target_str);
     block_on(save_builtin(vec![
         Value::from("-struct"),
@@ -905,7 +923,7 @@ fn save_struct_without_filename_defaults_to_matlab_mat() {
     .unwrap();
 
     assert!(
-        target.exists(),
+        exists(&target),
         "expected {} to be created",
         target.display()
     );

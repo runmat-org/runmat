@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 mod owning_tests;
 
 mod native_logical;
+pub mod filesystem;
 
 pub fn with_native_logical_test_provider<F, R>(f: F) -> R
 where
