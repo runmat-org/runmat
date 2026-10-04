@@ -1,12 +1,45 @@
 use super::*;
 
+#[derive(Debug)]
+pub(super) enum ReadFailure {
+    Io {
+        operation: &'static str,
+        source: std::io::Error,
+    },
+    Semantic(String),
+}
+
+impl From<String> for ReadFailure {
+    fn from(message: String) -> Self {
+        Self::Semantic(message)
+    }
+}
+
+impl std::fmt::Display for ReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io { operation, source } => write!(f, "fread: {operation} ({source})"),
+            Self::Semantic(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ReadFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Semantic(_) => None,
+        }
+    }
+}
+
 pub(super) fn read_from_handle(
     file: &mut File,
     size_spec: &SizeSpec,
     precision: &PrecisionSpec,
     skip: usize,
     machine: MachineFormat,
-) -> Result<(FreadEval, bool), String> {
+) -> Result<(FreadEval, bool), ReadFailure> {
     let endianness = machine.to_endianness();
     match precision.output {
         OutputKind::Numeric(output_dtype) => {
@@ -60,7 +93,7 @@ pub(super) fn read_numeric_values<R: Read + Seek>(
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(NumericStorage, usize, bool), String> {
+) -> Result<(NumericStorage, usize, bool), ReadFailure> {
     if let Some(0) = limit {
         return Ok((NumericStorage::zeros(input.numeric_dtype(), 0), 0, false));
     }
@@ -84,8 +117,11 @@ pub(super) fn read_numeric_values<R: Read + Seek>(
                 }
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(err) => {
-                    return Err(format!("fread: failed to read from file ({err})"));
+                Err(source) => {
+                    return Err(ReadFailure::Io {
+                        operation: "failed to read from file",
+                        source,
+                    })
                 }
             }
         }
@@ -98,7 +134,10 @@ pub(super) fn read_numeric_values<R: Read + Seek>(
         if skip > 0 && count.is_multiple_of(repeat) {
             reader
                 .seek(SeekFrom::Current(skip as i64))
-                .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
+                .map_err(|source| ReadFailure::Io {
+                    operation: "failed to skip bytes",
+                    source,
+                })?;
         }
     }
     Ok((
@@ -115,7 +154,7 @@ pub(super) fn read_char_values<R: Read + Seek>(
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
-) -> Result<(Vec<char>, usize, bool), String> {
+) -> Result<(Vec<char>, usize, bool), ReadFailure> {
     if let Some(0) = limit {
         return Ok((Vec::new(), 0, false));
     }
@@ -139,8 +178,11 @@ pub(super) fn read_char_values<R: Read + Seek>(
                 }
                 Ok(n) => remaining -= n,
                 Err(err) if err.kind() == ErrorKind::Interrupted => continue,
-                Err(err) => {
-                    return Err(format!("fread: failed to read from file ({err})"));
+                Err(source) => {
+                    return Err(ReadFailure::Io {
+                        operation: "failed to read from file",
+                        source,
+                    })
                 }
             }
         }
@@ -153,7 +195,10 @@ pub(super) fn read_char_values<R: Read + Seek>(
         if skip > 0 && count.is_multiple_of(repeat) {
             reader
                 .seek(SeekFrom::Current(skip as i64))
-                .map_err(|err| format!("fread: failed to skip bytes ({err})"))?;
+                .map_err(|source| ReadFailure::Io {
+                    operation: "failed to skip bytes",
+                    source,
+                })?;
         }
     }
 

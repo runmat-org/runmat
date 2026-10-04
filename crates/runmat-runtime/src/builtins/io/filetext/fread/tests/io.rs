@@ -1,4 +1,39 @@
 use super::*;
+
+struct FailingBinaryRead;
+
+impl std::io::Read for FailingBinaryRead {
+    fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "read access was revoked",
+        ))
+    }
+}
+
+impl std::io::Seek for FailingBinaryRead {
+    fn seek(&mut self, _: SeekFrom) -> std::io::Result<u64> {
+        Ok(0)
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn binary_read_failure_keeps_operational_source() {
+    let error = read_numeric_values(
+        &mut FailingBinaryRead,
+        InputType::UInt8,
+        1,
+        Some(1),
+        0,
+        Endianness::Little,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&error, ReadFailure::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied)
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fread_like_gpu_provider_roundtrip() {

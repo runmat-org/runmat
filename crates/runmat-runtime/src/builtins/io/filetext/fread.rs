@@ -232,10 +232,21 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         )
     })?;
 
-    let (mut eval, encountered_eof) = map_string_result(
-        read_from_handle(file, &size_spec, &precision, skip_bytes, machine_format),
-        &FREAD_ERROR_IO,
-    )?;
+    let (mut eval, encountered_eof) =
+        read_from_handle(file, &size_spec, &precision, skip_bytes, machine_format).map_err(
+            |error| {
+                let detail = error.to_string();
+                let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
+                let mut builder =
+                    build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(error);
+                if let Some(identifier) = FREAD_ERROR_IO.identifier {
+                    builder = builder.with_identifier(identifier);
+                }
+                builder.build()
+            },
+        )?;
     drop(guard);
     if encountered_eof {
         registry::mark_eof_encountered(fid);
