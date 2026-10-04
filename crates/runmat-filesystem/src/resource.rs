@@ -114,5 +114,25 @@ pub fn capture_resource_lease(provider: Arc<dyn FsProvider>) -> Option<CapturedF
     })
 }
 
+pub(crate) fn capture_resource_lease_for_effect(
+    provider: Arc<dyn FsProvider>,
+) -> std::io::Result<Option<CapturedFsResourceLease>> {
+    let Some(lease) = provider.resource_lease() else {
+        return Ok(None);
+    };
+    let contract = lease.contract();
+    if !lease.is_valid() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "filesystem resource authority was revoked",
+        ));
+    }
+    Ok(Some(CapturedFsResourceLease {
+        provider,
+        lease,
+        contract,
+    }))
+}
+
 #[cfg(test)]
 mod tests;

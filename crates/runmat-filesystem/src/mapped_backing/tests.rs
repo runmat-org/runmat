@@ -68,6 +68,7 @@ fn post_write_revocation_reports_committed_partial_bytes_and_cause() {
     let mut backing = CapturedMappedBacking {
         provider: Arc::new(MemoryFsProvider::new()),
         path: PathBuf::from("/fixture"),
+        resource: None,
         backing: Box::new(RevokedAfterWrite {
             current: current.clone(),
             committed: committed.clone(),
@@ -90,6 +91,7 @@ fn impossible_provider_committed_count_retains_cause_as_indeterminate() {
     let mut backing = CapturedMappedBacking {
         provider: Arc::new(MemoryFsProvider::new()),
         path: PathBuf::from("/fixture"),
+        resource: None,
         backing: Box::new(RevokedAfterWrite {
             current: Arc::new(AtomicBool::new(true)),
             committed: Arc::new(Mutex::new(Vec::new())),

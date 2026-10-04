@@ -1,7 +1,10 @@
 //! Captured, opened range I/O. An opened extent is a range limit, not a
 //! resource/allocator certificate or a transaction across multiple writes.
 
-use crate::{current_provider, current_provider_with_current_dir, FsProvider};
+use crate::resource::capture_resource_lease_for_effect;
+use crate::{
+    current_provider, current_provider_with_current_dir, CapturedFsResourceLease, FsProvider,
+};
 use async_trait::async_trait;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -39,6 +42,7 @@ pub struct CapturedMappedBacking {
     provider: Arc<dyn FsProvider>,
     path: PathBuf,
     backing: Box<dyn FsMappedBacking>,
+    resource: Option<CapturedFsResourceLease>,
 }
 
 impl CapturedMappedBacking {
@@ -59,6 +63,16 @@ impl CapturedMappedBacking {
     }
 
     pub fn check_current(&self) -> io::Result<()> {
+        if self
+            .resource
+            .as_ref()
+            .is_some_and(|lease| !lease.is_valid())
+        {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                "captured mapped filesystem authority was revoked",
+            ));
+        }
         self.backing.check_current()
     }
 
@@ -138,10 +152,27 @@ pub async fn capture_mapped_backing(
         let (provider, cwd) = current_provider_with_current_dir()?;
         (provider, cwd.join(path))
     };
+    capture_mapped_backing_on(provider, path, writable).await
+}
+
+/// Open through an already captured provider and resolved path. Callers that
+/// suspended during control materialization must not reacquire ambient state.
+pub async fn capture_mapped_backing_on(
+    provider: Arc<dyn FsProvider>,
+    path: PathBuf,
+    writable: bool,
+) -> io::Result<Option<CapturedMappedBacking>> {
+    let resource = capture_resource_lease_for_effect(Arc::clone(&provider))?;
     let Some(backing) = provider.open_mapped_backing(&path, writable).await? else {
         return Ok(None);
     };
     backing.check_current()?;
+    if resource.as_ref().is_some_and(|lease| !lease.is_valid()) {
+        return Err(io::Error::new(
+            ErrorKind::PermissionDenied,
+            "captured mapped filesystem authority was revoked during open",
+        ));
+    }
     if writable && !backing.writable() {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
@@ -152,6 +183,7 @@ pub async fn capture_mapped_backing(
         provider,
         path,
         backing,
+        resource,
     }))
 }
 
