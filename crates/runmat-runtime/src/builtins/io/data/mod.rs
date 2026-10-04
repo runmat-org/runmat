@@ -29,12 +29,13 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::data::authority::{self, AuthorizedHandle, HandleRole};
+#[cfg(test)]
+use crate::data::dataset_root;
 use crate::data::{
-    array_object, data_error, dataset_object, dataset_root, ensure_manifest_sequence,
-    get_object_prop, manifest_path, manifest_version_token, now_rfc3339, parse_schema,
-    parse_string, read_array_payload_async, read_manifest_async, remove_tx, sha256_hex, start_tx,
-    transaction_object, validate_chunk_shape, with_tx, with_tx_mut, write_array_payload_async,
-    write_manifest_async, DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry,
+    array_object, data_error, dataset_object, ensure_manifest_sequence, get_object_prop,
+    manifest_path, manifest_version_token, new_tx_id, now_rfc3339, parse_schema, parse_string,
+    remove_tx, sha256_hex, start_tx_with_id, transaction_object, validate_chunk_shape, with_tx,
+    with_tx_mut, DataArrayMeta, DataArrayPayload, DataChunkIndex, DataChunkIndexEntry,
     DataManifest, PendingCreateArray, PendingFill, PendingResize, PendingWrite, TxnStatus,
 };
 use crate::{make_cell, BuiltinResult};
@@ -1387,7 +1388,13 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
     let owner = dataset_owner(&base)?;
     let manifest = crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
-    let tx_id = start_tx(owner.public_path.clone(), manifest.txn_sequence)?;
+    let tx_id = new_tx_id()?;
+    let lease = authority::issue_child(&owner, HandleRole::Transaction(tx_id.clone()))?;
+    start_tx_with_id(
+        tx_id.clone(),
+        owner.public_path.clone(),
+        manifest.txn_sequence,
+    )?;
     tracing::info!(
         target: "runmat.data",
         dataset = owner.public_path,
@@ -1395,7 +1402,6 @@ async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<
         base_sequence = manifest.txn_sequence,
         "data transaction begin"
     );
-    let lease = authority::issue_child(&owner, HandleRole::Transaction(tx_id.clone()))?;
     Ok(transaction_object(&owner.public_path, &tx_id, lease))
 }
 
@@ -1603,7 +1609,7 @@ async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let (path, name) = array_identity(&base, "DataArray.write")?;
+    let (owner, name) = authority::resolve_array(&base)?;
     let (slice_spec, value) = match rest.as_slice() {
         [v] => (None, v),
         [slice, v] => (Some(slice), v),
@@ -1613,7 +1619,14 @@ async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResul
             ))
         }
     };
-    write_array_full_async(&path, &name, slice_spec, value).await?;
+    write_array_full_on(
+        owner.filesystem.as_ref(),
+        &owner.root,
+        &name,
+        slice_spec,
+        value,
+    )
+    .await?;
     Ok(Value::Bool(true))
 }
 
@@ -1708,8 +1721,8 @@ async fn data_array_fill_builtin(
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
-    let obj = as_object(&base, "DataTransaction.id")?;
-    Ok(get_object_prop(obj, "__tx_id")?.clone())
+    let (_, tx_id) = authority::resolve_transaction(&base)?;
+    Ok(Value::String(tx_id))
 }
 
 #[runtime_builtin(
@@ -1943,7 +1956,7 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
             ))
         }
     };
-    let tx_id = tx_id_from_object(&base, "DataTransaction.commit")?;
+    let (owner, tx_id) = authority::resolve_transaction(&base)?;
     let (dataset_path, base_sequence, writes, resizes, fills, create_arrays, delete_arrays, attrs) =
         with_tx(&tx_id, |tx| {
             if tx.status != TxnStatus::Open {
@@ -1970,8 +1983,14 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     let delete_ops = delete_arrays.len();
     let attr_updates = attrs.len();
 
-    let root = dataset_root(&dataset_path);
-    let mut manifest = read_manifest_async(&root).await?;
+    if dataset_path != owner.public_path {
+        return Err(data_error(
+            "DataTransaction.commit: transaction owner changed",
+        ));
+    }
+    let root = &owner.root;
+    let provider = owner.filesystem.as_ref();
+    let mut manifest = crate::data::read_manifest_on(provider, root).await?;
     ensure_manifest_sequence(base_sequence, &manifest)?;
     if let Some(options) = options {
         if let Some(expected) = options.fields.get("if_manifest") {
@@ -1992,14 +2011,16 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
         }
     }
     for create in create_arrays {
-        create_array_in_manifest(&root, &mut manifest, &create.array, create.meta).await?;
+        create_array_in_manifest(provider, root, &mut manifest, &create.array, create.meta).await?;
     }
     for resize in resizes {
-        resize_array_in_manifest(&root, &mut manifest, &resize.array, resize.shape).await?;
+        resize_array_in_manifest(provider, root, &mut manifest, &resize.array, resize.shape)
+            .await?;
     }
     for fill in fills {
         fill_array_in_manifest(
-            &root,
+            provider,
+            root,
             &mut manifest,
             &fill.array,
             fill.slice_spec.as_ref(),
@@ -2008,8 +2029,9 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
         .await?;
     }
     for write in writes {
-        apply_write_to_manifest_async(
-            &root,
+        apply_write_to_manifest_on(
+            provider,
+            root,
             &mut manifest,
             &write.array,
             write.slice_spec.as_ref(),
@@ -2018,14 +2040,14 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
         .await?;
     }
     for array_name in delete_arrays {
-        delete_array_in_manifest_async(&root, &mut manifest, &array_name).await?;
+        delete_array_in_manifest_on(provider, root, &mut manifest, &array_name).await?;
     }
     for (k, v) in attrs {
         manifest.attrs.insert(k, value_to_json(&v));
     }
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest_async(&root, &manifest).await?;
+    crate::data::write_manifest_on(provider, root, &manifest).await?;
     with_tx_mut(&tx_id, |tx| {
         tx.status = TxnStatus::Committed;
         Ok(())
@@ -2119,16 +2141,8 @@ fn dataset_owner(base: &Value) -> BuiltinResult<AuthorizedHandle> {
     authority::resolve_object(base, HandleRole::Dataset)
 }
 
-fn tx_id_from_object(base: &Value, context: &str) -> BuiltinResult<String> {
-    let obj = as_object(base, context)?;
-    parse_string(get_object_prop(obj, "__tx_id")?, context)
-}
-
-fn array_identity(base: &Value, context: &str) -> BuiltinResult<(String, String)> {
-    let obj = as_object(base, context)?;
-    let path = parse_string(get_object_prop(obj, "__data_path")?, context)?;
-    let name = parse_string(get_object_prop(obj, "__array_name")?, context)?;
-    Ok((path, name))
+fn tx_id_from_object(base: &Value, _context: &str) -> BuiltinResult<String> {
+    authority::resolve_transaction(base).map(|(_, tx_id)| tx_id)
 }
 
 fn as_object<'a>(value: &'a Value, context: &str) -> BuiltinResult<&'a ObjectInstance> {
@@ -2233,6 +2247,7 @@ fn make_rel_data_path(
 }
 
 async fn create_array_in_manifest(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -2244,8 +2259,16 @@ async fn create_array_in_manifest(
         )));
     }
     let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
-    let (payload_path, chunk_index_path) =
-        write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
+    let mut budget = None;
+    let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+        provider,
+        root,
+        array_name,
+        &payload,
+        &meta.chunk_shape,
+        &mut budget,
+    )
+    .await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
     meta.chunk_index_path = Some(make_rel_data_path(root, &chunk_index_path)?);
     manifest.arrays.insert(array_name.to_string(), meta);
@@ -2253,6 +2276,7 @@ async fn create_array_in_manifest(
 }
 
 async fn resize_array_in_manifest(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -2264,14 +2288,23 @@ async fn resize_array_in_manifest(
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     meta.shape = shape.clone();
     let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
-    let (payload_path, chunk_index_path) =
-        write_array_payload_async(root, array_name, &payload, &meta.chunk_shape).await?;
+    let mut budget = None;
+    let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+        provider,
+        root,
+        array_name,
+        &payload,
+        &meta.chunk_shape,
+        &mut budget,
+    )
+    .await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
     meta.chunk_index_path = Some(make_rel_data_path(root, &chunk_index_path)?);
     Ok(())
 }
 
 async fn fill_array_in_manifest(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -2283,7 +2316,7 @@ async fn fill_array_in_manifest(
         .get(array_name)
         .cloned()
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
-    let payload = read_array_payload_async(root, &meta).await?;
+    let payload = crate::data::read_array_payload_on(provider, root, &meta).await?;
     let next_payload = if let Some(slice_spec) = slice_spec {
         let ranges = parse_slice_spec(slice_spec, &payload.shape)?;
         let target_shape: Vec<usize> = ranges
@@ -2297,8 +2330,16 @@ async fn fill_array_in_manifest(
     } else {
         DataArrayPayload::filled(payload.dtype.clone(), payload.shape.clone(), value)?
     };
-    let (payload_path, chunk_index_path) =
-        write_array_payload_async(root, array_name, &next_payload, &meta.chunk_shape).await?;
+    let mut budget = None;
+    let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+        provider,
+        root,
+        array_name,
+        &next_payload,
+        &meta.chunk_shape,
+        &mut budget,
+    )
+    .await?;
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = next_payload.shape.clone();
         updated.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2307,7 +2348,8 @@ async fn fill_array_in_manifest(
     Ok(())
 }
 
-async fn delete_array_in_manifest_async(
+async fn delete_array_in_manifest_on(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -2319,15 +2361,13 @@ async fn delete_array_in_manifest_async(
         )));
     }
     let array_dir = root.join("arrays").join(array_name);
-    if runmat_filesystem::metadata_async(&array_dir).await.is_ok() {
-        runmat_filesystem::remove_dir_all_async(&array_dir)
-            .await
-            .map_err(|err| {
-                data_error(format!(
-                    "DataTransaction.delete_array: failed to remove '{}': {err}",
-                    array_dir.display()
-                ))
-            })?;
+    if provider.metadata(&array_dir).await.is_ok() {
+        provider.remove_dir_all(&array_dir).await.map_err(|err| {
+            data_error(format!(
+                "DataTransaction.delete_array: failed to remove '{}': {err}",
+                array_dir.display()
+            ))
+        })?;
     }
     Ok(())
 }
@@ -2502,21 +2542,23 @@ fn numeric_dimension_to_usize(value: NumericScalar) -> Option<usize> {
     }
 }
 
-async fn write_array_full_async(
-    dataset_path: &str,
+async fn write_array_full_on(
+    provider: &dyn runmat_filesystem::FsProvider,
+    root: &std::path::Path,
     array_name: &str,
     slice_spec: Option<&Value>,
     value: &Value,
 ) -> BuiltinResult<()> {
-    let root = dataset_root(dataset_path);
-    let mut manifest = read_manifest_async(&root).await?;
-    apply_write_to_manifest_async(&root, &mut manifest, array_name, slice_spec, value).await?;
+    let mut manifest = crate::data::read_manifest_on(provider, root).await?;
+    apply_write_to_manifest_on(provider, root, &mut manifest, array_name, slice_spec, value)
+        .await?;
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
-    write_manifest_async(&root, &manifest).await
+    crate::data::write_manifest_on(provider, root, &manifest).await
 }
 
-async fn apply_write_to_manifest_async(
+async fn apply_write_to_manifest_on(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -2530,22 +2572,32 @@ async fn apply_write_to_manifest_async(
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
 
     if let Some(slice_spec) = slice_spec {
-        if apply_slice_write_chunked_async(root, manifest, array_name, &meta, slice_spec, value)
-            .await?
+        if apply_slice_write_chunked_on(
+            provider, root, manifest, array_name, &meta, slice_spec, value,
+        )
+        .await?
         {
             return Ok(());
         }
     }
 
-    let payload = read_array_payload_async(root, &meta).await?;
+    let payload = crate::data::read_array_payload_on(provider, root, &meta).await?;
     let next_payload = if let Some(slice_spec) = slice_spec {
         write_slice_payload(&payload, slice_spec, value)?
     } else {
         DataArrayPayload::from_value(payload.dtype.clone(), value)?
     };
 
-    let (payload_path, chunk_index_path) =
-        write_array_payload_async(root, array_name, &next_payload, &meta.chunk_shape).await?;
+    let mut budget = None;
+    let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
+        provider,
+        root,
+        array_name,
+        &next_payload,
+        &meta.chunk_shape,
+        &mut budget,
+    )
+    .await?;
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = next_payload.shape.clone();
         updated.data_path = make_rel_data_path(root, &payload_path)?;
@@ -2554,7 +2606,8 @@ async fn apply_write_to_manifest_async(
     Ok(())
 }
 
-async fn apply_slice_write_chunked_async(
+async fn apply_slice_write_chunked_on(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
@@ -2566,10 +2619,7 @@ async fn apply_slice_write_chunked_async(
         return Ok(false);
     };
     let index_path = root.join(index_rel_path);
-    if runmat_filesystem::metadata_async(&index_path)
-        .await
-        .is_err()
-    {
+    if provider.metadata(&index_path).await.is_err() {
         return Ok(false);
     }
     let ranges = parse_slice_spec(slice_spec, &meta.shape)?;
@@ -2585,14 +2635,12 @@ async fn apply_slice_write_chunked_async(
         )));
     }
 
-    let index_bytes = runmat_filesystem::read_async(&index_path)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "failed to read chunk index '{}': {err}",
-                index_path.display()
-            ))
-        })?;
+    let index_bytes = provider.read(&index_path).await.map_err(|err| {
+        data_error(format!(
+            "failed to read chunk index '{}': {err}",
+            index_path.display()
+        ))
+    })?;
     let mut chunk_index: DataChunkIndex = serde_json::from_slice(&index_bytes).map_err(|err| {
         data_error(format!(
             "failed to parse chunk index '{}': {err}",
@@ -2616,7 +2664,8 @@ async fn apply_slice_write_chunked_async(
             continue;
         }
 
-        let (entry_index, existed, mut entry, mut chunk_payload) = load_or_init_chunk(
+        let (entry_index, existed, mut entry, mut chunk_payload) = load_or_init_chunk_on(
+            provider,
             root,
             array_name,
             &key,
@@ -2676,7 +2725,8 @@ async fn apply_slice_write_chunked_async(
         let chunk_bytes = serde_json::to_vec(&chunk_payload)
             .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
         let chunk_path = root.join(&entry.data_path);
-        runmat_filesystem::write_async(&chunk_path, &chunk_bytes)
+        provider
+            .write(&chunk_path, &chunk_bytes)
             .await
             .map_err(|err| {
                 data_error(format!(
@@ -2708,7 +2758,7 @@ async fn apply_slice_write_chunked_async(
         ));
     }
 
-    maybe_upload_chunk_batch_async(root, array_name, upload_batch).await?;
+    maybe_upload_chunk_batch_on(provider, root, array_name, upload_batch).await?;
     tracing::info!(
         target: "runmat.data",
         dataset = %root.display(),
@@ -2718,7 +2768,8 @@ async fn apply_slice_write_chunked_async(
     );
     let index_write = serde_json::to_vec(&chunk_index)
         .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    runmat_filesystem::write_async(&index_path, &index_write)
+    provider
+        .write(&index_path, &index_write)
         .await
         .map_err(|err| {
             data_error(format!(
@@ -3035,7 +3086,8 @@ fn touched_chunk_coords(
     out
 }
 
-async fn maybe_upload_chunk_batch_async(
+async fn maybe_upload_chunk_batch_on(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     array_name: &str,
     batch: Vec<(DataChunkDescriptor, Vec<u8>)>,
@@ -3048,7 +3100,7 @@ async fn maybe_upload_chunk_batch_async(
         array: array_name.to_string(),
         chunks: batch.iter().map(|(d, _)| d.clone()).collect(),
     };
-    let targets = match runmat_filesystem::data_chunk_upload_targets_async(&request).await {
+    let targets = match provider.data_chunk_upload_targets(&request).await {
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
@@ -3067,7 +3119,8 @@ async fn maybe_upload_chunk_batch_async(
                     descriptor.key
                 ))
             })?;
-        runmat_filesystem::data_upload_chunk_async(target, &bytes)
+        provider
+            .data_upload_chunk(target, &bytes)
             .await
             .map_err(|err| {
                 data_error(format!(
@@ -3091,7 +3144,8 @@ fn chunk_rel_path(array_name: &str, object_id: &str) -> String {
     format!("arrays/{array_name}/chunks/{object_id}.json")
 }
 
-async fn load_or_init_chunk(
+async fn load_or_init_chunk_on(
+    provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,
     array_name: &str,
     key: &str,
@@ -3107,7 +3161,8 @@ async fn load_or_init_chunk(
             .get(index)
             .cloned()
             .ok_or_else(|| data_error(format!("chunk index missing key '{key}'")))?;
-        let bytes = runmat_filesystem::read_async(root.join(&entry.data_path))
+        let bytes = provider
+            .read(&root.join(&entry.data_path))
             .await
             .map_err(|err| {
                 data_error(format!(
@@ -4229,7 +4284,7 @@ mod tests {
         let dtype = call_builtin("DataArray.dtype", std::slice::from_ref(&array))
             .expect("array metadata retains selected provider");
         assert_eq!(dtype, Value::String("uint64".into()));
-        let values = call_builtin("DataArray.read", &[array])
+        let values = call_builtin("DataArray.read", std::slice::from_ref(&array))
             .expect("array payload retains selected provider");
         let Value::Tensor(values) = values else {
             panic!("DataArray.read must return a tensor");
@@ -4237,6 +4292,46 @@ mod tests {
         assert_eq!(
             values.integer_storage(),
             Some(&runmat_value::IntegerStorage::U64(vec![0]))
+        );
+        call_builtin(
+            "DataArray.write",
+            &[
+                array.clone(),
+                Value::Tensor(
+                    Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![42]), vec![1, 1])
+                        .expect("replacement value"),
+                ),
+            ],
+        )
+        .expect("array write retains selected provider");
+        let Value::Tensor(written) =
+            call_builtin("DataArray.read", &[array]).expect("read after pinned write")
+        else {
+            panic!("DataArray.read must return a tensor");
+        };
+        assert_eq!(
+            written.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![42]))
+        );
+        let tx = call_builtin("Dataset.begin", std::slice::from_ref(&result))
+            .expect("transaction inherits selected provider");
+        call_builtin(
+            "DataTransaction.set_attr",
+            &[
+                tx.clone(),
+                Value::String("owner".into()),
+                Value::String("selected".into()),
+            ],
+        )
+        .expect("enqueue transaction attribute");
+        call_builtin("DataTransaction.commit", &[tx]).expect("commit retains selected provider");
+        assert_eq!(
+            call_builtin(
+                "Dataset.get_attr",
+                &[result.clone(), Value::String("owner".into())],
+            )
+            .expect("read committed attribute through selected provider"),
+            Value::String("selected".into())
         );
         assert_eq!(*suspensions.lock().expect("suspension count"), 1);
         let root = dir.path().join("pinned.data");

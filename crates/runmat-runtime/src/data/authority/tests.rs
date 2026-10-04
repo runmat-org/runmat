@@ -1,5 +1,13 @@
 use super::*;
 
+fn fixture_root(name: &str) -> PathBuf {
+    #[cfg(windows)]
+    let base = PathBuf::from(r"C:\runmat-authority");
+    #[cfg(not(windows))]
+    let base = PathBuf::from("/runmat-authority");
+    base.join(name)
+}
+
 fn object(role: HandleRole, path: &str, reference: ForeignRef) -> Value {
     let mut object = ObjectInstance::new(role.class().owned()).with_dataset_authority(reference);
     object
@@ -25,20 +33,20 @@ fn object(role: HandleRole, path: &str, reference: ForeignRef) -> Value {
 #[test]
 fn same_public_path_keeps_distinct_owner_and_clone_lease() {
     let first: Arc<dyn FsProvider> = Arc::new(
-        runmat_filesystem::MemoryFsProvider::with_current_dir("/one"),
+        runmat_filesystem::MemoryFsProvider::with_current_dir(fixture_root("one")),
     );
     let second: Arc<dyn FsProvider> = Arc::new(
-        runmat_filesystem::MemoryFsProvider::with_current_dir("/two"),
+        runmat_filesystem::MemoryFsProvider::with_current_dir(fixture_root("two")),
     );
     let first_ref = issue_dataset(
         first.clone(),
-        PathBuf::from("/one/same.data"),
+        fixture_root("one").join("same.data"),
         "same.data".into(),
     )
     .expect("first owner");
     let second_ref = issue_dataset(
         second.clone(),
-        PathBuf::from("/two/same.data"),
+        fixture_root("two").join("same.data"),
         "same.data".into(),
     )
     .expect("second owner");
@@ -47,7 +55,7 @@ fn same_public_path_keeps_distinct_owner_and_clone_lease() {
     let other = object(HandleRole::Dataset, "same.data", second_ref);
     let resolved = resolve_object(&copied, HandleRole::Dataset).expect("cloned first owner");
     assert!(Arc::ptr_eq(&resolved.filesystem, &first));
-    assert_eq!(resolved.root, PathBuf::from("/one/same.data"));
+    assert_eq!(resolved.root, fixture_root("one").join("same.data"));
     assert!(!Arc::ptr_eq(
         &resolve_object(&other, HandleRole::Dataset)
             .expect("second owner")
@@ -66,11 +74,11 @@ fn detached_and_forged_public_fields_cannot_resolve() {
     }
 
     let filesystem: Arc<dyn FsProvider> = Arc::new(
-        runmat_filesystem::MemoryFsProvider::with_current_dir("/one"),
+        runmat_filesystem::MemoryFsProvider::with_current_dir(fixture_root("one")),
     );
     let issued = issue_dataset(
         filesystem,
-        PathBuf::from("/one/same.data"),
+        fixture_root("one").join("same.data"),
         "same.data".into(),
     )
     .expect("issued owner");
@@ -112,14 +120,14 @@ fn detached_and_forged_public_fields_cannot_resolve() {
 #[test]
 fn derived_array_and_transaction_roles_are_sealed_independently() {
     let filesystem: Arc<dyn FsProvider> = Arc::new(
-        runmat_filesystem::MemoryFsProvider::with_current_dir("/one"),
+        runmat_filesystem::MemoryFsProvider::with_current_dir(fixture_root("one")),
     );
     let parent = object(
         HandleRole::Dataset,
         "same.data",
         issue_dataset(
             filesystem,
-            PathBuf::from("/one/same.data"),
+            fixture_root("one").join("same.data"),
             "same.data".into(),
         )
         .unwrap(),
@@ -160,17 +168,17 @@ fn derived_array_and_transaction_roles_are_sealed_independently() {
 #[test]
 fn final_clone_drop_releases_only_its_own_authority_record() {
     let filesystem: Arc<dyn FsProvider> = Arc::new(
-        runmat_filesystem::MemoryFsProvider::with_current_dir("/one"),
+        runmat_filesystem::MemoryFsProvider::with_current_dir(fixture_root("one")),
     );
     let first = issue_dataset(
         filesystem.clone(),
-        PathBuf::from("/one/first.data"),
+        fixture_root("one").join("first.data"),
         "first.data".into(),
     )
     .unwrap();
     let second = issue_dataset(
         filesystem,
-        PathBuf::from("/one/second.data"),
+        fixture_root("one").join("second.data"),
         "second.data".into(),
     )
     .unwrap();

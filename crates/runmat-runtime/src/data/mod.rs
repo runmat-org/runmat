@@ -1873,14 +1873,28 @@ pub fn new_dataset_id() -> String {
     format!("ds_{}_{}", Utc::now().timestamp_millis(), seq)
 }
 
-pub fn new_tx_id() -> String {
+pub fn new_tx_id() -> BuiltinResult<String> {
     static NEXT_TX_ID: AtomicU64 = AtomicU64::new(1);
-    let seq = NEXT_TX_ID.fetch_add(1, Ordering::Relaxed);
-    format!("tx_{}_{}", Utc::now().timestamp_millis(), seq)
+    let seq = NEXT_TX_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .map_err(|_| data_error("transaction identifier space is exhausted"))?;
+    Ok(format!("tx_{}_{}", Utc::now().timestamp_millis(), seq))
 }
 
+#[cfg(test)]
 pub fn start_tx(dataset_path: String, base_sequence: u64) -> BuiltinResult<String> {
-    let tx_id = new_tx_id();
+    let tx_id = new_tx_id()?;
+    start_tx_with_id(tx_id.clone(), dataset_path, base_sequence)?;
+    Ok(tx_id)
+}
+
+pub fn start_tx_with_id(
+    tx_id: String,
+    dataset_path: String,
+    base_sequence: u64,
+) -> BuiltinResult<()> {
     let pending = PendingTxn {
         dataset_path,
         base_sequence,
@@ -1893,9 +1907,13 @@ pub fn start_tx(dataset_path: String, base_sequence: u64) -> BuiltinResult<Strin
         status: TxnStatus::Open,
     };
     with_tx_registry(|registry| {
-        registry.insert(tx_id.clone(), pending);
-    })?;
-    Ok(tx_id)
+        if registry.contains_key(&tx_id) {
+            return Err(data_error("transaction identifier already exists"));
+        }
+        registry.insert(tx_id, pending);
+        Ok(())
+    })??;
+    Ok(())
 }
 
 pub fn with_tx_mut<T>(
@@ -2265,6 +2283,24 @@ mod tests {
             Some(DATA_TRANSACTION_NOT_FOUND_IDENTIFIER),
             "missing transaction lookups should expose a stable identifier"
         );
+    }
+
+    #[test]
+    fn transaction_registry_rejects_identity_collision_without_replacing_owner() {
+        let tx_id = new_tx_id().expect("unique transaction identity");
+        start_tx_with_id(tx_id.clone(), "first.data".into(), 7).expect("first transaction");
+        let duplicate = start_tx_with_id(tx_id.clone(), "second.data".into(), 99);
+        assert!(
+            duplicate.is_err(),
+            "duplicate identity must fail before replacing the first"
+        );
+        with_tx(&tx_id, |tx| {
+            assert_eq!(tx.dataset_path, "first.data");
+            assert_eq!(tx.base_sequence, 7);
+            Ok(())
+        })
+        .expect("first transaction remains intact");
+        remove_tx(&tx_id).expect("remove first transaction");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

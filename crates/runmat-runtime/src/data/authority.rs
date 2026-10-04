@@ -32,14 +32,6 @@ impl HandleRole {
             Self::Transaction(_) => DATA_TRANSACTION_CLASS,
         }
     }
-
-    fn type_name(&self) -> &'static str {
-        match self {
-            Self::Dataset => "Dataset",
-            Self::Array(_) => "DataArray",
-            Self::Transaction(_) => "DataTransaction",
-        }
-    }
 }
 
 pub(crate) struct AuthorizedHandle {
@@ -160,7 +152,7 @@ fn issue(
         },
         ForeignTypeIdentity {
             family: "runmat.data".into(),
-            name: role.type_name().into(),
+            name: role.class().display_name().into(),
             version: 1,
         },
         ForeignOwnership::Shared,
@@ -256,7 +248,7 @@ fn resolve(reference: &ForeignRef) -> BuiltinResult<AuthorizedHandle> {
     if !issued.shares_managed_lease(reference)
         || issued.resource_key() != reference.resource_key()
         || reference.type_identity.family != "runmat.data"
-        || reference.type_identity.name != record.role.type_name()
+        || reference.type_identity.name != record.role.class().display_name()
         || reference.type_identity.version != 1
         || reference.ownership != ForeignOwnership::Shared
         || reference.affinity != ForeignAffinity::OriginProcess
