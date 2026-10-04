@@ -185,6 +185,30 @@ impl RuntimePlacementService for SwapDuringSelection {
 
 #[test]
 fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swap() {
+    // Provider replacement and virtual CWD are process-wide. Keep this
+    // otherwise unchanged witness isolated from parallel archive tests.
+    const CHILD_MARKER: &str = "RUNMAT_UNZIP_OWNER_CAPTURE_TEST_CHILD";
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "builtins::io::archive::unzip::path_authority_tests::selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swap",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(CHILD_MARKER, "1")
+            .output()
+            .expect("isolated archive filesystem owner witness");
+        assert!(
+            output.status.success(),
+            "archive owner witness failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+        return;
+    }
+
     let _lock = vfs::provider_override_lock();
     let selected = Arc::new(vfs::MemoryFsProvider::with_current_dir(SELECTED_CWD));
     let replacement = Arc::new(vfs::MemoryFsProvider::with_current_dir(REPLACEMENT_CWD));
