@@ -3,10 +3,12 @@
 
 use super::document::PreferenceDocument;
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
-use crate::context::{RuntimeContext, RuntimeServiceFuture};
+use crate::context::{
+    RuntimeContext, RuntimeServiceFuture, RuntimeUserPathService, UserPathMutation,
+    UserPathServiceError, UserPathSnapshot,
+};
 use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
-use runmat_execution::value::ValuePayload;
 use runmat_value::Value;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -14,7 +16,10 @@ use tokio::sync::{oneshot, Semaphore};
 
 #[path = "native/store.rs"]
 mod store;
-use store::{NativeStore, NativeStoreError};
+use store::{NativeStore, NativeStoreError, NativeWrite};
+#[path = "native/transaction.rs"]
+mod transaction;
+use transaction::{worker, Mutation, TransactionError};
 
 #[derive(Clone)]
 pub struct NativePreferenceService {
@@ -41,8 +46,16 @@ impl NativePreferenceService {
         &self,
         budget: &mut CpuCooperationBudget,
     ) -> Result<PreferenceDocument, PreferenceServiceError> {
+        let permit = budget
+            .await_cancellable(self.gate.clone().acquire_owned())
+            .await
+            .map_err(cancelled)?
+            .map_err(|source| operational("preference read gate closed", source))?;
         let store = self.store.clone();
-        let task = self.driver.spawn_blocking(move || store.read());
+        let task = self.driver.spawn_blocking(move || {
+            let _permit = permit;
+            store.read()
+        });
         budget
             .await_cancellable(task)
             .await
@@ -53,10 +66,9 @@ impl NativePreferenceService {
 
     async fn mutate(
         &self,
-        runtime: RuntimeContext,
         mut budget: CpuCooperationBudget,
         mutation: Mutation,
-    ) -> Result<Vec<Value>, PreferenceServiceError> {
+    ) -> Result<(Vec<Value>, Option<UserPathSnapshot>), PreferenceServiceError> {
         checkpoint(&mut budget, 0).await?;
         let permit = budget
             .await_cancellable(self.gate.clone().acquire_owned())
@@ -66,12 +78,12 @@ impl NativePreferenceService {
         let (prepared_tx, prepared_rx) = oneshot::channel();
         let (authorized_tx, authorized_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = oneshot::channel();
-        let store = self.store.clone();
+        let write = self.acquire_write(&mut budget).await?;
         // The blocking transaction owns its permit, lock, stage and completion
         // after submission. The caller owns only the authorization sender.
         self.driver.spawn_blocking(move || {
             let _permit = permit;
-            worker(store, mutation, prepared_tx, authorized_rx, finished_tx);
+            worker(write, mutation, prepared_tx, authorized_rx, finished_tx);
         });
         let prepared = budget
             .await_cancellable(prepared_rx)
@@ -103,7 +115,35 @@ impl NativePreferenceService {
                 })?
                 .map_err(store_error)?;
         }
-        Ok(values)
+        Ok((values, prepared.user_path))
+    }
+
+    async fn acquire_write(
+        &self,
+        budget: &mut CpuCooperationBudget,
+    ) -> Result<NativeWrite, PreferenceServiceError> {
+        loop {
+            checkpoint(budget, 0).await?;
+            let store = self.store.clone();
+            let attempt = self.driver.spawn_blocking(move || store.try_begin_write());
+            let maybe_write = budget
+                .await_cancellable(attempt)
+                .await
+                .map_err(cancelled)?
+                .map_err(join_failed)?
+                .map_err(store_error)?;
+            if let Some(write) = maybe_write {
+                return Ok(write);
+            }
+            // The host driver's timer yields while another process owns the
+            // advisory lock. No blocking worker waits for that lock, and an
+            // abandoned invocation schedules no further attempts.
+            let timer = {
+                let _entered = self.driver.enter();
+                tokio::time::sleep(std::time::Duration::from_millis(10))
+            };
+            budget.await_cancellable(timer).await.map_err(cancelled)?;
+        }
     }
 }
 
@@ -228,7 +268,6 @@ impl RuntimePreferenceService for NativePreferenceService {
             }
             service
                 .mutate(
-                    runtime,
                     budget,
                     Mutation::ReadOrCreate {
                         group,
@@ -237,6 +276,7 @@ impl RuntimePreferenceService for NativePreferenceService {
                     },
                 )
                 .await
+                .map(|(values, _)| values)
         })
     }
 
@@ -260,7 +300,6 @@ impl RuntimePreferenceService for NativePreferenceService {
             }
             service
                 .mutate(
-                    runtime,
                     budget,
                     Mutation::Set {
                         group,
@@ -273,104 +312,37 @@ impl RuntimePreferenceService for NativePreferenceService {
     }
 }
 
-enum Mutation {
-    Set {
-        group: String,
-        entries: Vec<(String, ValuePayload)>,
-    },
-    ReadOrCreate {
-        group: String,
-        names: Vec<String>,
-        defaults: Option<Vec<ValuePayload>>,
-    },
-}
+impl RuntimeUserPathService for NativePreferenceService {
+    fn read(
+        &self,
+        runtime: RuntimeContext,
+    ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
+        let service = self.clone();
+        Box::pin(async move {
+            let mut budget = runtime.cpu_cooperation();
+            checkpoint(&mut budget, 0).await?;
+            let document = service.read(&mut budget).await?;
+            checkpoint(&mut budget, 1).await?;
+            Ok(UserPathSnapshot {
+                setting: document.user_path,
+                revision: document.user_path_revision,
+            })
+        })
+    }
 
-struct Prepared {
-    values: Vec<ValuePayload>,
-    commit_required: bool,
-}
-
-#[derive(Debug, thiserror::Error)]
-enum TransactionError {
-    #[error(transparent)]
-    Store(#[from] NativeStoreError),
-    #[error("preference '{name}' does not exist in group '{group}'")]
-    Missing { group: String, name: String },
-}
-
-fn worker(
-    store: NativeStore,
-    mutation: Mutation,
-    prepared: oneshot::Sender<Result<Prepared, TransactionError>>,
-    authorized: mpsc::Receiver<()>,
-    finished: oneshot::Sender<Result<(), NativeStoreError>>,
-) {
-    let preparation = (|| {
-        let mut write = store.begin_write()?;
-        let mut values = Vec::new();
-        let mut changed = false;
-        match mutation {
-            Mutation::Set { group, entries } => {
-                let target = write.document.groups.entry(group).or_default();
-                for (name, payload) in entries {
-                    target.insert(name, payload);
-                }
-                changed = true;
-            }
-            Mutation::ReadOrCreate {
-                group,
-                names,
-                defaults,
-            } => {
-                for (index, name) in names.iter().enumerate() {
-                    let target = write.document.groups.entry(group.clone()).or_default();
-                    if !target.contains_key(name) {
-                        let Some(default) = defaults.as_ref().and_then(|values| values.get(index))
-                        else {
-                            return Err(TransactionError::Missing {
-                                group,
-                                name: name.clone(),
-                            });
-                        };
-                        target.insert(name.clone(), default.clone());
-                        changed = true;
-                    }
-                    values.push(
-                        target
-                            .get(name)
-                            .expect("existing or inserted preference")
-                            .clone(),
-                    );
-                }
-            }
-        }
-        let stage = if changed { Some(write.stage()?) } else { None };
-        Ok((
-            Prepared {
-                values,
-                commit_required: changed,
-            },
-            stage,
-        ))
-    })();
-    match preparation {
-        Err(error) => {
-            let _ = prepared.send(Err(error));
-        }
-        Ok((receipt, stage)) => {
-            let needs_commit = receipt.commit_required;
-            if prepared.send(Ok(receipt)).is_err() {
-                return;
-            }
-            if !needs_commit {
-                return;
-            }
-            if authorized.recv().is_err() {
-                return;
-            }
-            let result = stage.expect("changed document has a stage").commit();
-            let _ = finished.send(result);
-        }
+    fn commit(
+        &self,
+        runtime: RuntimeContext,
+        mutation: UserPathMutation,
+    ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
+        let service = self.clone();
+        Box::pin(async move {
+            let setting = mutation.into_setting()?;
+            let mut budget = runtime.cpu_cooperation();
+            checkpoint(&mut budget, 0).await?;
+            let (_, snapshot) = service.mutate(budget, Mutation::UserPath(setting)).await?;
+            Ok(snapshot.expect("user-path mutation prepares a setting snapshot"))
+        })
     }
 }
 
@@ -382,7 +354,7 @@ async fn checkpoint(
 }
 
 fn cancelled(source: crate::execution::ExecutionServiceError) -> PreferenceServiceError {
-    PreferenceServiceError::Storage(source.into_runtime_error())
+    PreferenceServiceError::Execution(source)
 }
 
 fn transaction_error(source: TransactionError) -> PreferenceServiceError {
@@ -401,6 +373,9 @@ fn store_error(source: NativeStoreError) -> PreferenceServiceError {
         NativeStoreError::Indeterminate(source) => indeterminate(
             "preference replacement occurred but durability is unknown",
             source,
+        ),
+        NativeStoreError::RevisionExhausted => PreferenceServiceError::InvalidTransaction(
+            "application user-path revision is exhausted".into(),
         ),
     }
 }

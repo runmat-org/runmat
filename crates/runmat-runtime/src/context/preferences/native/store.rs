@@ -14,11 +14,21 @@ pub(super) enum NativeStoreError {
     Document(#[from] PreferenceDocumentError),
     #[error("preference replacement committed but durability could not be confirmed: {0}")]
     Indeterminate(#[source] io::Error),
+    #[error("application user-path revision is exhausted")]
+    RevisionExhausted,
 }
 
 #[derive(Clone)]
 pub(super) struct NativeStore {
     path: PathBuf,
+    #[cfg(test)]
+    commit_gate: Option<std::sync::Arc<CommitGate>>,
+}
+
+#[cfg(test)]
+pub(super) struct CommitGate {
+    pub reached: std::sync::mpsc::Sender<()>,
+    pub resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
 }
 
 impl NativeStore {
@@ -29,7 +39,17 @@ impl NativeStore {
                 "preference settings file must be an absolute file path",
             ));
         }
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            #[cfg(test)]
+            commit_gate: None,
+        })
+    }
+
+    #[cfg(test)]
+    pub fn with_commit_gate(mut self, gate: std::sync::Arc<CommitGate>) -> Self {
+        self.commit_gate = Some(gate);
+        self
     }
 
     pub fn read(&self) -> Result<PreferenceDocument, NativeStoreError> {
@@ -42,7 +62,7 @@ impl NativeStore {
         }
     }
 
-    pub fn begin_write(&self) -> Result<NativeWrite, NativeStoreError> {
+    pub fn try_begin_write(&self) -> Result<Option<NativeWrite>, NativeStoreError> {
         let parent = self.path.parent().expect("validated absolute file path");
         fs::create_dir_all(parent).map_err(NativeStoreError::Io)?;
         let mut lock_name = self
@@ -58,13 +78,19 @@ impl NativeStore {
             .write(true)
             .open(lock_path)
             .map_err(NativeStoreError::Io)?;
-        lock.lock().map_err(NativeStoreError::Io)?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(source) if source.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(source) => return Err(NativeStoreError::Io(source)),
+        }
         let document = self.read()?;
-        Ok(NativeWrite {
+        Ok(Some(NativeWrite {
             _lock: lock,
             path: self.path.clone(),
             document,
-        })
+            #[cfg(test)]
+            commit_gate: self.commit_gate.clone(),
+        }))
     }
 }
 
@@ -72,6 +98,8 @@ pub(super) struct NativeWrite {
     _lock: File,
     path: PathBuf,
     pub document: PreferenceDocument,
+    #[cfg(test)]
+    commit_gate: Option<std::sync::Arc<CommitGate>>,
 }
 
 impl NativeWrite {
@@ -89,6 +117,8 @@ impl NativeWrite {
             temporary,
             _lock: self._lock,
             path: self.path,
+            #[cfg(test)]
+            commit_gate: self.commit_gate,
         })
     }
 }
@@ -98,29 +128,86 @@ pub(super) struct NativeStage {
     temporary: NamedTempFile,
     _lock: File,
     path: PathBuf,
+    #[cfg(test)]
+    commit_gate: Option<std::sync::Arc<CommitGate>>,
 }
 
 impl NativeStage {
     pub fn commit(self) -> Result<(), NativeStoreError> {
-        let parent = self.path.parent().expect("validated absolute file path");
-        self.temporary
-            .persist(&self.path)
-            .map_err(|error| NativeStoreError::Io(error.error))?;
-        sync_parent(parent).map_err(NativeStoreError::Indeterminate)
+        #[cfg(test)]
+        if let Some(gate) = &self.commit_gate {
+            gate.reached.send(()).map_err(|source| {
+                NativeStoreError::Io(io::Error::new(io::ErrorKind::BrokenPipe, source))
+            })?;
+            gate.resume
+                .lock()
+                .expect("test gate mutex")
+                .recv_timeout(std::time::Duration::from_secs(3))
+                .map_err(|source| {
+                    NativeStoreError::Io(io::Error::new(io::ErrorKind::TimedOut, source))
+                })?;
+        }
+        #[cfg(windows)]
+        return commit_windows(self);
+
+        #[cfg(not(windows))]
+        {
+            let parent = self.path.parent().expect("validated absolute file path");
+            self.temporary
+                .persist(&self.path)
+                .map_err(|error| NativeStoreError::Io(error.error))?;
+            sync_parent(parent).map_err(NativeStoreError::Indeterminate)
+        }
     }
 }
 
+#[cfg(windows)]
+fn commit_windows(stage: NativeStage) -> Result<(), NativeStoreError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, SetFileAttributesW, FILE_ATTRIBUTE_NORMAL, MOVEFILE_REPLACE_EXISTING,
+        MOVEFILE_WRITE_THROUGH,
+    };
+
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    // Closing the source handle before replacement matches Windows rename
+    // rules. TempPath remains the sole cleanup owner until the move succeeds.
+    let mut temporary = stage.temporary.into_temp_path();
+    let source = wide(temporary.as_ref());
+    let destination = wide(&stage.path);
+    let normalized = unsafe { SetFileAttributesW(source.as_ptr(), FILE_ATTRIBUTE_NORMAL) };
+    if normalized == 0 {
+        return Err(NativeStoreError::Io(io::Error::last_os_error()));
+    }
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(NativeStoreError::Indeterminate(io::Error::last_os_error()));
+    }
+    temporary.disable_cleanup(true);
+    Ok(())
+}
+
+#[cfg(unix)]
 fn sync_parent(parent: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        File::open(parent)?.sync_all()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = parent;
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "parent-directory durability confirmation is unavailable on this host",
-        ))
-    }
+    File::open(parent)?.sync_all()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn sync_parent(_parent: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "parent-directory durability confirmation is unavailable on this host",
+    ))
 }
