@@ -24,7 +24,9 @@ fn read_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -187,7 +189,7 @@ struct ReadOutcome {
 }
 
 enum ReadError {
-    Timeout,
+    Timeout(io::Error),
     ConnectionClosed,
     Io(io::Error),
 }
@@ -199,7 +201,11 @@ fn perform_read(
 ) -> BuiltinResult<ReadOutcome> {
     match read_from_stream(stream, mode, element_size) {
         Ok(outcome) => Ok(outcome),
-        Err(ReadError::Timeout) => Err(read_error(&READ_ERROR_TIMEOUT)),
+        Err(ReadError::Timeout(err)) => Err(super::error::with_source_exact_message(
+            BUILTIN_NAME,
+            &READ_ERROR_TIMEOUT,
+            err,
+        )),
         Err(ReadError::ConnectionClosed) => Err(read_error(&READ_ERROR_CONNECTION_CLOSED)),
         Err(ReadError::Io(err)) => Err(super::error::with_source(
             BUILTIN_NAME,
@@ -243,7 +249,7 @@ fn read_all_available(stream: &mut TcpStream) -> Result<ReadOutcome, ReadError> 
                 break;
             }
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => return Err(ReadError::Timeout),
+            Err(err) if is_timeout(&err) => return Err(ReadError::Timeout(err)),
             Err(err) => return Err(ReadError::Io(err)),
         }
     }
@@ -304,7 +310,7 @@ fn read_exact_bytes(stream: &mut TcpStream, total: usize) -> Result<ReadOutcome,
                         continue;
                     }
                 }
-                return Err(ReadError::Timeout);
+                return Err(ReadError::Timeout(err));
             }
             Err(err) => return Err(ReadError::Io(err)),
         }

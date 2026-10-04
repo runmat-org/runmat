@@ -84,12 +84,14 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
         Err(err) => {
             drop(server_guard);
             let message = match err.kind() {
-                ErrorKind::WouldBlock => accept_flow(
+                ErrorKind::WouldBlock => super::error::with_source_message(
+                    BUILTIN_NAME,
                     &ACCEPT_ERROR_TIMEOUT,
                     format!(
                         "accept: timed out waiting for a client connection after {:.3} seconds",
                         timeout
                     ),
+                    err,
                 ),
                 _ => super::error::with_source(
                     BUILTIN_NAME,
@@ -607,7 +609,15 @@ pub(crate) mod tests {
             vec![Value::from("Timeout"), Value::Num(0.05)],
         )
         .unwrap_err();
-        assert_error_identifier(err, ACCEPT_ERROR_TIMEOUT.identifier.unwrap());
+        assert_eq!(err.identifier(), ACCEPT_ERROR_TIMEOUT.identifier);
+        assert!(err
+            .message()
+            .contains("timed out waiting for a client connection"));
+        assert_eq!(err.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        let source = std::error::Error::source(&err)
+            .and_then(|cause| cause.downcast_ref::<io::Error>())
+            .expect("accept timeout retains the socket cause");
+        assert_eq!(source.kind(), ErrorKind::WouldBlock);
         remove_server_for_test(server_id(&server_value));
     }
 

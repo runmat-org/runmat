@@ -24,7 +24,9 @@ fn write_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -172,19 +174,14 @@ pub(super) async fn write_builtin(
 
     match write_bytes(&mut stream, &payload.bytes) {
         Ok(_) => Ok(Value::Num(payload.elements as f64)),
-        Err(WriteError::Timeout) => Err(write_error(&WRITE_ERROR_TIMEOUT)),
-        Err(WriteError::ConnectionClosed) => {
-            if let Ok(mut guard) = handle.lock() {
-                guard.connected = false;
+        Err(error) => {
+            if matches!(error, WriteError::ConnectionClosed(_)) {
+                if let Ok(mut guard) = handle.lock() {
+                    guard.connected = false;
+                }
             }
-            Err(write_error(&WRITE_ERROR_CONNECTION_CLOSED))
+            Err(map_write_socket_error(error))
         }
-        Err(WriteError::Io(err)) => Err(super::error::with_source(
-            BUILTIN_NAME,
-            &WRITE_ERROR_INTERNAL,
-            format!("write: socket error ({err})"),
-            err,
-        )),
     }
 }
 
@@ -897,21 +894,41 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
 }
 
 enum WriteError {
-    Timeout,
-    ConnectionClosed,
+    Timeout(io::Error),
+    ConnectionClosed(Option<io::Error>),
     Io(io::Error),
+}
+
+fn map_write_socket_error(error: WriteError) -> RuntimeError {
+    match error {
+        WriteError::Timeout(source) => {
+            super::error::with_source_exact_message(BUILTIN_NAME, &WRITE_ERROR_TIMEOUT, source)
+        }
+        WriteError::ConnectionClosed(Some(source)) => super::error::with_source_exact_message(
+            BUILTIN_NAME,
+            &WRITE_ERROR_CONNECTION_CLOSED,
+            source,
+        ),
+        WriteError::ConnectionClosed(None) => write_error(&WRITE_ERROR_CONNECTION_CLOSED),
+        WriteError::Io(source) => super::error::with_source(
+            BUILTIN_NAME,
+            &WRITE_ERROR_INTERNAL,
+            format!("write: socket error ({source})"),
+            source,
+        ),
+    }
 }
 
 fn write_bytes(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), WriteError> {
     let mut offset = 0usize;
     while offset < bytes.len() {
         match stream.write(&bytes[offset..]) {
-            Ok(0) => return Err(WriteError::ConnectionClosed),
+            Ok(0) => return Err(WriteError::ConnectionClosed(None)),
             Ok(n) => offset += n,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => return Err(WriteError::Timeout),
+            Err(err) if is_timeout(&err) => return Err(WriteError::Timeout(err)),
             Err(err) if is_connection_closed_error(&err) => {
-                return Err(WriteError::ConnectionClosed)
+                return Err(WriteError::ConnectionClosed(Some(err)))
             }
             Err(err) => return Err(WriteError::Io(err)),
         }
@@ -975,6 +992,38 @@ pub(crate) mod tests {
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
+    }
+
+    #[test]
+    fn terminal_socket_errors_retain_original_causes_without_replay() {
+        use std::error::Error;
+
+        for (error, descriptor, kind) in [
+            (
+                WriteError::Timeout(io::Error::new(io::ErrorKind::TimedOut, "send stalled")),
+                &WRITE_ERROR_TIMEOUT,
+                io::ErrorKind::TimedOut,
+            ),
+            (
+                WriteError::ConnectionClosed(Some(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "peer closed",
+                ))),
+                &WRITE_ERROR_CONNECTION_CLOSED,
+                io::ErrorKind::BrokenPipe,
+            ),
+        ] {
+            let failure = map_write_socket_error(error);
+            assert_eq!(failure.identifier(), descriptor.identifier);
+            assert_eq!(failure.message(), descriptor.message);
+            assert_eq!(failure.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+            assert_eq!(
+                Error::source(&failure)
+                    .and_then(|source| source.downcast_ref::<io::Error>())
+                    .map(io::Error::kind),
+                Some(kind),
+            );
+        }
     }
 
     #[test]

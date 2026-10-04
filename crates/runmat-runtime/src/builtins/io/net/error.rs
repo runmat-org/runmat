@@ -22,6 +22,32 @@ pub(super) fn with_source(
     builder.build()
 }
 
+/// Keep a stable public socket diagnostic byte-for-byte while retaining an
+/// operational cause that the previous unit error variant discarded.
+pub(super) fn with_source_exact_message(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    source: impl RuntimeErrorSourceBound,
+) -> RuntimeError {
+    with_source_message(builtin, error, error.message, source)
+}
+
+pub(super) fn with_source_message(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: impl RuntimeErrorSourceBound,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(builtin)
+        .with_gpu_gather_retry(GpuGatherRetry::Never)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

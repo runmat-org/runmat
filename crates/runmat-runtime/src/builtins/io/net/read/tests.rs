@@ -356,7 +356,16 @@ fn read_respects_timeout() {
     let client = make_client(stream, 0.1);
 
     let err = run_read(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
-    assert_error_identifier(err, READ_ERROR_TIMEOUT.identifier.unwrap());
+    assert_eq!(err.identifier(), READ_ERROR_TIMEOUT.identifier);
+    assert_eq!(err.message(), READ_ERROR_TIMEOUT.message);
+    assert_eq!(err.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    let source = std::error::Error::source(&err)
+        .and_then(|source| source.downcast_ref::<io::Error>())
+        .expect("timed-out socket error remains the cause");
+    assert!(matches!(
+        source.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ));
 
     remove_client_for_test(client_id(&client));
 }
