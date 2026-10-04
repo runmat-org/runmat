@@ -21,6 +21,7 @@ pub(crate) struct AuthorizedMatFile {
 
 struct Record {
     source: Arc<MatFsPath>,
+    public_path: String,
     writable: bool,
     lease: WeakForeignRef,
     issuer: IssuerScope,
@@ -102,6 +103,7 @@ impl ForeignResourceRelease for Release {
 pub(crate) fn issue_matfile(
     runtime: Option<&RuntimeContext>,
     source: Arc<MatFsPath>,
+    public_path: String,
     writable: bool,
 ) -> crate::BuiltinResult<ForeignRef> {
     let issuer = IssuerScope::from_runtime(runtime);
@@ -137,6 +139,7 @@ pub(crate) fn issue_matfile(
         handle,
         Record {
             source,
+            public_path,
             writable,
             lease,
             issuer,
@@ -192,7 +195,7 @@ pub(crate) fn resolve_matfile(
             "matfile receiver authority does not belong to this registry",
         ));
     }
-    let expected_source = Value::String(record.source.path().to_string_lossy().into_owned());
+    let expected_source = Value::String(record.public_path.clone());
     let Some(Value::Struct(properties)) = object.properties.get(PROPERTIES_FIELD) else {
         return Err(matfile_error(
             "matfile receiver presentation is missing Properties",

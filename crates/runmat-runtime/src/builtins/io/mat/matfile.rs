@@ -250,6 +250,7 @@ pub async fn matfile_builtin(
     let host_rest = gather_rest(rest).await?;
     let writable = parse_writable_option(&host_rest)?;
     let path = normalise_path(&host_filename)?;
+    let public_path = path.to_string_lossy().into_owned();
     let source = std::sync::Arc::new(MatFsPath::capture(path).map_err(|err| {
         matfile_error_with_source(
             &MATFILE_ERROR_IO,
@@ -257,9 +258,9 @@ pub async fn matfile_builtin(
             err,
         )
     })?);
-    let reference = issue_matfile(runtime.as_ref(), source.clone(), writable)?;
+    let reference = issue_matfile(runtime.as_ref(), source, public_path.clone(), writable)?;
     Ok(Value::Object(matfile_object(
-        source.path(),
+        &public_path,
         writable,
         reference,
     )))
@@ -473,15 +474,14 @@ pub fn ensure_matfile_class_registered() {
 }
 
 fn matfile_object(
-    path: &Path,
+    source: &str,
     writable: bool,
     authority: runmat_value::ForeignRef,
 ) -> ObjectInstance {
-    let source = path.to_string_lossy().to_string();
     let mut object = ObjectInstance::new(MATFILE_CLASS.owned()).with_matfile_authority(authority);
     object.properties.insert(
         PROPERTIES_FIELD.to_string(),
-        properties_struct(source, writable),
+        properties_struct(source.to_string(), writable),
     );
     object
 }
@@ -913,6 +913,16 @@ mod tests {
             vec![Value::String("Writable".into()), Value::Bool(true)],
         ))
         .expect("selected receiver");
+        let Value::Object(ref presented) = object else {
+            panic!("MAT object");
+        };
+        let Some(Value::Struct(properties)) = presented.properties.get(PROPERTIES_FIELD) else {
+            panic!("MAT Properties");
+        };
+        assert_eq!(
+            properties.fields.get(SOURCE_FIELD),
+            Some(&Value::String("fixture.mat".into()))
+        );
         let _replacement = fs::replace_provider(replacement.clone());
         fs::set_current_dir("/replacement").expect("replacement cwd");
         let value = block_on(matfile_subsref(
