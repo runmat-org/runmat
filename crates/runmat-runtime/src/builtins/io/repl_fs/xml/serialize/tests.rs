@@ -68,6 +68,36 @@ fn struct_text_uses_scalar_geometry_without_losing_wide_integer_values() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn text_and_attributes_reject_invalid_xml_characters_without_filtering() {
+    for ch in [
+        '\0', '\u{8}', '\u{B}', '\u{C}', '\u{1F}', '\u{FFFE}', '\u{FFFF}',
+    ] {
+        let mut object = element("root");
+        object
+            .properties
+            .insert("TextContent".into(), Value::String(format!("a{ch}b")));
+        let error = serialize(Value::Object(object)).expect_err("invalid text character");
+        assert!(error.message().contains("invalid XML character"));
+        let mut object = element("root");
+        let mut attributes = StructValue::new();
+        attributes.insert("value", Value::String(format!("a{ch}b")));
+        object
+            .properties
+            .insert("Attributes".into(), Value::Struct(attributes));
+        assert!(serialize(Value::Object(object)).is_err());
+    }
+    let mut object = element("root");
+    object
+        .properties
+        .insert("TextContent".into(), Value::String("a\tb\nc\rd😀".into()));
+    assert_eq!(
+        serialize(Value::Object(object)).unwrap(),
+        "<root>a\tb\nc\rd😀</root>"
+    );
+}
+
 #[test]
 fn malformed_dom_does_not_overwrite_an_existing_file() {
     use runmat_filesystem::FsProvider;

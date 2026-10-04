@@ -167,6 +167,7 @@ async fn xml_text_escape(value: &str, cooperation: &mut XmlCooperation) -> Built
     let mut out = String::new();
     let mut completed = 0usize;
     for ch in value.chars() {
+        validate_xml_character(ch)?;
         completed += ch.len_utf8();
         match ch {
             '&' => out.push_str("&amp;"),
@@ -187,6 +188,7 @@ async fn xml_attr_escape(value: &str, cooperation: &mut XmlCooperation) -> Built
     let mut out = String::new();
     let mut completed = 0usize;
     for ch in value.chars() {
+        validate_xml_character(ch)?;
         completed += ch.len_utf8();
         match ch {
             '&' => out.push_str("&amp;"),
@@ -203,6 +205,17 @@ async fn xml_attr_escape(value: &str, cooperation: &mut XmlCooperation) -> Built
     }
     cooperation.completed(completed).await?;
     Ok(out)
+}
+
+// XML 1.0 Char production. Rust chars already exclude surrogate code points.
+fn validate_xml_character(ch: char) -> BuiltinResult<()> {
+    if matches!(ch, '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}'
+        | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
+    {
+        Ok(())
+    } else {
+        Err(compat_error("xmlwrite", "xmlwrite: invalid XML character"))
+    }
 }
 
 #[cfg(test)]
