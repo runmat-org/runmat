@@ -193,7 +193,7 @@ impl AccelProvider for FixtureCudaProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
-        let result = self.download_payload(handle).map(|allocation| {
+        let result = self.download_payload(handle).inspect(|allocation| {
             runmat_value::record_host_copy(
                 runmat_value::HostCopyReason::ProviderReadback,
                 allocation
@@ -201,7 +201,6 @@ impl AccelProvider for FixtureCudaProvider {
                     .len()
                     .saturating_mul(allocation.data.element_type().element_size()),
             );
-            allocation
         });
         Box::pin(async move { result })
     }
