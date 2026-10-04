@@ -13,6 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         "Accepts URLs supplied as character vectors or string scalars; the URL must be absolute.",
         "Query names are text. Query values may be text, numeric, or logical scalars or vectors; native integer values are formatted from exact storage without conversion to double. Vector values use comma-separated formatting in the current implementation.",
         "An options structure immediately after the URL controls response decoding (`ContentType`), timeout (`Timeout`), headers (`HeaderFields`), and authentication (`Username` and `Password`). The default timeout is 5 seconds, and an integer timeout is read exactly.",
+        "A leading options structure also pairs `KeyName` with `KeyValue` as an HTTP header. Native integer key values retain exact decimal text; the empty default pair adds no header or query parameter. Direct name-value query pairs keep their query meaning.",
         "RunMat also accepts a leading structure or cell array of query parameters and recognizes option-like direct name-value pairs. These conveniences do not replace the portable query-pair plus final-options form.",
         "`ContentType 'auto'` (default) inspects the `Content-Type` response header to choose between JSON, text, or binary decoding. Explicit `ContentType 'json'`, `'text'`, or `'binary'` override the detection logic.",
         "JSON responses are parsed with the same rules as `jsondecode`, producing doubles, logicals, strings, structs, and cell arrays that match MATLAB semantics.",
@@ -57,7 +58,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime HTTP implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webread.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Runtime HTTP implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webread.rs") },
+            BuiltinDocumentationLink { label: "API-key header admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/api_key.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "HTTP domain unit tests", location: "builtins::io::http::webread::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "HTTP JSON decoding", location: "builtins::io::http::webread::tests::webread_fetches_json_response" },

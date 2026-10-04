@@ -41,7 +41,7 @@ const KEY_VALUE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinInte
     classes: &crate::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "A scalar key value retains its exact signedness, width, and value in the options object until HTTP header serialization.",
+    notes: "A scalar key value retains its exact signedness, width, and value in the options object; webread/webwrite serialize native integers directly to HTTP header decimal text.",
 }];
 pub const WEBOPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {

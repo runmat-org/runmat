@@ -52,6 +52,52 @@ fn webwrite_rejects_non_http_url_before_resident_body_readback() {
     assert!(error.message().contains("unsupported URL scheme"));
     assert_eq!(allocation.probe.retirements(), 0);
 }
+
+#[test]
+fn webwrite_rejects_invalid_api_key_header_before_resident_body_readback() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident request body");
+    let mut options = StructValue::new();
+    options
+        .fields
+        .insert("KeyName".into(), Value::from("bad\nname"));
+    options.fields.insert("KeyValue".into(), Value::from("x"));
+    let error = futures::executor::block_on(webwrite_builtin(
+        None,
+        Value::from("https://example.test"),
+        vec![
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::Struct(options),
+        ],
+    ))
+    .expect_err("invalid header");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:webwrite:InvalidOptionValue")
+    );
+    assert!(error.message().contains("valid HTTP header name"));
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[test]
+fn direct_keyname_pair_remains_a_request_parameter() {
+    let mut options = WebWriteOptions::default();
+    let mut query = Vec::new();
+    process_name_value_pair(
+        "KeyName",
+        &Value::from("ordinary-query"),
+        &mut options,
+        &mut query,
+    )
+    .expect("direct request pair");
+    assert_eq!(query, vec![("KeyName".into(), "ordinary-query".into())]);
+    assert!(options.api_key_header.is_none());
+}
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;

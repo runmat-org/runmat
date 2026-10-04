@@ -171,6 +171,39 @@ fn weboptions_preserves_exact_integer_key_value() {
 }
 
 #[test]
+fn weboptions_rejects_nonscalar_text_key_values_before_other_resident_readback() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident unrelated option");
+    let invalid_text = [
+        Value::CharArray(runmat_value::CharArray::new(vec!['a', 'b'], 2, 1).expect("char matrix")),
+        Value::StringArray(
+            runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
+                .expect("string array"),
+        ),
+    ];
+    for invalid in invalid_text {
+        let error = run_weboptions(vec![
+            Value::from("KeyValue"),
+            invalid,
+            Value::from("Timeout"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ])
+        .expect_err("KeyValue requires scalar text");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:weboptions:InvalidOptionValue")
+        );
+        assert!(!error.message().contains("provider"));
+    }
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[test]
 fn weboptions_runmat_only_forms_are_independently_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let query_error = run_weboptions(vec![
@@ -370,10 +403,42 @@ fn webread_uses_weboptions_without_polluting_query() {
     }
     let headers = rx.recv().expect("captured headers");
     assert!(headers.starts_with("GET "));
+    assert!(!headers.contains("KeyName="));
+    assert!(!headers.contains("KeyValue="));
     assert!(
         !headers.contains("MediaType=auto"),
         "MediaType should not appear in query string"
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn webread_and_webwrite_apply_exact_integer_api_key_header() {
+    let key = run_weboptions(vec![
+        Value::from("KeyName"),
+        Value::from("X-Sequence"),
+        Value::from("KeyValue"),
+        Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+    ])
+    .expect("API key options");
+    for (builtin, payload) in [("webread", None), ("webwrite", Some(Value::from("body")))] {
+        let (tx, rx) = mpsc::channel();
+        let url = spawn_server(move |mut stream| {
+            let (headers, _) = read_request(&mut stream);
+            tx.send(headers).expect("captured request");
+            respond_with(stream, "text/plain", b"ok");
+        });
+        let mut args = vec![Value::from(url)];
+        if let Some(body) = payload {
+            args.push(body);
+        }
+        args.push(key.clone());
+        run_call_builtin(builtin, &args).expect("HTTP request with API key");
+        let headers = rx.recv().expect("captured headers");
+        assert!(headers.contains(&format!("X-Sequence: {}", u64::MAX)));
+        assert!(!headers.contains("KeyName="));
+        assert!(!headers.contains("KeyValue="));
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Forms and fields", paragraphs: &[
             "`weboptions()` returns defaults; case-insensitive name-value pairs override them. In RunMat mode, an existing options struct may be copied and overridden. The input struct is not mutated.",
             "The implemented fields are `ContentType`, `Timeout`, `HeaderFields`, `UserAgent`, `Username`, `Password`, `KeyName`, `KeyValue`, `RequestMethod`, `MediaType`, and the RunMat-only `QueryParameters`. Unknown names raise an error. `CharacterEncoding`, `ContentReader`, `ArrayFormat`, and `CertificateFilename` are not accepted by the current constructor or consumed by these HTTP operations.",
-            "The default timeout is 5 seconds. `Timeout` accepts a positive numeric scalar up to 2147.483647 seconds or `Inf`; accepted native integer values are converted to bounded timeout seconds. `KeyValue` accepts a text, numeric, or logical scalar and retains exact native integer storage.",
+            "The default timeout is 5 seconds. `Timeout` accepts a positive numeric scalar up to 2147.483647 seconds or `Inf`; accepted native integer values are converted to bounded timeout seconds. `KeyValue` accepts a text, numeric, or logical scalar and retains exact native integer storage. When paired with nonempty `KeyName`, `webread` and `webwrite` emit one HTTP header with exact integer decimal text.",
             "`ContentType` accepts `auto`, `json`, `text`, or `binary` (with documented text/binary aliases). `RequestMethod` accepts `auto`, `get`, `post`, `put`, `patch`, or `delete`; the consuming operation decides whether a method is supported. `HeaderFields` accepts a struct or two-column cell array.",
             "Empty username and password leave basic authentication disabled. A nonempty password without a username is rejected. `HeaderFields` and `QueryParameters` can be cleared with an empty struct or an empty two-column cell array.",
         ] },
@@ -51,6 +51,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[
             BuiltinDocumentationLink { label: "HTTP options entrypoint", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/weboptions.rs") },
             BuiltinDocumentationLink { label: "HTTP options field validation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/weboptions/options.rs") },
+            BuiltinDocumentationLink { label: "API-key header admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/api_key.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Options forms and gates", location: "builtins::io::http::weboptions::tests" },

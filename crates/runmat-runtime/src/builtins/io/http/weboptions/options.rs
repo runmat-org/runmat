@@ -68,17 +68,15 @@ pub(super) fn set_option_field(
             Ok(())
         }
         WebOptionField::KeyValue => {
-            if !matches!(
-                value,
-                Value::String(_)
-                    | Value::CharArray(_)
-                    | Value::StringArray(_)
-                    | Value::Num(_)
-                    | Value::Int(_)
-                    | Value::Bool(_)
-            ) && !matches!(value, Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor))
-                && !matches!(value, Value::LogicalArray(array) if array.len() == 1)
-            {
+            let supported = match value {
+                Value::String(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
+                Value::CharArray(array) => array.rows == 1,
+                Value::StringArray(array) => array.data.len() == 1,
+                Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
+                Value::LogicalArray(array) => array.len() == 1,
+                _ => false,
+            };
+            if !supported {
                 return Err(weboptions_error_with(
                     &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                     "weboptions: KeyValue must be a text, numeric, or logical scalar",

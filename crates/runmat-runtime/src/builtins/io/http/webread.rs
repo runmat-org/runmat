@@ -190,7 +190,23 @@ fn process_struct_fields(
     options: &mut WebReadOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
+    options.api_key_header = super::api_key::from_options(struct_value).map_err(|err| {
+        webread_error_with_source(
+            &WEBREAD_ERROR_INVALID_OPTION_VALUE,
+            format!("webread: {err}"),
+            err,
+        )
+    })?;
     for (key, value) in &struct_value.fields {
+        if matches!(
+            runmat_builtins::WebOptionField::decode(key),
+            Some(
+                runmat_builtins::WebOptionField::KeyName
+                    | runmat_builtins::WebOptionField::KeyValue
+            )
+        ) {
+            continue;
+        }
         process_name_value_pair(key, value, options, query_params)?;
     }
     Ok(())
@@ -344,6 +360,9 @@ async fn execute_request(
         .to_string();
 
     let mut headers = options.headers.clone();
+    if let Some((name, value)) = &options.api_key_header {
+        headers.push((name.clone(), value.clone()));
+    }
     let has_auth_header = headers
         .iter()
         .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));

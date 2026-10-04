@@ -14,6 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         "Post names are text. Post values may be text, numeric, logical, or datetime values, including supported arrays; native integer values are serialized from exact storage.",
         "A structure or supported numeric value may be used as JSON data. Nested native integer values remain exact through JSON serialization.",
         "An options structure immediately after the data controls `ContentType`, `MediaType`, `Timeout`, `HeaderFields`, `Username`, `Password`, `UserAgent`, and `RequestMethod`. The default timeout is 5 seconds, and an integer timeout is read exactly.",
+        "A leading options structure also pairs `KeyName` with `KeyValue` as an HTTP header. Native integer key values retain exact decimal text; the empty default pair adds no header or query parameter. Direct name-value pairs retain their existing request-name meaning.",
         "`ContentType` controls how the response is parsed (`\"auto\"` by default). Set it to `\"json\"`, `\"text\"`, or `\"binary\"` to force JSON decoding, text return, or raw byte vectors.",
         "`MediaType` sets the outbound `Content-Type` header. When omitted, RunMat chooses a sensible default (`application/x-www-form-urlencoded`, `application/json`, `text/plain; charset=utf-8`, or `application/octet-stream`) based on the payload.",
         "RunMat additionally supports `QueryParameters`, direct option-like name-value pairs, and raw byte-oriented uploads. These conveniences are distinct from the portable post-pair plus final-options form.",
@@ -58,7 +59,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime HTTP implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webwrite.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Runtime HTTP implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/webwrite.rs") },
+            BuiltinDocumentationLink { label: "API-key header admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/http/api_key.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "HTTP domain unit tests", location: "builtins::io::http::webwrite::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Default form body", location: "builtins::io::http::webwrite::tests::webwrite_posts_form_data_by_default" },

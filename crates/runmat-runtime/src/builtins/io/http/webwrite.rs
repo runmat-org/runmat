@@ -22,10 +22,10 @@ use base64::Engine;
 use runmat_builtins::{
     parse_http_url, BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode,
     WEBWRITE_DESCRIPTOR, WEBWRITE_ERROR_FLOW, WEBWRITE_ERROR_INVALID_ARGUMENT,
-    WEBWRITE_ERROR_INVALID_CREDENTIALS, WEBWRITE_ERROR_INVALID_URL, WEBWRITE_ERROR_MISSING_DATA,
-    WEBWRITE_ERROR_MISSING_OPTION_VALUE, WEBWRITE_ERROR_OUTPUT, WEBWRITE_ERROR_OUTPUTS,
-    WEBWRITE_ERROR_RESPONSE_JSON, WEBWRITE_ERROR_TRANSPORT,
-    WEBWRITE_EXPLICIT_GPU_EXTENSION as EXPLICIT_GPU_EXTENSION,
+    WEBWRITE_ERROR_INVALID_CREDENTIALS, WEBWRITE_ERROR_INVALID_OPTION_VALUE,
+    WEBWRITE_ERROR_INVALID_URL, WEBWRITE_ERROR_MISSING_DATA, WEBWRITE_ERROR_MISSING_OPTION_VALUE,
+    WEBWRITE_ERROR_OUTPUT, WEBWRITE_ERROR_OUTPUTS, WEBWRITE_ERROR_RESPONSE_JSON,
+    WEBWRITE_ERROR_TRANSPORT, WEBWRITE_EXPLICIT_GPU_EXTENSION as EXPLICIT_GPU_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StructValue, Tensor, Value};
@@ -209,7 +209,23 @@ fn process_struct_fields(
     options: &mut WebWriteOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
+    options.api_key_header = super::api_key::from_options(struct_value).map_err(|err| {
+        webwrite_error_with_source(
+            &WEBWRITE_ERROR_INVALID_OPTION_VALUE,
+            format!("webwrite: {err}"),
+            err,
+        )
+    })?;
     for (key, value) in &struct_value.fields {
+        if matches!(
+            runmat_builtins::WebOptionField::decode(key),
+            Some(
+                runmat_builtins::WebOptionField::KeyName
+                    | runmat_builtins::WebOptionField::KeyValue
+            )
+        ) {
+            continue;
+        }
         process_name_value_pair(key, value, options, query_params)?;
     }
     Ok(())
@@ -328,6 +344,9 @@ async fn execute_request(
         .to_string();
 
     let mut headers = options.headers.clone();
+    if let Some((name, value)) = &options.api_key_header {
+        headers.push((name.clone(), value.clone()));
+    }
     let has_auth_header = headers
         .iter()
         .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
