@@ -131,15 +131,6 @@ fn dropping_actual_textscan_during_output_restores_cursor_and_exclusivity() {
     let mut open = OpenOptions::new();
     open.read(true);
     let file = block_on(open.open_async(&path)).expect("open file");
-    let fid = registry::register_file(RegisteredFile {
-        path: path.to_path_buf(),
-        permission: "r".to_string(),
-        access: registry::FileAccess::READ,
-        machinefmt: "native".to_string(),
-        encoding: "UTF-8".to_string(),
-        handle: Arc::new(StdMutex::new(Some(file))),
-    });
-
     let turns = Rc::new(Cell::new(0));
     let pending_on = Rc::new(Cell::new(None));
     let dropped = Rc::new(Cell::new(false));
@@ -152,13 +143,26 @@ fn dropping_actual_textscan_during_output_restores_cursor_and_exclusivity() {
         }),
         source.token(),
     );
+    let fid = registry::register_file_in(
+        RegisteredFile {
+            path: path.to_path_buf(),
+            permission: "r".to_string(),
+            access: registry::FileAccess::READ,
+            machinefmt: "native".to_string(),
+            encoding: "UTF-8".to_string(),
+            handle: Arc::new(StdMutex::new(Some(file))),
+        },
+        Some(&runtime),
+        None,
+    );
 
     // Calibrate the execution adapter at the parser boundary. The next
     // positive work charge in the full call belongs to output construction.
     let format = parse_format_spec("%f").expect("format");
     let options = TextscanOptions::default();
     let mut cooperation = TextscanCooperation::new(Some(&runtime));
-    let parsed = block_on(input::parse_registered_file(
+    let parsed = block_on(input::parse_registered_file_in(
+        Some(&runtime),
         fid,
         &format,
         Some(1),
@@ -174,7 +178,7 @@ fn dropping_actual_textscan_during_output_restores_cursor_and_exclusivity() {
     pending_on.set(Some(parser_turns + 1));
 
     let mut call = Box::pin(textscan_builtin(
-        Some(runtime),
+        Some(runtime.clone()),
         Value::Num(fid as f64),
         Value::from("%f"),
         vec![Value::Num(1.0)],
@@ -190,36 +194,37 @@ fn dropping_actual_textscan_during_output_restores_cursor_and_exclusivity() {
         "suspended in output construction"
     );
     assert!(matches!(
-        registry::acquire_file(fid),
+        registry::acquire_file_in(fid, Some(&runtime)),
         Err(registry::FileOperationError::Busy)
     ));
     assert_eq!(
-        block_on(registry::close_async(fid))
+        block_on(registry::close_async_in(fid, Some(&runtime)))
             .expect_err("pending output blocks close")
             .kind(),
         std::io::ErrorKind::WouldBlock
     );
     drop(call);
+    pending_on.set(None);
     assert!(
         dropped.get(),
         "abandonment drops the execution-service turn"
     );
 
-    let mut restored = registry::acquire_file(fid).expect("same owner restored");
+    let mut restored = registry::acquire_file_in(fid, Some(&runtime)).expect("same owner restored");
     assert_eq!(
         std::io::Seek::stream_position(restored.file_mut()).expect("cursor"),
         0
     );
     drop(restored);
     let output = block_on(textscan_builtin(
-        None,
+        Some(runtime.clone()),
         Value::Num(fid as f64),
         Value::from("%f"),
         vec![Value::Num(1.0)],
     ))
     .expect("subsequent invocation succeeds");
     assert_eq!(numeric_column(&output, 0), vec![10.0]);
-    block_on(registry::close_async(fid))
+    block_on(registry::close_async_in(fid, Some(&runtime)))
         .expect("close")
         .expect("entry");
     registry::reset_for_tests();

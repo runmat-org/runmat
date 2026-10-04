@@ -22,7 +22,6 @@ use runmat_value::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_filesystem::File;
 
 const BUILTIN_NAME: &str = "fread";
 
@@ -66,10 +65,15 @@ fn map_string_result<T>(
 #[runtime_builtin(
     name = "fread",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fread"
 )]
-async fn fread_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&fid, &rest).await?;
+async fn fread_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    fid: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_in(runtime.as_ref(), &fid, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -125,11 +129,20 @@ impl FreadEval {
 }
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
+    evaluate_in(None, fid_value, rest).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+    rest: &[Value],
+) -> BuiltinResult<FreadEval> {
     let prepared = PreparedFreadCall::new(fid_value, rest)?;
     let fid = prepared.resolve_fid().await?;
 
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => fread_error_with_message(
+    let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier
+        | registry::FileOperationError::ForeignSession => fread_error_with_message(
             FREAD_ERROR_INVALID_IDENTIFIER.message,
             &FREAD_ERROR_INVALID_IDENTIFIER,
         ),
@@ -155,6 +168,16 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         .resolve_controls(&operation.info.machinefmt)
         .await?;
 
+    operation.check_authority(runtime).map_err(|source| {
+        let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = FREAD_ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })?;
+
     let (mut eval, encountered_eof) = read_from_handle(
         operation.file_mut(),
         &controls.size,
@@ -173,11 +196,28 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         }
         builder.build()
     })?;
-    drop(operation);
+    operation.check_authority(runtime).map_err(|source| {
+        let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = FREAD_ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })?;
     if encountered_eof {
-        registry::mark_eof_encountered(fid);
+        registry::mark_eof_encountered_in(fid, runtime);
     }
     eval.apply_like(like, controls.precision)?;
+    operation.check_authority(runtime).map_err(|source| {
+        let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = FREAD_ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })?;
     Ok(eval)
 }
 

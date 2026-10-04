@@ -16,7 +16,10 @@ enum FormatPlan {
     Resident { index: usize },
 }
 
-pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall> {
+pub(super) async fn prepare(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &[Value],
+) -> BuiltinResult<PreparedFprintfCall> {
     if args.is_empty() {
         return Err(fprintf_error_with_detail(
             &FPRINTF_ERROR_INVALID_INPUT,
@@ -32,7 +35,7 @@ pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall
         match plan {
             FormatPlan::Host { index, text } => break (index, text),
             FormatPlan::Resident { index } => {
-                validate_unambiguous_host_target(args, index)?;
+                validate_unambiguous_host_target(runtime, args, index)?;
                 let host = gather_value(&args[index]).await?;
                 let text = map_string_result(
                     coerce_to_format_string(&host),
@@ -47,7 +50,7 @@ pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall
         }
     };
 
-    let (target_index, target) = select_target(args, format_index, &mut staged).await?;
+    let (target_index, target) = select_target(runtime, args, format_index, &mut staged).await?;
     let mut data_args = Vec::with_capacity(args.len().saturating_sub(1));
     for (index, value) in args.iter().enumerate() {
         if index == format_index || target_index == Some(index) {
@@ -62,7 +65,11 @@ pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall
     })
 }
 
-fn validate_unambiguous_host_target(args: &[Value], format_index: usize) -> BuiltinResult<()> {
+fn validate_unambiguous_host_target(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &[Value],
+    format_index: usize,
+) -> BuiltinResult<()> {
     // A stream label encountered before a later actual format would outrank a
     // numeric fid. Only inspect a host fid when that override is impossible.
     if args
@@ -79,11 +86,11 @@ fn validate_unambiguous_host_target(args: &[Value], format_index: usize) -> Buil
         let parsed = parse_fid(value);
         if format_index == 1 {
             let fid = map_string_result(parsed, &FPRINTF_ERROR_INVALID_INPUT)?;
-            target_from_fid(fid)?;
+            target_from_fid(runtime, fid)?;
             break;
         }
         if let Ok(fid) = parsed {
-            target_from_fid(fid)?;
+            target_from_fid(runtime, fid)?;
             break;
         }
     }
@@ -116,6 +123,7 @@ fn next_format(args: &[Value], start: usize) -> BuiltinResult<Option<FormatPlan>
 }
 
 async fn select_target(
+    runtime: Option<&crate::context::RuntimeContext>,
     args: &[Value],
     format_index: usize,
     staged: &mut [Option<Value>],
@@ -146,10 +154,10 @@ async fn select_target(
         let parsed = parse_fid(&host);
         if format_index == 1 && index == 0 {
             let fid = map_string_result(parsed, &FPRINTF_ERROR_INVALID_INPUT)?;
-            return Ok((Some(index), target_from_fid(fid)?));
+            return Ok((Some(index), target_from_fid(runtime, fid)?));
         }
         if let Ok(fid) = parsed {
-            return Ok((Some(index), target_from_fid(fid)?));
+            return Ok((Some(index), target_from_fid(runtime, fid)?));
         }
     }
     Ok((None, OutputTarget::Stdout))

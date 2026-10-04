@@ -57,11 +57,15 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fclose",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
-async fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fclose_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     preflight_fclose_outputs()?;
-    let eval = evaluate(&args).await?;
+    let eval = evaluate_in(runtime.as_ref(), &args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -114,11 +118,18 @@ impl FcloseEval {
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
+    evaluate_in(None, args).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &[Value],
+) -> BuiltinResult<FcloseEval> {
     preflight_fclose_inputs(args)?;
     let gathered = gather_args(args).await?;
     match gathered.len() {
-        0 => Ok(close_all().await),
-        1 => handle_single_argument(&gathered[0]).await,
+        0 => Ok(close_all(runtime).await),
+        1 => handle_single_argument(runtime, &gathered[0]).await,
         _ => Err(fclose_error_with_detail(
             &FCLOSE_ERROR_INVALID_INPUT,
             "too many input arguments",
@@ -254,21 +265,24 @@ fn preflight_fclose_value(value: &Value) -> BuiltinResult<()> {
     }
 }
 
-async fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
+async fn handle_single_argument(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
-        return Ok(close_all().await);
+        return Ok(close_all(runtime).await);
     }
     let fids = collect_file_ids(value)?;
-    Ok(close_fids(&fids).await)
+    Ok(close_fids(runtime, &fids).await)
 }
 
-async fn close_all() -> FcloseEval {
-    let infos = registry::list_infos();
+async fn close_all(runtime: Option<&crate::context::RuntimeContext>) -> FcloseEval {
+    let infos = registry::list_infos_in(runtime);
     let mut status_ok = true;
     let mut message = String::new();
     for info in infos {
         if info.id >= 3 {
-            if let Err(err) = registry::close_async(info.id).await {
+            if let Err(err) = registry::close_async_in(info.id, runtime).await {
                 status_ok = false;
                 if message.is_empty() {
                     message = err.to_string();
@@ -283,7 +297,7 @@ async fn close_all() -> FcloseEval {
     }
 }
 
-async fn close_fids(fids: &[i32]) -> FcloseEval {
+async fn close_fids(runtime: Option<&crate::context::RuntimeContext>, fids: &[i32]) -> FcloseEval {
     if fids.is_empty() {
         return FcloseEval::success();
     }
@@ -300,7 +314,7 @@ async fn close_fids(fids: &[i32]) -> FcloseEval {
         if fid < 3 {
             continue;
         }
-        match registry::close_async(fid).await {
+        match registry::close_async_in(fid, runtime).await {
             Ok(Some(_)) => {}
             Ok(None) => {
                 status_ok = false;

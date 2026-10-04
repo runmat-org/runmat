@@ -3,8 +3,8 @@ use super::*;
 mod elements;
 pub(super) use elements::{borrow_elements, WriteElement};
 
-pub(super) fn write_elements(
-    file: &mut File,
+pub(super) fn write_elements<W: Write + Seek>(
+    file: &mut W,
     values: impl IntoIterator<Item = WriteElement>,
     spec: WriteSpec,
     skip: usize,
@@ -157,7 +157,7 @@ pub(super) fn endian_i64(value: i64, endian: Endianness) -> [u8; 8] {
     }
 }
 
-pub(super) fn write_bytes(file: &mut File, bytes: &[u8]) -> BuiltinResult<()> {
+pub(super) fn write_bytes<W: Write>(file: &mut W, bytes: &[u8]) -> BuiltinResult<()> {
     file.write_all(bytes).map_err(|err| {
         fwrite_error_with_source(
             format!("fwrite: failed to write to file ({err})"),

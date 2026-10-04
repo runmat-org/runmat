@@ -70,10 +70,15 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fgets",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fgets"
 )]
-async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&fid, &rest).await?;
+async fn fgets_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    fid: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_in(runtime.as_ref(), &fid, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -114,6 +119,14 @@ impl FgetsEval {
 }
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsEval> {
+    evaluate_in(None, fid_value, rest).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+    rest: &[Value],
+) -> BuiltinResult<FgetsEval> {
     if rest.len() > 1 {
         return Err(fgets_error_with_detail(
             &FGETS_ERROR_INVALID_INPUT,
@@ -147,8 +160,9 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         ));
     }
 
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => {
+    let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier
+        | registry::FileOperationError::ForeignSession => {
             fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER)
         }
         other => fgets_error_with_source(other.into_io_error()),
@@ -161,11 +175,25 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
     }
     let encoding = operation.info.encoding.clone();
     let nchar_limit = parse_nchar(rest).await?;
-    let read = read_text_line(operation.file_mut(), nchar_limit, BUILTIN_NAME)
-        .map_err(|e| fgets_error_with_detail(&FGETS_ERROR_IO, e.message()))?;
-    drop(operation);
+    operation
+        .check_authority(runtime)
+        .map_err(fgets_error_with_source)?;
+    let read =
+        read_text_line(operation.file_mut(), nchar_limit, BUILTIN_NAME).map_err(|error| {
+            let mut builder =
+                build_runtime_error(format!("{}: {}", FGETS_ERROR_IO.message, error.message()))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(error);
+            if let Some(identifier) = FGETS_ERROR_IO.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        })?;
+    operation
+        .check_authority(runtime)
+        .map_err(fgets_error_with_source)?;
     if read.encountered_eof {
-        registry::mark_eof_encountered(fid);
+        registry::mark_eof_encountered_in(fid, runtime);
     }
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
@@ -186,6 +214,9 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
             .map_err(|e| fgets_error_with_detail(&FGETS_ERROR_IO, e.message()))?
     };
 
+    operation
+        .check_authority(runtime)
+        .map_err(fgets_error_with_source)?;
     Ok(FgetsEval::new(line_value, terminators_value))
 }
 

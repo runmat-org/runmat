@@ -89,7 +89,14 @@ impl FprintfEval {
 
 /// Evaluate the `fprintf` builtin without going through the dispatcher.
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
-    let prepared = prepared::prepare(args).await?;
+    evaluate_in(None, args).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &[Value],
+) -> BuiltinResult<FprintfEval> {
+    let prepared = prepared::prepare(runtime, args).await?;
     let raw_format = prepared.format;
     let mut target = prepared.target;
     let format_string =
@@ -109,7 +116,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
         encode_output(&rendered, target.encoding_label()),
         &FPRINTF_ERROR_ENCODE,
     )?;
-    target.write(&bytes)?;
+    target.write(runtime, &bytes)?;
     Ok(FprintfEval {
         bytes_written: bytes.len(),
     })
@@ -118,13 +125,18 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
 #[runtime_builtin(
     name = "fprintf",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
-async fn fprintf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fprintf_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let mut args = Vec::with_capacity(rest.len() + 1);
     args.push(first);
     args.extend(rest);
-    let eval = evaluate(&args).await?;
+    let eval = evaluate_in(runtime.as_ref(), &args).await?;
     Ok(Value::Num(eval.bytes_written() as f64))
 }
 

@@ -67,10 +67,15 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fgetl",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fgetl"
 )]
-async fn fgetl_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&fid, &rest).await?;
+async fn fgetl_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    fid: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_in(runtime.as_ref(), &fid, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -105,6 +110,14 @@ impl FgetlEval {
 }
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlEval> {
+    evaluate_in(None, fid_value, rest).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+    rest: &[Value],
+) -> BuiltinResult<FgetlEval> {
     if !rest.is_empty() {
         return Err(fgetl_error_with_detail(
             &FGETL_ERROR_INVALID_INPUT,
@@ -129,8 +142,9 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         ));
     }
 
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => {
+    let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier
+        | registry::FileOperationError::ForeignSession => {
             fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER)
         }
         other => fgetl_error_with_source(other.into_io_error()),
@@ -142,11 +156,24 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         ));
     }
     let encoding = operation.info.encoding.clone();
-    let read = read_text_line(operation.file_mut(), None, BUILTIN_NAME)
-        .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
-    drop(operation);
+    operation
+        .check_authority(runtime)
+        .map_err(fgetl_error_with_source)?;
+    let read = read_text_line(operation.file_mut(), None, BUILTIN_NAME).map_err(|error| {
+        let mut builder =
+            build_runtime_error(format!("{}: {}", FGETL_ERROR_IO.message, error.message()))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(error);
+        if let Some(identifier) = FGETL_ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })?;
+    operation
+        .check_authority(runtime)
+        .map_err(fgetl_error_with_source)?;
     if read.encountered_eof {
-        registry::mark_eof_encountered(fid);
+        registry::mark_eof_encountered_in(fid, runtime);
     }
     if read.eof_before_any {
         return Ok(FgetlEval::end_of_file());
@@ -161,6 +188,9 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
     let line_len = read.data.len().saturating_sub(read.terminators.len());
     let line_value = bytes_to_char_array(&read.data[..line_len], &encoding, BUILTIN_NAME)
         .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
+    operation
+        .check_authority(runtime)
+        .map_err(fgetl_error_with_source)?;
     Ok(FgetlEval::new(line_value))
 }
 

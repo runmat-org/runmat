@@ -6,6 +6,7 @@ pub(super) struct HostAdmission {
 }
 
 pub(super) fn preflight(
+    runtime: Option<&crate::context::RuntimeContext>,
     input: &Value,
     format: &Value,
     rest: &[Value],
@@ -28,7 +29,7 @@ pub(super) fn preflight(
     if !crate::dispatcher::value_contains_gpu(input) {
         if let Some(fid) = numeric_fid(input) {
             input::validate_fid(fid)?;
-            let info = registry::info_for(fid).ok_or_else(|| {
+            let info = registry::info_for_in(fid, runtime).ok_or_else(|| {
                 textscan_error_with(
                     &TEXTSCAN_ERROR_FILE,
                     format!("textscan: invalid file identifier {fid}"),

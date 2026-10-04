@@ -16,7 +16,6 @@ use runmat_value::{CharArray, IntValue, NumericDType, Value};
 use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_filesystem::File;
 
 const BUILTIN_NAME: &str = "fwrite";
 
@@ -74,10 +73,16 @@ fn map_string_result<T>(
 #[runtime_builtin(
     name = "fwrite",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
-async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&fid, &data, &rest).await?;
+async fn fwrite_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    fid: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_in(runtime.as_ref(), &fid, &data, &rest).await?;
     Ok(Value::Num(eval.count as f64))
 }
 
@@ -100,6 +105,15 @@ impl FwriteEval {
 
 /// Evaluate the `fwrite` builtin without invoking the runtime dispatcher.
 pub async fn evaluate(
+    fid_value: &Value,
+    data_value: &Value,
+    rest: &[Value],
+) -> BuiltinResult<FwriteEval> {
+    evaluate_in(None, fid_value, data_value, rest).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
     fid_value: &Value,
     data_value: &Value,
     rest: &[Value],
@@ -156,8 +170,9 @@ pub async fn evaluate(
         ));
     }
 
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => fwrite_error_with_message(
+    let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier
+        | registry::FileOperationError::ForeignSession => fwrite_error_with_message(
             FWRITE_ERROR_INVALID_IDENTIFIER.message,
             &FWRITE_ERROR_INVALID_IDENTIFIER,
         ),
@@ -186,6 +201,9 @@ pub async fn evaluate(
     let data_host = gather_value(data_value).await?;
     let elements = map_string_result(borrow_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
 
+    operation
+        .check_authority(runtime)
+        .map_err(|source| fwrite_error_with_source(source.to_string(), &FWRITE_ERROR_IO, source))?;
     let count = write_elements(
         operation.file_mut(),
         elements,
@@ -193,6 +211,9 @@ pub async fn evaluate(
         skip_bytes,
         machine_format,
     )?;
+    operation
+        .check_authority(runtime)
+        .map_err(|source| fwrite_error_with_source(source.to_string(), &FWRITE_ERROR_IO, source))?;
     Ok(FwriteEval::new(count))
 }
 

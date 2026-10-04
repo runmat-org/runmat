@@ -29,7 +29,11 @@ impl OutputTarget {
         }
     }
 
-    pub(super) fn write(&mut self, bytes: &[u8]) -> BuiltinResult<()> {
+    pub(super) fn write(
+        &mut self,
+        runtime: Option<&crate::context::RuntimeContext>,
+        bytes: &[u8],
+    ) -> BuiltinResult<()> {
         match self {
             OutputTarget::Stdout => {
                 record_console_chunk(ConsoleStream::Stdout, bytes);
@@ -40,6 +44,13 @@ impl OutputTarget {
                 Ok(())
             }
             OutputTarget::File { operation, .. } => {
+                operation.check_authority(runtime).map_err(|source| {
+                    fprintf_error_with_source(
+                        format!("fprintf: file authority invalidated ({source})"),
+                        &FPRINTF_ERROR_IO,
+                        source,
+                    )
+                })?;
                 operation.file_mut().write_all(bytes).map_err(|err| {
                     fprintf_error_with_source(
                         format!(
@@ -48,6 +59,13 @@ impl OutputTarget {
                         ),
                         &FPRINTF_ERROR_IO,
                         err,
+                    )
+                })?;
+                operation.check_authority(runtime).map_err(|source| {
+                    fprintf_error_with_source(
+                        format!("fprintf: file authority invalidated ({source})"),
+                        &FPRINTF_ERROR_IO,
+                        source,
                     )
                 })
             }
@@ -63,7 +81,10 @@ fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) {
     record_console_output(stream, text);
 }
 
-pub(super) fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
+pub(super) fn target_from_fid(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid: i32,
+) -> BuiltinResult<OutputTarget> {
     if fid < 0 {
         return Err(fprintf_error_with_detail(
             &FPRINTF_ERROR_INVALID_INPUT,
@@ -78,8 +99,9 @@ pub(super) fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
         1 => Ok(OutputTarget::Stdout),
         2 => Ok(OutputTarget::Stderr),
         _ => {
-            let operation = registry::acquire_file(fid).map_err(|err| match err {
-                registry::FileOperationError::InvalidIdentifier => fprintf_error_with_message(
+            let operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
+                registry::FileOperationError::InvalidIdentifier
+                | registry::FileOperationError::ForeignSession => fprintf_error_with_message(
                     FPRINTF_ERROR_INVALID_IDENTIFIER.message,
                     &FPRINTF_ERROR_INVALID_IDENTIFIER,
                 ),

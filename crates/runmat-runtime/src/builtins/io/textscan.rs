@@ -83,7 +83,7 @@ async fn textscan_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let admitted = admission::preflight(&input, &format_spec, &rest)?;
+    let admitted = admission::preflight(runtime.as_ref(), &input, &format_spec, &rest)?;
     let input = gather_if_needed_async(&input)
         .await
         .map_err(map_control_flow)?;
@@ -94,8 +94,15 @@ async fn textscan_builtin(
     };
     let mut cooperation = TextscanCooperation::new(runtime.as_ref());
     cooperation.completed(0).await?;
-    let mut parsed =
-        parse_input(&input, &parsed_format, repeat, &options, &mut cooperation).await?;
+    let mut parsed = parse_input(
+        runtime.as_ref(),
+        &input,
+        &parsed_format,
+        repeat,
+        &options,
+        &mut cooperation,
+    )
+    .await?;
     cooperation.completed(0).await?;
     let output = build_output(
         std::mem::take(&mut parsed.columns),
@@ -104,6 +111,7 @@ async fn textscan_builtin(
     )
     .await?;
     cooperation.completed(0).await?;
+    parsed.check_authority(runtime.as_ref())?;
     parsed.commit_file_position();
     Ok(output)
 }

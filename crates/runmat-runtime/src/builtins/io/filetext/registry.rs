@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use runmat_filesystem::File;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Mutex as StdMutex};
@@ -8,7 +8,14 @@ use std::sync::{Arc, Mutex, Mutex as StdMutex};
 pub(crate) type SharedFileHandle = Arc<StdMutex<Option<File>>>;
 
 mod operation;
-pub(crate) use operation::{acquire_file, FileOperation, FileOperationError};
+#[cfg(test)]
+pub(crate) use operation::acquire_file;
+pub(crate) use operation::{acquire_file_in, FileOperation, FileOperationError};
+mod retirement;
+use retirement::retire_session;
+mod authority;
+use crate::context::{RuntimeContext, RuntimeContextLocalId};
+pub(crate) use authority::{FileFilesystem, FileIssuer};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FileAccess {
@@ -58,6 +65,11 @@ impl Drop for CloseEntry {
         // by close_async; no lock is held across the flush await.
         let mut registry = REGISTRY.lock().unwrap_or_else(|poison| poison.into_inner());
         if let Some(entry) = self.entry.take() {
+            if !entry.issuer.live() {
+                drop(registry);
+                drop(entry);
+                return;
+            }
             if let Some(handle) = entry.file_handle() {
                 let mut slot = handle.lock().unwrap_or_else(|poison| poison.into_inner());
                 if slot.is_none() {
@@ -80,6 +92,9 @@ struct Entry {
     resource: Resource,
     eof_encountered: bool,
     restore_failure: Option<Arc<io::Error>>,
+    issuer: FileIssuer,
+    filesystem: Option<Arc<FileFilesystem>>,
+    retired: bool,
 }
 
 impl Entry {
@@ -106,6 +121,9 @@ impl Entry {
             resource: Resource::Standard,
             eof_encountered: false,
             restore_failure: None,
+            issuer: FileIssuer::Process,
+            filesystem: None,
+            retired: false,
         }
     }
 
@@ -150,7 +168,12 @@ pub(crate) struct RegisteredFile {
 }
 
 impl RegisteredFile {
-    fn into_entry(self, id: i32) -> Entry {
+    fn into_entry(
+        self,
+        id: i32,
+        issuer: FileIssuer,
+        filesystem: Option<Arc<FileFilesystem>>,
+    ) -> Entry {
         let display_name = self.path.to_string_lossy().to_string();
         Entry {
             id,
@@ -163,6 +186,9 @@ impl RegisteredFile {
             resource: Resource::File(self.handle),
             eof_encountered: false,
             restore_failure: None,
+            issuer,
+            filesystem,
+            retired: false,
         }
     }
 }
@@ -170,6 +196,7 @@ impl RegisteredFile {
 struct FileRegistry {
     next_id: i32,
     entries: HashMap<i32, Entry>,
+    cleanup_registered: HashSet<RuntimeContextLocalId>,
 }
 
 impl FileRegistry {
@@ -181,6 +208,7 @@ impl FileRegistry {
         Self {
             next_id: 3,
             entries,
+            cleanup_registered: HashSet::new(),
         }
     }
 
@@ -196,22 +224,59 @@ static REGISTRY: Lazy<Mutex<FileRegistry>> = Lazy::new(|| Mutex::new(FileRegistr
 #[cfg(test)]
 static TEST_REGISTRY_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+#[cfg(test)]
 pub(crate) fn register_file(file: RegisteredFile) -> i32 {
+    register_file_in(file, None, None)
+}
+
+pub(crate) fn register_file_in(
+    file: RegisteredFile,
+    runtime: Option<&RuntimeContext>,
+    filesystem: Option<Arc<FileFilesystem>>,
+) -> i32 {
+    let issuer = FileIssuer::from_runtime(runtime);
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     let id = guard.allocate_id();
-    let entry = file.into_entry(id);
+    let entry = file.into_entry(id, issuer, filesystem);
     guard.entries.insert(id, entry);
+    let register_cleanup =
+        runtime.is_some_and(|runtime| guard.cleanup_registered.insert(runtime.local_identity()));
+    drop(guard);
+    if register_cleanup {
+        let runtime = runtime.expect("session cleanup has a runtime");
+        let identity = runtime.local_identity();
+        runtime.register_session_resource_cleanup(move || retire_session(identity));
+    }
     id
 }
 
+#[cfg(test)]
 pub(crate) fn info_for(fid: i32) -> Option<FileInfo> {
-    let guard = REGISTRY.lock().expect("file registry poisoned");
-    guard.entries.get(&fid).map(|entry| entry.info())
+    info_for_in(fid, None)
 }
 
-pub(crate) fn list_infos() -> Vec<FileInfo> {
+pub(crate) fn info_for_in(fid: i32, runtime: Option<&RuntimeContext>) -> Option<FileInfo> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
-    let mut infos: Vec<FileInfo> = guard.entries.values().map(|entry| entry.info()).collect();
+    guard
+        .entries
+        .get(&fid)
+        .filter(|entry| entry_visible(entry, runtime))
+        .map(|entry| entry.info())
+}
+
+#[cfg(test)]
+pub(crate) fn list_infos() -> Vec<FileInfo> {
+    list_infos_in(None)
+}
+
+pub(crate) fn list_infos_in(runtime: Option<&RuntimeContext>) -> Vec<FileInfo> {
+    let guard = REGISTRY.lock().expect("file registry poisoned");
+    let mut infos: Vec<FileInfo> = guard
+        .entries
+        .values()
+        .filter(|entry| entry_visible(entry, runtime))
+        .map(|entry| entry.info())
+        .collect();
     infos.sort_by_key(|info| info.id);
     infos
 }
@@ -243,25 +308,50 @@ pub(crate) fn snapshot_file(fid: i32) -> Option<RegisteredFileSnapshot> {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn eof_encountered(fid: i32) -> Option<bool> {
-    let guard = REGISTRY.lock().expect("file registry poisoned");
-    guard.entries.get(&fid).map(|entry| entry.eof_encountered)
+    eof_encountered_in(fid, None)
 }
 
+pub(crate) fn eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> Option<bool> {
+    let guard = REGISTRY.lock().expect("file registry poisoned");
+    guard
+        .entries
+        .get(&fid)
+        .filter(|entry| entry_visible(entry, runtime))
+        .map(|entry| entry.eof_encountered)
+}
+
+#[cfg(test)]
 pub(crate) fn mark_eof_encountered(fid: i32) -> bool {
+    mark_eof_encountered_in(fid, None)
+}
+
+pub(crate) fn mark_eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> bool {
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     let Some(entry) = guard.entries.get_mut(&fid) else {
         return false;
     };
+    if !entry_visible(entry, runtime) {
+        return false;
+    }
     entry.eof_encountered = true;
     true
 }
 
+#[cfg(test)]
 pub(crate) fn clear_eof_encountered(fid: i32) -> bool {
+    clear_eof_encountered_in(fid, None)
+}
+
+pub(crate) fn clear_eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> bool {
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     let Some(entry) = guard.entries.get_mut(&fid) else {
         return false;
     };
+    if !entry_visible(entry, runtime) {
+        return false;
+    }
     entry.eof_encountered = false;
     true
 }
@@ -275,7 +365,15 @@ pub(crate) fn close(fid: i32) -> Option<FileInfo> {
     guard.entries.remove(&fid).map(|entry| entry.info())
 }
 
+#[cfg(test)]
 pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
+    close_async_in(fid, None).await
+}
+
+pub(crate) async fn close_async_in(
+    fid: i32,
+    runtime: Option<&RuntimeContext>,
+) -> std::io::Result<Option<FileInfo>> {
     let entry = {
         if fid < 3 {
             return Ok(None);
@@ -284,6 +382,9 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
         let Some(registered) = guard.entries.get(&fid) else {
             return Ok(None);
         };
+        if !entry_visible(registered, runtime) {
+            return Ok(None);
+        }
         let Some(handle) = registered.file_handle() else {
             return Ok(None);
         };
@@ -317,17 +418,41 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
         return Ok(None);
     };
 
+    if let Some(filesystem) = entry
+        .entry
+        .as_ref()
+        .and_then(|entry| entry.filesystem.as_ref())
+    {
+        filesystem.check()?;
+    }
+
     if let Some(file) = entry.file.as_mut() {
         file.flush_async().await?;
     }
+    if let Some(registered) = entry.entry.as_ref() {
+        if let Some(filesystem) = &registered.filesystem {
+            filesystem.check()?;
+        }
+        if !registered.issuer.admits(runtime) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "file identifier session authority expired",
+            ));
+        }
+    }
     entry.committed = true;
     Ok(Some(entry.info.clone()))
+}
+
+fn entry_visible(entry: &Entry, runtime: Option<&RuntimeContext>) -> bool {
+    !entry.retired && (entry.id < 3 || entry.issuer.admits(runtime))
 }
 
 #[cfg(test)]
 pub(crate) fn reset_for_tests() {
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     guard.entries.retain(|&id, _| id < 3);
+    guard.cleanup_registered.clear();
     guard.next_id = 3;
 }
 
@@ -337,3 +462,7 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
 }
+
+#[cfg(test)]
+#[path = "registry/session_tests.rs"]
+mod session_tests;

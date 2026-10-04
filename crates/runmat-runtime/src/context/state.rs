@@ -9,6 +9,18 @@ use crate::callsite::CallsiteInfo;
 use crate::debug_context::DebugFrame;
 use crate::source_context::SourceInfo;
 
+#[derive(Default)]
+pub(crate) struct SessionResourceCleanup(pub(crate) RefCell<Vec<Box<dyn FnOnce()>>>);
+
+impl std::fmt::Debug for SessionResourceCleanup {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SessionResourceCleanup")
+            .field("registrations", &self.0.borrow().len())
+            .finish()
+    }
+}
+
 /// Mutable state owned by exactly one runtime session.
 ///
 /// Fields are split by semantic responsibility even though they share one
@@ -20,6 +32,7 @@ pub struct RuntimeContextState {
     /// Non-serialized liveness authority shared by invocation generations of
     /// this session, but never by a parallel-lab fork or a new context.
     pub(crate) session_lease: Arc<()>,
+    pub(crate) resource_cleanup: SessionResourceCleanup,
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
     pub(crate) output: RefCell<OutputState>,
@@ -52,6 +65,7 @@ impl RuntimeContextState {
         Self {
             local_identity,
             session_lease: Arc::new(()),
+            resource_cleanup: SessionResourceCleanup::default(),
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
             output: RefCell::new(OutputState::default()),
@@ -79,6 +93,16 @@ impl RuntimeContextState {
             callstack_limit: Cell::new(super::DEFAULT_CALLSTACK_LIMIT),
             error_namespace: RefCell::new(super::DEFAULT_ERROR_NAMESPACE.to_string()),
             random: RefCell::new(crate::builtins::common::random::RuntimeRng::new()),
+        }
+    }
+}
+
+impl Drop for RuntimeContextState {
+    fn drop(&mut self) {
+        // Domain owners register cleanup without making context depend on
+        // builtin modules. No RefCell borrow survives a callback.
+        for cleanup in self.resource_cleanup.0.get_mut().drain(..) {
+            cleanup();
         }
     }
 }

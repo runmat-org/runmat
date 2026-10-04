@@ -33,8 +33,8 @@ impl std::error::Error for ReadFailure {
     }
 }
 
-pub(super) fn read_from_handle(
-    file: &mut File,
+pub(super) fn read_from_handle<R: Read + Seek>(
+    file: &mut R,
     size_spec: &SizeSpec,
     precision: &PrecisionSpec,
     skip: usize,

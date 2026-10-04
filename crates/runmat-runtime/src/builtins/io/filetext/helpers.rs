@@ -1,7 +1,6 @@
 use std::io::{Read, Seek, SeekFrom};
 
 use encoding_rs::{Encoding, UTF_8};
-use runmat_filesystem::File;
 use runmat_value::{CharArray, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -33,8 +32,8 @@ pub(crate) struct LineRead {
     pub(crate) encountered_eof: bool,
 }
 
-pub(crate) fn read_text_line(
-    file: &mut File,
+pub(crate) fn read_text_line<R: Read + Seek>(
+    file: &mut R,
     limit: Option<usize>,
     builtin_name: &'static str,
 ) -> BuiltinResult<LineRead> {
@@ -158,7 +157,11 @@ pub(crate) fn read_text_line(
     })
 }
 
-fn seek_current(file: &mut File, offset: i64, builtin_name: &'static str) -> BuiltinResult<()> {
+fn seek_current<R: Seek>(
+    file: &mut R,
+    offset: i64,
+    builtin_name: &'static str,
+) -> BuiltinResult<()> {
     file.seek(SeekFrom::Current(offset)).map_err(|err| {
         build_runtime_error(format!("{builtin_name}: failed to seek in file: {err}"))
             .with_builtin(builtin_name)

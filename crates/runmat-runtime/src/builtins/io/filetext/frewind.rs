@@ -84,15 +84,26 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "frewind",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::frewind"
 )]
-async fn frewind_builtin(fid: Value) -> crate::BuiltinResult<Value> {
-    evaluate(&fid).await?;
+async fn frewind_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    fid: Value,
+) -> crate::BuiltinResult<Value> {
+    evaluate_in(runtime.as_ref(), &fid).await?;
     Ok(Value::OutputList(Vec::new()))
 }
 
 /// Evaluate the `frewind` builtin without invoking the runtime dispatcher.
 pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
+    evaluate_in(None, fid_value).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+) -> BuiltinResult<()> {
     preflight_fid(fid_value)?;
     let fid_host = gather_if_needed_async(fid_value)
         .await
@@ -108,8 +119,9 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
         return Ok(());
     }
 
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => {
+    let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier
+        | registry::FileOperationError::ForeignSession => {
             frewind_error(&FREWIND_ERROR_INVALID_IDENTIFIER)
         }
         other => {
@@ -118,6 +130,9 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
         }
     })?;
 
+    operation
+        .check_authority(runtime)
+        .map_err(|err| frewind_error_with_source_detail(&FREWIND_ERROR_IO, err.to_string(), err))?;
     operation
         .file_mut()
         .seek(SeekFrom::Start(0))
@@ -128,8 +143,11 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
                 err,
             )
         })?;
+    operation
+        .check_authority(runtime)
+        .map_err(|err| frewind_error_with_source_detail(&FREWIND_ERROR_IO, err.to_string(), err))?;
     drop(operation);
-    registry::clear_eof_encountered(fid);
+    registry::clear_eof_encountered_in(fid, runtime);
 
     Ok(())
 }

@@ -1,7 +1,6 @@
 //! MATLAB-compatible `fopen` builtin exposing host file streams.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, FOPEN_ERROR_INTERNAL, FOPEN_ERROR_INVALID_ENCODING,
@@ -19,10 +18,9 @@ use runmat_value::Value;
 use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{
     helpers::{extract_scalar_string, normalize_encoding_label},
-    registry::{self, RegisteredFile},
+    registry,
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
-use runmat_filesystem::OpenOptions;
 
 const BUILTIN_NAME: &str = "fopen";
 
@@ -57,10 +55,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fopen",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::fopen"
 )]
-async fn fopen_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args).await?;
+async fn fopen_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_in(runtime.as_ref(), &args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -75,12 +77,22 @@ async fn fopen_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 mod output;
 mod permission;
+#[path = "fopen/routes.rs"]
+mod routes;
+use routes::{handle_all, handle_open, handle_query};
 
 pub use output::FopenEval;
-use output::{ListOutputs, OpenOutputs, QueryOutputs};
+use output::OpenOutputs;
 use permission::Permission;
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
+    evaluate_in(None, args).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &[Value],
+) -> BuiltinResult<FopenEval> {
     if args.is_empty()
         || args
             .first()
@@ -95,18 +107,34 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
         preflight_query_fid(first)?;
     }
     preflight_form(args)?;
+    let filesystem = if let Some(first) = args.first() {
+        if !matches_keyword(first, "all")
+            && !is_numeric_value(first)
+            && !matches!(first, Value::GpuTensor(_))
+        {
+            let path = value_to_path(first)?;
+            match registry::FileFilesystem::capture(&path) {
+                Ok(filesystem) => Some(std::sync::Arc::new(filesystem)),
+                Err(error) => return Ok(FopenEval::open(OpenOutputs::failure(error.to_string()))),
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let gathered = gather_args(args).await?;
     if gathered.is_empty() {
-        return handle_all(&[]);
+        return handle_all(runtime, &[]);
     }
     let first = &gathered[0];
     if matches_keyword(first, "all") {
-        return handle_all(&gathered[1..]);
+        return handle_all(runtime, &gathered[1..]);
     }
     if is_numeric_value(first) {
-        return handle_query(first, &gathered[1..]);
+        return handle_query(runtime, first, &gathered[1..]);
     }
-    handle_open(first, &gathered[1..]).await
+    handle_open(runtime, first, &gathered[1..], filesystem).await
 }
 
 /// Reject controls whose host value or resident metadata already proves the
@@ -164,82 +192,6 @@ fn preflight_form(args: &[Value]) -> BuiltinResult<()> {
     parse_machinefmt(args.get(2))?;
     parse_encoding(args.get(3), &permission)?;
     Ok(())
-}
-
-async fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
-    if rest.len() > 3 {
-        return Err(fopen_error_with_detail(
-            &FOPEN_ERROR_INVALID_INPUT,
-            "too many input arguments",
-        ));
-    }
-
-    let path = value_to_path(path_value)?;
-    let mut args = rest.iter();
-    let permission = Permission::parse(args.next())?;
-    let machinefmt = parse_machinefmt(args.next())?;
-    let encoding = parse_encoding(args.next(), &permission)?;
-
-    let mut options = OpenOptions::new();
-    options.read(permission.read);
-    options.write(permission.write);
-    options.create(permission.create);
-    options.append(permission.append);
-    options.truncate(permission.truncate);
-
-    match options.open_async(&path).await {
-        Ok(file) => {
-            let handle = Arc::new(StdMutex::new(Some(file)));
-            let registered = RegisteredFile {
-                path: path.clone(),
-                permission: permission.canonical.clone(),
-                access: permission.access(),
-                machinefmt: machinefmt.clone(),
-                encoding: encoding.clone(),
-                handle,
-            };
-            let fid = registry::register_file(registered);
-            Ok(FopenEval::open(OpenOutputs::success(
-                fid, machinefmt, encoding,
-            )))
-        }
-        Err(err) => Ok(FopenEval::open(OpenOutputs::failure(err.to_string()))),
-    }
-}
-
-fn handle_query(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
-    if !rest.is_empty() {
-        return Err(fopen_error_with_detail(
-            &FOPEN_ERROR_INVALID_INPUT,
-            "too many input arguments",
-        ));
-    }
-    let fid = parse_fid(fid_value)?;
-    let outputs = match registry::info_for(fid) {
-        Some(info) => QueryOutputs::from_info(info),
-        None => QueryOutputs::not_found(),
-    };
-    Ok(FopenEval::query(outputs))
-}
-
-fn handle_all(rest: &[Value]) -> BuiltinResult<FopenEval> {
-    if rest.len() > 1 {
-        return Err(fopen_error_with_detail(
-            &FOPEN_ERROR_INVALID_INPUT,
-            "too many input arguments",
-        ));
-    }
-    let machinefmt_filter = if let Some(value) = rest.first() {
-        Some(parse_machinefmt(Some(value))?)
-    } else {
-        None
-    };
-    let mut infos = registry::list_infos();
-    if let Some(filter) = &machinefmt_filter {
-        infos.retain(|info| info.machinefmt.eq_ignore_ascii_case(filter));
-    }
-    let outputs = ListOutputs::from_infos(infos)?;
-    Ok(FopenEval::list(outputs))
 }
 
 async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {

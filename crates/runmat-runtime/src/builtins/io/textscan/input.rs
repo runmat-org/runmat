@@ -11,6 +11,22 @@ pub(super) struct ParsedInput {
 }
 
 impl ParsedInput {
+    pub(super) fn check_authority(
+        &self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<()> {
+        if let Some(operation) = &self.file_operation {
+            operation.check_authority(runtime).map_err(|source| {
+                textscan_error_with_source(
+                    &TEXTSCAN_ERROR_FILE,
+                    "textscan: file authority invalidated",
+                    source,
+                )
+            })?;
+        }
+        Ok(())
+    }
+
     pub(super) fn commit_file_position(&mut self) {
         if let Some(operation) = self.file_operation.as_mut() {
             operation.commit_cursor();
@@ -19,6 +35,7 @@ impl ParsedInput {
 }
 
 pub(super) async fn parse_input(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
     format_spec: &[FormatElement],
     repeat: Option<usize>,
@@ -26,7 +43,8 @@ pub(super) async fn parse_input(
     cooperation: &mut TextscanCooperation,
 ) -> BuiltinResult<ParsedInput> {
     if let Some(fid) = numeric_fid(value) {
-        return parse_registered_file(fid, format_spec, repeat, options, cooperation).await;
+        return parse_registered_file_in(runtime, fid, format_spec, repeat, options, cooperation)
+            .await;
     }
     let text = string_scalar(value, "textOrFileID")?;
     let parsed = parse_textscan(&text, format_spec, repeat, options, cooperation).await?;
@@ -43,9 +61,21 @@ pub(super) async fn parse_registered_file(
     options: &TextscanOptions,
     cooperation: &mut TextscanCooperation,
 ) -> BuiltinResult<ParsedInput> {
+    parse_registered_file_in(None, fid, format_spec, repeat, options, cooperation).await
+}
+
+pub(super) async fn parse_registered_file_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid: i32,
+    format_spec: &[FormatElement],
+    repeat: Option<usize>,
+    options: &TextscanOptions,
+    cooperation: &mut TextscanCooperation,
+) -> BuiltinResult<ParsedInput> {
     validate_fid(fid)?;
-    let mut operation = registry::acquire_file(fid).map_err(|error| match error {
-        registry::FileOperationError::InvalidIdentifier => textscan_error_with(
+    let mut operation = registry::acquire_file_in(fid, runtime).map_err(|error| match error {
+        registry::FileOperationError::InvalidIdentifier
+        | registry::FileOperationError::ForeignSession => textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: invalid file identifier {fid}"),
         ),
@@ -76,6 +106,13 @@ pub(super) async fn parse_registered_file(
     let mut chunk = [0u8; 8192];
     loop {
         cooperation.completed(0).await?;
+        operation.check_authority(runtime).map_err(|source| {
+            textscan_error_with_source(
+                &TEXTSCAN_ERROR_FILE,
+                "textscan: file authority invalidated",
+                source,
+            )
+        })?;
         let count = operation.file_mut().read(&mut chunk).map_err(|err| {
             textscan_error_with_source(
                 &TEXTSCAN_ERROR_FILE,
@@ -116,6 +153,13 @@ pub(super) async fn parse_registered_file(
                 err,
             )
         })?;
+    operation.check_authority(runtime).map_err(|source| {
+        textscan_error_with_source(
+            &TEXTSCAN_ERROR_FILE,
+            "textscan: file authority invalidated",
+            source,
+        )
+    })?;
     cooperation.completed(0).await?;
     Ok(ParsedInput {
         columns: parsed.columns,

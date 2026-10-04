@@ -56,15 +56,26 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "feof",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::filetext::feof"
 )]
-async fn feof_builtin(fid: Value) -> crate::BuiltinResult<Value> {
-    let at_end = evaluate(&fid).await?;
+async fn feof_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    fid: Value,
+) -> crate::BuiltinResult<Value> {
+    let at_end = evaluate_in(runtime.as_ref(), &fid).await?;
     Ok(Value::Bool(at_end))
 }
 
 /// Evaluate the `feof` builtin without invoking the runtime dispatcher.
 pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
+    evaluate_in(None, fid_value).await
+}
+
+pub async fn evaluate_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+) -> BuiltinResult<bool> {
     preflight_fid(fid_value)?;
     let fid_host = gather_if_needed_async(fid_value)
         .await
@@ -81,7 +92,8 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
         return Ok(false);
     }
 
-    registry::eof_encountered(fid).ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))
+    registry::eof_encountered_in(fid, runtime)
+        .ok_or_else(|| feof_error(&FEOF_ERROR_INVALID_IDENTIFIER))
 }
 
 fn preflight_fid(value: &Value) -> BuiltinResult<()> {

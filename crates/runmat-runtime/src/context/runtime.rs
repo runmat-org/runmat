@@ -161,6 +161,14 @@ impl RuntimeContext {
         Arc::downgrade(&self.state.session_lease)
     }
 
+    pub(crate) fn register_session_resource_cleanup(&self, cleanup: impl FnOnce() + 'static) {
+        self.state
+            .resource_cleanup
+            .0
+            .borrow_mut()
+            .push(Box::new(cleanup));
+    }
+
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
     }
