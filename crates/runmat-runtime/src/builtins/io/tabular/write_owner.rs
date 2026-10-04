@@ -96,6 +96,11 @@ pub(super) async fn safe_replace_file(
     selected: &TabularFsPath,
     bytes: &[u8],
 ) -> Result<(), StagedWriteError> {
+    cooperation
+        .completed(0)
+        .await
+        .map_err(StagedWriteError::Control)?;
+    selected.check().map_err(StagedWriteError::Io)?;
     let mut stage = selected
         .begin_staged_replace()
         .map_err(StagedWriteError::Io)?
