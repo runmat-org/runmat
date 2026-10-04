@@ -5,6 +5,7 @@ use runmat_accelerate_api::{
 
 #[test]
 fn write_only_file_rejects_resident_size_before_download() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();
     registry::reset_for_tests();
     let path = unique_path("fread_write_only_preflight");

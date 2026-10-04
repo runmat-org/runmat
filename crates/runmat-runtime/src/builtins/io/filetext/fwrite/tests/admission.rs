@@ -5,6 +5,7 @@ use runmat_accelerate_api::{
 
 #[test]
 fn read_only_file_rejects_resident_payload_before_download() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();
     registry::reset_for_tests();
     let path = unique_path("fwrite_read_only_preflight");

@@ -85,6 +85,7 @@ fn known_read_only_target_fails_before_pending_data_download() {
 
 #[test]
 fn read_only_target_precedes_pending_resident_format_download() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();
     registry::reset_for_tests();
     let path = unique_path("fprintf_resident_format_read_only");
@@ -128,6 +129,7 @@ fn read_only_target_precedes_pending_resident_format_download() {
 
 #[test]
 fn later_stream_label_data_cannot_override_known_target_before_resident_format() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();
     registry::reset_for_tests();
     let path = unique_path("fprintf_later_stream_data");
@@ -198,6 +200,7 @@ fn known_invalid_character_matrix_format_precedes_resident_data() {
 
 #[test]
 fn unambiguous_invalid_fid_never_falls_back_to_stdout_or_downloads_data() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::console::reset_thread_buffer();
     let provider = Box::leak(Box::new(PendingDataProvider {
         owner: TestAllocationOwner::new(),
