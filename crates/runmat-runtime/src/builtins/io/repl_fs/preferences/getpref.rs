@@ -5,7 +5,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Value};
 
 use super::controls::{error, preference_names, scalar_text, PreferenceNames};
-use super::{preparation, service};
+use super::service;
 use crate::context::{PreferenceServiceError, RuntimeContext};
 use crate::BuiltinResult;
 
@@ -90,10 +90,6 @@ async fn named(runtime: Option<RuntimeContext>, args: &[Value]) -> BuiltinResult
         }
     };
     let (runtime, preferences) = service::required(runtime, "getpref")?;
-    let defaults = match defaults {
-        Some(defaults) => Some(preparation::durable_values(&runtime, "getpref", defaults).await?),
-        None => None,
-    };
     let values = preferences
         .read_or_create_many(runtime, group, names.clone(), defaults)
         .await

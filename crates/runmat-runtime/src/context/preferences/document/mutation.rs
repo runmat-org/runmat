@@ -12,7 +12,7 @@ pub(in crate::context::preferences) enum DocumentMutation {
     ReadOrCreate {
         group: String,
         names: Vec<String>,
-        defaults: Option<Vec<ValuePayload>>,
+        defaults: Option<Vec<Option<ValuePayload>>>,
     },
     UserPath(UserPathSetting),
 }
@@ -56,7 +56,10 @@ pub(in crate::context::preferences) fn apply(
             for (index, name) in names.iter().enumerate() {
                 let target = document.groups.entry(group.clone()).or_default();
                 if !target.contains_key(name) {
-                    let Some(default) = defaults.as_ref().and_then(|values| values.get(index))
+                    let Some(default) = defaults
+                        .as_ref()
+                        .and_then(|values| values.get(index))
+                        .and_then(Option::as_ref)
                     else {
                         return Err(DocumentMutationError::Missing {
                             group,
@@ -111,7 +114,7 @@ mod tests {
             DocumentMutation::ReadOrCreate {
                 group: "app".into(),
                 names: vec!["same".into(), "same".into()],
-                defaults: Some(vec![first.clone(), later]),
+                defaults: Some(vec![Some(first.clone()), Some(later)]),
             },
         )
         .unwrap();

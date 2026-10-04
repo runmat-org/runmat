@@ -1,7 +1,7 @@
 //! Explicit isolated preference authority for deterministic hosts and tests.
 //! This is not durable storage and is never installed as a session fallback.
 
-use super::document::PreferenceDocument;
+use super::document::{missing_default_indices, PreferenceDocument};
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
 use crate::context::{RuntimeContext, RuntimeServiceFuture};
 use crate::context::{
@@ -145,17 +145,17 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
                     "default and preference-name cardinalities differ".into(),
                 ));
             }
-            let mut encoded_defaults = Vec::new();
-            if let Some(defaults) = defaults {
-                for value in &defaults {
-                    encoded_defaults.push(encode_durable_value(value)?);
-                    checkpoint(&mut budget, 1).await?;
-                }
-            }
             let mut document = budget
                 .await_cancellable(document.lock())
                 .await
                 .map_err(storage)?;
+            let mut encoded_defaults = vec![None; names.len()];
+            if let Some(defaults) = &defaults {
+                for index in missing_default_indices(&document, &group, &names) {
+                    encoded_defaults[index] = Some(encode_durable_value(&defaults[index])?);
+                    checkpoint(&mut budget, 1).await?;
+                }
+            }
             let mut candidate = EncodedValues::new();
             if let Some(existing) = document.groups.get(&group) {
                 for (name, payload) in existing {
@@ -167,7 +167,7 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
             let mut changed = false;
             for (index, name) in names.iter().enumerate() {
                 if !candidate.contains_key(name) {
-                    if let Some(default) = encoded_defaults.get(index) {
+                    if let Some(default) = encoded_defaults.get(index).and_then(Option::as_ref) {
                         candidate.insert(name.clone(), default.clone());
                         changed = true;
                     } else {

@@ -68,6 +68,15 @@ impl BrowserPreferenceService {
         budget: &mut CpuCooperationBudget,
         mutation: DocumentMutation,
     ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
+        self.mutate_request(budget, transaction::BrowserMutation::Prepared(mutation))
+            .await
+    }
+
+    async fn mutate_request(
+        &self,
+        budget: &mut CpuCooperationBudget,
+        mutation: transaction::BrowserMutation,
+    ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
         let gate = budget
             .await_cancellable(self.gate.clone().lock_owned())
             .await
@@ -173,19 +182,10 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                     "default and preference-name cardinalities differ".into(),
                 ));
             }
-            let mut encoded = None;
-            if let Some(defaults) = defaults {
-                let mut values = Vec::with_capacity(defaults.len());
-                for value in defaults {
-                    values.push(encode_durable_value(&value)?);
-                    checkpoint(&mut budget, 1).await?;
-                }
-                encoded = Some(values);
-            }
             if names.is_empty() {
                 return Ok(Vec::new());
             }
-            if encoded.is_none() {
+            let Some(defaults) = defaults else {
                 let document = service.read_document(&mut budget).await?;
                 let mut output = Vec::with_capacity(names.len());
                 for name in names {
@@ -201,14 +201,14 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                     checkpoint(&mut budget, 1).await?;
                 }
                 return Ok(output);
-            }
+            };
             let prepared = service
-                .mutate(
+                .mutate_request(
                     &mut budget,
-                    DocumentMutation::ReadOrCreate {
+                    transaction::BrowserMutation::ReadOrCreate {
                         group,
                         names,
-                        defaults: encoded,
+                        defaults,
                     },
                 )
                 .await?;
@@ -304,6 +304,8 @@ enum BrowserPreferenceError {
     Document(#[from] PreferenceDocumentError),
     #[error(transparent)]
     Mutation(#[from] DocumentMutationError),
+    #[error(transparent)]
+    ValueEncoding(#[from] crate::execution::value_codec::ValueCodecError),
 }
 
 #[derive(Debug)]
@@ -331,6 +333,9 @@ fn read_error(error: BrowserPreferenceError) -> PreferenceServiceError {
             PreferenceServiceError::InvalidTransaction(
                 "application user-path revision is exhausted".into(),
             )
+        }
+        BrowserPreferenceError::ValueEncoding(source) => {
+            PreferenceServiceError::ValueEncoding(source)
         }
         other => PreferenceServiceError::Storage(
             crate::build_runtime_error("browser application settings read failed")

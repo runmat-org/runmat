@@ -223,7 +223,11 @@ async fn dropped_authorized_writer_keeps_one_terminal_owner_and_closes_connectio
             encode_durable_value(&Value::Num(7.0)).unwrap(),
         )],
     };
-    let mut write = Box::pin(transaction::mutate(database, mutation, gate));
+    let mut write = Box::pin(transaction::mutate(
+        database,
+        transaction::BrowserMutation::Prepared(mutation),
+        gate,
+    ));
     assert!(matches!(
         Future::poll(
             write.as_mut(),
@@ -252,11 +256,11 @@ async fn late_missing_name_aborts_private_document_without_partial_publication()
     let gate = service.gate.clone().lock_owned().await;
     let result = transaction::mutate(
         database,
-        DocumentMutation::ReadOrCreate {
+        transaction::BrowserMutation::Prepared(DocumentMutation::ReadOrCreate {
             group: "app".into(),
             names: vec!["would-insert".into(), "missing".into()],
-            defaults: Some(vec![encode_durable_value(&Value::Num(1.0)).unwrap()]),
-        },
+            defaults: Some(vec![Some(encode_durable_value(&Value::Num(1.0)).unwrap())]),
+        }),
         gate,
     )
     .await;
@@ -267,6 +271,51 @@ async fn late_missing_name_aborts_private_document_without_partial_publication()
         )) if name == "missing"
     ));
     assert!(service.all_groups(runtime()).await.unwrap().is_empty());
+    delete_namespace(&service).await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn indexeddb_transaction_encodes_only_missing_first_defaults() {
+    let service = unique_service();
+    service
+        .set_many(
+            runtime(),
+            "app".into(),
+            vec![("existing".into(), Value::Num(7.0))],
+        )
+        .await
+        .unwrap();
+    let ignored = Value::FunctionHandle("session_function".into());
+    let values = service
+        .read_or_create_many(
+            runtime(),
+            "app".into(),
+            vec!["existing".into(), "new".into(), "new".into()],
+            Some(vec![ignored.clone(), Value::Num(9.0), ignored.clone()]),
+        )
+        .await
+        .expect("only missing first default crosses durable codec");
+    assert_eq!(
+        values,
+        vec![Value::Num(7.0), Value::Num(9.0), Value::Num(9.0)]
+    );
+    let error = service
+        .read_or_create_many(
+            runtime(),
+            "app".into(),
+            vec!["would-insert".into(), "invalid".into()],
+            Some(vec![Value::Num(2.0), ignored]),
+        )
+        .await
+        .expect_err("late invalid default aborts one readwrite transaction");
+    assert!(matches!(error, PreferenceServiceError::ValueEncoding(_)));
+    let stored = service
+        .group_values(runtime(), "app".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(!stored.contains_key("would-insert"));
     delete_namespace(&service).await;
 }
 

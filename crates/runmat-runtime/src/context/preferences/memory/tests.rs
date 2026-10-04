@@ -94,6 +94,51 @@ fn cloned_authority_shares_commits_but_separate_authority_is_isolated() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn ignored_defaults_are_not_encoded_and_missing_defaults_publish_atomically() {
+    let service = IsolatedMemoryPreferenceService::new();
+    block_on(service.set_many(
+        runtime(),
+        "app".into(),
+        vec![("existing".into(), Value::Num(7.0))],
+    ))
+    .unwrap();
+    let ignored = Value::FunctionHandle("session_function".into());
+    let values = block_on(service.read_or_create_many(
+        runtime(),
+        "app".into(),
+        vec!["existing".into(), "new".into(), "new".into()],
+        Some(vec![ignored.clone(), Value::Num(9.0), ignored.clone()]),
+    ))
+    .expect("only first missing default is encoded");
+    assert_eq!(
+        values,
+        vec![Value::Num(7.0), Value::Num(9.0), Value::Num(9.0)]
+    );
+    let existing = block_on(service.read_or_create_many(
+        runtime(),
+        "app".into(),
+        vec!["existing".into()],
+        Some(vec![ignored.clone()]),
+    ))
+    .expect("ignored callable default does not narrow existing-value form");
+    assert_eq!(existing, vec![Value::Num(7.0)]);
+    let error = block_on(service.read_or_create_many(
+        runtime(),
+        "app".into(),
+        vec!["would-insert".into(), "invalid".into()],
+        Some(vec![Value::Num(2.0), ignored]),
+    ))
+    .expect_err("later invalid missing default blocks entire batch");
+    assert!(matches!(error, PreferenceServiceError::ValueEncoding(_)));
+    let stored = block_on(service.group_values(runtime(), "app".into()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(!stored.contains_key("would-insert"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn late_unsupported_value_and_missing_name_leave_transaction_unchanged() {
     let service = IsolatedMemoryPreferenceService::new();
     let error = block_on(service.set_many(

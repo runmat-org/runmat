@@ -3,12 +3,16 @@
 use super::connection::{OwnedDatabase, DOCUMENT_KEY, DOCUMENT_STORE};
 use super::store::{decode_document, transaction_error};
 use super::{browser_error, BrowserPreferenceError};
-use crate::context::preferences::document::{apply_mutation, DocumentMutation};
+use crate::context::preferences::document::{
+    apply_mutation, missing_default_indices, DocumentMutation,
+};
 use crate::context::UserPathSnapshot;
+use crate::execution::value_codec::encode_durable_value;
 use futures::channel::oneshot;
 use futures::lock::OwnedMutexGuard;
 use js_sys::Uint8Array;
 use runmat_execution::value::ValuePayload;
+use runmat_value::Value;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use wasm_bindgen::closure::Closure;
@@ -21,9 +25,18 @@ pub(super) struct BrowserPrepared {
     pub user_path: Option<UserPathSnapshot>,
 }
 
+pub(super) enum BrowserMutation {
+    Prepared(DocumentMutation),
+    ReadOrCreate {
+        group: String,
+        names: Vec<String>,
+        defaults: Vec<Value>,
+    },
+}
+
 pub(super) async fn mutate(
     database: OwnedDatabase,
-    mutation: DocumentMutation,
+    mutation: BrowserMutation,
     gate: OwnedMutexGuard<()>,
 ) -> Result<BrowserPrepared, BrowserPreferenceError> {
     let transaction = database
@@ -100,6 +113,24 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
             .mutation
             .take()
             .ok_or(BrowserPreferenceError::LostObservation)?;
+        let mutation = match mutation {
+            BrowserMutation::Prepared(mutation) => mutation,
+            BrowserMutation::ReadOrCreate {
+                group,
+                names,
+                defaults,
+            } => {
+                let mut encoded = vec![None; names.len()];
+                for index in missing_default_indices(&document, &group, &names) {
+                    encoded[index] = Some(encode_durable_value(&defaults[index])?);
+                }
+                DocumentMutation::ReadOrCreate {
+                    group,
+                    names,
+                    defaults: Some(encoded),
+                }
+            }
+        };
         let (document, prepared) =
             apply_mutation(document, mutation).map_err(BrowserPreferenceError::Mutation)?;
         if prepared.changed {
@@ -158,7 +189,7 @@ struct ActiveWrite {
     transaction: IdbTransaction,
     store: IdbObjectStore,
     request: IdbRequest,
-    mutation: Option<DocumentMutation>,
+    mutation: Option<BrowserMutation>,
     prepared: Option<Result<BrowserPrepared, BrowserPreferenceError>>,
     completion_sender: Option<oneshot::Sender<Result<BrowserPrepared, BrowserPreferenceError>>>,
     on_get: Option<Closure<dyn FnMut(Event)>>,

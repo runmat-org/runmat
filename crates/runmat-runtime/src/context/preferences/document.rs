@@ -6,6 +6,7 @@ use crate::execution::value_codec::{decode_durable_value, ValueCodecError};
 use runmat_execution::value::ValuePayload;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 #[path = "document/mutation.rs"]
 mod mutation;
@@ -15,6 +16,26 @@ pub(super) use mutation::{apply as apply_mutation, DocumentMutation, DocumentMut
 
 pub(super) const PREFERENCE_DOCUMENT_VERSION: u32 = 1;
 pub(super) type EncodedGroups = BTreeMap<String, BTreeMap<String, ValuePayload>>;
+
+/// Indices whose first occurrence is absent from the authoritative document.
+/// A repeated missing name uses its first default; later defaults are ignored.
+pub(super) fn missing_default_indices(
+    document: &PreferenceDocument,
+    group: &str,
+    names: &[String],
+) -> Vec<usize> {
+    let existing = document.groups.get(group);
+    let mut seen = HashSet::with_capacity(names.len());
+    names
+        .iter()
+        .enumerate()
+        .filter_map(|(index, name)| {
+            (seen.insert(name.as_str())
+                && !existing.is_some_and(|values| values.contains_key(name)))
+            .then_some(index)
+        })
+        .collect()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum PreferenceDocumentError {
@@ -99,6 +120,30 @@ mod tests {
     use super::*;
     use crate::execution::value_codec::encode_durable_value;
     use runmat_value::{IntValue, ObjectInstance, Value};
+
+    #[test]
+    fn missing_default_selection_ignores_existing_and_repeated_names() {
+        let mut document = PreferenceDocument::empty();
+        document.groups.entry("app".into()).or_default().insert(
+            "existing".into(),
+            encode_durable_value(&Value::Num(3.0)).unwrap(),
+        );
+        let names = vec![
+            "existing".into(),
+            "new".into(),
+            "new".into(),
+            "other".into(),
+        ];
+        assert_eq!(
+            missing_default_indices(&document, "app", &names),
+            vec![1, 3]
+        );
+        assert_eq!(
+            missing_default_indices(&document, "absent", &names),
+            vec![0, 1, 3]
+        );
+        assert!(missing_default_indices(&document, "app", &[]).is_empty());
+    }
 
     #[test]
     fn document_version_is_explicit_and_plain_objects_round_trip() {

@@ -1,6 +1,7 @@
 //! Native app-owned preference service. One active write per service; an OS
 //! file lock coordinates separate processes and independently created hosts.
 
+use super::document::missing_default_indices;
 use super::document::PreferenceDocument;
 use super::document::{DocumentMutation as Mutation, DocumentMutationError};
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
@@ -21,6 +22,8 @@ use store::{NativeStore, NativeStoreError, NativeWrite};
 #[path = "native/transaction.rs"]
 mod transaction;
 use transaction::{worker, TransactionError};
+#[path = "native/lazy_defaults.rs"]
+mod lazy_defaults;
 
 #[derive(Clone)]
 pub struct NativePreferenceService {
@@ -86,37 +89,7 @@ impl NativePreferenceService {
             let _permit = permit;
             worker(write, mutation, prepared_tx, authorized_rx, finished_tx);
         });
-        let prepared = budget
-            .await_cancellable(prepared_rx)
-            .await
-            .map_err(cancelled)?
-            .map_err(|source| operational("preference preparation ended", source))?
-            .map_err(transaction_error)?;
-        let mut values = Vec::with_capacity(prepared.values.len());
-        for payload in &prepared.values {
-            values.push(decode_durable_value(payload)?);
-            checkpoint(&mut budget, 1).await?;
-        }
-        if prepared.changed {
-            checkpoint(&mut budget, 0).await?;
-            authorized_tx.send(()).map_err(|_| {
-                operational(
-                    "preference authorization owner ended",
-                    std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        "preference worker ended before authorization",
-                    ),
-                )
-            })?;
-            // Cancellation after authorization is not proof of rollback.
-            finished_rx
-                .await
-                .map_err(|source| {
-                    indeterminate("preference commit outcome was not observed", source)
-                })?
-                .map_err(store_error)?;
-        }
-        Ok((values, prepared.user_path))
+        observe_mutation(&mut budget, prepared_rx, authorized_tx, finished_rx).await
     }
 
     async fn acquire_write(
@@ -146,6 +119,43 @@ impl NativePreferenceService {
             budget.await_cancellable(timer).await.map_err(cancelled)?;
         }
     }
+}
+
+async fn observe_mutation(
+    budget: &mut CpuCooperationBudget,
+    prepared_rx: oneshot::Receiver<Result<super::document::DocumentPrepared, TransactionError>>,
+    authorized_tx: mpsc::Sender<()>,
+    finished_rx: oneshot::Receiver<Result<(), NativeStoreError>>,
+) -> Result<(Vec<Value>, Option<UserPathSnapshot>), PreferenceServiceError> {
+    let prepared = budget
+        .await_cancellable(prepared_rx)
+        .await
+        .map_err(cancelled)?
+        .map_err(|source| operational("preference preparation ended", source))?
+        .map_err(transaction_error)?;
+    let mut values = Vec::with_capacity(prepared.values.len());
+    for payload in &prepared.values {
+        values.push(decode_durable_value(payload)?);
+        checkpoint(&mut budget, 1).await?;
+    }
+    if prepared.changed {
+        checkpoint(&mut budget, 0).await?;
+        authorized_tx.send(()).map_err(|_| {
+            operational(
+                "preference authorization owner ended",
+                std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "preference worker ended before authorization",
+                ),
+            )
+        })?;
+        // Cancellation after authorization is not proof of rollback.
+        finished_rx
+            .await
+            .map_err(|source| indeterminate("preference commit outcome was not observed", source))?
+            .map_err(store_error)?;
+    }
+    Ok((values, prepared.user_path))
 }
 
 impl RuntimePreferenceService for NativePreferenceService {
@@ -238,19 +248,10 @@ impl RuntimePreferenceService for NativePreferenceService {
                     "default and preference-name cardinalities differ".into(),
                 ));
             }
-            let mut encoded = None;
-            if let Some(defaults) = defaults {
-                let mut values = Vec::with_capacity(defaults.len());
-                for value in &defaults {
-                    values.push(encode_durable_value(value)?);
-                    checkpoint(&mut budget, 1).await?;
-                }
-                encoded = Some(values);
-            }
             if names.is_empty() {
                 return Ok(Vec::new());
             }
-            if encoded.is_none() {
+            let Some(defaults) = defaults else {
                 let document = service.read(&mut budget).await?;
                 let mut output = Vec::with_capacity(names.len());
                 for name in &names {
@@ -266,18 +267,8 @@ impl RuntimePreferenceService for NativePreferenceService {
                     checkpoint(&mut budget, 1).await?;
                 }
                 return Ok(output);
-            }
-            service
-                .mutate(
-                    budget,
-                    Mutation::ReadOrCreate {
-                        group,
-                        names,
-                        defaults: encoded,
-                    },
-                )
-                .await
-                .map(|(values, _)| values)
+            };
+            lazy_defaults::read_or_create(service, budget, group, names, defaults).await
         })
     }
 

@@ -138,6 +138,45 @@ fn missing_without_default_does_not_create_a_settings_file() {
 }
 
 #[test]
+fn locked_native_transaction_encodes_only_missing_first_defaults() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    let driver = driver();
+    let service = NativePreferenceService::new(path, driver.handle().clone()).unwrap();
+    block_on(service.set_many(
+        runtime(),
+        "app".into(),
+        vec![("existing".into(), Value::Num(7.0))],
+    ))
+    .unwrap();
+    let ignored = Value::FunctionHandle("session_function".into());
+    let values = block_on(service.read_or_create_many(
+        runtime(),
+        "app".into(),
+        vec!["existing".into(), "new".into(), "new".into()],
+        Some(vec![ignored.clone(), Value::Num(9.0), ignored.clone()]),
+    ))
+    .expect("only missing first default crosses durable codec");
+    assert_eq!(
+        values,
+        vec![Value::Num(7.0), Value::Num(9.0), Value::Num(9.0)]
+    );
+    let error = block_on(service.read_or_create_many(
+        runtime(),
+        "app".into(),
+        vec!["would-insert".into(), "invalid".into()],
+        Some(vec![Value::Num(2.0), ignored]),
+    ))
+    .expect_err("late invalid default aborts locked document");
+    assert!(matches!(error, PreferenceServiceError::ValueEncoding(_)));
+    let stored = block_on(service.group_values(runtime(), "app".into()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(!stored.contains_key("would-insert"));
+}
+
+#[test]
 fn abandoned_private_stage_and_corrupt_existing_document_never_replace() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("preferences.json");

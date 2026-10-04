@@ -431,10 +431,10 @@ fn getpref_existing_value_wins_over_default_without_conversion() {
         vec![
             Value::String("getprefExistingWins".into()),
             Value::String("value".into()),
-            Value::Num(1.0),
+            Value::FunctionHandle("session_function".into()),
         ],
     ))
-    .expect("read existing preference");
+    .expect("ignored unsupported host default must not narrow existing form");
     assert_eq!(result, existing);
 }
 
