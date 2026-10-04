@@ -290,18 +290,15 @@ impl ValidationBudget<'_> {
                 limit: self.limits.max_fields.into(),
             });
         }
-        let mut previous: Option<&str> = None;
+        let mut names = std::collections::HashSet::with_capacity(value.fields.len());
         for field in &value.fields {
             self.text(&field.name)?;
-            if previous.is_some_and(|previous| previous >= field.name.as_str())
-                || field.values.len() as u64 != count
-            {
+            if !names.insert(field.name.as_str()) || field.values.len() as u64 != count {
                 return Err(ContractError::invalid(
                     "structure array",
                     "field names or column lengths are invalid",
                 ));
             }
-            previous = Some(&field.name);
             for item in &field.values {
                 self.payload(item, depth + 1)?;
             }

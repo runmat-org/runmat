@@ -24,6 +24,42 @@ fn nested_payloads_obey_depth_and_node_limits() {
 }
 
 #[test]
+fn durable_object_array_elements_count_as_nodes_and_depth() {
+    use runmat_execution::value::{DurableObjectArray, DurablePlainObject};
+    let object = DurablePlainObject {
+        class_identity: runmat_types::ClassIdentity::new("PreferencePayload").unwrap(),
+        properties: Vec::new(),
+        dynamic_properties: Vec::new(),
+    };
+    let payload = ValuePayload::Inline(Box::new(InlineValue::DurableObjectArray(
+        DurableObjectArray {
+            class_identity: object.class_identity.clone(),
+            shape: vec![1, 2],
+            elements: vec![object.clone(), object],
+        },
+    )));
+    assert!(
+        payload.validate(ValueLimits::default()).is_err(),
+        "V2 rejects durable tags"
+    );
+    assert!(payload
+        .validate_for_durable_storage(ValueLimits {
+            max_nodes: 2,
+            ..ValueLimits::default()
+        })
+        .is_err());
+    assert!(payload
+        .validate_for_durable_storage(ValueLimits {
+            max_depth: 0,
+            ..ValueLimits::default()
+        })
+        .is_err());
+    assert!(payload
+        .validate_for_durable_storage(ValueLimits::default())
+        .is_ok());
+}
+
+#[test]
 fn struct_fields_must_be_sorted_and_unique() {
     use runmat_execution::value::StructField;
     let scalar = || ValuePayload::Inline(Box::new(InlineValue::Logical(true)));

@@ -48,7 +48,7 @@ impl ValuePayload {
         validation::validate(self, limits)
     }
 
-    /// Preference-document payloads may contain durable aggregate tags that
+    /// Durable-storage payloads may contain aggregate tags that
     /// the V2 execution transport deliberately rejects.
     pub fn validate_for_durable_storage(&self, limits: ValueLimits) -> Result<(), ContractError> {
         validation::validate_for_durable_storage(self, limits)

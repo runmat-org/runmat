@@ -1,4 +1,4 @@
-//! Preference-document aggregate forms in the canonical ValuePayload schema.
+//! Durable-storage aggregate forms in the canonical ValuePayload schema.
 //! V2 execution transport does not admit these tags.
 
 use super::{StructField, ValuePayload};

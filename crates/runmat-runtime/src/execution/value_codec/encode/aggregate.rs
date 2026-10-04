@@ -13,7 +13,7 @@ pub(super) fn struct_array(
     path: &str,
     purpose: CodecPurpose,
 ) -> Result<DurableStructArray, ValueCodecError> {
-    let mut fields = value
+    let fields = value
         .field_names()
         .map(|name| {
             Ok(DurableStructArrayField {
@@ -34,7 +34,6 @@ pub(super) fn struct_array(
             })
         })
         .collect::<Result<Vec<_>, ValueCodecError>>()?;
-    fields.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(DurableStructArray {
         shape: shape(value.shape(), path)?,
         fields,

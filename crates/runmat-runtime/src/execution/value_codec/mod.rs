@@ -90,6 +90,27 @@ mod tests {
     }
 
     #[test]
+    fn durable_struct_array_preserves_observable_field_order() {
+        let array = Value::StructArray(
+            runmat_value::StructArray::empty(vec!["zeta".into(), "alpha".into()], vec![0, 2, 1])
+                .unwrap(),
+        );
+        let payload = encode_durable_value(&array).unwrap();
+        assert!(decode_inline_value(&payload).is_err());
+        let Value::StructArray(decoded) = decode_durable_value(&payload).unwrap() else {
+            panic!("structure array")
+        };
+        assert_eq!(
+            decoded
+                .field_names()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["zeta", "alpha"]
+        );
+        assert_eq!(decoded.shape(), &[0, 2, 1]);
+    }
+
+    #[test]
     fn portable_value_roundtrip_is_centralized_and_bit_exact() {
         let value = Value::Cell(
             CellArray::new(
