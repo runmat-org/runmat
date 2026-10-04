@@ -140,7 +140,11 @@ impl RuntimePlacementService for SwapDuringSelection {
         );
         assert_eq!(
             self.admission.observed.borrow().as_slice(),
-            &[(PathBuf::from(SELECTED_ARCHIVE), PathBuf::from(SELECTED_CWD))]
+            vec![
+                (PathBuf::from(SELECTED_ARCHIVE), PathBuf::from(SELECTED_CWD));
+                self.selections.get() + 1
+            ]
+            .as_slice()
         );
         self.selections.set(self.selections.get() + 1);
 
@@ -264,6 +268,7 @@ fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swa
     )
     .expect("publication selection")
     .expect("selected receipt");
+    assert_eq!(placement.selections.get(), 2);
     let second = UnzipResult {
         filenames: vec!["/selected-cwd/owner.txt".into()],
         receipt: Some(receipt),
