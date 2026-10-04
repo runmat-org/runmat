@@ -42,6 +42,10 @@ impl HostEffectStagePermit {
         &self.filesystem
     }
 
+    pub fn reservation(&self) -> Arc<dyn HostEffectStageReservation> {
+        self.reservation.clone()
+    }
+
     pub fn checkpoint(&self) -> BuiltinResult<()> {
         if self.runtime.is_cancelled() {
             return Err(cancelled());

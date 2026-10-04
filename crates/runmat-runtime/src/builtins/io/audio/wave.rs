@@ -89,7 +89,7 @@ pub(super) struct WaveFormat {
     pub(super) valid_bits_per_sample: Option<u16>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub(super) enum WaveSampleCoding {
     Pcm8,
     Pcm16,

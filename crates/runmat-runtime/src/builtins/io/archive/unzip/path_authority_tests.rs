@@ -79,6 +79,7 @@ impl RuntimeHostEffectResourceService for ExactArchiveResources {
             |evidence| crate::context::host_effect::HostEffectResourceAdmission {
                 evidence,
                 liveness_lease: Arc::new(ArchiveLiveness(self.valid.clone())),
+                output_allocation_permit: None,
             },
         )
     }

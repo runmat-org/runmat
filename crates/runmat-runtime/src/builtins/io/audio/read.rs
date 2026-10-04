@@ -31,6 +31,18 @@ pub(super) async fn audioread_builtin(
     let input = FsInputLease::capture(path, &AUDIOREAD_ERROR_IO, AUDIOREAD_BUILTIN_NAME)?;
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
     cooperation.completed(0).await?;
+    if needs_decode_stage(runtime.as_ref()) {
+        return read_staged(
+            runtime
+                .as_ref()
+                .expect("finite resource budget requires runtime"),
+            &input,
+            options,
+            outputs,
+            &mut cooperation,
+        )
+        .await;
+    }
     let receipt = select_decode(runtime.as_ref(), &input, options, outputs)?;
     if let Some(receipt) = receipt.as_ref() {
         cooperation.install_resource_liveness_lease(receipt.resource_liveness_lease());
@@ -38,22 +50,72 @@ pub(super) async fn audioread_builtin(
     let result = async {
         cooperation.completed(0).await?;
         let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;
-        let value = match outputs {
-            None => Value::Tensor(decoded.samples),
-            Some(0) => Value::OutputList(Vec::new()),
-            Some(1) => Value::OutputList(vec![Value::Tensor(decoded.samples)]),
-            Some(2) => Value::OutputList(vec![
-                Value::Tensor(decoded.samples),
-                Value::Num(decoded.sample_rate),
-            ]),
-            Some(_) => unreachable!("output arity was admitted before filesystem capture"),
-        };
+        let value = present_decoded(decoded, outputs);
         cooperation.completed(0).await?;
         Ok(value)
     }
     .await;
     finish_receipt(receipt, &result, cooperation.was_cancelled());
     result
+}
+
+async fn read_staged(
+    runtime: &crate::context::RuntimeContext,
+    input: &FsInputLease,
+    options: AudioreadOptions,
+    outputs: Option<usize>,
+    cooperation: &mut AudioCooperation,
+) -> BuiltinResult<Value> {
+    let stage = admit_decode_stage(runtime, input, options, outputs)?;
+    cooperation.install_stage_reservation(stage.reservation());
+    let prepared = prepare_wave_stream(input, options, cooperation)
+        .await?
+        .ok_or_else(|| {
+            build_runtime_error("audioread: staged route has no bounded opened source")
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build()
+        })?;
+    if !prepared.has_bounded_opened_source() {
+        return Err(
+            build_runtime_error("audioread: staged route has no direct opened source")
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build(),
+        );
+    }
+    stage.checkpoint()?;
+    let geometry = prepared.geometry;
+    let receipt = select_decode_after_stage(runtime, input, options, outputs, &geometry, stage)?;
+    cooperation.install_resource_liveness_lease(receipt.resource_liveness_lease());
+    let result = async {
+        cooperation.completed(0).await?;
+        let permit = receipt.output_allocation_permit().ok_or_else(|| {
+            build_runtime_error("audioread: exact output allocation authority is unavailable")
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build()
+        })?;
+        let decoded =
+            decode_prepared_wave_stream_exact(prepared, &input.path, cooperation, permit.as_ref())
+                .await?;
+        let value = present_decoded(decoded, outputs);
+        cooperation.completed(0).await?;
+        Ok(value)
+    }
+    .await;
+    finish_receipt(Some(receipt), &result, cooperation.was_cancelled());
+    result
+}
+
+fn present_decoded(decoded: DecodedAudio, outputs: Option<usize>) -> Value {
+    match outputs {
+        None => Value::Tensor(decoded.samples),
+        Some(0) => Value::OutputList(Vec::new()),
+        Some(1) => Value::OutputList(vec![Value::Tensor(decoded.samples)]),
+        Some(2) => Value::OutputList(vec![
+            Value::Tensor(decoded.samples),
+            Value::Num(decoded.sample_rate),
+        ]),
+        Some(_) => unreachable!("output arity was admitted before filesystem capture"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

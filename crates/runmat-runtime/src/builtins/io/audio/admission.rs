@@ -2,11 +2,15 @@
 
 use super::*;
 use crate::context::host_effect::{
-    select_host_effect, AudioDecodeOutput, AudioFrameRange, HostEffectOutput, HostEffectReceipt,
-    HostEffectRequest, HostEffectWorkload,
+    admit_host_effect_stage, select_host_effect, select_host_effect_after_stage, AudioDecodeOutput,
+    AudioFrameRange, HostEffectOutput, HostEffectReceipt, HostEffectRequest, HostEffectStagePermit,
+    HostEffectWorkload,
 };
 use crate::context::RuntimeContext;
 use runmat_execution::{Digest, WholeWorkObservationOutcome};
+
+mod geometry;
+pub(super) use geometry::AudioDecodeGeometry;
 
 pub(super) fn select_decode(
     runtime: Option<&RuntimeContext>,
@@ -14,6 +18,51 @@ pub(super) fn select_decode(
     options: AudioreadOptions,
     outputs: Option<usize>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
+    select_host_effect(runtime, decode_request(input, options, outputs, None)?)
+}
+
+pub(super) fn needs_decode_stage(runtime: Option<&RuntimeContext>) -> bool {
+    runtime.is_some_and(|runtime| {
+        runtime.service_ports().parallel().is_some_and(|parallel| {
+            parallel
+                .placement_resources()
+                .memory_available_bytes
+                .is_some()
+        })
+    })
+}
+
+pub(super) fn admit_decode_stage(
+    runtime: &RuntimeContext,
+    input: &FsInputLease,
+    options: AudioreadOptions,
+    outputs: Option<usize>,
+) -> BuiltinResult<HostEffectStagePermit> {
+    admit_host_effect_stage(runtime, decode_request(input, options, outputs, None)?)
+}
+
+pub(super) fn select_decode_after_stage(
+    runtime: &RuntimeContext,
+    input: &FsInputLease,
+    options: AudioreadOptions,
+    outputs: Option<usize>,
+    geometry: &AudioDecodeGeometry,
+    stage: HostEffectStagePermit,
+) -> BuiltinResult<HostEffectReceipt> {
+    select_host_effect_after_stage(
+        runtime,
+        decode_request(input, options, outputs, Some(*geometry))?,
+        geometry,
+        stage,
+    )
+}
+
+fn decode_request<'a>(
+    input: &'a FsInputLease,
+    options: AudioreadOptions,
+    outputs: Option<usize>,
+    geometry: Option<AudioDecodeGeometry>,
+) -> BuiltinResult<HostEffectRequest<'a>> {
     let output = match outputs {
         Some(0) => AudioDecodeOutput::EffectOnly,
         Some(2) => AudioDecodeOutput::SamplesAndRate,
@@ -45,15 +94,15 @@ pub(super) fn select_decode(
         datatype: options.datatype,
         output,
     };
-    select_host_effect(
-        runtime,
-        HostEffectRequest {
-            operation: AUDIOREAD_BUILTIN_NAME,
-            workload,
-            domain_facts: Digest::sha256(workload.identity_bytes()),
-            filesystem: &input.provider,
-        },
-    )
+    Ok(HostEffectRequest {
+        operation: AUDIOREAD_BUILTIN_NAME,
+        workload,
+        domain_facts: geometry.map_or_else(
+            || Digest::sha256(workload.identity_bytes()),
+            AudioDecodeGeometry::digest,
+        ),
+        filesystem: &input.provider,
+    })
 }
 
 pub(super) fn select_metadata(

@@ -58,6 +58,7 @@ pub(crate) fn test_admission(evidence: HostEffectResourceEvidence) -> HostEffect
     HostEffectResourceAdmission {
         evidence,
         liveness_lease: Arc::new(TestHostEffectLivenessLease),
+        output_allocation_permit: None,
     }
 }
 
@@ -66,6 +67,10 @@ pub struct HostEffectResourceAdmission {
     /// Revocation guard for the installed source/codec authority. Allocation
     /// enforcement is a separate prerequisite of `evidence` being truthful.
     pub liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
+    /// Optional exact output payload reservation authority. The operation
+    /// owner may require it for a finite route; ordinary unbounded calls do
+    /// not fabricate one. A retained output keeps its reservation until drop.
+    pub output_allocation_permit: Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>,
 }
 
 pub struct HostEffectRequest<'a> {
@@ -244,6 +249,7 @@ fn select_host_effect_inner(
             .as_ref()
             .map_or_else(Instant::now, |stage| stage.started),
         resource_liveness_lease: admission.liveness_lease,
+        output_allocation_permit: admission.output_allocation_permit,
         _stage: stage,
     }))
 }
@@ -269,10 +275,16 @@ pub struct HostEffectReceipt {
     selected: RuntimeWholeWorkSelection,
     started: Instant,
     resource_liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
+    output_allocation_permit: Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>,
     _stage: Option<HostEffectStagePermit>,
 }
 
 impl HostEffectReceipt {
+    pub fn output_allocation_permit(
+        &self,
+    ) -> Option<Arc<dyn runmat_value::ExactHostAllocationPermit>> {
+        self.output_allocation_permit.clone()
+    }
     pub fn resource_liveness_lease(&self) -> Arc<dyn HostEffectResourceLivenessLease> {
         self.resource_liveness_lease.clone()
     }

@@ -378,6 +378,7 @@ fn revoked_resource_authority_rejects_completion_and_releases_probe() {
             Arc::ptr_eq(request.filesystem, fixture_fs()).then(|| HostEffectResourceAdmission {
                 evidence: bounds(ResourceByteBound::Known(8), ResourceByteBound::Known(8)),
                 liveness_lease: Arc::new(Revocable(self.0.clone())),
+                output_allocation_permit: None,
             })
         }
     }

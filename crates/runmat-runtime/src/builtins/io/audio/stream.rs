@@ -7,6 +7,10 @@ const INPUT_CHUNK_BYTES: usize = 64 * 1024;
 const AUDIO_WORK_CHUNK: usize = 4096;
 
 mod classify;
+mod exact;
+mod scatter;
+pub(super) use exact::decode_prepared_wave_stream_exact;
+use scatter::{collect_stream_samples, fill_stream_samples};
 
 #[cfg(test)]
 #[path = "stream/tests.rs"]
@@ -24,6 +28,7 @@ mod one_pass_tests;
 #[derive(Clone, Copy)]
 struct WaveStream {
     format: WaveFormat,
+    opened_extent: u64,
     data_offset: u64,
     data_len: u64,
 }
@@ -61,11 +66,34 @@ pub(super) async fn decode_wave_stream(
     options: AudioreadOptions,
     cooperation: &mut AudioCooperation,
 ) -> BuiltinResult<DecodedAudio> {
+    match prepare_wave_stream(input, options, cooperation).await? {
+        Some(prepared) => decode_prepared_wave_stream(prepared, &input.path, cooperation).await,
+        None => decode_whole_on_provider(input, options, cooperation).await,
+    }
+}
+
+pub(super) struct PreparedWaveStream {
+    file: OpenedAudioInput,
+    parsed: WaveStream,
+    pub(super) geometry: AudioDecodeGeometry,
+}
+
+impl PreparedWaveStream {
+    pub(super) fn has_bounded_opened_source(&self) -> bool {
+        self.file.opened_extent().is_some()
+    }
+}
+
+pub(super) async fn prepare_wave_stream(
+    input: &FsInputLease,
+    options: AudioreadOptions,
+    cooperation: &mut AudioCooperation,
+) -> BuiltinResult<Option<PreparedWaveStream>> {
     cooperation.completed(0).await?;
     let mut file = match cooperation.await_io(input.open()).await? {
         Ok(file) => file,
         Err(source) if source.kind() == std::io::ErrorKind::Unsupported => {
-            return decode_whole_on_provider(input, options, cooperation).await;
+            return Ok(None);
         }
         Err(source) => return Err(io_error(&input.path, source)),
     };
@@ -75,8 +103,7 @@ pub(super) async fn decode_wave_stream(
         match file.seek(SeekFrom::End(0)) {
             Ok(size) => size,
             Err(source) if source.kind() == std::io::ErrorKind::Unsupported => {
-                drop(file);
-                return decode_whole_on_provider(input, options, cooperation).await;
+                return Ok(None);
             }
             Err(source) => return Err(io_error(&input.path, source)),
         }
@@ -94,7 +121,29 @@ pub(super) async fn decode_wave_stream(
             classify::non_wave(&mut file, &input.path, file_size, magic, cooperation).await?;
         return Err(format_error(classification));
     }
-    decode_seekable_wave(&mut file, &input.path, options, cooperation).await
+    let parsed = scan_wave(&mut file, &input.path, cooperation).await?;
+    let geometry = AudioDecodeGeometry::for_wave(parsed, options)?;
+    cooperation.completed(0).await?;
+    Ok(Some(PreparedWaveStream {
+        file,
+        parsed,
+        geometry,
+    }))
+}
+
+pub(super) async fn decode_prepared_wave_stream(
+    mut prepared: PreparedWaveStream,
+    path: &Path,
+    cooperation: &mut AudioCooperation,
+) -> BuiltinResult<DecodedAudio> {
+    decode_scanned_wave(
+        &mut prepared.file,
+        path,
+        prepared.parsed,
+        prepared.geometry,
+        cooperation,
+    )
+    .await
 }
 
 async fn decode_seekable_wave<R: Read + Seek>(
@@ -104,49 +153,109 @@ async fn decode_seekable_wave<R: Read + Seek>(
     cooperation: &mut AudioCooperation,
 ) -> BuiltinResult<DecodedAudio> {
     let parsed = scan_wave(file, path, cooperation).await?;
-    let fmt = parsed.format;
-    let coding = fmt.sample_coding().map_err(format_error)?;
-    let channels = usize::from(fmt.channels);
-    let block_align = usize::from(fmt.block_align);
-    let bytes_per_channel = usize::from(fmt.bits_per_sample.div_ceil(8));
-    let minimum_block_align = channels
-        .checked_mul(bytes_per_channel)
-        .ok_or_else(|| format_error("WAVE channel layout overflows platform limits"))?;
-    if block_align == 0 || bytes_per_channel == 0 || minimum_block_align > block_align {
-        return Err(format_error(
-            "WAVE block alignment is smaller than the channel sample width",
-        ));
-    }
-    let data_len = usize::try_from(parsed.data_len)
-        .map_err(|_| format_error("RF64 data chunk is too large for this platform"))?;
-    if data_len % block_align != 0 {
-        return Err(format_error(
-            "WAVE data chunk is not aligned to whole sample frames",
-        ));
-    }
-    let total_frames = data_len / block_align;
-    let (start, end) = match options.range {
-        None => (0, total_frames),
-        Some(AudioSampleRange { first, last }) => {
-            let last = last.unwrap_or(total_frames);
-            if first > total_frames || last > total_frames {
-                return Err(format_error(
-                    "sample range exceeds the available audio frames",
-                ));
-            }
-            (first - 1, last)
+    let geometry = AudioDecodeGeometry::for_wave(parsed, options)?;
+    decode_scanned_wave(file, path, parsed, geometry, cooperation).await
+}
+
+impl AudioDecodeGeometry {
+    fn for_wave(parsed: WaveStream, options: AudioreadOptions) -> BuiltinResult<Self> {
+        let fmt = parsed.format;
+        let coding = fmt.sample_coding().map_err(format_error)?;
+        let channels = usize::from(fmt.channels);
+        let block_align = usize::from(fmt.block_align);
+        let bytes_per_channel = usize::from(fmt.bits_per_sample.div_ceil(8));
+        let minimum_block_align = channels
+            .checked_mul(bytes_per_channel)
+            .ok_or_else(|| format_error("WAVE channel layout overflows platform limits"))?;
+        if channels == 0
+            || block_align == 0
+            || bytes_per_channel == 0
+            || minimum_block_align > block_align
+        {
+            return Err(format_error(
+                "WAVE block alignment is smaller than the channel sample width",
+            ));
         }
-    };
-    let shape = vec![end - start, channels];
+        let data_len = usize::try_from(parsed.data_len)
+            .map_err(|_| format_error("RF64 data chunk is too large for this platform"))?;
+        if data_len % block_align != 0 {
+            return Err(format_error(
+                "WAVE data chunk is not aligned to whole sample frames",
+            ));
+        }
+        let total_frames = data_len / block_align;
+        let (start, end) = match options.range {
+            None => (0, total_frames),
+            Some(AudioSampleRange { first, last }) => {
+                let last = last.unwrap_or(total_frames);
+                if first > total_frames || last > total_frames {
+                    return Err(format_error(
+                        "sample range exceeds the available audio frames",
+                    ));
+                }
+                (first - 1, last)
+            }
+        };
+        let sample_count = (end - start)
+            .checked_mul(channels)
+            .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
+        let output_dtype = match (options.datatype, coding) {
+            (AudioReadDataType::Double, _) => NumericDType::F64,
+            (AudioReadDataType::Native, WaveSampleCoding::Pcm8) => NumericDType::U8,
+            (AudioReadDataType::Native, WaveSampleCoding::Pcm16) => NumericDType::I16,
+            (AudioReadDataType::Native, WaveSampleCoding::Pcm24 | WaveSampleCoding::Pcm32) => {
+                NumericDType::I32
+            }
+            (AudioReadDataType::Native, WaveSampleCoding::Float32) => NumericDType::F32,
+            (AudioReadDataType::Native, WaveSampleCoding::Float64) => NumericDType::F64,
+        };
+        let output_payload_bytes = sample_count
+            .checked_mul(output_dtype.byte_size())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or_else(|| format_error("decoded audio byte length overflows platform limits"))?;
+        let frames_per_chunk =
+            (INPUT_CHUNK_BYTES / block_align).clamp(1, (AUDIO_WORK_CHUNK / channels).max(1));
+        let input_chunk_bytes = frames_per_chunk
+            .checked_mul(block_align)
+            .ok_or_else(|| format_error("audio input chunk overflows platform limits"))?;
+        Ok(Self {
+            opened_extent: parsed.opened_extent,
+            data_offset: parsed.data_offset,
+            data_len: parsed.data_len,
+            coding,
+            datatype: options.datatype,
+            channels,
+            block_align,
+            bytes_per_channel,
+            start,
+            end,
+            sample_count,
+            output_dtype,
+            output_payload_bytes,
+            input_chunk_bytes,
+        })
+    }
+}
+
+async fn decode_scanned_wave<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+    parsed: WaveStream,
+    facts: AudioDecodeGeometry,
+    cooperation: &mut AudioCooperation,
+) -> BuiltinResult<DecodedAudio> {
+    let fmt = parsed.format;
+    let coding = facts.coding;
+    let shape = vec![facts.end - facts.start, facts.channels];
     let geometry = StreamGeometry {
-        data_offset: parsed.data_offset,
-        channels,
-        start,
-        end,
-        block_align,
-        bytes_per_channel,
+        data_offset: facts.data_offset,
+        channels: facts.channels,
+        start: facts.start,
+        end: facts.end,
+        block_align: facts.block_align,
+        bytes_per_channel: facts.bytes_per_channel,
     };
-    let samples = match (options.datatype, coding) {
+    let samples = match (facts.datatype, coding) {
         (AudioReadDataType::Native, WaveSampleCoding::Pcm8) => Tensor::new_integer(
             IntegerStorage::U8(
                 collect_stream_samples(file, path, geometry, cooperation, |sample| sample[0])
@@ -317,122 +426,8 @@ async fn scan_wave<R: Read + Seek>(
         data.ok_or_else(|| format_error("WAVE file is missing a data chunk"))?;
     Ok(WaveStream {
         format,
+        opened_extent: file_size,
         data_offset,
         data_len,
     })
-}
-
-async fn collect_stream_samples<T: Copy + Default, R: Read + Seek>(
-    file: &mut R,
-    path: &Path,
-    geometry: StreamGeometry,
-    cooperation: &mut AudioCooperation,
-    decode: impl Fn(&[u8]) -> T,
-) -> BuiltinResult<Vec<T>> {
-    let StreamGeometry {
-        data_offset,
-        channels,
-        start,
-        end,
-        block_align,
-        bytes_per_channel,
-    } = geometry;
-    if channels == 0 || block_align == 0 || bytes_per_channel == 0 {
-        return Err(format_error("invalid WAVE channel layout"));
-    }
-    let minimum_block_align = channels
-        .checked_mul(bytes_per_channel)
-        .ok_or_else(|| format_error("WAVE channel layout overflows platform limits"))?;
-    if minimum_block_align > block_align {
-        return Err(format_error(
-            "WAVE block alignment is smaller than the channel sample width",
-        ));
-    }
-    let selected_frames = end
-        .checked_sub(start)
-        .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
-    let sample_count = selected_frames
-        .checked_mul(channels)
-        .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
-    if start < end && bytes_per_channel > 8 {
-        return Err(format_error("unsupported WAVE sample width"));
-    }
-    cooperation.completed(0).await?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(sample_count)
-        .map_err(|err| format_error(format!("decoded audio allocation failed: {err}")))?;
-    // Safe indexed scatter needs initialized storage. Initialize it in work
-    // quanta so a large output does not defer cancellation until after one
-    // uninterruptible full-vector zero-fill.
-    while output.len() < sample_count {
-        let initialized = (sample_count - output.len()).min(AUDIO_WORK_CHUNK);
-        output.resize(output.len() + initialized, T::default());
-        cooperation.completed(initialized).await?;
-    }
-    if selected_frames == 0 {
-        return Ok(output);
-    }
-    // The byte cap bounds the input read, and the decoded-sample cap keeps
-    // cancellation checkpoints responsive for multi-channel input.
-    let frames_per_chunk =
-        (INPUT_CHUNK_BYTES / block_align).clamp(1, (AUDIO_WORK_CHUNK / channels).max(1));
-    let buffer_len = frames_per_chunk
-        .checked_mul(block_align)
-        .ok_or_else(|| format_error("audio input chunk overflows platform limits"))?;
-    let mut buffer = Vec::new();
-    buffer
-        .try_reserve_exact(buffer_len)
-        .map_err(|err| format_error(format!("audio input allocation failed: {err}")))?;
-    buffer.resize(buffer_len, 0);
-    let mut frame = start;
-    while frame < end {
-        cooperation.completed(0).await?;
-        let frames = (end - frame).min(frames_per_chunk);
-        let frame_offset = frame
-            .checked_mul(block_align)
-            .ok_or_else(|| format_error("sample offset overflows platform limits"))?;
-        let offset = data_offset
-            .checked_add(
-                u64::try_from(frame_offset)
-                    .map_err(|_| format_error("sample offset overflows platform limits"))?,
-            )
-            .ok_or_else(|| format_error("sample offset overflows platform limits"))?;
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|source| io_error(path, source))?;
-        let size = frames
-            .checked_mul(block_align)
-            .ok_or_else(|| format_error("audio input chunk overflows platform limits"))?;
-        file.read_exact(&mut buffer[..size])
-            .map_err(|source| io_error(path, source))?;
-        let mut scatter = |local_frame: usize, channel: usize| {
-            let at = local_frame * block_align;
-            let sample_at = at + channel * bytes_per_channel;
-            let output_at = channel * selected_frames + (frame - start) + local_frame;
-            output[output_at] = decode(&buffer[sample_at..sample_at + bytes_per_channel]);
-        };
-        if channels <= AUDIO_WORK_CHUNK {
-            for local_frame in 0..frames {
-                for channel in 0..channels {
-                    scatter(local_frame, channel);
-                }
-            }
-            cooperation.completed(frames * channels).await?;
-        } else {
-            // A single legal PCM8 frame can have more channels than one work
-            // quantum. Keep the frame read once, but yield between channel
-            // groups so cancellation never waits for the entire wide frame.
-            for local_frame in 0..frames {
-                for first_channel in (0..channels).step_by(AUDIO_WORK_CHUNK) {
-                    let next_channel = (first_channel + AUDIO_WORK_CHUNK).min(channels);
-                    for channel in first_channel..next_channel {
-                        scatter(local_frame, channel);
-                    }
-                    cooperation.completed(next_channel - first_channel).await?;
-                }
-            }
-        }
-        frame += frames;
-    }
-    Ok(output)
 }

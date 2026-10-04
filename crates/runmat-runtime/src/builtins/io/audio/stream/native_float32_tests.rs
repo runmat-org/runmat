@@ -130,3 +130,42 @@ fn native_float32_range_and_double_representation_remain_distinct() {
         );
     });
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn exact_capacity_scatter_matches_native_float32_column_major_bits() {
+    let bytes = float32_wave();
+    let mut source = std::io::Cursor::new(bytes);
+    let mut cooperation = AudioCooperation::new(None, AUDIOREAD_BUILTIN_NAME);
+    let mut output = [0.0_f32; 6];
+    let mut input_chunk = [0_u8; INPUT_CHUNK_BYTES];
+    let geometry = StreamGeometry {
+        data_offset: 44,
+        channels: 2,
+        start: 0,
+        end: 3,
+        block_align: 8,
+        bytes_per_channel: 4,
+    };
+    block_on(fill_stream_samples(
+        &mut source,
+        Path::new("native-float.wav"),
+        geometry,
+        &mut cooperation,
+        &mut output,
+        &mut input_chunk,
+        |sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]),
+    ))
+    .expect("fixed-capacity scatter");
+    assert_eq!(
+        output.map(f32::to_bits),
+        [
+            INTERLEAVED_BITS[0],
+            INTERLEAVED_BITS[2],
+            INTERLEAVED_BITS[4],
+            INTERLEAVED_BITS[1],
+            INTERLEAVED_BITS[3],
+            INTERLEAVED_BITS[5],
+        ]
+    );
+}

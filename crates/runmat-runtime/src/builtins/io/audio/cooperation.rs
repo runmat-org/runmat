@@ -1,6 +1,8 @@
 //! Audio-owned work accounting; the runtime execution service owns yield policy.
 
-use crate::context::host_effect::{stale_resource, HostEffectResourceLivenessLease};
+use crate::context::host_effect::{
+    stale_resource, HostEffectResourceLivenessLease, HostEffectStageReservation,
+};
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -13,6 +15,7 @@ pub(super) struct AudioCooperation {
     builtin: &'static str,
     cancelled: bool,
     resource_liveness_lease: Option<Arc<dyn HostEffectResourceLivenessLease>>,
+    stage_reservation: Option<Arc<dyn HostEffectStageReservation>>,
 }
 
 impl AudioCooperation {
@@ -23,6 +26,7 @@ impl AudioCooperation {
             builtin,
             cancelled: false,
             resource_liveness_lease: None,
+            stage_reservation: None,
         }
     }
 
@@ -34,6 +38,7 @@ impl AudioCooperation {
             builtin,
             cancelled: false,
             resource_liveness_lease: None,
+            stage_reservation: None,
         }
     }
 
@@ -50,11 +55,22 @@ impl AudioCooperation {
         self.resource_liveness_lease = Some(lease);
     }
 
+    pub(super) fn install_stage_reservation(
+        &mut self,
+        reservation: Arc<dyn HostEffectStageReservation>,
+    ) {
+        self.stage_reservation = Some(reservation);
+    }
+
     fn check_resource_liveness(&self) -> BuiltinResult<()> {
         if self
             .resource_liveness_lease
             .as_ref()
             .is_some_and(|permit| !permit.is_current())
+            || self
+                .stage_reservation
+                .as_ref()
+                .is_some_and(|permit| !permit.is_current())
         {
             Err(stale_resource())
         } else {
