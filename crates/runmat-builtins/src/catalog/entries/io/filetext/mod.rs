@@ -11,6 +11,7 @@ mod fgetl;
 mod fgets;
 mod fileread;
 mod filewrite;
+mod fprintf;
 
 pub use self::fclose::*;
 pub use self::feof::*;
@@ -19,6 +20,7 @@ pub use self::fgets::*;
 pub use self::fileread::*;
 pub use self::filewrite::*;
 pub use self::fopen::*;
+pub use self::fprintf::*;
 pub use self::frewind::*;
 pub use self::readlines::*;
 pub use self::writelines::*;
@@ -34,4 +36,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(fgets::ENTRIES.iter().copied());
     values.extend(fileread::ENTRIES.iter().copied());
     values.extend(filewrite::ENTRIES.iter().copied());
+    values.extend(fprintf::ENTRIES.iter().copied());
 }
