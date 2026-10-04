@@ -1,6 +1,8 @@
 use super::*;
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use runmat_value::{CellArray, IntValue, StructValue};
 
 fn runtime() -> RuntimeContext {
@@ -126,4 +128,23 @@ fn unpolled_and_dropped_mutations_have_no_publication() {
         service.visit_retained_values(&mut |_| panic!("no runtime value retained")),
         Some(())
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn cancelled_generation_cannot_publish_or_reuse_another_authority() {
+    let service = IsolatedMemoryPreferenceService::new();
+    let cancellation = CancellationSource::new();
+    cancellation.cancel(CancellationReason::User);
+    let cancelled = runtime().with_cancellation_token(cancellation.token());
+    let error = block_on(service.set_many(
+        cancelled,
+        "app".into(),
+        vec![("name".into(), Value::Num(1.0))],
+    ))
+    .unwrap_err();
+    assert!(matches!(error, PreferenceServiceError::Storage(_)));
+    assert!(block_on(service.group_values(runtime(), "app".into()))
+        .unwrap()
+        .is_none());
 }
