@@ -286,8 +286,6 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
     Ok(true)
 }
 
-#[derive(Clone, Copy, Debug)]
-
 pub(in crate::builtins::io::data) async fn maybe_upload_chunk_batch_on(
     provider: &dyn runmat_filesystem::FsProvider,
     root: &std::path::Path,

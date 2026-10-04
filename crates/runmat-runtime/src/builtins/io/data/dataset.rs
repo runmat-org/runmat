@@ -199,7 +199,6 @@ async fn dataset_get_attr_builtin(
     name = "Dataset.set_attr",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attr_builtin(
@@ -233,7 +232,6 @@ async fn dataset_set_attr_builtin(
     name = "Dataset.set_attrs",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attrs_builtin(

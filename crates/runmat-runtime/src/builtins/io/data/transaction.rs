@@ -21,7 +21,6 @@ async fn data_tx_id_builtin(runtime: Option<RuntimeContext>, base: Value) -> Bui
     name = "DataTransaction.write",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_write_builtin(
@@ -67,7 +66,6 @@ async fn data_tx_write_builtin(
     name = "DataTransaction.set_attr",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attr_builtin(
@@ -104,7 +102,6 @@ async fn data_tx_set_attr_builtin(
     name = "DataTransaction.set_attrs",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attrs_builtin(
@@ -146,7 +143,6 @@ async fn data_tx_set_attrs_builtin(
     name = "DataTransaction.resize",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_resize_builtin(
@@ -193,7 +189,6 @@ async fn data_tx_resize_builtin(
     name = "DataTransaction.fill",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_fill_builtin(
@@ -239,7 +234,6 @@ async fn data_tx_fill_builtin(
     name = "DataTransaction.delete_array",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_delete_array_builtin(
@@ -275,7 +269,6 @@ async fn data_tx_delete_array_builtin(
     name = "DataTransaction.create_array",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_create_array_builtin(
@@ -316,7 +309,6 @@ async fn data_tx_create_array_builtin(
     name = "DataTransaction.commit",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_builtin(
@@ -545,7 +537,6 @@ async fn commit(
     name = "commit",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_alias_builtin(
@@ -567,7 +558,6 @@ async fn data_tx_commit_alias_builtin(
     name = "DataTransaction.abort",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_abort_builtin(

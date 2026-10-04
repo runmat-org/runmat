@@ -19,7 +19,6 @@ const BUILTIN_NAME: &str = "weboptions";
 
 #[runtime_builtin(
     name = "weboptions",
-    category = "io/http",
     binding_variant = "default",
     builtin_path = "crate::builtins::io::http::weboptions"
 )]

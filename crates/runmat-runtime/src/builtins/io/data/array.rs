@@ -168,7 +168,6 @@ async fn data_array_read_builtin(
     name = "DataArray.write",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_write_builtin(
@@ -207,7 +206,6 @@ async fn data_array_write_builtin(
     name = "DataArray.resize",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_resize_builtin(
@@ -287,7 +285,6 @@ async fn metadata(
     name = "DataArray.fill",
     binding_variant = "default",
     context = true,
-    sink = true,
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_fill_builtin(

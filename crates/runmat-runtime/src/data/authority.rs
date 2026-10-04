@@ -131,7 +131,7 @@ impl ForeignResourceRelease for Release {
         };
         if let Ok(mut state) = state.lock() {
             state.records.remove(&key.handle);
-        }
+        };
     }
 }
 

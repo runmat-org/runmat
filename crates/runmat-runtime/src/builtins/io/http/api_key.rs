@@ -131,7 +131,7 @@ fn validate_components(
         (Some(name), Some(value)) if name.trim().is_empty() && !value.is_empty() => {
             Err(ApiKeyError::MissingName)
         }
-        (Some(name), Some(value)) if name.trim().is_empty() => Ok(Some(None)),
+        (Some(name), Some(_)) if name.trim().is_empty() => Ok(Some(None)),
         (Some(name), Some(value)) => Ok(Some(Some((name, value)))),
         _ => Ok(None),
     }
