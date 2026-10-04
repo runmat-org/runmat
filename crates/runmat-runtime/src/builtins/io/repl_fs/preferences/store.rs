@@ -115,6 +115,9 @@ pub(crate) fn read_many(
 }
 
 pub(crate) fn set_many(group: String, entries: Vec<(String, Value)>) {
+    if entries.is_empty() {
+        return;
+    }
     PREFS.with(|prefs| {
         let mut prefs = prefs.borrow_mut();
         let group = prefs.entry(group).or_default();
@@ -188,5 +191,13 @@ mod tests {
             vec![("smtp".into(), Value::String("relay".into()))],
         );
         assert_eq!(session_pref_text(group, "smtp"), Some("relay".into()));
+    }
+
+    #[test]
+    fn empty_name_batch_does_not_create_a_group() {
+        let group = "runmatPreferenceEmptyBatch";
+        set_many(group.into(), Vec::new());
+        assert!(!has_group(group));
+        assert_eq!(read_many(group, &[], None).expect("empty read"), Vec::new());
     }
 }
