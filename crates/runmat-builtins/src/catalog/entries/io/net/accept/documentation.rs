@@ -1,0 +1,66 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("accept"), slug: Some("accept"),
+    summary: "Accept a pending TCP client connection from a RunMat server listener.",
+    description: "`accept(server)` waits for a pending connection on a socket created by `tcpserver`. It returns a client value carrying TCP client-style metadata for `read`, `write`, and `close`.",
+    keywords: &["accept", "tcpserver", "tcpclient", "networking"],
+    related: &["tcpserver", "close", "read", "readline", "tcpclient", "write"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Server and timeout", paragraphs: &[
+            "The first argument must be the current RunMat server value returned by `tcpserver`. An invalid, missing, or stale listener yields `RunMat:accept:InvalidTcpServer`.",
+            "By default, `accept` uses the timeout captured when the server was created. Override it per call with `accept(server, \"Timeout\", seconds)`. The timeout is nonnegative; NaN, negative, nonscalar, or unsupported Name/Value controls raise `RunMat:accept:InvalidNameValue`.",
+            "If no client connects before a finite timeout, `accept` raises `RunMat:accept:Timeout`. Other OS accept failures raise `RunMat:accept:AcceptFailed` with the underlying error detail.",
+        ] },
+        BuiltinDocumentationSection { heading: "Result and host execution", paragraphs: &[
+            "The current RunMat result is a client structure with fields such as `Address`, `Port`, `NumBytesAvailable`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`, plus internal socket registry fields. It is not yet a MATLAB handle object.",
+            "The socket wait executes on the host. Resident server or timeout controls gather through their owner before waiting; no accelerator kernel performs network I/O. A successful call creates a separate accepted client while the server remains available for later accepts.",
+            "The operating-system backlog determines how many connections can queue. Use `close(client)` to release an accepted socket and `close(server)` to release the listener. TLS is not supported by this plain TCP route.",
+        ] },
+        BuiltinDocumentationSection { heading: "Illustrative programs", paragraphs: &[
+            "Accepting a localhost client\nsrv = tcpserver(\"127.0.0.1\", 0);\nport = srv.ServerPort;\ntcpclient(\"127.0.0.1\", port);\nclient = accept(srv);\ndisp(client.Address)\ndisp(client.Port)\nIllustrative display: 127.0.0.1\n55000 (actual peer port varies)",
+            "Overriding one accept timeout\nsrv = tcpserver(\"0.0.0.0\", 0, \"Timeout\", 10);\ntry\n    client = accept(srv, \"Timeout\", 0.25);\ncatch err\n    disp(err.identifier)\nend\nExpected identifier without a connecting peer: RunMat:accept:Timeout",
+            "Inspecting connection metadata\nsrv = tcpserver(\"::1\", 45000);\ntcpclient(\"::1\", 45000);\nclient = accept(srv);\nfprintf(\"Remote peer %s:%d\\n\", client.Address, client.Port);\nfprintf(\"Byte order: %s\\n\", client.ByteOrder)\nIllustrative display: Remote peer ::1:51432\nByte order: little-endian (peer port varies)",
+            "Handling multiple queued clients sequentially\nsrv = tcpserver(\"127.0.0.1\", 47000);\ntcpclient(\"127.0.0.1\", 47000);\ntcpclient(\"127.0.0.1\", 47000);\nclient1 = accept(srv);\nclient2 = accept(srv);\nfprintf(\"First connection from %s\\n\", client1.Address);\nfprintf(\"Second connection from %s\\n\", client2.Address)\nExpected display: First connection from 127.0.0.1\nSecond connection from 127.0.0.1",
+            "Inspecting the current internal identifier\nsrv = tcpserver(\"127.0.0.1\", 52000);\ntcpclient(\"127.0.0.1\", 52000);\nclient = accept(srv);\nclientId = client.__tcpclient_id;\nfprintf(\"Internal client identifier: %d\\n\", clientId)\nIllustrative display: Internal client identifier: 42 (value varies; do not use as authorization)",
+        ] },
+    ],
+    examples: &[BuiltinExample {
+        id: "local-accepted-client", title: "Accept a queued local connection",
+        program: "srv = tcpserver('127.0.0.1', 0);\nport = srv.ServerPort;\noutbound = tcpclient('127.0.0.1', port);\ninbound = accept(srv, 'Timeout', 1);\nassert(inbound.Connected);\nassert(strcmp(inbound.Address, '127.0.0.1'));\nclose(inbound);\nclose(outbound);\nclose(srv);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Native,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(inbound.Connected); assert(strcmp(inbound.Address, '127.0.0.1'));" },
+    }],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "What happens if the server is invalid or closed?", answer: "RunMat reports `RunMat:accept:InvalidTcpServer`. Pass a live value returned by `tcpserver`." },
+        BuiltinDocumentationFaq { question: "Can I accept multiple clients with the same server?", answer: "Yes. Call `accept` repeatedly; each success registers a separate client while keeping the listener active." },
+        BuiltinDocumentationFaq { question: "How do I change the timeout globally?", answer: "Set `Timeout` when constructing `tcpserver`; override one call with `accept(srv, \"Timeout\", value)`." },
+        BuiltinDocumentationFaq { question: "Does RunMat support IPv6 clients?", answer: "Yes. IPv4 and IPv6 peer addresses are recorded as text in the returned client’s `Address` field." },
+        BuiltinDocumentationFaq { question: "Is there a queue limit for pending connections?", answer: "The OS backlog applies; a full queue can refuse new connections before `accept` sees them." },
+        BuiltinDocumentationFaq { question: "Can I use `accept` in parallel workers?", answer: "Socket values are process-local registry references in the current implementation; do not transfer a server value to another worker as a portable ownership mechanism." },
+        BuiltinDocumentationFaq { question: "How do I close the accepted client?", answer: "Call `close(client)`; dropping the current struct alone does not necessarily close its registered socket." },
+        BuiltinDocumentationFaq { question: "What does `NumBytesAvailable` represent?", answer: "It is initially zero in the returned snapshot. The current value is not a live view of changing socket buffer state." },
+        BuiltinDocumentationFaq { question: "Does the builtin support TLS?", answer: "No. This route supports plain TCP only." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "tcpserver", target: BuiltinDocumentationLinkTarget::Builtin("tcpserver") },
+        BuiltinDocumentationLink { label: "close", target: BuiltinDocumentationLinkTarget::Builtin("close") },
+        BuiltinDocumentationLink { label: "read", target: BuiltinDocumentationLinkTarget::Builtin("read") },
+        BuiltinDocumentationLink { label: "readline", target: BuiltinDocumentationLinkTarget::Builtin("readline") },
+        BuiltinDocumentationLink { label: "tcpclient", target: BuiltinDocumentationLinkTarget::Builtin("tcpclient") },
+        BuiltinDocumentationLink { label: "write", target: BuiltinDocumentationLinkTarget::Builtin("write") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP acceptor", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/accept.rs") }, BuiltinDocumentationLink { label: "Shared server socket registry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/server_state.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Loopback accept tests", location: "builtins::io::net::accept::tests" }],
+        notes: &[],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

@@ -1,12 +1,8 @@
 //! MATLAB-compatible `accept` builtin for RunMat networking.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ACCEPT_ERROR_ACCEPT_FAILED, ACCEPT_ERROR_INTERNAL,
+    ACCEPT_ERROR_INVALID_NAME_VALUE, ACCEPT_ERROR_INVALID_SERVER, ACCEPT_ERROR_TIMEOUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
@@ -14,10 +10,6 @@ use runmat_value::{IntValue, StructValue, Value};
 use super::client_state::{insert_client, CLIENT_HANDLE_FIELD};
 use super::control::{configure_stream, default_user_data, parse_timeout_value};
 use super::server_state::{server_handle, TcpServerState, HANDLE_ID_FIELD};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use runmat_time::Instant;
@@ -27,176 +19,9 @@ use std::time::Duration;
 
 const BUILTIN_NAME: &str = "accept";
 
-const ACCEPT_OUTPUT_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "client",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpclient handle struct representing the accepted connection.",
-}];
-const ACCEPT_INPUTS_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "server",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpserver handle struct returned by tcpserver.",
-}];
-const ACCEPT_INPUTS_SERVER_TIMEOUT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "server",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tcpserver handle struct returned by tcpserver.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Timeout\""),
-        description: "Name token. Supported value: \"Timeout\".",
-    },
-    BuiltinParamDescriptor {
-        name: "timeout",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Per-call accept timeout in seconds (non-negative, supports Inf).",
-    },
-];
-const ACCEPT_INPUTS_SERVER_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "server",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tcpserver handle struct returned by tcpserver.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value_pairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/Value option pairs (currently Timeout only).",
-    },
-];
-const ACCEPT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "client = accept(server)",
-        inputs: &ACCEPT_INPUTS_SERVER,
-        outputs: &ACCEPT_OUTPUT_CLIENT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "client = accept(server, \"Timeout\", timeout)",
-        inputs: &ACCEPT_INPUTS_SERVER_TIMEOUT,
-        outputs: &ACCEPT_OUTPUT_CLIENT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "client = accept(server, Name, Value, ...)",
-        inputs: &ACCEPT_INPUTS_SERVER_NAME_VALUE,
-        outputs: &ACCEPT_OUTPUT_CLIENT,
-    },
-];
-
-const ACCEPT_ERROR_INVALID_SERVER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACCEPT.INVALID_SERVER",
-    identifier: Some("RunMat:accept:InvalidTcpServer"),
-    when: "Server argument is missing/invalid or references a stale tcpserver handle.",
-    message: "accept: invalid tcpserver handle",
-};
-const ACCEPT_ERROR_TIMEOUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACCEPT.TIMEOUT",
-    identifier: Some("RunMat:accept:Timeout"),
-    when: "No incoming connection arrives before timeout elapses.",
-    message: "accept: timed out waiting for a client connection",
-};
-const ACCEPT_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACCEPT.INVALID_NAME_VALUE",
-    identifier: Some("RunMat:accept:InvalidNameValue"),
-    when: "Name/Value options are malformed, unsupported, or have invalid values.",
-    message: "accept: invalid name-value arguments",
-};
-const ACCEPT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACCEPT.INTERNAL",
-    identifier: Some("RunMat:accept:InternalError"),
-    when: "Internal lock/stream setup operation fails.",
-    message: "accept: internal error",
-};
-const ACCEPT_ERROR_ACCEPT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ACCEPT.ACCEPT_FAILED",
-    identifier: Some("RunMat:accept:AcceptFailed"),
-    when: "Underlying socket accept call fails for reasons other than timeout.",
-    message: "accept: failed to accept client",
-};
-const ACCEPT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    ACCEPT_ERROR_INVALID_SERVER,
-    ACCEPT_ERROR_TIMEOUT,
-    ACCEPT_ERROR_INVALID_NAME_VALUE,
-    ACCEPT_ERROR_INTERNAL,
-    ACCEPT_ERROR_ACCEPT_FAILED,
-];
-pub const ACCEPT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ACCEPT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ACCEPT_ERRORS,
-};
-
-const ACCEPT_TIMEOUT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Timeout",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat's safe additive accept API documents a nonnegative scalar timeout in every integer class, or a floating scalar including positive Inf.",
-    }];
-pub const ACCEPT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "client = accept(server, \"Timeout\", integer_timeout)",
-        inputs: &ACCEPT_TIMEOUT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The timeout crosses one explicit binary64-seconds boundary and must fit std::time::Duration; networking and its returned client handle remain host-only, while resident scalar controls gather before validation.",
-    }];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::accept")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "accept",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host-only networking builtin; GPU inputs are gathered to CPU before accepting clients.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::accept")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "accept",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
-
 #[runtime_builtin(
     name = "accept",
-    category = "io/net",
-    summary = "Accept pending TCP client connections with MATLAB-compatible socket semantics.",
-    keywords = "accept,tcpserver,tcpclient",
-    type_resolver(crate::builtins::io::type_resolvers::accept_type),
-    descriptor(crate::builtins::io::net::accept::ACCEPT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::net::accept::ACCEPT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -505,6 +330,7 @@ pub(crate) mod tests {
     use super::super::server_state::{remove_server_for_test, HANDLE_ID_FIELD as SERVER_FIELD};
     use super::super::tcpserver::tcpserver_builtin;
     use super::*;
+    use runmat_builtins::ACCEPT_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
     use std::thread;

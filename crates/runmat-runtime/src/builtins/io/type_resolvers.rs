@@ -16,10 +16,6 @@ pub(crate) fn struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }
 
-pub fn accept_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    struct_type(args, ctx)
-}
-
 pub fn close_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -44,11 +40,5 @@ mod tests {
         };
     }
 
-    assert_resolver!(
-        accept_type_resolver,
-        accept_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
     assert_resolver!(close_type_resolver, close_type, &[], Type::Num);
 }

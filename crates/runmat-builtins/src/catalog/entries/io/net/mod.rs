@@ -1,5 +1,6 @@
 //! TCP socket construction and stream I/O identities.
 
+mod accept;
 mod datatype;
 mod constructor_inference;
 mod read;
@@ -8,6 +9,7 @@ mod tcpclient;
 mod tcpserver;
 mod write;
 
+pub use accept::*;
 pub use datatype::NetDataType;
 pub use read::*;
 pub use readline::*;
@@ -35,6 +37,7 @@ pub use tcpserver::{
 pub use write::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &ACCEPT_CATALOG_ENTRY,
     &READ_CATALOG_ENTRY,
     &READLINE_CATALOG_ENTRY,
     &TCPCLIENT_CATALOG_ENTRY,
