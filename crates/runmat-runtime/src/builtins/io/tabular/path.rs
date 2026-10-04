@@ -79,6 +79,10 @@ impl TabularFsPath {
         &self.path
     }
 
+    pub(super) fn provider_identity(&self) -> usize {
+        Arc::as_ptr(&self.provider) as *const () as usize
+    }
+
     pub(super) fn check(&self) -> io::Result<()> {
         if self.lease.as_ref().is_some_and(|lease| !lease.is_valid()) {
             return Err(io::Error::new(
@@ -103,6 +107,68 @@ impl TabularFsPath {
             .await?;
         self.check()?;
         Ok(file)
+    }
+
+    pub(super) async fn open_sibling_with(
+        &self,
+        sibling: &Path,
+        options: &OpenOptions,
+    ) -> io::Result<fs::File> {
+        self.check_sibling(sibling)?;
+        self.check()?;
+        let file = options
+            .open_async_on(self.provider.as_ref(), sibling)
+            .await?;
+        self.check()?;
+        Ok(file)
+    }
+
+    pub(super) async fn canonicalize_on_owner(&self, path: &Path) -> io::Result<PathBuf> {
+        self.check()?;
+        let canonical = self.provider.canonicalize(path).await?;
+        self.check()?;
+        Ok(canonical)
+    }
+
+    pub(super) async fn remove_sibling(&self, sibling: &Path) -> io::Result<()> {
+        self.check_sibling(sibling)?;
+        self.check()?;
+        let result = self.provider.remove_file(sibling).await;
+        self.check()?;
+        result
+    }
+
+    pub(super) async fn replace_from_sibling(&self, sibling: &Path) -> io::Result<()> {
+        self.check_sibling(sibling)?;
+        self.check()?;
+        let existed = match self.provider.metadata(&self.path).await {
+            Ok(_) => true,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => false,
+            Err(source) => return Err(source),
+        };
+        self.check()?;
+        let result = self.provider.rename_replace(sibling, &self.path).await;
+        self.check()?;
+        match result {
+            Ok(()) => Ok(()),
+            Err(source) if !existed && source.kind() == io::ErrorKind::Unsupported => {
+                self.check()?;
+                let result = self.provider.rename(sibling, &self.path).await;
+                self.check()?;
+                result
+            }
+            Err(source) => Err(source),
+        }
+    }
+
+    fn check_sibling(&self, sibling: &Path) -> io::Result<()> {
+        if !sibling.is_absolute() || sibling.parent() != self.path.parent() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "temporary tabular path must be an absolute sibling of its destination",
+            ));
+        }
+        Ok(())
     }
 
     pub(super) async fn metadata(&self) -> io::Result<fs::FsMetadata> {
