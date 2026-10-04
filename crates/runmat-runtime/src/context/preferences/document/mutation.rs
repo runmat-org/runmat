@@ -40,11 +40,13 @@ pub(super) fn apply(
     let mut return_user_path = false;
     match mutation {
         DocumentMutation::Set { group, entries } => {
-            let target = document.groups.entry(group).or_default();
-            for (name, payload) in entries {
-                target.insert(name, payload);
+            if !entries.is_empty() {
+                let target = document.groups.entry(group).or_default();
+                for (name, payload) in entries {
+                    target.insert(name, payload);
+                }
+                changed = true;
             }
-            changed = true;
         }
         DocumentMutation::ReadOrCreate {
             group,
@@ -101,7 +103,7 @@ mod tests {
 
     #[test]
     fn repeated_defaults_first_wins_and_user_path_is_a_distinct_revision() {
-        let mut document = PreferenceDocument::empty();
+        let document = PreferenceDocument::empty();
         let first = encode_durable_value(&Value::Num(1.0)).unwrap();
         let later = encode_durable_value(&Value::Num(2.0)).unwrap();
         let (updated, result) = apply(
@@ -126,5 +128,21 @@ mod tests {
             document.user_path,
             UserPathSetting::Custom("Rel/Exact".into())
         );
+    }
+
+    #[test]
+    fn empty_set_does_not_create_a_group_or_require_publication() {
+        let (document, prepared) = apply(
+            PreferenceDocument::empty(),
+            DocumentMutation::Set {
+                group: "app".into(),
+                entries: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert!(document.groups.is_empty());
+        assert!(!prepared.changed);
+        assert!(prepared.values.is_empty());
+        assert!(prepared.user_path.is_none());
     }
 }
