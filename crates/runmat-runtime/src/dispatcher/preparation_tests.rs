@@ -26,6 +26,17 @@ fn runtime(probe: &Rc<Probe>) -> RuntimeContext {
 }
 
 struct Override;
+
+// A test-owned legacy binding keeps this route witness independent of which
+// production identities have already moved to the canonical catalog.
+#[runmat_macros::runtime_builtin(
+    name = "__dispatcher_legacy_preparation_fixture",
+    builtin_path = "crate::dispatcher::preparation_tests"
+)]
+fn legacy_preparation_fixture(value: Value) -> crate::BuiltinResult<Value> {
+    Ok(value)
+}
+
 impl crate::context::RuntimeBuiltinService for Override {
     fn bindings_by_name(&self, name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
         let Some(entry) = runmat_builtins::builtin_catalog_primary_entry_by_name(name) else {
@@ -84,17 +95,18 @@ fn canonical_execution_never_enters_legacy_preparation() {
 
 #[test]
 fn inventory_execution_enters_legacy_preparation_after_selection() {
-    assert!(runmat_builtins::builtin_function_by_name("mean").is_some());
+    let name = "__dispatcher_legacy_preparation_fixture";
+    assert!(runmat_builtins::builtin_function_by_name(name).is_some());
     let probe = Rc::new(Probe::default());
     let context = runtime(&probe);
     let _scope = context.enter();
     futures::executor::block_on(call_builtin_async_in_context(
         &context,
-        "mean",
+        name,
         &[Value::Num(3.)],
     ))
     .unwrap();
-    assert_eq!(&*probe.0.borrow(), &["mean"]);
+    assert_eq!(&*probe.0.borrow(), &[name]);
 }
 
 #[test]

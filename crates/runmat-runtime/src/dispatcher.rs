@@ -1291,8 +1291,18 @@ mod tests {
         ))
         .with_service_ports(ports);
         let _scope = runtime.enter();
-        let error = call_builtin("full", &[Value::Num(7.0)]).expect_err("exact registry miss");
+        let error = block_on(call_builtin_async_in_context(
+            &runtime,
+            "full",
+            &[Value::Num(7.0)],
+        ))
+        .expect_err("exact registry miss");
         assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
+        // The embedding entrypoint deliberately has no session authority.
+        assert_eq!(
+            call_builtin("full", &[Value::Num(7.0)]).unwrap(),
+            Value::Num(7.0)
+        );
     }
 
     #[test]
