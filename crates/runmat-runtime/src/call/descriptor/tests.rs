@@ -51,8 +51,30 @@ fn selected_named_fallback_error_is_not_absence_or_replayed() {
         ))
         .expect_err("the selected builtin error must propagate");
         assert_eq!(err.identifier(), Some(identifier));
+        assert_eq!(
+            err.failure_origin(),
+            crate::runtime_error::RuntimeFailureOrigin::Unclassified
+        );
         CALLS.with(|calls| assert_eq!(calls.get(), 1));
     }
+}
+
+#[test]
+fn absent_named_callable_is_a_producer_classified_language_failure() {
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+    let _scope = runtime.enter();
+    let error = futures::executor::block_on(forward_named_fallback(
+        Some(&runtime),
+        "__runmat_missing_input_callable__".into(),
+        Vec::new(),
+        1,
+    ))
+    .expect_err("missing callable");
+    assert_eq!(
+        error.failure_origin(),
+        crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation
+    );
+    assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]

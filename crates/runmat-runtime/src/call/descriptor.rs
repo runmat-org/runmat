@@ -456,6 +456,7 @@ async fn forward_named_fallback(
     .ok_or_else(|| {
         crate::build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
+            .with_failure_origin(crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation)
             .build()
     })?;
     crate::call::arguments::adapt_legacy_builtin_result(value)
