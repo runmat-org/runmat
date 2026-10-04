@@ -61,6 +61,12 @@ fn format_and_filename_errors_keep_owning_identifiers_and_causes() {
         Some("RunMat:memmapfile:InvalidOption")
     );
     assert!(invalid_option.source().is_some());
+
+    let invalid_control = numeric_usize(&Value::Num(2.5), "Offset").unwrap_err();
+    assert_eq!(
+        invalid_control.identifier(),
+        Some("RunMat:memmapfile:InvalidControl")
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

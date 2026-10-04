@@ -544,10 +544,10 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             .map_err(|source| map_control_flow("memmapfile", source))?;
         match option {
             MemmapOption::Writable => writable = truthy(&value),
-            MemmapOption::Offset => offset = numeric_usize(&value, "memmapfile", "Offset")?,
+            MemmapOption::Offset => offset = numeric_usize(&value, "Offset")?,
             MemmapOption::Format => format = MemmapFormat::from_value(&value)?,
             MemmapOption::Repeat => {
-                repeat = Some(numeric_usize(&value, "memmapfile", "Repeat")?);
+                repeat = Some(numeric_usize(&value, "Repeat")?);
             }
         }
     }
@@ -910,16 +910,14 @@ mod tests {
         assert!(shape_from_value(&Value::Num(usize::MAX as f64 + 1.0)).is_err());
 
         assert_eq!(
-            numeric_usize(&Value::Int(IntValue::U16(64)), "memmapfile", "Offset").unwrap(),
+            numeric_usize(&Value::Int(IntValue::U16(64)), "Offset").unwrap(),
             64
         );
-        assert!(numeric_usize(&Value::Int(IntValue::I8(-1)), "memmapfile", "Offset").is_err());
-        assert!(numeric_usize(&Value::Num(2.5), "memmapfile", "Offset").is_err());
-        assert!(
-            numeric_usize(&Value::Num(usize::MAX as f64 + 1.0), "memmapfile", "Offset").is_err()
-        );
+        assert!(numeric_usize(&Value::Int(IntValue::I8(-1)), "Offset").is_err());
+        assert!(numeric_usize(&Value::Num(2.5), "Offset").is_err());
+        assert!(numeric_usize(&Value::Num(usize::MAX as f64 + 1.0), "Offset").is_err());
 
-        let maximum = numeric_usize(&Value::Int(IntValue::U64(u64::MAX)), "memmapfile", "Repeat");
+        let maximum = numeric_usize(&Value::Int(IntValue::U64(u64::MAX)), "Repeat");
         if usize::BITS == 64 {
             assert_eq!(maximum.unwrap(), usize::MAX);
         } else {
