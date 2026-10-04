@@ -1,7 +1,9 @@
-//! Production-linked authority checks for interop, JSON, HTTP, and Data cutovers.
+//! Production-linked authority checks for interop, JSON, HTTP, Data, and HDF5 cutovers.
 
 use runmat_builtins::{
     builtin_catalog_entries, builtin_function_by_name, BuiltinCatalogEntry, CALLLIB_CATALOG_ENTRY,
+    H5DISP_CATALOG_ENTRY, H5INFO_CATALOG_ENTRY, H5READ_CATALOG_ENTRY, H5WRITEATT_CATALOG_ENTRY,
+    H5WRITE_CATALOG_ENTRY, HDF5INFO_CATALOG_ENTRY, HDF5READ_CATALOG_ENTRY, HDF5WRITE_CATALOG_ENTRY,
     JSONDECODE_CATALOG_ENTRY, JSONENCODE_CATALOG_ENTRY, LIBFUNCTIONS_CATALOG_ENTRY,
     LIBISLOADED_CATALOG_ENTRY, LIBPOINTER_CATALOG_ENTRY, LIBSTRUCT_CATALOG_ENTRY,
     LOADLIBRARY_CATALOG_ENTRY, SETDATATYPE_CATALOG_ENTRY, UNLOADLIBRARY_CATALOG_ENTRY,
@@ -24,6 +26,14 @@ fn migrated_identities_have_one_production_binding_and_no_legacy_authority() {
         &JSONDECODE_CATALOG_ENTRY,
         &JSONENCODE_CATALOG_ENTRY,
         &WEBOPTIONS_CATALOG_ENTRY,
+        &H5DISP_CATALOG_ENTRY,
+        &H5INFO_CATALOG_ENTRY,
+        &H5READ_CATALOG_ENTRY,
+        &H5WRITE_CATALOG_ENTRY,
+        &H5WRITEATT_CATALOG_ENTRY,
+        &HDF5INFO_CATALOG_ENTRY,
+        &HDF5READ_CATALOG_ENTRY,
+        &HDF5WRITE_CATALOG_ENTRY,
     ];
     // This is an inventory scope, not runtime class or operation dispatch.
     let data_entries: Vec<_> = builtin_catalog_entries()

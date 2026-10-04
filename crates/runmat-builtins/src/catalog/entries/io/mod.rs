@@ -13,6 +13,7 @@ mod json;
 mod data_path;
 mod data_handle;
 mod data_family;
+mod hdf5;
 
 pub use self::archive::*;
 pub use self::audio::*;
@@ -21,6 +22,7 @@ pub use self::data_family::*;
 pub use self::data_handle::*;
 pub use self::data_path::*;
 pub use self::filetext::*;
+pub use self::hdf5::*;
 pub use self::http::*;
 pub(in crate::catalog) use self::inference::infer;
 pub use self::json::*;
@@ -36,4 +38,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(json::ENTRIES.iter().copied());
     values.extend(data_path::ENTRIES.iter().copied());
     data_handle::extend_entries(values);
+    values.extend(hdf5::ENTRIES.iter().copied());
 }
