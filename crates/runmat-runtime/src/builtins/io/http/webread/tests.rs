@@ -58,27 +58,26 @@ fn webread_rejects_non_http_url_before_resident_query_readback() {
 }
 
 #[test]
-fn webread_rejects_invalid_api_key_header_before_resident_query_readback() {
+fn webread_rejects_invalid_known_key_name_before_resident_key_value_readback() {
     let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
         .allocate_zeroed(
             vec![1, 1],
             runmat_accelerate_api::NumericElementType::F64,
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
-        .expect("resident query value");
+        .expect("resident key value");
     let mut options = StructValue::new();
     options
         .fields
         .insert("KeyName".into(), Value::from("bad\nname"));
-    options.fields.insert("KeyValue".into(), Value::from("x"));
+    options.fields.insert(
+        "KeyValue".into(),
+        Value::GpuTensor(allocation.handle.clone()),
+    );
     let error = futures::executor::block_on(webread_builtin(
         None,
         Value::from("https://example.test"),
-        vec![
-            Value::Struct(options),
-            Value::from("q"),
-            Value::GpuTensor(allocation.handle.clone()),
-        ],
+        vec![Value::Struct(options)],
     ))
     .expect_err("invalid header");
     assert_eq!(

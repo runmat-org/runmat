@@ -2,26 +2,16 @@
 
 use super::*;
 
-pub(super) fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_host_arguments(
+    args: &[Value],
+    prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
+) -> BuiltinResult<()> {
     let mut options = WebReadOptions::default();
     let mut query = Vec::new();
     let mut index = 0;
     if let Some(Value::Struct(fields)) = args.first() {
-        let key_values_known = fields
-            .fields
-            .iter()
-            .filter(|(name, _)| {
-                matches!(
-                    runmat_builtins::WebOptionField::decode(name),
-                    Some(
-                        runmat_builtins::WebOptionField::KeyName
-                            | runmat_builtins::WebOptionField::KeyValue
-                    )
-                )
-            })
-            .all(|(_, value)| !crate::dispatcher::value_contains_gpu(value));
-        if key_values_known {
-            super::super::api_key::from_options(fields).map_err(|err| {
+        if let Some(prepared) = prepared_api_key {
+            prepared.preflight_known(fields).map_err(|err| {
                 webread_error_with_source(
                     &WEBREAD_ERROR_INVALID_OPTION_VALUE,
                     format!("webread: {err}"),
@@ -30,13 +20,7 @@ pub(super) fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
             })?;
         }
         for (name, value) in &fields.fields {
-            if matches!(
-                runmat_builtins::WebOptionField::decode(name),
-                Some(
-                    runmat_builtins::WebOptionField::KeyName
-                        | runmat_builtins::WebOptionField::KeyValue
-                )
-            ) {
+            if prepared_api_key.is_some_and(|prepared| prepared.contains_field(name)) {
                 continue;
             }
             if !crate::dispatcher::value_contains_gpu(value) {

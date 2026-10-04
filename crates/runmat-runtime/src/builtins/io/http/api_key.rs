@@ -45,36 +45,96 @@ impl std::error::Error for ApiKeyError {
 
 /// Direct `webread`/`webwrite` name-value pairs remain query/post names. Only
 /// the leading options structure carries these weboptions-specific fields.
-pub(super) fn from_options(source: &StructValue) -> Result<Option<(String, String)>, ApiKeyError> {
-    let name = source
-        .fields
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("KeyName"));
-    let value = source
-        .fields
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("KeyValue"));
-    if name.is_none() && value.is_none() {
-        return Ok(None);
+#[derive(Debug, Default)]
+pub(super) struct PreparedApiKey {
+    name_field: Option<String>,
+    value_field: Option<String>,
+    field_names: Vec<String>,
+}
+
+impl PreparedApiKey {
+    pub(super) fn parse(source: &StructValue) -> Self {
+        let mut prepared = Self::default();
+        for name in source.fields.keys() {
+            match runmat_builtins::WebOptionField::decode(name) {
+                Some(runmat_builtins::WebOptionField::KeyName) => {
+                    prepared.name_field = Some(name.clone());
+                    prepared.field_names.push(name.clone());
+                }
+                Some(runmat_builtins::WebOptionField::KeyValue) => {
+                    prepared.value_field = Some(name.clone());
+                    prepared.field_names.push(name.clone());
+                }
+                _ => {}
+            }
+        }
+        // BTreeMap traversal and assignment retain the last spelling when a
+        // struct contains two differently cased aliases of the same field.
+        prepared
     }
-    let name = name
-        .map(|(_, value)| text_scalar(value).ok_or(ApiKeyError::InvalidName))
-        .transpose()?
-        .unwrap_or_default();
-    let value = value
-        .map(|(_, value)| key_value(value).ok_or(ApiKeyError::InvalidValue))
-        .transpose()?
-        .unwrap_or_default();
-    if name.trim().is_empty() {
-        return if value.is_empty() {
-            Ok(None)
-        } else {
-            Err(ApiKeyError::MissingName)
+
+    pub(super) fn contains_field(&self, name: &str) -> bool {
+        self.field_names.iter().any(|field| field == name)
+    }
+
+    pub(super) fn preflight_known(&self, source: &StructValue) -> Result<(), ApiKeyError> {
+        let (name, value) = self.components(source, true)?;
+        validate_components(name, value).map(|_| ())
+    }
+
+    pub(super) fn finish(
+        &self,
+        source: &StructValue,
+    ) -> Result<Option<(String, String)>, ApiKeyError> {
+        let (name, value) = self.components(source, false)?;
+        Ok(validate_components(name, value)?.flatten())
+    }
+
+    fn components(
+        &self,
+        source: &StructValue,
+        skip_resident: bool,
+    ) -> Result<(Option<String>, Option<String>), ApiKeyError> {
+        let name = match self
+            .name_field
+            .as_ref()
+            .and_then(|field| source.fields.get(field))
+        {
+            Some(value) if skip_resident && crate::dispatcher::value_contains_gpu(value) => None,
+            Some(value) => Some(text_scalar(value).ok_or(ApiKeyError::InvalidName)?),
+            None => Some(String::new()),
         };
+        let value = match self
+            .value_field
+            .as_ref()
+            .and_then(|field| source.fields.get(field))
+        {
+            Some(value) if skip_resident && crate::dispatcher::value_contains_gpu(value) => None,
+            Some(value) => Some(key_value(value).ok_or(ApiKeyError::InvalidValue)?),
+            None => Some(String::new()),
+        };
+        Ok((name, value))
     }
-    HeaderName::from_bytes(name.as_bytes()).map_err(ApiKeyError::InvalidHeaderName)?;
-    HeaderValue::from_str(&value).map_err(ApiKeyError::InvalidHeaderValue)?;
-    Ok(Some((name, value)))
+}
+
+fn validate_components(
+    name: Option<String>,
+    value: Option<String>,
+) -> Result<Option<Option<(String, String)>>, ApiKeyError> {
+    if let Some(name) = name.as_deref().filter(|name| !name.trim().is_empty()) {
+        HeaderName::from_bytes(name.as_bytes()).map_err(ApiKeyError::InvalidHeaderName)?;
+    }
+    if let Some(value) = value.as_deref() {
+        HeaderValue::from_str(value).map_err(ApiKeyError::InvalidHeaderValue)?;
+    }
+    match (name, value) {
+        (Some(name), Some(value)) if name.trim().is_empty() && !value.is_empty() => {
+            Err(ApiKeyError::MissingName)
+        }
+        (Some(name), Some(value)) if name.trim().is_empty() => Ok(Some(None)),
+        (Some(name), Some(value)) => Ok(Some(Some((name, value)))),
+        _ => Ok(None),
+    }
 }
 
 fn text_scalar(value: &Value) -> Option<String> {
@@ -130,18 +190,51 @@ mod tests {
             .fields
             .insert("KeyValue".into(), Value::Int(IntValue::U64(u64::MAX)));
         assert_eq!(
-            from_options(&source).unwrap(),
+            PreparedApiKey::parse(&source).finish(&source).unwrap(),
             Some(("X-Sequence".into(), u64::MAX.to_string()))
         );
         source.fields.insert("KeyName".into(), Value::from(""));
         source.fields.insert("KeyValue".into(), Value::from(""));
-        assert_eq!(from_options(&source).unwrap(), None);
+        assert_eq!(
+            PreparedApiKey::parse(&source).finish(&source).unwrap(),
+            None
+        );
         source
             .fields
             .insert("KeyValue".into(), Value::from("secret"));
         assert!(matches!(
-            from_options(&source),
+            PreparedApiKey::parse(&source).finish(&source),
             Err(ApiKeyError::MissingName)
         ));
+    }
+
+    #[test]
+    fn independently_known_name_is_validated_before_resident_value_and_case_alias_is_last_wins() {
+        let mut source = StructValue::new();
+        source
+            .fields
+            .insert("KeyName".into(), Value::from("bad\nname"));
+        source
+            .fields
+            .insert("KeyValue".into(), Value::from("value"));
+        let prepared = PreparedApiKey::parse(&source);
+        assert!(matches!(
+            prepared.preflight_known(&source),
+            Err(ApiKeyError::InvalidHeaderName(_))
+        ));
+
+        source
+            .fields
+            .insert("KEYNAME".into(), Value::from("X-First"));
+        source
+            .fields
+            .insert("keyname".into(), Value::from("X-Last"));
+        let prepared = PreparedApiKey::parse(&source);
+        assert_eq!(
+            prepared.finish(&source).unwrap(),
+            Some(("X-Last".into(), "value".into()))
+        );
+        assert!(prepared.contains_field("KEYNAME"));
+        assert!(prepared.contains_field("KeyName"));
     }
 }

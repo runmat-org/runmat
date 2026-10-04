@@ -141,7 +141,11 @@ async fn webwrite_builtin(
             WEBWRITE_ERROR_MISSING_DATA.message,
         ));
     }
-    preflight_host_arguments(&rest[1..])?;
+    let prepared_api_key = match rest.get(1) {
+        Some(Value::Struct(source)) => Some(super::api_key::PreparedApiKey::parse(source)),
+        _ => None,
+    };
+    preflight_host_arguments(&rest[1..], prepared_api_key.as_ref())?;
     let parsed_url = parse_http_url(&url_text).map_err(|err| {
         webwrite_error_with_source(
             &WEBWRITE_ERROR_INVALID_URL,
@@ -166,20 +170,26 @@ async fn webwrite_builtin(
         )
     })?;
 
-    let (options, query_params) = parse_arguments(queue)?;
+    let (options, query_params) = parse_arguments(queue, prepared_api_key.as_ref())?;
     let body = prepare_request_body(data_value, &options).await?;
     execute_request(parsed_url, options, &query_params, body, context.as_ref()).await
 }
 
 fn parse_arguments(
     mut queue: VecDeque<Value>,
+    prepared_api_key: Option<&super::api_key::PreparedApiKey>,
 ) -> BuiltinResult<(WebWriteOptions, Vec<(String, String)>)> {
     let mut options = WebWriteOptions::default();
     let mut query_params = Vec::new();
 
     if matches!(queue.front(), Some(Value::Struct(_))) {
         if let Some(Value::Struct(struct_value)) = queue.pop_front() {
-            process_struct_fields(&struct_value, &mut options, &mut query_params)?;
+            process_struct_fields(
+                &struct_value,
+                prepared_api_key,
+                &mut options,
+                &mut query_params,
+            )?;
         }
     } else if matches!(queue.front(), Some(Value::Cell(_))) {
         if let Some(Value::Cell(cell)) = queue.pop_front() {
@@ -206,24 +216,21 @@ fn parse_arguments(
 
 fn process_struct_fields(
     struct_value: &StructValue,
+    prepared_api_key: Option<&super::api_key::PreparedApiKey>,
     options: &mut WebWriteOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
-    options.api_key_header = super::api_key::from_options(struct_value).map_err(|err| {
-        webwrite_error_with_source(
-            &WEBWRITE_ERROR_INVALID_OPTION_VALUE,
-            format!("webwrite: {err}"),
-            err,
-        )
-    })?;
-    for (key, value) in &struct_value.fields {
-        if matches!(
-            runmat_builtins::WebOptionField::decode(key),
-            Some(
-                runmat_builtins::WebOptionField::KeyName
-                    | runmat_builtins::WebOptionField::KeyValue
+    if let Some(prepared) = prepared_api_key {
+        options.api_key_header = prepared.finish(struct_value).map_err(|err| {
+            webwrite_error_with_source(
+                &WEBWRITE_ERROR_INVALID_OPTION_VALUE,
+                format!("webwrite: {err}"),
+                err,
             )
-        ) {
+        })?;
+    }
+    for (key, value) in &struct_value.fields {
+        if prepared_api_key.is_some_and(|prepared| prepared.contains_field(key)) {
             continue;
         }
         process_name_value_pair(key, value, options, query_params)?;
