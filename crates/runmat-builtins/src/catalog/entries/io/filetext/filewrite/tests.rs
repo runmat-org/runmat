@@ -16,7 +16,7 @@ fn native_write_has_double_count_and_filesystem_effect() {
             ValueFact::scalar(ValueKindFact::String),
             ValueFact::proven(
                 ValueKindFact::Numeric(NumericFact {
-                    class: NumericClass::Uint64,
+                    class: NumericClass::UInt64,
                     domain: NumericDomain::Real,
                 }),
                 ShapeFact::from(vec![Some(1), Some(4)]),
