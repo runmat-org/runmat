@@ -18,7 +18,7 @@ pub(super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
             "Decoded values are host-resident. Saving a GPU value materializes it through its owner; loading that file does not create a GPU allocation. Use `gpuArray` explicitly if a device result is required.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "Input bytes are obtained from the captured filesystem provider. Reading, decompression, restoration callbacks, and workspace publication can allocate substantial host memory. A finite whole-call resource certificate is not currently available for every provider/codec/callback route; constrained execution must fail admission when complete evidence is unavailable.",
+            "Input bytes are obtained from the captured filesystem provider. Reading, decompression, restoration callbacks, and workspace publication can allocate substantial host memory. Whole-call resource admission and feedback for these routes remain incomplete; a finite resource certificate must not be inferred from file length alone.",
         ] },
     ],
     examples: &[

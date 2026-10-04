@@ -240,6 +240,7 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
+    preflight_known_options(&args)?;
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
         host_args.push(gather_if_needed_async(value).await?);
@@ -371,6 +372,37 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     write_mat_file(&destination, &mat_vars).await?;
 
     Ok(Value::Num(0.0))
+}
+
+fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {
+    for (index, value) in args.iter().enumerate() {
+        let Some(token) = value_to_string_scalar(value) else {
+            continue;
+        };
+        if !token.starts_with('-') {
+            continue;
+        }
+        match runmat_builtins::MatSaveOption::parse(&token) {
+            Some(
+                runmat_builtins::MatSaveOption::Struct | runmat_builtins::MatSaveOption::Regexp,
+            ) if index + 1 == args.len() => {
+                let message = if token.eq_ignore_ascii_case("-struct") {
+                    "save: '-struct' requires a struct variable name"
+                } else {
+                    "save: '-regexp' requires at least one pattern"
+                };
+                return Err(save_error_with(&SAVE_ERROR_INVALID_OPTION, message));
+            }
+            None => {
+                return Err(save_error_with(
+                    &SAVE_ERROR_INVALID_OPTION,
+                    format!("save: unsupported option '{}'", token.to_ascii_lowercase()),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 struct StructRequest {
@@ -1307,6 +1339,14 @@ fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_option_rejects_before_resident_preparation() {
+        let args = [Value::from("case.mat"), Value::from("-unsupported")];
+        let error = preflight_known_options(&args).expect_err("unsupported flag");
+        assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
+    }
     use crate::builtins::common::test_support;
     use crate::workspace::WorkspaceResolver;
     use futures::executor::block_on;

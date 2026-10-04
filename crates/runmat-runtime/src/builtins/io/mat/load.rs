@@ -339,6 +339,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
             "load: filename, options, and variable selectors must be host text values",
         ));
     }
+    preflight_known_options(args)?;
     let mut host_args = Vec::with_capacity(args.len());
     for arg in args {
         host_args.push(gather_if_needed_async(arg).await?);
@@ -388,6 +389,33 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
     Ok(LoadEval {
         variables: selected,
     })
+}
+
+fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {
+    for (index, value) in args.iter().enumerate() {
+        let Some(token) = value_to_string_scalar(value) else {
+            continue;
+        };
+        if !token.starts_with('-') {
+            continue;
+        }
+        match runmat_builtins::MatLoadOption::parse(&token) {
+            Some(runmat_builtins::MatLoadOption::Regexp) if index + 1 == args.len() => {
+                return Err(load_error_with(
+                    &LOAD_ERROR_INVALID_OPTION,
+                    "load: '-regexp' requires at least one pattern",
+                ));
+            }
+            None => {
+                return Err(load_error_with(
+                    &LOAD_ERROR_INVALID_OPTION,
+                    format!("load: unsupported option '{}'", token.to_ascii_lowercase()),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 struct ParsedInvocation {
@@ -1728,6 +1756,14 @@ fn read_tagged<R: Read>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_option_rejects_before_resident_preparation() {
+        let args = [Value::from("case.mat"), Value::from("-unsupported")];
+        let error = preflight_known_options(&args).expect_err("unsupported flag");
+        assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
+    }
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use crate::workspace::WorkspaceResolver;
     use flate2::write::ZlibEncoder;
