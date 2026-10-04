@@ -2,6 +2,23 @@
 
 use crate::*;
 
+macro_rules! receiver_descriptor {
+    ($name:ident, $label:literal, $inputs:expr, $outputs:expr) => {
+        pub const $name: crate::BuiltinDescriptor = crate::BuiltinDescriptor {
+            signatures: &[crate::BuiltinSignatureDescriptor {
+                label: $label,
+                inputs: $inputs,
+                outputs: $outputs,
+            }],
+            output_mode: crate::BuiltinOutputMode::Fixed,
+            completion_policy: crate::BuiltinCompletionPolicy::Public,
+            errors: super::super::descriptor::ERRORS,
+        };
+    };
+}
+
+pub(super) use receiver_descriptor;
+
 pub(super) const fn param(
     name: &'static str,
     ty: BuiltinParamType,

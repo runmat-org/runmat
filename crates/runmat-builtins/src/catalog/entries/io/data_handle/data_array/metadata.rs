@@ -28,7 +28,7 @@ const READ: Behavior = Behavior {
 
 macro_rules! metadata {
     ($entry:ident, $descriptor:ident, $infer:ident, $name:literal, $label:literal, $output:expr, $form:expr, $doc:expr, $behavior:expr) => {
-        receiver_descriptor!($descriptor, $label, &[d::ARRAY], $output);
+        d::receiver_descriptor!($descriptor, $label, &[d::ARRAY], $output);
         fn $infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
             inference::array_infer(request, entry, $form)
         }

@@ -11,7 +11,7 @@ use runmat_types::{CallInference, CallRequest};
 
 macro_rules! payload {
     ($entry:ident, $descriptor:ident, $infer:ident, $name:literal, $label:literal, $inputs:expr, $output:expr, $form:expr, $doc:expr, $effects:expr, $purity:expr, $integers:expr) => {
-        receiver_descriptor!($descriptor, $label, $inputs, $output);
+        d::receiver_descriptor!($descriptor, $label, $inputs, $output);
         fn $infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
             inference::array_infer(request, entry, $form)
         }

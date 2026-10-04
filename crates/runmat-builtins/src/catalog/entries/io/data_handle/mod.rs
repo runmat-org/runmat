@@ -1,20 +1,5 @@
 //! Dataset, DataArray, and DataTransaction receiver contracts.
 
-macro_rules! receiver_descriptor {
-    ($name:ident, $label:literal, $inputs:expr, $outputs:expr) => {
-        pub const $name: crate::BuiltinDescriptor = crate::BuiltinDescriptor {
-            signatures: &[crate::BuiltinSignatureDescriptor {
-                label: $label,
-                inputs: $inputs,
-                outputs: $outputs,
-            }],
-            output_mode: crate::BuiltinOutputMode::Fixed,
-            completion_policy: crate::BuiltinCompletionPolicy::Public,
-            errors: super::super::descriptor::ERRORS,
-        };
-    };
-}
-
 mod contract;
 mod data_array;
 mod data_transaction;
