@@ -74,6 +74,17 @@ pub struct RuntimeError {
     pub identifier: Option<String>,
     pub context: ErrorContext,
     pub gpu_gather_retry: GpuGatherRetry,
+    pub failure_origin: RuntimeFailureOrigin,
+}
+
+/// Producer-owned failure provenance, independent of diagnostic spelling or
+/// host presentation policy. Unclassified failures must not be retried based
+/// on their message or identifier.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RuntimeFailureOrigin {
+    #[default]
+    Unclassified,
+    LanguageEvaluation,
 }
 
 /// Whether dispatcher-level legacy GPU gather-and-retry may transform this error.
@@ -97,6 +108,7 @@ impl RuntimeError {
             identifier: None,
             context: ErrorContext::default(),
             gpu_gather_retry: GpuGatherRetry::Legacy,
+            failure_origin: RuntimeFailureOrigin::Unclassified,
         }
     }
 
@@ -110,6 +122,10 @@ impl RuntimeError {
 
     pub fn gpu_gather_retry(&self) -> GpuGatherRetry {
         self.gpu_gather_retry
+    }
+
+    pub fn failure_origin(&self) -> RuntimeFailureOrigin {
+        self.failure_origin
     }
 
     pub fn contains(&self, needle: &str) -> bool {
@@ -205,6 +221,11 @@ pub struct RuntimeErrorBuilder {
 }
 
 impl RuntimeErrorBuilder {
+    pub fn with_failure_origin(mut self, origin: RuntimeFailureOrigin) -> Self {
+        self.error.failure_origin = origin;
+        self
+    }
+
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.error.identifier = Some(identifier.into());
         self
@@ -263,6 +284,10 @@ impl RuntimeErrorBuilder {
 #[cfg(test)]
 #[path = "runtime_error/source_tests.rs"]
 mod source_tests;
+
+#[cfg(test)]
+#[path = "runtime_error/origin_tests.rs"]
+mod origin_tests;
 
 pub fn runtime_error(message: impl Into<String>) -> RuntimeErrorBuilder {
     RuntimeErrorBuilder {
