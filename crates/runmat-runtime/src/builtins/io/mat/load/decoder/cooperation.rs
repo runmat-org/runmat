@@ -13,7 +13,10 @@ pub(super) struct MatDecodeCooperation<'a> {
 }
 
 impl<'a> MatDecodeCooperation<'a> {
-    pub(super) fn new(runtime: Option<&RuntimeContext>, source: Option<&'a MatFsPath>) -> Self {
+    pub(in crate::builtins::io::mat::load) fn new(
+        runtime: Option<&RuntimeContext>,
+        source: Option<&'a MatFsPath>,
+    ) -> Self {
         Self {
             budget: runtime.map(RuntimeContext::cpu_cooperation),
             source,
@@ -39,7 +42,10 @@ impl<'a> MatDecodeCooperation<'a> {
         self.check_source()
     }
 
-    pub(super) async fn await_io<T, E, F>(&mut self, future: F) -> BuiltinResult<Result<T, E>>
+    pub(in crate::builtins::io::mat::load) async fn await_io<T, E, F>(
+        &mut self,
+        future: F,
+    ) -> BuiltinResult<Result<T, E>>
     where
         F: Future<Output = Result<T, E>>,
     {
