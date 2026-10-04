@@ -1,29 +1,29 @@
-use super::*;
+use crate::*;
 
-const OUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+pub(super) const OUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "data",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Dataset contents.",
 }];
-const OUT_INFO: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+pub(super) const OUT_INFO: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "info",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "HDF5 metadata structure.",
 }];
-const OUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+pub(super) const OUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "text",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Textual HDF5 metadata display.",
 }];
-const OUT_NONE: [BuiltinParamDescriptor; 0] = [];
+pub(super) const OUT_NONE: [BuiltinParamDescriptor; 0] = [];
 
-const IN_FILE_DATASET: [BuiltinParamDescriptor; 2] = [
+pub(super) const IN_FILE_DATASET: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::StringScalar,
@@ -39,7 +39,7 @@ const IN_FILE_DATASET: [BuiltinParamDescriptor; 2] = [
         description: "Dataset path in the file.",
     },
 ];
-const IN_FILE_DATASET_SELECTION: [BuiltinParamDescriptor; 5] = [
+pub(super) const IN_FILE_DATASET_SELECTION: [BuiltinParamDescriptor; 5] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::StringScalar,
@@ -57,14 +57,14 @@ const IN_FILE_DATASET_SELECTION: [BuiltinParamDescriptor; 5] = [
     BuiltinParamDescriptor {
         name: "start",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
         default: None,
         description: "One-based starting subscript for each HDF5 dimension.",
     },
     BuiltinParamDescriptor {
         name: "count",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
         default: None,
         description: "Number of elements to read in each dimension.",
     },
@@ -76,7 +76,7 @@ const IN_FILE_DATASET_SELECTION: [BuiltinParamDescriptor; 5] = [
         description: "Stride for each HDF5 dimension.",
     },
 ];
-const IN_FILE_DATASET_VALUE: [BuiltinParamDescriptor; 3] = [
+pub(super) const IN_FILE_DATASET_VALUE: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::StringScalar,
@@ -99,7 +99,7 @@ const IN_FILE_DATASET_VALUE: [BuiltinParamDescriptor; 3] = [
         description: "Data to write.",
     },
 ];
-const IN_FILE_DATASET_VALUE_SELECTION: [BuiltinParamDescriptor; 6] = [
+pub(super) const IN_FILE_DATASET_VALUE_SELECTION: [BuiltinParamDescriptor; 6] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::StringScalar,
@@ -124,14 +124,14 @@ const IN_FILE_DATASET_VALUE_SELECTION: [BuiltinParamDescriptor; 6] = [
     BuiltinParamDescriptor {
         name: "start",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
         default: None,
         description: "One-based starting subscript for each HDF5 dimension.",
     },
     BuiltinParamDescriptor {
         name: "count",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
+        arity: BuiltinParamArity::Required,
         default: None,
         description: "Number of elements to write in each dimension.",
     },
@@ -143,7 +143,7 @@ const IN_FILE_DATASET_VALUE_SELECTION: [BuiltinParamDescriptor; 6] = [
         description: "Stride for each HDF5 dimension.",
     },
 ];
-const IN_FILE_LOCATION_ATTRIBUTE_VALUE: [BuiltinParamDescriptor; 4] = [
+pub(super) const IN_FILE_LOCATION_ATTRIBUTE_VALUE: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::StringScalar,
@@ -173,14 +173,14 @@ const IN_FILE_LOCATION_ATTRIBUTE_VALUE: [BuiltinParamDescriptor; 4] = [
         description: "Attribute value to write.",
     },
 ];
-const IN_FILE_ONLY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+pub(super) const IN_FILE_ONLY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "HDF5 file name.",
 }];
-const IN_FILE_OPTIONAL_LOCATION: [BuiltinParamDescriptor; 2] = [
+pub(super) const IN_FILE_OPTIONAL_LOCATION: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::StringScalar,
@@ -197,135 +197,58 @@ const IN_FILE_OPTIONAL_LOCATION: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const H5READ_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "data = h5read(filename, dataset)",
-        inputs: &IN_FILE_DATASET,
-        outputs: &OUT_DATA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "data = h5read(filename, dataset, start, count, stride)",
-        inputs: &IN_FILE_DATASET_SELECTION,
-        outputs: &OUT_DATA,
-    },
-];
-const H5WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "h5write(filename, dataset, data)",
-        inputs: &IN_FILE_DATASET_VALUE,
-        outputs: &OUT_NONE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h5write(filename, dataset, data, start, count, stride)",
-        inputs: &IN_FILE_DATASET_VALUE_SELECTION,
-        outputs: &OUT_NONE,
-    },
-];
-const H5WRITEATT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "h5writeatt(filename, location, attribute, data)",
-    inputs: &IN_FILE_LOCATION_ATTRIBUTE_VALUE,
-    outputs: &OUT_NONE,
-}];
-const H5INFO_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "info = h5info(filename)",
-        inputs: &IN_FILE_ONLY,
-        outputs: &OUT_INFO,
-    },
-    BuiltinSignatureDescriptor {
-        label: "info = h5info(filename, location)",
-        inputs: &IN_FILE_OPTIONAL_LOCATION,
-        outputs: &OUT_INFO,
-    },
-];
-const H5DISP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "text = h5disp(filename)",
-        inputs: &IN_FILE_ONLY,
-        outputs: &OUT_TEXT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "text = h5disp(filename, location)",
-        inputs: &IN_FILE_OPTIONAL_LOCATION,
-        outputs: &OUT_TEXT,
-    },
-];
-
-pub(super) const ERR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ERR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.HDF5.ARGUMENT",
     identifier: Some("RunMat:hdf5:InvalidArgument"),
     when: "Filename, object paths, selection vectors, or values are malformed.",
     message: "hdf5: invalid argument",
 };
-pub(super) const ERR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ERR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.HDF5.IO",
     identifier: Some("RunMat:hdf5:Io"),
     when: "The HDF5 file cannot be opened, read, written, or traversed.",
     message: "hdf5: file I/O failed",
 };
-pub(super) const ERR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ERR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.HDF5.UNSUPPORTED",
     identifier: Some("RunMat:hdf5:UnsupportedType"),
     when: "The HDF5 type or MATLAB value is outside the supported dense numeric, logical, or string subset.",
     message: "hdf5: unsupported type",
 };
-pub(super) const ERR_WASM: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const ERR_WASM: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.HDF5.WASM_UNSUPPORTED",
     identifier: Some("RunMat:hdf5:UnsupportedTarget"),
     when: "Native HDF5 library support is unavailable on wasm targets.",
     message: "hdf5: native HDF5 is unavailable on this target",
 };
-pub(super) const ERRORS: [BuiltinErrorDescriptor; 4] =
-    [ERR_ARGUMENT, ERR_IO, ERR_UNSUPPORTED, ERR_WASM];
+pub const ERR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HDF5.PROVIDER_UNSUPPORTED",
+    identifier: Some("RunMat:hdf5:UnsupportedProvider"),
+    when: "The captured filesystem provider cannot issue a native path for the HDF5 library.",
+    message: "hdf5: active filesystem provider has no native HDF5 path route",
+};
+pub(super) const ERRORS: [BuiltinErrorDescriptor; 5] = [
+    ERR_ARGUMENT,
+    ERR_IO,
+    ERR_UNSUPPORTED,
+    ERR_WASM,
+    ERR_PROVIDER,
+];
 
-macro_rules! descriptor {
-    ($name:ident, $sigs:expr, $outputs:expr) => {
-        pub const $name: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$sigs,
-            output_mode: $outputs,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
+pub(super) const INTEGER_SELECTION_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "start/count/stride",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Exact typed integer selection entries are checked as one-based positive platform indices; floating entries must be finite integral values.",
+    }];
 
-descriptor!(
-    H5READ_DESCRIPTOR,
-    H5READ_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    H5WRITE_DESCRIPTOR,
-    H5WRITE_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    H5WRITEATT_DESCRIPTOR,
-    H5WRITEATT_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    H5INFO_DESCRIPTOR,
-    H5INFO_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    H5DISP_DESCRIPTOR,
-    H5DISP_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    HDF5READ_DESCRIPTOR,
-    H5READ_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    HDF5WRITE_DESCRIPTOR,
-    H5WRITE_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-descriptor!(
-    HDF5INFO_DESCRIPTOR,
-    H5INFO_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
+pub(super) const INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "data",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "Dense typed integer data retains its exact storage width and signedness during HDF5 serialization.",
+    }];

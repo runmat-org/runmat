@@ -18,7 +18,7 @@ pub(super) enum WritableData {
         shape: Vec<usize>,
     },
     Strings {
-        data: Vec<String>,
+        data: Vec<VarLenUnicode>,
         shape: Vec<usize>,
     },
 }
@@ -59,15 +59,15 @@ impl WritableData {
                 shape: array.shape,
             }),
             Value::String(text) => Ok(Self::Strings {
-                data: vec![text],
+                data: encode_strings(builtin, &[text])?,
                 shape: vec![1, 1],
             }),
             Value::StringArray(array) => Ok(Self::Strings {
-                data: array.data,
+                data: encode_strings(builtin, &array.data)?,
                 shape: array.shape,
             }),
             Value::CharArray(chars) => Ok(Self::Strings {
-                data: char_rows(&chars),
+                data: encode_strings(builtin, &char_rows(&chars))?,
                 shape: vec![chars.rows.max(1), 1],
             }),
             _ => Err(hdf5_error(
@@ -263,13 +263,6 @@ pub(super) fn write_attr_to_location(
     name: &str,
     data: WritableData,
 ) -> BuiltinResult<()> {
-    let encoded_strings = match &data {
-        WritableData::Strings { data, shape } => Some(encode_strings(
-            builtin,
-            &col_major_to_row_major(data, shape),
-        )?),
-        _ => None,
-    };
     if location
         .attr_names()
         .map(|names| names.iter().any(|item| item == name))
@@ -350,9 +343,8 @@ pub(super) fn write_attr_to_location(
                 )
             })?;
         }
-        WritableData::Strings { shape, .. } => {
-            let encoded =
-                encoded_strings.expect("string payload was encoded before attribute mutation");
+        WritableData::Strings { data, shape } => {
+            let encoded = col_major_to_row_major(&data, &shape);
             let attr = location
                 .new_attr::<VarLenUnicode>()
                 .shape(shape.as_slice())

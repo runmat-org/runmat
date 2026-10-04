@@ -7,6 +7,7 @@ use super::*;
 
 #[test]
 fn h5write_and_h5read_round_trip_column_major_numeric() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("roundtrip.h5");
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
@@ -37,6 +38,7 @@ fn h5write_and_h5read_round_trip_column_major_numeric() {
 
 #[test]
 fn hdf5_round_trips_native_single_storage() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("single_roundtrip.h5");
     let tensor = Tensor::from_f32(vec![1.25, 2.5, 3.75, 5.0], vec![2, 2]).unwrap();
@@ -67,6 +69,7 @@ fn hdf5_round_trips_native_single_storage() {
 
 #[test]
 fn h5write_rejects_typed_complex_integer_without_float_coercion() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("typed_complex.h5");
     let storage = IntegerComplexStorage::new(
@@ -90,6 +93,7 @@ fn h5write_rejects_typed_complex_integer_without_float_coercion() {
 #[test]
 #[cfg(target_pointer_width = "64")]
 fn hdf5_selection_vectors_read_integer_storage_exactly() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let exact = (1_u64 << 53) + 1;
 
     assert_eq!(
@@ -111,6 +115,7 @@ fn hdf5_selection_vectors_read_integer_storage_exactly() {
 
 #[test]
 fn hdf5_selection_vectors_reject_unrepresentable_double_bounds() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let boundary = numeric_vector_usize(&Value::Num(usize::MAX as f64), H5READ_NAME, "start");
     if usize::BITS == 64 {
         assert!(boundary.is_err());
@@ -124,6 +129,7 @@ fn hdf5_selection_vectors_reject_unrepresentable_double_bounds() {
 
 #[test]
 fn hdf5_round_trips_all_integer_classes_without_f64_conversion() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("integer_classes.h5");
     let cases = [
@@ -171,6 +177,7 @@ fn hdf5_round_trips_all_integer_classes_without_f64_conversion() {
 
 #[test]
 fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("integer_paths.h5");
 
@@ -240,6 +247,7 @@ fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
 
 #[test]
 fn h5read_supports_start_count_stride_selection() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("slice.h5");
     let tensor = Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).unwrap();
@@ -273,6 +281,7 @@ fn h5read_supports_start_count_stride_selection() {
 
 #[test]
 fn h5write_supports_start_count_stride_selection() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("partial_write.h5");
     let base = Tensor::zeros(vec![3, 4]);
@@ -318,6 +327,7 @@ fn h5write_supports_start_count_stride_selection() {
 
 #[test]
 fn h5write_full_existing_dataset_preserves_attributes() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("rewrite_preserves_attrs.h5");
     block_on(h5write_builtin(
@@ -369,6 +379,7 @@ fn h5write_full_existing_dataset_preserves_attributes() {
 
 #[test]
 fn h5writeatt_h5info_and_h5disp_report_metadata() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("info.h5");
     block_on(h5write_builtin(
@@ -415,6 +426,7 @@ fn h5writeatt_h5info_and_h5disp_report_metadata() {
 
 #[test]
 fn h5read_rejects_unsupported_compound_dataset() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
     #[derive(hdf5::H5Type, Clone, Copy)]
     #[repr(C)]
     #[allow(non_local_definitions)]

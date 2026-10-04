@@ -2,10 +2,11 @@ use super::*;
 
 pub fn read_dataset(
     builtin: &'static str,
-    path: PathBuf,
+    lease: &Hdf5PathLease,
     dataset_path: String,
     controls: SelectionControls,
 ) -> BuiltinResult<Value> {
+    let path = lease.path();
     let file = open_file_read(builtin, &path)?;
     let ds = file.dataset(&dataset_path).map_err(|err| {
         io_error(
@@ -21,11 +22,12 @@ pub fn read_dataset(
 
 pub fn write_dataset(
     builtin: &'static str,
-    path: PathBuf,
+    lease: &Hdf5PathLease,
     dataset_path: String,
     data: Value,
     controls: SelectionControls,
 ) -> BuiltinResult<()> {
+    let path = lease.path();
     let data = WritableData::from_value(builtin, data)?;
     let file = File::append(&path).map_err(|err| {
         io_error(
@@ -100,7 +102,6 @@ pub fn write_dataset(
         }
         WritableData::Strings { data, shape } => {
             let row_major = col_major_to_row_major(&data, &shape);
-            let encoded = encode_strings(builtin, &row_major)?;
             let ds = file
                 .new_dataset::<VarLenUnicode>()
                 .shape(shape.as_slice())
@@ -113,7 +114,7 @@ pub fn write_dataset(
                         err,
                     )
                 })?;
-            ds.write_raw(&encoded).map_err(|err| {
+            ds.write_raw(&row_major).map_err(|err| {
                 io_error(
                     builtin,
                     format!("{builtin}: unable to write dataset {dataset_path}"),
@@ -172,8 +173,7 @@ fn write_existing_dataset(
         WritableData::Strings { data, shape } => {
             validate_full_write_shape(builtin, &shape, &ds.shape())?;
             let row_major = col_major_to_row_major(&data, &shape);
-            let encoded = encode_strings(builtin, &row_major)?;
-            ds.write_raw(&encoded).map_err(|err| {
+            ds.write_raw(&row_major).map_err(|err| {
                 io_error(
                     builtin,
                     format!("{builtin}: unable to write existing dataset {dataset_path}"),
@@ -229,19 +229,19 @@ fn write_dataset_selection(
         WritableData::Strings { data, shape } => {
             validate_write_selection_shape(builtin, &shape, &selection.count)?;
             let row_major = col_major_to_row_major(&data, &shape);
-            let encoded = encode_strings(builtin, &row_major)?;
-            write_hyperslab::<VarLenUnicode>(builtin, &ds, &selection, encoded)
+            write_hyperslab::<VarLenUnicode>(builtin, &ds, &selection, row_major)
         }
     }
 }
 
 pub fn write_attribute(
     builtin: &'static str,
-    path: PathBuf,
+    lease: &Hdf5PathLease,
     location: String,
     attribute: String,
     data: Value,
 ) -> BuiltinResult<()> {
+    let path = lease.path();
     let data = WritableData::from_value(builtin, data)?;
     let file = File::append(&path).map_err(|err| {
         io_error(
@@ -265,7 +265,12 @@ pub fn write_attribute(
     }
 }
 
-pub fn info(builtin: &'static str, path: PathBuf, location: String) -> BuiltinResult<Value> {
+pub fn info(
+    builtin: &'static str,
+    lease: &Hdf5PathLease,
+    location: String,
+) -> BuiltinResult<Value> {
+    let path = lease.path();
     let file = open_file_read(builtin, &path)?;
     let info = if location == "/" {
         let group = file.group("/").map_err(|err| {
@@ -275,7 +280,7 @@ pub fn info(builtin: &'static str, path: PathBuf, location: String) -> BuiltinRe
                 err,
             )
         })?;
-        group_info(builtin, &group, "/", Some(path.as_path()))?
+        group_info(builtin, &group, "/", Some(path))?
     } else if let Ok(ds) = file.dataset(&location) {
         dataset_info(builtin, &ds, &location)?
     } else {
@@ -286,12 +291,17 @@ pub fn info(builtin: &'static str, path: PathBuf, location: String) -> BuiltinRe
                 err,
             )
         })?;
-        group_info(builtin, &group, &location, Some(path.as_path()))?
+        group_info(builtin, &group, &location, Some(path))?
     };
     Ok(Value::Struct(info))
 }
 
-pub fn disp(builtin: &'static str, path: PathBuf, location: String) -> BuiltinResult<String> {
+pub fn disp(
+    builtin: &'static str,
+    lease: &Hdf5PathLease,
+    location: String,
+) -> BuiltinResult<String> {
+    let path = lease.path();
     let file = open_file_read(builtin, &path)?;
     let mut out = String::new();
     out.push_str(&format!("HDF5 {location}\n"));
