@@ -195,6 +195,14 @@ pub trait RuntimeProcessService {
     ) -> RuntimeServiceFuture<
         runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
     >;
+
+    fn output_complete_with_input(
+        &self,
+        command: runmat_process_host::HostCommand,
+        input: Vec<u8>,
+    ) -> RuntimeServiceFuture<
+        runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
+    >;
 }
 
 pub trait RuntimeErrorService {

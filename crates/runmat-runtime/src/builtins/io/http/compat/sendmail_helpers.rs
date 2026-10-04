@@ -166,7 +166,7 @@ pub(super) fn format_mail_message(recipients: &[String], subject: &str, body: &s
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn try_sendmail_command(recipients: &[String], message: &str) -> BuiltinResult<bool> {
+pub(super) fn selected_sendmail_command() -> Option<PathBuf> {
     let configured = std::env::var("RUNMAT_SENDMAIL_COMMAND").ok();
     let command = configured
         .as_deref()
@@ -180,54 +180,10 @@ pub(super) fn try_sendmail_command(recipients: &[String], message: &str) -> Buil
                 None
             }
         });
-    let Some(command) = command else {
-        return Ok(false);
-    };
-    let mut child = Command::new(&command)
-        .arg("-t")
-        .arg("-oi")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            sendmail_error_with_source(
-                SendmailFailure::Command,
-                format!("sendmail: unable to spawn {} ({err})", command.display()),
-                err,
-            )
-        })?;
-    {
-        let stdin = child.stdin.as_mut().ok_or_else(|| {
-            sendmail_error(
-                SendmailFailure::Command,
-                "sendmail: unable to open mail stdin",
-            )
-        })?;
-        use std::io::Write;
-        stdin.write_all(message.as_bytes()).map_err(|err| {
-            sendmail_error_with_source(SendmailFailure::Command, format!("sendmail: {err}"), err)
-        })?;
-    }
-    let output = child.wait_with_output().map_err(|err| {
-        sendmail_error_with_source(SendmailFailure::Command, format!("sendmail: {err}"), err)
-    })?;
-    if output.status.success() {
-        return Ok(true);
-    }
-    let detail = String::from_utf8_lossy(&output.stderr);
-    Err(sendmail_error(
-        SendmailFailure::Command,
-        format!(
-            "sendmail: {} failed for {} ({})",
-            command.display(),
-            recipients.join(", "),
-            detail.trim()
-        ),
-    ))
+    command
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn try_sendmail_command(_recipients: &[String], _message: &str) -> BuiltinResult<bool> {
-    Ok(false)
+pub(super) fn selected_sendmail_command() -> Option<PathBuf> {
+    None
 }

@@ -22,6 +22,22 @@ impl RuntimeProcessService for NativeProcessService {
             EnteredHostFuture::new(driver.handle().clone(), command.output_complete()).await
         })
     }
+
+    fn output_complete_with_input(
+        &self,
+        command: HostCommand,
+        input: Vec<u8>,
+    ) -> RuntimeServiceFuture<Result<CompleteProcessOutput, ProcessHostError>> {
+        Box::pin(async move {
+            let driver = host_driver()
+                .map_err(|source| ProcessHostError::Io(std::io::Error::other(source)))?;
+            EnteredHostFuture::new(
+                driver.handle().clone(),
+                command.output_complete_with_input(input),
+            )
+            .await
+        })
+    }
 }
 
 pub(super) fn default_process_service() -> Rc<dyn RuntimeProcessService> {

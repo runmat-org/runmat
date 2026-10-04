@@ -1274,6 +1274,15 @@ mod tests {
             > {
                 Box::pin(command.output_complete())
             }
+            fn output_complete_with_input(
+                &self,
+                command: runmat_process_host::HostCommand,
+                input: Vec<u8>,
+            ) -> crate::context::RuntimeServiceFuture<
+                runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
+            > {
+                Box::pin(command.output_complete_with_input(input))
+            }
         }
         let _serial = vfs::provider_override_lock();
         let _native = vfs::replace_provider(Arc::new(vfs::NativeFsProvider));

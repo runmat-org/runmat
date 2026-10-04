@@ -62,13 +62,16 @@ impl ChildProcess {
             .ok_or_else(|| ProcessHostError::Protocol("child stdio has already been taken".into()))
     }
 
-    pub(crate) fn take_complete_output(&mut self) -> ProcessHostResult<(ChildStdout, ChildStderr)> {
+    pub(crate) fn take_complete_output(
+        &mut self,
+    ) -> ProcessHostResult<(Option<ChildStdin>, ChildStdout, ChildStderr)> {
         if self.stdio.is_some() || self.child.stdout.is_none() || self.child.stderr.is_none() {
             return Err(ProcessHostError::Protocol(
                 "complete child output pipes are unavailable".into(),
             ));
         }
         Ok((
+            self.child.stdin.take(),
             self.child.stdout.take().expect("checked stdout"),
             self.child.stderr.take().expect("checked stderr"),
         ))

@@ -16,6 +16,8 @@ pub enum StdioPolicy {
     Piped,
     /// Both output pipes belong to one complete-output call; neither is capped.
     CompleteOutput,
+    /// Complete output with one owned input body written concurrently with both drains.
+    CompleteOutputWithInput,
     Inherit,
     Null,
     Files {
@@ -83,7 +85,10 @@ impl HostCommand {
         if self.lifetime == ChildLifetime::Detached
             && matches!(
                 self.stdio,
-                StdioPolicy::Piped | StdioPolicy::CompleteOutput | StdioPolicy::Inherit
+                StdioPolicy::Piped
+                    | StdioPolicy::CompleteOutput
+                    | StdioPolicy::CompleteOutputWithInput
+                    | StdioPolicy::Inherit
             )
         {
             return Err(ProcessHostError::Configuration(
@@ -100,23 +105,62 @@ impl HostCommand {
 
     /// Collect both pipes to EOF without truncation, retaining the owned child
     /// and its process-tree teardown authority until the final wait completes.
-    pub async fn output_complete(mut self) -> ProcessHostResult<CompleteProcessOutput> {
+    pub async fn output_complete(self) -> ProcessHostResult<CompleteProcessOutput> {
+        self.complete_output(None).await
+    }
+
+    /// The input body remains owned by this call. Dropping the future closes
+    /// stdin and terminates the owned child while both output pipes drain.
+    pub async fn output_complete_with_input(
+        self,
+        input: Vec<u8>,
+    ) -> ProcessHostResult<CompleteProcessOutput> {
+        self.complete_output(Some(input)).await
+    }
+
+    async fn complete_output(
+        mut self,
+        input: Option<Vec<u8>>,
+    ) -> ProcessHostResult<CompleteProcessOutput> {
         use tokio::io::AsyncReadExt as _;
+        use tokio::io::AsyncWriteExt as _;
 
         if self.lifetime != ChildLifetime::Owned {
             return Err(ProcessHostError::Configuration(
                 "complete output requires an owned child".into(),
             ));
         }
-        self.stdio = StdioPolicy::CompleteOutput;
+        self.stdio = if input.is_some() {
+            StdioPolicy::CompleteOutputWithInput
+        } else {
+            StdioPolicy::CompleteOutput
+        };
         let mut process = self.spawn().await?;
         let guard = CompleteOutputDropGuard::new(process.id());
-        let (mut stdout_reader, mut stderr_reader) = process.take_complete_output()?;
+        let (stdin_writer, mut stdout_reader, mut stderr_reader) =
+            process.take_complete_output()?;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         // Keep the direct child unreaped while draining: its PID remains
         // reserved, so cancellation cannot signal a recycled process group.
+        let write_input = async {
+            match (stdin_writer, input) {
+                (Some(mut writer), Some(bytes)) => {
+                    writer.write_all(&bytes).await?;
+                    writer.shutdown().await?;
+                }
+                (None, Some(_)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "owned child stdin is unavailable",
+                    ));
+                }
+                _ => {}
+            }
+            Ok::<(), std::io::Error>(())
+        };
         tokio::try_join!(
+            write_input,
             stdout_reader.read_to_end(&mut stdout),
             stderr_reader.read_to_end(&mut stderr),
         )?;
@@ -173,6 +217,89 @@ mod tests {
             .stderr
             .chunks_exact(16)
             .all(|chunk| chunk == b"fedcba9876543210"));
+    }
+
+    #[tokio::test]
+    async fn owned_input_and_both_output_pipes_progress_concurrently() {
+        let mut command = HostCommand::new("/bin/sh");
+        command.arguments = vec![
+            "-c".into(),
+            "i=0; while [ \"$i\" -lt 8192 ]; do printf 'out'; printf 'err' >&2; i=$((i+1)); done; cat".into(),
+        ];
+        let input = vec![0x5au8; 256 * 1024];
+        let output = tokio::time::timeout(
+            Duration::from_secs(20),
+            command.output_complete_with_input(input.clone()),
+        )
+        .await
+        .expect("stdin and both outputs must make progress")
+        .expect("owned child must complete");
+        assert!(output.exit.success);
+        assert_eq!(output.stderr.len(), 8192 * 3);
+        let expected_prefix = b"out".repeat(8192);
+        assert_eq!(&output.stdout[..8192 * 3], expected_prefix.as_slice());
+        assert_eq!(&output.stdout[8192 * 3..], input);
+    }
+
+    #[tokio::test]
+    async fn early_stdin_close_retains_typed_io_cause() {
+        let mut command = HostCommand::new("/bin/sh");
+        command.arguments = vec!["-c".into(), "exec 0<&-; sleep 1".into()];
+        let error = command
+            .output_complete_with_input(vec![0x5a; 256 * 1024])
+            .await
+            .expect_err("closed child stdin must fail owned write");
+        assert!(matches!(error, ProcessHostError::Io(_)));
+    }
+
+    #[tokio::test]
+    async fn unpolled_input_call_starts_no_child() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let marker = directory.path().join("unpolled-marker");
+        let mut command = HostCommand::new("/bin/sh");
+        command.arguments = vec![
+            "-c".into(),
+            "printf started > \"$1\"".into(),
+            "sh".into(),
+            marker.to_string_lossy().into_owned(),
+        ];
+        drop(command.output_complete_with_input(vec![1, 2, 3]));
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    async fn aborted_input_call_terminates_owned_process_group() {
+        let directory = tempfile::tempdir().expect("test directory");
+        let marker = directory.path().join("input-process-id");
+        let mut command = HostCommand::new("/bin/sh");
+        command.arguments = vec![
+            "-c".into(),
+            "printf '%s' \"$$\" > \"$1\"; exec /bin/sleep 30".into(),
+            "sh".into(),
+            marker.to_string_lossy().into_owned(),
+        ];
+        let task = tokio::spawn(command.output_complete_with_input(vec![0x5a; 256 * 1024]));
+        let pid = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&marker) {
+                    if let Ok(pid) = text.parse::<u32>() {
+                        break pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("child must start");
+        task.abort();
+        let _ = task.await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while crate::is_process_alive(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancelled input/output child must terminate");
     }
 
     #[tokio::test]

@@ -12,8 +12,6 @@ use runmat_builtins::{SendmailFailure, SENDMAIL_DESCRIPTOR, SENDMAIL_ERROR_OUTPU
 use runmat_builtins::{WEBSAVE_DESCRIPTOR, WEBSAVE_ERROR_OUTPUTS, WEBSAVE_EXPLICIT_GPU_EXTENSION};
 use runmat_value::NumericScalar;
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
-use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use runmat_builtins::{
@@ -28,6 +26,9 @@ use url::Url;
 use super::transport::{self, HttpMethod, HttpRequest};
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "compat/sendmail_process.rs"]
+mod sendmail_process;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_TIMEOUT_SECONDS: f64 = 2147.483647;
@@ -355,7 +356,11 @@ async fn sendmail_builtin(
         return Ok(Value::Num(0.0));
     }
 
-    if try_sendmail_command(&recipients, &message)? {
+    if let Some(command) = selected_sendmail_command() {
+        #[cfg(not(target_arch = "wasm32"))]
+        sendmail_process::run(context.as_ref(), command, &recipients, message).await?;
+        #[cfg(target_arch = "wasm32")]
+        let _ = command;
         return Ok(Value::Num(0.0));
     }
 

@@ -30,6 +30,13 @@ pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
                 .stderr(Stdio::piped());
             false
         }
+        StdioPolicy::CompleteOutputWithInput => {
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            false
+        }
         StdioPolicy::Inherit => {
             command
                 .stdin(Stdio::inherit())

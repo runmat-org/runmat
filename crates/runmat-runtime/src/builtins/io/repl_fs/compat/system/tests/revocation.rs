@@ -132,6 +132,15 @@ impl crate::context::RuntimeProcessService for DirectProcess {
     > {
         Box::pin(command.output_complete())
     }
+    fn output_complete_with_input(
+        &self,
+        command: runmat_process_host::HostCommand,
+        input: Vec<u8>,
+    ) -> crate::context::RuntimeServiceFuture<
+        runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
+    > {
+        Box::pin(command.output_complete_with_input(input))
+    }
 }
 
 #[cfg(unix)]
