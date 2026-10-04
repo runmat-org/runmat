@@ -83,7 +83,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn selected_provider_and_relative_path_survive_ambient_swap() {
-        let _lock = fs::provider_override_lock();
+        let _state = crate::builtins::io::mat::tests::state_guard();
         let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
         let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
         selected

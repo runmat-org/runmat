@@ -9,6 +9,7 @@ async fn save_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn known_invalid_option_rejects_before_resident_preparation() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let args = [Value::from("case.mat"), Value::from("-unsupported")];
     let error = preflight_known_options(&args).expect_err("unsupported flag");
     assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
@@ -17,6 +18,7 @@ fn known_invalid_option_rejects_before_resident_preparation() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn regexp_followed_by_another_option_has_no_pattern() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let args = [
         Value::from("case.mat"),
         Value::from("-regexp"),
@@ -29,6 +31,7 @@ fn regexp_followed_by_another_option_has_no_pattern() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn nested_implicit_save_does_not_inherit_outer_captured_status() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let _presentation = crate::output_context::push_output_count(1);
     let error = block_on(crate::dispatcher::call_builtin_async(
         "save",
@@ -41,7 +44,7 @@ fn nested_implicit_save_does_not_inherit_outer_captured_status() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn known_invalid_option_does_not_download_prior_resident_argument() {
-    let _lock = test_support::accel_test_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     let resident = owner.resident();
@@ -57,7 +60,7 @@ fn known_invalid_option_does_not_download_prior_resident_argument() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn numeric_resident_text_control_rejects_without_download() {
-    let _lock = test_support::accel_test_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     let resident = owner.resident();
@@ -70,6 +73,7 @@ fn numeric_resident_text_control_rejects_without_download() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn finite_save_without_complete_resource_evidence_rejects_before_workspace_gather_or_write() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     struct Finite;
     impl crate::context::RuntimeParallelService for Finite {
         fn supports(&self, _: crate::context::ParallelCapability) -> bool {
@@ -82,9 +86,6 @@ fn finite_save_without_complete_resource_evidence_rejects_before_workspace_gathe
             }
         }
     }
-    let _lock = test_support::accel_test_lock();
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
     let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         "/mat",
     ));
@@ -117,11 +118,10 @@ fn finite_save_without_complete_resource_evidence_rejects_before_workspace_gathe
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_save_reports_write_error_once_with_source() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::Witness;
     use runmat_execution::WholeWorkObservationOutcome;
 
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
@@ -163,11 +163,10 @@ fn selected_outer_save_reports_write_error_once_with_source() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_save_observes_only_after_published_mat_payload() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::Witness;
     use runmat_execution::WholeWorkObservationOutcome;
 
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
@@ -204,10 +203,9 @@ fn selected_outer_save_observes_only_after_published_mat_payload() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn revoked_mat_resource_authority_rejects_outer_save_before_write() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::Witness;
 
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
@@ -241,11 +239,10 @@ fn revoked_mat_resource_authority_rejects_outer_save_before_write() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{PendingWriteFs, Witness};
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
@@ -309,13 +306,11 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::pending_provider::PendingDownloadProvider;
     use super::super::tests::receipt::Witness;
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 
-    let _accel = test_support::accel_test_lock();
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
     ensure_test_resolver();
     let owner = Box::leak(Box::new(PendingDownloadProvider::new()));
     let _gpu = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
@@ -379,8 +374,7 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn invalid_regexp_rejects_before_workspace_gather() {
-    let _lock = test_support::accel_test_lock();
-    let _workspace = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     set_workspace(&[("gpu_data", Value::GpuTensor(owner.resident()))]);
@@ -436,10 +430,6 @@ fn set_workspace(entries: &[(&str, Value)]) {
     });
 }
 
-fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
-    crate::workspace::test_guard()
-}
-
 fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
     match result {
         Err(err) => {
@@ -465,14 +455,14 @@ fn assert_saved_double(path: &Path, name: &str, expected: f64) {
 
 #[test]
 fn captured_status_is_a_pre_effect_runmat_extension() {
-    let _workspace = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("x", Value::Num(4.0))]);
     let folder = tempdir().expect("MAT test folder");
     let path = folder.path().join("status.mat");
     let previous = crate::compatibility::runmat_extensions_enabled();
     crate::compatibility::set_runmat_extensions_enabled(false);
-    let _outputs = crate::output_context::push_output_count(1);
+    let _outputs = crate::output_count::push_output_count(Some(1));
     let result = block_on(save_builtin(vec![Value::String(
         path.to_string_lossy().into_owned(),
     )]));
@@ -484,7 +474,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
     );
     assert!(!path.exists(), "rejection precedes MAT file publication");
     drop(_outputs);
-    let _statement = crate::output_context::push_output_count(0);
+    let _statement = crate::output_count::push_output_count(Some(0));
     let status = block_on(save_builtin(vec![Value::String(
         path.to_string_lossy().into_owned(),
     )]))
@@ -496,6 +486,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_descriptor_signatures_cover_core_forms() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let labels: Vec<&str> = SAVE_DESCRIPTOR
         .signatures
         .iter()
@@ -532,7 +523,7 @@ impl Drop for EnvOverride {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_numeric_variable() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("A", Value::Num(42.0))]);
     let dir = tempdir().unwrap();
@@ -557,7 +548,7 @@ fn save_numeric_variable() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_preserves_supported_numeric_classes() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let single = Tensor::new_with_dtype(vec![1.25, 2.5], vec![1, 2], NumericDType::F32)
         .expect("single tensor");
@@ -642,7 +633,7 @@ fn save_preserves_supported_numeric_classes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_string_array_variable_names() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[
         ("A", Value::Num(1.0)),
@@ -668,7 +659,7 @@ fn save_string_array_variable_names() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_char_matrix_variable_names() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[
         ("foo", Value::Num(10.0)),
@@ -694,7 +685,7 @@ fn save_char_matrix_variable_names() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_struct_fields() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let mut opts_struct = StructValue::new();
     opts_struct
@@ -725,7 +716,7 @@ fn save_struct_fields() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_struct_field_selection() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let mut opts_struct = StructValue::new();
     opts_struct
@@ -758,7 +749,7 @@ fn save_struct_field_selection() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_missing_variable_errors() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[]);
     let result = block_on(save_builtin(vec![
@@ -771,7 +762,7 @@ fn save_missing_variable_errors() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_regex_variable_selection() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[
         ("alpha", Value::Num(1.0)),
@@ -798,7 +789,7 @@ fn save_regex_variable_selection() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_regex_requires_pattern() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("foo", Value::Num(1.0))]);
     let result = block_on(save_builtin(vec![Value::from("-regexp")]));
@@ -808,7 +799,7 @@ fn save_regex_requires_pattern() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_append_creates_missing_file() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("A", Value::Num(1.0))]);
     let dir = tempdir().unwrap();
@@ -827,7 +818,7 @@ fn save_append_creates_missing_file() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_append_preserves_existing_and_replaces_duplicates() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("A", Value::Num(1.0))]);
     let dir = tempdir().unwrap();
@@ -854,7 +845,7 @@ fn save_append_preserves_existing_and_replaces_duplicates() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_unsupported_option_errors() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("foo", Value::Num(1.0))]);
     let result = block_on(save_builtin(vec![
@@ -868,7 +859,7 @@ fn save_unsupported_option_errors() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_defaults_to_matlab_mat() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let _lock = lock_env_override();
     set_workspace(&[("answer", Value::Num(7.0))]);
@@ -895,7 +886,7 @@ fn save_defaults_to_matlab_mat() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_struct_without_filename_defaults_to_matlab_mat() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let _lock = lock_env_override();
     let mut payload_struct = StructValue::new();
@@ -930,7 +921,7 @@ fn save_struct_without_filename_defaults_to_matlab_mat() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn save_gpu_tensor_roundtrip() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     test_support::with_test_provider(|provider| {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
@@ -966,7 +957,7 @@ fn save_gpu_tensor_roundtrip() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn save_wgpu_tensor_roundtrip() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

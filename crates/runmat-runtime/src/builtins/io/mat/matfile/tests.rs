@@ -7,10 +7,10 @@ use std::sync::Arc;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cancelled_assignment_does_not_open_or_publish_mat_bytes() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
     use std::rc::Rc;
 
-    let _lock = fs::provider_override_lock();
     let (directory, filename) = if cfg!(windows) {
         (r"C:\selected", r"C:\selected\cancelled.mat")
     } else {
@@ -51,7 +51,7 @@ fn cancelled_assignment_does_not_open_or_publish_mat_bytes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn known_invalid_writable_pair_does_not_download_resident_filename() {
-    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     let resident = owner.resident();
@@ -88,7 +88,7 @@ fn finite_runtime() -> crate::context::RuntimeContext {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn finite_matfile_constructor_rejects_before_resident_writable_download() {
-    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     let error = futures::executor::block_on(super::matfile_builtin(
@@ -107,8 +107,7 @@ fn finite_matfile_constructor_rejects_before_resident_writable_download() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
-    let _lock = fs::provider_override_lock();
-    let _accel = crate::builtins::common::test_support::accel_test_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let (directory, filename) = if cfg!(windows) {
         (r"C:\mat", r"C:\mat\missing.mat")
     } else {
@@ -155,7 +154,7 @@ fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn finite_matfile_member_read_rejects_before_missing_file_is_opened() {
-    let _lock = fs::provider_override_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected);
@@ -180,10 +179,10 @@ fn finite_matfile_member_read_rejects_before_missing_file_is_opened() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_member_read_reports_open_failure_once() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::Witness;
     use runmat_execution::WholeWorkObservationOutcome;
 
-    let _lock = fs::provider_override_lock();
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected.clone());
@@ -213,9 +212,9 @@ fn selected_outer_member_read_reports_open_failure_once() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_assignment_pending_drop_releases_without_publication_or_feedback() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{PendingWriteFs, Witness};
 
-    let _lock = fs::provider_override_lock();
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
     let selected = Arc::new(PendingWriteFs::new(directory));
     let _provider = fs::replace_provider(selected.clone());
@@ -251,6 +250,7 @@ fn selected_outer_assignment_pending_drop_releases_without_publication_or_feedba
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn invalid_read_index_precedes_detached_receiver_authority() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(
         "()",
         Value::Cell(
@@ -332,6 +332,7 @@ fn char_row(value: &str) -> Value {
 
 #[test]
 fn matfile_constructs_properties_and_reads_whole_variables() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("read");
     write_sample(&path);
     let object = block_on(matfile_builtin(
@@ -363,6 +364,7 @@ fn matfile_constructs_properties_and_reads_whole_variables() {
 
 #[test]
 fn matfile_accepts_text_forms_and_normalises_extension() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let path_without_ext =
         std::env::temp_dir().join(format!("runmat_matfile_text_{}", std::process::id()));
     let expected_path = path_without_ext.with_extension("mat");
@@ -402,6 +404,7 @@ fn matfile_accepts_text_forms_and_normalises_extension() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn repeated_writable_pairs_are_prepared_once_and_last_value_wins() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let object = block_on(matfile_builtin(
         Value::String("repeated.mat".into()),
         vec![
@@ -426,6 +429,7 @@ fn repeated_writable_pairs_are_prepared_once_and_last_value_wins() {
 
 #[test]
 fn matfile_writable_assignment_replaces_and_appends_variables() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("write");
     write_sample(&path);
     let mut object = block_on(matfile_builtin(
@@ -460,7 +464,7 @@ fn matfile_writable_assignment_replaces_and_appends_variables() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn matfile_receiver_keeps_original_provider_and_cwd_after_swap() {
-    let _lock = fs::provider_override_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
     let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
     let selected_bytes = block_on(encode_workspace_to_mat_bytes(&[(
@@ -526,6 +530,7 @@ fn matfile_receiver_keeps_original_provider_and_cwd_after_swap() {
 
 #[test]
 fn matfile_writable_assignment_preserves_exact_integer_storage() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("integer_write");
     write_sample(&path);
     let object = block_on(matfile_builtin(
@@ -558,6 +563,7 @@ fn matfile_writable_assignment_preserves_exact_integer_storage() {
 
 #[test]
 fn matfile_rejects_readonly_assignment_and_partial_indexing() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("readonly");
     write_sample(&path);
     let object = block_on(matfile_builtin(

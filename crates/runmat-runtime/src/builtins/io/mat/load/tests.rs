@@ -6,7 +6,7 @@ use runmat_value::{CellArray, ComplexTensor, IntValue, NumericStorage, SparseTen
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn numeric_resident_text_control_rejects_without_download() {
-    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     let resident = owner.resident();
@@ -19,9 +19,9 @@ fn numeric_resident_text_control_rejects_without_download() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_load_revoked_during_pending_open_never_reads_or_publishes() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{GatedOpenFs, Witness};
 
-    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
     let filename = if cfg!(windows) {
         r"C:\mat\gated.mat"
@@ -65,9 +65,9 @@ fn selected_outer_load_revoked_during_pending_open_never_reads_or_publishes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn selected_outer_load_revoked_by_first_read_stops_decode_before_more_reads() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{GatedOpenFs, Witness};
 
-    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
     let filename = if cfg!(windows) {
         r"C:\mat\read-revoked.mat"
@@ -107,6 +107,7 @@ fn selected_outer_load_revoked_by_first_read_stops_decode_before_more_reads() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn known_invalid_option_rejects_before_resident_preparation() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let args = [Value::from("case.mat"), Value::from("-unsupported")];
     let error = preflight_known_options(&args).expect_err("unsupported flag");
     assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
@@ -115,6 +116,7 @@ fn known_invalid_option_rejects_before_resident_preparation() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn regexp_followed_by_another_option_has_no_pattern() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let args = [
         Value::from("case.mat"),
         Value::from("-regexp"),
@@ -127,7 +129,7 @@ fn regexp_followed_by_another_option_has_no_pattern() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
-    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let folder = tempdir().expect("MAT fixture folder");
     let path = folder.path().join("nested-output.mat");
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
@@ -151,8 +153,7 @@ fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
-    let _filesystem = runmat_filesystem::provider_override_lock();
-    let _workspace = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[]);
     let folder = tempdir().expect("MAT fixture folder");
@@ -220,10 +221,6 @@ fn set_workspace(entries: &[(&str, Value)]) {
     });
 }
 
-fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
-    crate::workspace::test_guard()
-}
-
 fn assert_error_contains<T>(result: crate::BuiltinResult<T>, snippet: &str) {
     match result {
         Err(err) => {
@@ -256,6 +253,7 @@ fn load_entries_from_bytes(bytes: Vec<u8>) -> Vec<(String, Value)> {
 
 #[test]
 fn parsed_struct_fields_are_consumed_in_mat_field_major_order() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     fn scalar(value: f64) -> MatArray {
         MatArray {
             class: MatClass::Double,
@@ -313,6 +311,7 @@ fn parsed_struct_fields_are_consumed_in_mat_field_major_order() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_descriptor_signatures_cover_core_forms() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let labels: Vec<&str> = LOAD_DESCRIPTOR
         .signatures
         .iter()
@@ -327,7 +326,7 @@ fn load_descriptor_signatures_cover_core_forms() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_roundtrip_numeric() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
     set_workspace(&[("A", Value::Tensor(tensor))]);
@@ -362,7 +361,7 @@ fn load_roundtrip_numeric() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_selected_variables() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("signal", Value::Num(42.0)), ("noise", Value::Num(5.0))]);
     let dir = tempdir().unwrap();
@@ -388,7 +387,7 @@ fn load_selected_variables() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_regex_selection() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[
         ("w1", Value::Num(1.0)),
@@ -418,7 +417,7 @@ fn load_regex_selection() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_missing_variable_errors() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("existing", Value::Num(7.0))]);
     let dir = tempdir().unwrap();
@@ -442,7 +441,7 @@ fn load_missing_variable_errors() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_string_array_roundtrip() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let strings = StringArray::new(vec!["foo".into(), "bar".into()], vec![1, 2]).unwrap();
     set_workspace(&[("labels", Value::StringArray(strings))]);
@@ -479,6 +478,7 @@ fn load_string_array_roundtrip() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn mat_string_cell_roundtrip_decodes_utf16_surrogate_pairs() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let source =
         StringArray::new(vec!["A😀".into(), "plain".into()], vec![1, 2]).expect("two strings");
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
@@ -497,6 +497,7 @@ fn mat_string_cell_roundtrip_decodes_utf16_surrogate_pairs() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn mat_unicode_char_row_roundtrip_restores_scalar_geometry() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let source = CharArray::new_row("A😀");
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
         "text".into(),
@@ -510,6 +511,7 @@ fn mat_unicode_char_row_roundtrip_restores_scalar_geometry() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn external_non_bmp_char_matrix_rejects_unrepresentable_geometry() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let error = mat_array_to_value(MatArray {
         class: MatClass::Char,
         dims: vec![2, 1],
@@ -524,7 +526,7 @@ fn external_non_bmp_char_matrix_rejects_unrepresentable_geometry() {
 
 #[test]
 fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     let chars = CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).expect("chars");
     let cells = CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
@@ -554,6 +556,7 @@ fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_compressed_level5_payload() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let mat_bytes = block_on(encode_workspace_to_mat_bytes(&[
         ("A".to_string(), Value::Num(123.0)),
         ("B".to_string(), Value::from("text")),
@@ -575,6 +578,7 @@ fn load_compressed_level5_payload() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_preserves_supported_numeric_mat_classes() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let single = Tensor::new_with_dtype(vec![1.5, 2.5], vec![1, 2], NumericDType::F32)
         .expect("single tensor");
     let single_scalar = Tensor::from_f32(vec![0.1], vec![1, 1]).expect("single scalar");
@@ -637,6 +641,7 @@ fn load_preserves_supported_numeric_mat_classes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_save_roundtrip_preserves_every_integer_tensor_class_exactly() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let cases = vec![
         ("i8", IntegerStorage::I8(vec![i8::MIN, i8::MAX])),
         ("u8", IntegerStorage::U8(vec![0, u8::MAX])),
@@ -688,6 +693,7 @@ fn load_save_roundtrip_preserves_every_integer_tensor_class_exactly() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_save_roundtrip_preserves_every_complex_integer_tensor_class_exactly() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let cases = vec![
         (
             "i8",
@@ -754,6 +760,7 @@ fn load_save_roundtrip_preserves_every_complex_integer_tensor_class_exactly() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_save_roundtrip_preserves_nested_integer_tensors() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let unsigned =
         Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
             .expect("unsigned tensor");
@@ -813,6 +820,7 @@ fn load_save_roundtrip_preserves_nested_integer_tensors() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_save_real_sparse_roundtrip() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let sparse = SparseTensor::new(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.0, 5.0, 6.0])
         .expect("sparse");
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
@@ -829,6 +837,7 @@ fn load_save_real_sparse_roundtrip() {
 
 #[test]
 fn load_save_native_single_sparse_roundtrip_preserves_dtype_and_values() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let sparse =
         SparseTensor::new_f32(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.25, 5.5, 6.75])
             .expect("single sparse");
@@ -846,6 +855,7 @@ fn load_save_native_single_sparse_roundtrip_preserves_dtype_and_values() {
 
 #[test]
 fn load_save_logical_sparse_roundtrip_preserves_pattern_and_class() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let sparse = SparseTensor::new_logical(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2]).expect("logical");
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
         "logical_sparse".to_string(),
@@ -861,6 +871,7 @@ fn load_save_logical_sparse_roundtrip_preserves_pattern_and_class() {
 
 #[test]
 fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let sparse = SparseTensor::new_integer(
         1,
         1,
@@ -907,6 +918,7 @@ fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_save_sparse_integer_roundtrips_preserve_every_dtype_and_exact_values() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let cases = [
         (
             "i8",
@@ -1019,6 +1031,7 @@ fn load_save_sparse_integer_roundtrips_preserve_every_dtype_and_exact_values() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_save_empty_sparse_integer_roundtrip_preserves_dtype_and_shape() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let sparse = SparseTensor::new_integer(
         0,
         5,
@@ -1048,7 +1061,7 @@ fn load_save_empty_sparse_integer_roundtrip_preserves_dtype_and_shape() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_option_before_filename() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("alpha", Value::Num(1.0)), ("beta", Value::Num(2.0))]);
     let dir = tempdir().unwrap();
@@ -1075,7 +1088,7 @@ fn load_option_before_filename() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_char_array_names_trimmed() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("short", Value::Num(5.0)), ("longer", Value::Num(9.0))]);
     let dir = tempdir().unwrap();
@@ -1114,7 +1127,7 @@ fn load_char_array_names_trimmed() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn load_duplicate_names_last_wins() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     set_workspace(&[("dup", Value::Num(11.0))]);
     let dir = tempdir().unwrap();
@@ -1142,7 +1155,7 @@ fn load_duplicate_names_last_wins() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn load_wgpu_tensor_roundtrip() {
-    let _guard = workspace_guard();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
     if runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

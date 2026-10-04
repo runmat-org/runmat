@@ -172,7 +172,7 @@ mod tests {
         use crate::builtins::io::mat::tests::pending_provider::PendingDownloadProvider;
         use runmat_execution::CancellationReason;
 
-        let _accel = crate::builtins::common::test_support::accel_test_lock();
+        let _state = crate::builtins::io::mat::tests::state_guard();
         let owner = Box::leak(Box::new(PendingDownloadProvider::new()));
         let _gpu = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
         let value = Value::Cell(

@@ -7,6 +7,26 @@ use runmat_accelerate_api::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// Serialize MAT fixtures that touch accelerator, filesystem, or workspace
+/// process state. Keep this order identical across every MAT test so a
+/// provider callback cannot invert it while another fixture is active.
+pub(super) struct MatTestStateGuard {
+    _workspace: std::sync::MutexGuard<'static, ()>,
+    _filesystem: std::sync::MutexGuard<'static, ()>,
+    _global: crate::builtins::common::test_support::AccelTestGuard,
+}
+
+pub(super) fn state_guard() -> MatTestStateGuard {
+    let global = crate::builtins::common::test_support::accel_test_lock();
+    let filesystem = runmat_filesystem::provider_override_lock();
+    let workspace = crate::workspace::test_guard();
+    MatTestStateGuard {
+        _workspace: workspace,
+        _filesystem: filesystem,
+        _global: global,
+    }
+}
+
 pub(super) mod receipt;
 pub(super) mod pending_provider;
 

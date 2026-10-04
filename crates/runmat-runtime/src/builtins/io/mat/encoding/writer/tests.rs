@@ -298,7 +298,7 @@ fn checked_plan_matches_encoded_bytes_across_nested_mat_classes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cancelled_encoding_never_publishes_to_captured_owner() {
-    let _lock = runmat_filesystem::provider_override_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         virtual_directory(),
     ));
@@ -346,7 +346,7 @@ fn cancelled_encoding_never_publishes_to_captured_owner() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn large_numeric_encoding_cancels_inside_payload_before_write() {
-    let _lock = runmat_filesystem::provider_override_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         virtual_directory(),
     ));

@@ -57,7 +57,7 @@ fn revoked_captured_filesystem_keeps_typed_io_cause_on_receiver_resolution() {
     use crate::builtins::io::mat::tests::receipt::GatedOpenFs;
     use runmat_filesystem as fs;
 
-    let _lock = fs::provider_override_lock();
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
     let filename = if cfg!(windows) {
         r"C:\mat\revoked.mat"
