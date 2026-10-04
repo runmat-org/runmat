@@ -243,8 +243,17 @@ fn cross_process_child_entry() {
     let Some(path) = std::env::var_os("RUNMAT_PREF_TEST_CHILD_DOCUMENT") else {
         return;
     };
+    let path = std::path::PathBuf::from(path);
     let driver = driver();
-    let service = NativePreferenceService::new(path.into(), driver.handle().clone()).unwrap();
+    let service = NativePreferenceService::new(path.clone(), driver.handle().clone()).unwrap();
+    assert!(
+        NativeStore::new(path)
+            .unwrap()
+            .try_begin_write()
+            .unwrap()
+            .is_none(),
+        "parent still holds the cross-process document lock"
+    );
     println!("RUNMAT_PREF_CHILD_READY");
     block_on(service.set_many(
         runtime(),
