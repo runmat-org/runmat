@@ -6492,6 +6492,7 @@ dependencies = [
  "runmat-native-ffi",
  "runmat-package",
  "runmat-parser",
+ "runmat-process-host",
  "runmat-python",
  "runmat-runtime",
  "runmat-static-analysis",
