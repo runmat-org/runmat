@@ -28,9 +28,10 @@ fn cloned_authority_shares_commits_but_separate_authority_is_isolated() {
     assert!(block_on(isolated.group_values(runtime(), "app".into()))
         .expect("isolated read")
         .is_none());
-    let reopened =
-        IsolatedMemoryPreferenceService::from_document_bytes(&service.document_bytes().unwrap())
-            .expect("versioned document");
+    let reopened = IsolatedMemoryPreferenceService::from_document_bytes(
+        &block_on(service.document_bytes()).unwrap(),
+    )
+    .expect("versioned document");
     assert_eq!(
         block_on(reopened.group_values(runtime(), "app".into()))
             .unwrap()
