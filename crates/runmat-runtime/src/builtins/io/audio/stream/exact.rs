@@ -4,7 +4,7 @@ use super::*;
 
 /// Zero-output calls still scan and read the selected samples, but do not
 /// construct a tensor or demand a retained-output allocation permit.
-pub(super) async fn validate_prepared_wave_stream_discarded(
+pub(in crate::builtins::io::audio) async fn validate_prepared_wave_stream_discarded(
     mut prepared: PreparedWaveStream,
     path: &Path,
     cooperation: &mut AudioCooperation,
@@ -34,7 +34,7 @@ pub(super) async fn validate_prepared_wave_stream_discarded(
     cooperation.completed(0).await
 }
 
-pub(super) async fn decode_prepared_wave_stream_exact(
+pub(in crate::builtins::io::audio) async fn decode_prepared_wave_stream_exact(
     mut prepared: PreparedWaveStream,
     path: &Path,
     cooperation: &mut AudioCooperation,

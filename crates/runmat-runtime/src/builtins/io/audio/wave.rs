@@ -1,3 +1,5 @@
+use super::WaveSampleCoding;
+
 pub(super) fn parse_wave_metadata(
     bytes: &[u8],
     file_size: u64,
