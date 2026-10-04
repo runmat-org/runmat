@@ -95,6 +95,7 @@ impl RuntimePlacementService for SwappingPlacement {
         request.validate().expect("typed selected host effect");
         self.selected.set(self.selected.get() + 1);
         *self.guard.borrow_mut() = Some(fs::replace_provider(self.replacement.clone()));
+        fs::set_current_dir("/replacement").expect("replacement provider cwd fixture");
         let candidate = &request.candidates[0];
         Ok(RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
