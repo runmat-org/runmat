@@ -11,6 +11,7 @@ use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
 use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
+use crate::context::host_effect::HostEffectResourceLivenessLease;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use runmat_builtins::{
@@ -442,7 +443,16 @@ pub(crate) async fn read_mat_file_for_builtin_on_with_context(
     builtin: &str,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<Vec<(String, Value)>> {
-    match read_mat_file_on_with_context(source, runtime).await {
+    read_mat_file_for_builtin_on_with_resource_liveness(source, builtin, runtime, None).await
+}
+
+pub(crate) async fn read_mat_file_for_builtin_on_with_resource_liveness(
+    source: &MatFsPath,
+    builtin: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
+    resource_liveness: Option<std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
+) -> crate::BuiltinResult<Vec<(String, Value)>> {
+    match read_mat_file_on_with_resource_liveness(source, runtime, resource_liveness).await {
         Ok(entries) => Ok(entries),
         Err(err) => {
             let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
@@ -474,8 +484,17 @@ pub(crate) async fn read_mat_file_on_with_context(
     source: &MatFsPath,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
+    read_mat_file_on_with_resource_liveness(source, runtime, None).await
+}
+
+pub(crate) async fn read_mat_file_on_with_resource_liveness(
+    source: &MatFsPath,
+    runtime: Option<&crate::context::RuntimeContext>,
+    resource_liveness: Option<std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
+) -> BuiltinResult<Vec<(String, Value)>> {
     let mut cooperation =
-        decoder::MatCodecCooperation::new(runtime, Some(source), "load", &LOAD_ERROR_IO);
+        decoder::MatCodecCooperation::new(runtime, Some(source), "load", &LOAD_ERROR_IO)
+            .with_resource_liveness(resource_liveness);
     let file = cooperation.await_io(source.open()).await?.map_err(|err| {
         load_error_with_source(
             &LOAD_ERROR_IO,

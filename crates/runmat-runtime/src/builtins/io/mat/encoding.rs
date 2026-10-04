@@ -482,7 +482,14 @@ pub(crate) async fn encode_workspace_to_mat_bytes_for_owner(
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
         completed(&mut cooperation, 0).await?;
-        let value = prepare_value_for_mat_save(value.clone()).await?;
+        let value = match cooperation.as_deref_mut() {
+            Some(cooperation) => {
+                cooperation
+                    .await_io(prepare_value_for_mat_save(value.clone()))
+                    .await??
+            }
+            None => prepare_value_for_mat_save(value.clone()).await?,
+        };
         completed(&mut cooperation, 0).await?;
         mat_vars.push(MatVar {
             name: name.clone(),

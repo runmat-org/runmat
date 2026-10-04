@@ -179,6 +179,77 @@ fn finite_matfile_member_read_rejects_before_missing_file_is_opened() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn selected_outer_member_read_reports_open_failure_once() {
+    use super::super::tests::receipt::Witness;
+    use runmat_execution::WholeWorkObservationOutcome;
+
+    let _lock = fs::provider_override_lock();
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
+    let _provider = fs::replace_provider(selected.clone());
+    fs::set_current_dir(directory).expect("virtual cwd");
+    let object = block_on(matfile_builtin(Value::from("missing.mat"), vec![]))
+        .expect("context-free MAT receiver");
+    let witness = Witness::new(selected);
+    let subscript =
+        crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("A"))
+            .expect("member selector");
+    let error = block_on(super::matfile_subsref(
+        Some(witness.runtime.clone()),
+        object,
+        subscript,
+    ))
+    .expect_err("missing source must preserve open failure");
+    assert_eq!(error.identifier(), Some("RunMat:load:Io"));
+    assert!(error.source.is_some(), "retain MAT open cause chain");
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert_eq!(
+        witness.outcomes(),
+        vec![WholeWorkObservationOutcome::OperationalFailure]
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn selected_outer_assignment_pending_drop_releases_without_publication_or_feedback() {
+    use super::super::tests::receipt::{PendingWriteFs, Witness};
+
+    let _lock = fs::provider_override_lock();
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let selected = Arc::new(PendingWriteFs::new(directory));
+    let _provider = fs::replace_provider(selected.clone());
+    fs::set_current_dir(directory).expect("virtual cwd");
+    let object = block_on(matfile_builtin(
+        Value::from("pending.mat"),
+        vec![Value::from("Writable"), Value::Bool(true)],
+    ))
+    .expect("context-free writable receiver");
+    let witness = Witness::new(selected.clone());
+    let subscript =
+        crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("A"))
+            .expect("member selector");
+    let mut future = Box::pin(super::matfile_subsasgn(
+        Some(witness.runtime.clone()),
+        object,
+        subscript,
+        Value::Num(42.0),
+    ));
+    assert!(matches!(
+        futures::poll!(future.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(selected.writes(), 1);
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 1);
+    drop(future);
+    assert_eq!(selected.abandoned(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn invalid_read_index_precedes_detached_receiver_authority() {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(
         "()",
@@ -195,7 +266,7 @@ fn invalid_read_index_precedes_detached_receiver_authority() {
         .next()
         .expect("one fixture step");
     let detached = Value::Object(ObjectInstance::new(MATFILE_CLASS.owned()));
-    let error = futures::executor::block_on(super::matfile_read_step(None, detached, step))
+    let error = futures::executor::block_on(super::matfile_read_step(None, detached, step, None))
         .expect_err("partial indexing is unsupported before authority lookup");
     assert_eq!(error.identifier(), Some("RunMat:matfile:Unsupported"));
 }

@@ -10,7 +10,7 @@ use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
 use super::cooperation::MatCodecCooperation;
-use super::load::read_mat_file_on_with_context;
+use super::load::read_mat_file_on_with_resource_liveness;
 use crate::context::host_effect::{
     HostEffectWorkload, MatEncodeMode, MatEncodeOutput, MatStructSelection,
 };
@@ -37,10 +37,8 @@ async fn save_builtin(
     let output_scope = crate::output_count::current_output_scope();
     let requested_outputs = match output_scope {
         crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
-        crate::output_count::InvocationOutputScope::Implicit => None,
-        crate::output_count::InvocationOutputScope::Unscoped => {
-            crate::output_context::requested_output_count()
-        }
+        crate::output_count::InvocationOutputScope::Implicit
+        | crate::output_count::InvocationOutputScope::Unscoped => None,
     };
     if requested_outputs.is_some_and(|count| count > 0) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -108,10 +106,7 @@ async fn save_builtin(
             structs: &struct_selections,
             patterns: &request.regex_patterns,
         },
-        output: if matches!(
-            output_scope,
-            crate::output_count::InvocationOutputScope::Requested(0)
-        ) {
+        output: if requested_outputs == Some(0) {
             MatEncodeOutput::EffectOnly
         } else {
             MatEncodeOutput::Status
@@ -228,7 +223,9 @@ async fn save_builtin(
         let mut mat_vars = Vec::with_capacity(unique_entries.len());
         for (name, value) in unique_entries {
             cooperation.completed(0).await?;
-            let value = prepare_value_for_mat_save(value).await?;
+            let value = cooperation
+                .await_io(prepare_value_for_mat_save(value))
+                .await??;
             cooperation.completed(0).await?;
             mat_vars.push(MatVar {
                 name,
@@ -516,7 +513,13 @@ async fn read_existing_entries_for_append(
             ));
         }
     }
-    match read_mat_file_on_with_context(path, runtime).await {
+    match read_mat_file_on_with_resource_liveness(
+        path,
+        runtime,
+        cooperation.resource_liveness_lease(),
+    )
+    .await
+    {
         Ok(entries) => Ok(entries),
         Err(err) => Err(save_error_with_source(
             &SAVE_ERROR_IO,

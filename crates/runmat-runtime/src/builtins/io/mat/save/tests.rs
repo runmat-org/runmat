@@ -116,6 +116,197 @@ fn finite_save_without_complete_resource_evidence_rejects_before_workspace_gathe
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn selected_outer_save_reports_write_error_once_with_source() {
+    use super::super::tests::receipt::Witness;
+    use runmat_execution::WholeWorkObservationOutcome;
+
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _workspace = workspace_guard();
+    ensure_test_resolver();
+    set_workspace(&[("answer", Value::Num(42.0))]);
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\readonly.mat"
+    } else {
+        "/mat/readonly.mat"
+    };
+    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        directory,
+    ));
+    filesystem
+        .write_project_path(filename, b"original")
+        .expect("seed destination");
+    block_on(filesystem.set_readonly(std::path::Path::new(filename), true))
+        .expect("protect destination");
+    let _selected = runmat_filesystem::replace_provider(filesystem.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(filesystem.clone());
+    let error = block_on(super::save_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename), Value::from("answer")],
+    ))
+    .expect_err("provider write failure must propagate");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    assert!(error.source.is_some(), "retain provider IO cause");
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert_eq!(
+        witness.outcomes(),
+        vec![WholeWorkObservationOutcome::OperationalFailure]
+    );
+    assert_eq!(
+        block_on(filesystem.read(std::path::Path::new(filename))).expect("original bytes"),
+        b"original"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn selected_outer_save_observes_only_after_published_mat_payload() {
+    use super::super::tests::receipt::Witness;
+    use runmat_execution::WholeWorkObservationOutcome;
+
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _workspace = workspace_guard();
+    ensure_test_resolver();
+    set_workspace(&[("answer", Value::Num(42.0))]);
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\published.mat"
+    } else {
+        "/mat/published.mat"
+    };
+    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        directory,
+    ));
+    let _selected = runmat_filesystem::replace_provider(filesystem.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(filesystem.clone());
+    let status = block_on(super::save_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename), Value::from("answer")],
+    ))
+    .expect("selected save");
+    assert_eq!(status, Value::Num(0.0));
+    let bytes = block_on(filesystem.read(std::path::Path::new(filename)))
+        .expect("published payload before receipt completion");
+    let decoded = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(&bytes)
+        .expect("actual MAT payload");
+    assert_eq!(decoded, vec![("answer".to_string(), Value::Num(42.0))]);
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert_eq!(
+        witness.outcomes(),
+        vec![WholeWorkObservationOutcome::Success]
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn revoked_mat_resource_authority_rejects_outer_save_before_write() {
+    use super::super::tests::receipt::Witness;
+
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _workspace = workspace_guard();
+    ensure_test_resolver();
+    set_workspace(&[("answer", Value::Num(42.0))]);
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\revoked.mat"
+    } else {
+        "/mat/revoked.mat"
+    };
+    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        directory,
+    ));
+    let _selected = runmat_filesystem::replace_provider(filesystem.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(filesystem.clone());
+    witness.revoke();
+    let error = block_on(super::save_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename), Value::from("answer")],
+    ))
+    .expect_err("revoked resource producer cannot select a write");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert_eq!(witness.selections(), 0);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+    assert!(block_on(filesystem.read(std::path::Path::new(filename))).is_err());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
+    use super::super::tests::receipt::{PendingWriteFs, Witness};
+    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _workspace = workspace_guard();
+    ensure_test_resolver();
+    set_workspace(&[("answer", Value::Num(42.0))]);
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\pending.mat"
+    } else {
+        "/mat/pending.mat"
+    };
+    let filesystem = std::sync::Arc::new(PendingWriteFs::new(directory));
+    let _selected = runmat_filesystem::replace_provider(filesystem.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(filesystem.clone());
+
+    let unpolled = super::save_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename), Value::from("answer")],
+    );
+    drop(unpolled);
+    assert_eq!(witness.selections(), 0);
+    assert_eq!(filesystem.writes(), 0);
+
+    let mut abandoned = Box::pin(super::save_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename), Value::from("answer")],
+    ));
+    assert!(matches!(
+        futures::poll!(abandoned.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 1);
+    assert_eq!(filesystem.writes(), 1);
+    drop(abandoned);
+    assert_eq!(filesystem.abandoned(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+
+    let cancellation = CancellationSource::new();
+    let runtime = witness
+        .runtime
+        .with_cancellation_token(cancellation.token());
+    let mut cancelled = Box::pin(super::save_builtin(
+        Some(runtime),
+        vec![Value::from(filename), Value::from("answer")],
+    ));
+    assert!(matches!(
+        futures::poll!(cancelled.as_mut()),
+        std::task::Poll::Pending
+    ));
+    cancellation.cancel(CancellationReason::User);
+    let error = block_on(cancelled).expect_err("pending selected write is cancelled");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(witness.selections(), 2);
+    assert_eq!(witness.probes(), 0);
+    assert_eq!(filesystem.writes(), 2);
+    assert_eq!(filesystem.abandoned(), 2);
+    assert!(witness.outcomes().is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn invalid_regexp_rejects_before_workspace_gather() {
     let _lock = test_support::accel_test_lock();
     let _workspace = workspace_guard();

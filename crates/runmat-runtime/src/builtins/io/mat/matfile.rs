@@ -11,7 +11,7 @@ use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
 use super::cooperation::MatCodecCooperation;
 use super::encoding::{encode_workspace_to_mat_bytes_for_owner, MatEncodingOwner};
-use super::load::read_mat_file_for_builtin_on_with_context;
+use super::load::read_mat_file_for_builtin_on_with_resource_liveness;
 use crate::context::host_effect::{
     HostEffectResourceLivenessLease, HostEffectWorkload, MatAssignmentSuffix, MatDecodeOutput,
     MatDecodeSelection, MatEncodeMode, MatEncodeOutput, MatHandleControl,
@@ -144,7 +144,8 @@ pub async fn matfile_subsref(
         path,
         move |obj, step| async move {
             check_resource_liveness(liveness.as_ref())?;
-            let value = matfile_read_step(read_runtime.as_ref(), obj, step).await?;
+            let value =
+                matfile_read_step(read_runtime.as_ref(), obj, step, liveness.clone()).await?;
             check_resource_liveness(liveness.as_ref())?;
             Ok(value)
         },
@@ -166,6 +167,7 @@ async fn matfile_read_step(
     runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
+    resource_liveness: Option<std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
 ) -> BuiltinResult<Value> {
     let payload = step.selector_value()?;
     let object = into_matfile_object(obj, MATFILE_SUBSREF)?;
@@ -185,8 +187,13 @@ async fn matfile_read_step(
             .cloned()
             .ok_or_else(|| matfile_error("matfile object is missing Properties"));
     }
-    let entries =
-        read_mat_file_for_builtin_on_with_context(&owner.source, BUILTIN_NAME, runtime).await?;
+    let entries = read_mat_file_for_builtin_on_with_resource_liveness(
+        &owner.source,
+        BUILTIN_NAME,
+        runtime,
+        resource_liveness,
+    )
+    .await?;
     resolve_matfile(runtime, &object)?;
     entries
         .into_iter()
@@ -266,7 +273,8 @@ pub async fn matfile_subsasgn(
         vec![rhs],
         move |obj, step| async move {
             check_resource_liveness(read_liveness.as_ref())?;
-            let result = matfile_read_step(read_runtime.as_ref(), obj, step).await?;
+            let result =
+                matfile_read_step(read_runtime.as_ref(), obj, step, read_liveness.clone()).await?;
             check_resource_liveness(read_liveness.as_ref())?;
             Ok(result)
         },
@@ -464,8 +472,13 @@ async fn read_existing_entries_for_assignment(
     match cooperation.await_io(path.metadata()).await? {
         Ok(_) => {
             resolve_matfile(runtime, object)?;
-            let entries =
-                read_mat_file_for_builtin_on_with_context(path, BUILTIN_NAME, runtime).await?;
+            let entries = read_mat_file_for_builtin_on_with_resource_liveness(
+                path,
+                BUILTIN_NAME,
+                runtime,
+                cooperation.resource_liveness_lease(),
+            )
+            .await?;
             resolve_matfile(runtime, object)?;
             Ok(entries)
         }

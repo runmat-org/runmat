@@ -57,6 +57,12 @@ impl<'a> MatCodecCooperation<'a> {
         self
     }
 
+    pub(in crate::builtins::io::mat) fn resource_liveness_lease(
+        &self,
+    ) -> Option<Arc<dyn HostEffectResourceLivenessLease>> {
+        self.resource_liveness.clone()
+    }
+
     pub(in crate::builtins::io::mat) async fn completed(
         &mut self,
         bytes: usize,
