@@ -201,6 +201,7 @@ fn fclose_keeps_file_registered_when_flush_fails() {
     let fail_flush = Arc::new(AtomicBool::new(true));
     let provider = Arc::new(FailingFlushProvider {
         fail_flush: fail_flush.clone(),
+        cancel_on_ready: None,
     });
     let _provider_guard = runmat_filesystem::replace_provider(provider);
 
@@ -229,6 +230,7 @@ fn concurrent_fclose_only_one_call_closes_file() {
     registry::reset_for_tests();
     let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
         fail_flush: Arc::new(AtomicBool::new(false)),
+        cancel_on_ready: None,
     }));
 
     let eval = run_fopen(&[Value::from("yielding_close.txt"), Value::from("w")]).expect("fopen");
@@ -259,6 +261,7 @@ fn dropping_pending_close_restores_identifier_and_exact_handle() {
     registry::reset_for_tests();
     let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
         fail_flush: Arc::new(AtomicBool::new(false)),
+        cancel_on_ready: None,
     }));
 
     let eval = run_fopen(&[Value::from("pending_close.txt"), Value::from("w")]).expect("fopen");
@@ -297,6 +300,7 @@ fn cancelled_pending_flush_restores_session_identifier_and_exact_handle() {
     registry::reset_for_tests();
     let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
         fail_flush: Arc::new(AtomicBool::new(false)),
+        cancel_on_ready: None,
     }));
     let cancellation = CancellationSource::new();
     let runtime = RuntimeContext::with_cancellation(
@@ -320,6 +324,46 @@ fn cancelled_pending_flush_restores_session_identifier_and_exact_handle() {
         .err()
         .expect("cancelled flush");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    let restored = registry::shared_handle(fid).expect("restored handle");
+    assert!(Arc::ptr_eq(&original, &restored));
+    assert!(restored.lock().expect("handle lock").is_some());
+    futures::executor::block_on(registry::close_async_in(fid, Some(&runtime)))
+        .expect("later close");
+    registry::reset_for_tests();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn cancellation_during_ready_flush_cannot_commit_identifier_removal() {
+    use crate::context::RuntimeContext;
+    use crate::execution::RuntimeExecutionService;
+    use runmat_execution::cancellation::CancellationSource;
+    use std::rc::Rc;
+
+    let _guard = registry_guard();
+    let _provider_lock = runmat_filesystem::provider_override_lock();
+    registry::reset_for_tests();
+    let cancellation = CancellationSource::new();
+    let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
+        fail_flush: Arc::new(AtomicBool::new(false)),
+        cancel_on_ready: Some(cancellation.clone()),
+    }));
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let opened = futures::executor::block_on(fopen::evaluate_in(
+        Some(&runtime),
+        &[Value::from("ready_flush.txt"), Value::from("w")],
+    ))
+    .expect("session open");
+    let fid = opened.as_open().expect("open form").fid as i32;
+    let original = registry::shared_handle(fid).expect("registered handle");
+    let error = futures::executor::block_on(evaluate_in(Some(&runtime), &[Value::Num(fid as f64)]))
+        .err()
+        .expect("inline cancellation before close publication");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(registry::info_for_in(fid, Some(&runtime)).is_some());
     let restored = registry::shared_handle(fid).expect("restored handle");
     assert!(Arc::ptr_eq(&original, &restored));
     assert!(restored.lock().expect("handle lock").is_some());

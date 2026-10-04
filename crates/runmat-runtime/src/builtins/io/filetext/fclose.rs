@@ -282,13 +282,7 @@ async fn close_all(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinR
     let mut message = String::new();
     for info in infos {
         if info.id >= 3 {
-            if let Err(err) = super::cooperation::await_io(
-                runtime,
-                BUILTIN_NAME,
-                registry::close_async_in(info.id, runtime),
-            )
-            .await?
-            {
+            if let Err(err) = close_one(runtime, info.id).await? {
                 status_ok = false;
                 if message.is_empty() {
                     message = err.to_string();
@@ -323,13 +317,7 @@ async fn close_fids(
         if fid < 3 {
             continue;
         }
-        match super::cooperation::await_io(
-            runtime,
-            BUILTIN_NAME,
-            registry::close_async_in(fid, runtime),
-        )
-        .await?
-        {
+        match close_one(runtime, fid).await? {
             Ok(Some(_)) => {}
             Ok(None) => {
                 status_ok = false;
@@ -350,6 +338,26 @@ async fn close_fids(
     } else {
         Ok(FcloseEval::failure(message))
     }
+}
+
+async fn close_one(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid: i32,
+) -> BuiltinResult<std::io::Result<Option<registry::FileInfo>>> {
+    let prepared = match super::cooperation::await_io(
+        runtime,
+        BUILTIN_NAME,
+        registry::prepare_close_async_in(fid, runtime),
+    )
+    .await?
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return Ok(Err(error)),
+    };
+    // The checked-out entry remains owned here. An inline cancellation from a
+    // Ready flush, or a pending cooperative turn, restores its exact handle.
+    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
+    Ok(prepared.map(|entry| entry.commit(runtime)).transpose())
 }
 
 fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {

@@ -8,6 +8,7 @@ use std::task::{Context, Poll};
 
 pub(super) struct FailingFlushProvider {
     pub(super) fail_flush: Arc<AtomicBool>,
+    pub(super) cancel_on_ready: Option<runmat_execution::cancellation::CancellationSource>,
 }
 
 fn unsupported_provider_op() -> io::Error {
@@ -24,6 +25,7 @@ impl runmat_filesystem::FsProvider for FailingFlushProvider {
         Ok(Box::new(FailingFlushHandle {
             inner: Cursor::new(Vec::new()),
             fail_flush: self.fail_flush.clone(),
+            cancel_on_ready: self.cancel_on_ready.clone(),
         }))
     }
 
@@ -83,6 +85,7 @@ impl runmat_filesystem::FsProvider for FailingFlushProvider {
 struct FailingFlushHandle {
     inner: Cursor<Vec<u8>>,
     fail_flush: Arc<AtomicBool>,
+    cancel_on_ready: Option<runmat_execution::cancellation::CancellationSource>,
 }
 
 struct YieldOnce {
@@ -133,6 +136,9 @@ impl Seek for FailingFlushHandle {
 impl runmat_filesystem::FileHandle for FailingFlushHandle {
     async fn flush_async(&mut self) -> io::Result<()> {
         YieldOnce { yielded: false }.await;
+        if let Some(source) = &self.cancel_on_ready {
+            source.cancel(runmat_execution::CancellationReason::User);
+        }
         self.flush()
     }
 }

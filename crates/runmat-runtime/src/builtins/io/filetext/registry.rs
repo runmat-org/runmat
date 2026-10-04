@@ -55,6 +55,28 @@ struct CloseEntry {
     committed: bool,
 }
 
+/// Owns the checked-out identifier until the invocation has completed its
+/// cancellation checkpoint. Dropping this value restores the same handle.
+pub(crate) struct PreparedClose(CloseEntry);
+
+impl PreparedClose {
+    pub(crate) fn commit(mut self, runtime: Option<&RuntimeContext>) -> io::Result<FileInfo> {
+        if let Some(registered) = self.0.entry.as_ref() {
+            if let Some(filesystem) = &registered.filesystem {
+                filesystem.check()?;
+            }
+            if !registered.issuer.admits(runtime) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "file identifier session authority expired",
+                ));
+            }
+        }
+        self.0.committed = true;
+        Ok(self.0.info.clone())
+    }
+}
+
 impl Drop for CloseEntry {
     fn drop(&mut self) {
         if self.committed {
@@ -374,6 +396,16 @@ pub(crate) async fn close_async_in(
     fid: i32,
     runtime: Option<&RuntimeContext>,
 ) -> std::io::Result<Option<FileInfo>> {
+    prepare_close_async_in(fid, runtime)
+        .await?
+        .map(|prepared| prepared.commit(runtime))
+        .transpose()
+}
+
+pub(crate) async fn prepare_close_async_in(
+    fid: i32,
+    runtime: Option<&RuntimeContext>,
+) -> std::io::Result<Option<PreparedClose>> {
     let entry = {
         if fid < 3 {
             return Ok(None);
@@ -440,8 +472,7 @@ pub(crate) async fn close_async_in(
             ));
         }
     }
-    entry.committed = true;
-    Ok(Some(entry.info.clone()))
+    Ok(Some(PreparedClose(entry)))
 }
 
 fn entry_visible(entry: &Entry, runtime: Option<&RuntimeContext>) -> bool {
