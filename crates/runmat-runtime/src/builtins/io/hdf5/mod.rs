@@ -23,6 +23,7 @@ use runmat_value::{
 
 use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::validation::value_text_scalar_string;
+use crate::console::{record_console_line, ConsoleStream};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 mod path;
@@ -348,7 +349,12 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     path::check(&path, H5DISP_NAME)?;
     let result = imp::disp(H5DISP_NAME, &path, controls)?;
     path::check(&path, H5DISP_NAME)?;
-    Ok(Value::String(result))
+    if crate::output_count::current_output_count() == Some(0) {
+        record_console_line(ConsoleStream::Stdout, result);
+        Ok(Value::OutputList(Vec::new()))
+    } else {
+        Ok(Value::String(result))
+    }
 }
 
 fn optional_location(rest: &[Value], builtin: &'static str) -> BuiltinResult<String> {

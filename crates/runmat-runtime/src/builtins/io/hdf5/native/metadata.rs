@@ -209,7 +209,7 @@ pub(super) fn render_attributes(
                 )
             })?;
         out.push_str(&format!(
-            "{}Attribute: {name} [{}] {}\n",
+            "{}Attribute: {name} [{}] {}",
             " ".repeat(indent),
             attr.shape()
                 .iter()
@@ -218,6 +218,10 @@ pub(super) fn render_attributes(
                 .join("x"),
             type_name(&dtype)
         ));
+        if let Some(value) = scalar_attribute_text(builtin, &attr, &dtype)? {
+            out.push_str(&format!(" Value: {value}"));
+        }
+        out.push('\n');
     }
     Ok(())
 }

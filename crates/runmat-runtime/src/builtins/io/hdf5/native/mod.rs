@@ -48,6 +48,8 @@ fn open_file_read(builtin: &'static str, path: &Path) -> BuiltinResult<File> {
 
 mod metadata;
 use metadata::{dataset_info, group_info, render_dataset, render_group};
+mod attribute_values;
+use attribute_values::scalar_attribute_text;
 
 fn char_rows(chars: &CharArray) -> Vec<String> {
     if chars.rows == 0 || chars.cols == 0 {
