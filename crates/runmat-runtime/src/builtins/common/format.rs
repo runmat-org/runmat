@@ -9,6 +9,9 @@ use runmat_value::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+mod conversion;
+use conversion::{FloatStyle, FormatConversion};
+
 const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
 
 /// Stateful cursor over formatting arguments.
@@ -88,7 +91,7 @@ struct FormatSpec {
     flags: FormatFlags,
     width: Option<Count>,
     precision: Option<Count>,
-    conversion: char,
+    conversion: FormatConversion,
 }
 
 /// Format a MATLAB-style format string with the provided arguments.
@@ -123,29 +126,7 @@ pub fn validate_format_syntax(fmt: &str) -> BuiltinResult<()> {
         if chars.peek() == Some(&'%') {
             chars.next();
         } else {
-            let spec = parse_format_spec(&mut chars)?;
-            if !matches!(
-                spec.conversion,
-                'd' | 'i'
-                    | 'u'
-                    | 'o'
-                    | 'x'
-                    | 'X'
-                    | 'b'
-                    | 'f'
-                    | 'F'
-                    | 'e'
-                    | 'E'
-                    | 'g'
-                    | 'G'
-                    | 's'
-                    | 'c'
-            ) {
-                return Err(format_error_with_identifier(
-                    format!("sprintf: unsupported format %{}", spec.conversion),
-                    FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
-                ));
-            }
+            parse_format_spec(&mut chars)?;
         }
     }
     Ok(())
@@ -244,9 +225,15 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> BuiltinResult<FormatSpe
         }
     }
 
-    let conversion = chars
+    let symbol = chars
         .next()
         .ok_or_else(|| format_error("sprintf: incomplete format specifier"))?;
+    let conversion = FormatConversion::from_symbol(symbol).ok_or_else(|| {
+        format_error_with_identifier(
+            format!("sprintf: unsupported format %{symbol}"),
+            FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
+        )
+    })?;
     Ok(FormatSpec {
         flags,
         width,
@@ -319,7 +306,7 @@ fn apply_format_spec(
 
     let conversion = spec.conversion;
     let formatted = match conversion {
-        'd' | 'i' => {
+        FormatConversion::SignedDecimal => {
             let value = cursor.next()?;
             consumed += 1;
             let int_value = value_to_i128(&value)?;
@@ -334,13 +321,13 @@ fn apply_format_spec(
                 false,
             )
         }
-        'u' => {
+        FormatConversion::UnsignedDecimal => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
             format_unsigned(uint_value, 10, flags, width, precision, false, false)
         }
-        'o' => {
+        FormatConversion::Octal => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -354,7 +341,7 @@ fn apply_format_spec(
                 false,
             )
         }
-        'x' => {
+        FormatConversion::HexLower => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -368,7 +355,7 @@ fn apply_format_spec(
                 false,
             )
         }
-        'X' => {
+        FormatConversion::HexUpper => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -382,7 +369,7 @@ fn apply_format_spec(
                 true,
             )
         }
-        'b' => {
+        FormatConversion::Binary => {
             let value = cursor.next()?;
             consumed += 1;
             let uint_value = value_to_u128(&value)?;
@@ -396,34 +383,28 @@ fn apply_format_spec(
                 false,
             )
         }
-        'f' | 'F' | 'e' | 'E' | 'g' | 'G' => {
+        FormatConversion::Float(style) => {
             let value = cursor.next()?;
             consumed += 1;
             let float_value = value_to_f64(&value)?;
             format_float(
                 float_value,
-                conversion,
+                style,
                 flags,
                 width,
                 precision,
                 spec.flags.alternate,
             )
         }
-        's' => {
+        FormatConversion::String => {
             let value = cursor.next()?;
             consumed += 1;
             format_string(value, flags, width, precision)
         }
-        'c' => {
+        FormatConversion::Character => {
             let value = cursor.next()?;
             consumed += 1;
             format_char(value, flags, width)
-        }
-        other => {
-            return Err(format_error_with_identifier(
-                format!("sprintf: unsupported format %{other}"),
-                FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
-            ));
         }
     }?;
 
@@ -547,7 +528,7 @@ fn format_unsigned(
 
 fn format_float(
     value: f64,
-    conversion: char,
+    style: FloatStyle,
     flags: FormatFlags,
     width: Option<isize>,
     precision: Option<isize>,
@@ -589,24 +570,19 @@ fn format_float(
     }
 
     let prec = precision.unwrap_or(6).max(0) as usize;
-    let mut body = match conversion {
-        'f' | 'F' => format!("{magnitude:.prec$}"),
-        'e' => format!("{magnitude:.prec$e}"),
-        'E' => format!("{magnitude:.prec$E}"),
-        'g' | 'G' => format_float_general(magnitude, prec, conversion.is_uppercase()),
-        _ => {
-            return Err(format_error(format!(
-                "sprintf: unsupported float conversion %{}",
-                conversion
-            )))
-        }
+    let mut body = match style {
+        FloatStyle::FixedLower | FloatStyle::FixedUpper => format!("{magnitude:.prec$}"),
+        FloatStyle::ExponentLower => format!("{magnitude:.prec$e}"),
+        FloatStyle::ExponentUpper => format!("{magnitude:.prec$E}"),
+        FloatStyle::GeneralLower => format_float_general(magnitude, prec, false),
+        FloatStyle::GeneralUpper => format_float_general(magnitude, prec, true),
     };
 
-    if alternate && !body.contains('.') && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
+    if alternate && !body.contains('.') && style.permits_grouping_or_decimal() {
         body.push('.');
     }
 
-    if flags.grouping && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
+    if flags.grouping && style.permits_grouping_or_decimal() {
         body = group_float_mantissa(&body);
     }
 
@@ -1248,6 +1224,49 @@ mod tests {
         get_display_format, set_display_format, FormatMode, IntegerComplexStorage, NumericStorage,
         Tensor,
     };
+
+    #[test]
+    fn syntax_admission_and_typed_execution_share_conversion_grammar() {
+        for (format, value) in [
+            ("%d", Value::Num(12.0)),
+            ("%i", Value::Num(12.0)),
+            ("%u", Value::Num(12.0)),
+            ("%o", Value::Num(12.0)),
+            ("%x", Value::Num(12.0)),
+            ("%X", Value::Num(12.0)),
+            ("%b", Value::Num(12.0)),
+            ("%f", Value::Num(12.0)),
+            ("%F", Value::Num(12.0)),
+            ("%e", Value::Num(12.0)),
+            ("%E", Value::Num(12.0)),
+            ("%g", Value::Num(12.0)),
+            ("%G", Value::Num(12.0)),
+            ("%s", Value::from("value")),
+            ("%c", Value::Num(65.0)),
+        ] {
+            validate_format_syntax(format).expect("admitted conversion");
+            format_variadic(format, &[value]).expect("same conversion executes");
+        }
+        for invalid in ["%q", "%", "%10.2q"] {
+            assert!(validate_format_syntax(invalid).is_err());
+        }
+        assert_eq!(
+            format_variadic("%#x", &[Value::Num(255.0)]).unwrap(),
+            "0xff"
+        );
+        assert_eq!(
+            format_variadic("%#X", &[Value::Num(255.0)]).unwrap(),
+            "0XFF"
+        );
+        assert_eq!(
+            format_variadic("%.1e", &[Value::Num(12.0)]).unwrap(),
+            "1.2e1"
+        );
+        assert_eq!(
+            format_variadic("%.1E", &[Value::Num(12.0)]).unwrap(),
+            "1.2E1"
+        );
+    }
 
     #[test]
     fn format_variadic_supports_thousands_grouping_flag() {

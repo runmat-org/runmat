@@ -19,6 +19,7 @@ const BUILTIN_NAME: &str = "fprintf";
 
 mod admission;
 mod encoding;
+mod prepared;
 mod target;
 
 use admission::coerce_single_integer_string_argument;
@@ -88,7 +89,7 @@ impl FprintfEval {
 
 /// Evaluate the `fprintf` builtin without going through the dispatcher.
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
-    let prepared = admission::prepare(args).await?;
+    let prepared = prepared::prepare(args).await?;
     let raw_format = prepared.format;
     let target = prepared.target;
     let format_string =

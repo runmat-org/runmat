@@ -57,6 +57,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[
             BuiltinDocumentationLink { label: "Formatted write owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf.rs") },
             BuiltinDocumentationLink { label: "Argument and format admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/admission.rs") },
+            BuiltinDocumentationLink { label: "Prepared call and target staging", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/prepared.rs") },
             BuiltinDocumentationLink { label: "File target authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/target.rs") },
             BuiltinDocumentationLink { label: "File encoding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fprintf/encoding.rs") },
         ],

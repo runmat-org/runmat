@@ -1,6 +1,5 @@
-use super::admission::{
-    coerce_to_format_string, preflight_fid, preflight_format, preflight_special_roles,
-};
+use super::admission::{coerce_to_format_string, preflight_fid, preflight_format};
+use super::prepared::preflight_special_roles;
 use super::target::parse_fid;
 use super::*;
 use crate::builtins::common::test_support;
