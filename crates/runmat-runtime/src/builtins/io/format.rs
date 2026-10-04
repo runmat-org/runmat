@@ -1,62 +1,13 @@
 //! MATLAB-compatible `format` builtin for controlling numeric display precision.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FormatCommand, FORMAT_DESCRIPTOR, FORMAT_ERROR_ARG_CONFIG,
+    FORMAT_ERROR_UNKNOWN_MODE, FORMAT_INTEGER_AUDIT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{set_display_format, FormatMode, Tensor, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
-
-const FORMAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ans",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Empty matrix placeholder returned by sink invocation.",
-}];
-const FORMAT_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const FORMAT_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "Format mode keyword (short, long, shortE, longE, shortG, longG, rat, hex, compact, loose).",
-}];
-const FORMAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "format()",
-        inputs: &FORMAT_INPUTS_NONE,
-        outputs: &FORMAT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "format(mode)",
-        inputs: &FORMAT_INPUTS_MODE,
-        outputs: &FORMAT_OUTPUT,
-    },
-];
-const FORMAT_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FORMAT.ARG_CONFIG",
-    identifier: None,
-    when: "Input arguments do not match supported format call forms.",
-    message: "format: invalid argument configuration",
-};
-const FORMAT_ERROR_UNKNOWN_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FORMAT.UNKNOWN_MODE",
-    identifier: None,
-    when: "Mode string is not a supported numeric display mode keyword.",
-    message: "format: unknown format mode",
-};
-const FORMAT_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [FORMAT_ERROR_ARG_CONFIG, FORMAT_ERROR_UNKNOWN_MODE];
-pub const FORMAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FORMAT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FORMAT_ERRORS,
-};
 
 fn format_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -76,7 +27,9 @@ fn format_error_with(
     keywords = "format,display,precision,numeric,short,long,scientific",
     sink = true,
     suppress_auto_output = true,
-    descriptor(crate::builtins::io::format::FORMAT_DESCRIPTOR),
+    integer_audit(runmat_builtins::FORMAT_INTEGER_AUDIT),
+    binding_variant = "default",
+    descriptor(runmat_builtins::FORMAT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::format"
 )]
 async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -85,11 +38,10 @@ async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             set_display_format(FormatMode::Short);
             return Ok(empty_value());
         }
-        [Value::String(s)] => s.to_lowercase(),
-        [Value::CharArray(chars)] if chars.rows == 1 => chars
-            .row_string()
-            .expect("row-validated character array")
-            .to_lowercase(),
+        [Value::String(s)] => s.clone(),
+        [Value::CharArray(chars)] if chars.rows == 1 => {
+            chars.row_string().expect("row-validated character array")
+        }
         _ => {
             return Err(format_error_with(
                 &FORMAT_ERROR_ARG_CONFIG,
@@ -97,32 +49,19 @@ async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             ));
         }
     };
-    // Spacing modes: accepted for MATLAB compatibility but not yet implemented.
-    // Crucially, they must NOT change the active numeric format.
-    if matches!(keyword.trim(), "compact" | "loose") {
-        return Ok(empty_value());
-    }
-    set_display_format(parse_numeric_mode(keyword.trim())?);
-    Ok(empty_value())
-}
-
-fn parse_numeric_mode(s: &str) -> BuiltinResult<FormatMode> {
-    match s {
-        "short" => Ok(FormatMode::Short),
-        "long" => Ok(FormatMode::Long),
-        "shorte" => Ok(FormatMode::ShortE),
-        "longe" => Ok(FormatMode::LongE),
-        "shortg" => Ok(FormatMode::ShortG),
-        "longg" => Ok(FormatMode::LongG),
-        "rat" | "rational" => Ok(FormatMode::Rational),
-        "hex" => Ok(FormatMode::Hex),
-        other => Err(format_error_with(
+    let command = FormatCommand::decode(&keyword).ok_or_else(|| {
+        format_error_with(
             &FORMAT_ERROR_UNKNOWN_MODE,
             format!(
-                "format: unknown format '{other}'; numeric modes: short, long, shortE, longE, shortG, longG, rat, hex"
+                "format: unknown format '{}'; numeric modes: short, long, shortE, longE, shortG, longG, rat, hex",
+                keyword.trim().to_ascii_lowercase()
             ),
-        )),
+        )
+    })?;
+    if let FormatCommand::Numeric(mode) = command {
+        set_display_format(mode);
     }
+    Ok(empty_value())
 }
 
 fn empty_value() -> Value {
@@ -153,28 +92,53 @@ mod tests {
         assert!(labels.contains(&"format()"));
         assert!(labels.contains(&"format(mode)"));
 
-        // parse_numeric_mode receives an already-lowercased string from the builtin.
-        assert_eq!(parse_numeric_mode("short").unwrap(), FormatMode::Short);
-        assert_eq!(parse_numeric_mode("long").unwrap(), FormatMode::Long);
-        assert_eq!(parse_numeric_mode("shorte").unwrap(), FormatMode::ShortE);
-        assert_eq!(parse_numeric_mode("longe").unwrap(), FormatMode::LongE);
-        assert_eq!(parse_numeric_mode("shortg").unwrap(), FormatMode::ShortG);
-        assert_eq!(parse_numeric_mode("longg").unwrap(), FormatMode::LongG);
-        assert_eq!(parse_numeric_mode("rat").unwrap(), FormatMode::Rational);
         assert_eq!(
-            parse_numeric_mode("rational").unwrap(),
-            FormatMode::Rational
+            FormatCommand::decode("short"),
+            Some(FormatCommand::Numeric(FormatMode::Short))
         );
-        assert_eq!(parse_numeric_mode("hex").unwrap(), FormatMode::Hex);
+        assert_eq!(
+            FormatCommand::decode("long"),
+            Some(FormatCommand::Numeric(FormatMode::Long))
+        );
+        assert_eq!(
+            FormatCommand::decode("shorte"),
+            Some(FormatCommand::Numeric(FormatMode::ShortE))
+        );
+        assert_eq!(
+            FormatCommand::decode("longe"),
+            Some(FormatCommand::Numeric(FormatMode::LongE))
+        );
+        assert_eq!(
+            FormatCommand::decode("shortg"),
+            Some(FormatCommand::Numeric(FormatMode::ShortG))
+        );
+        assert_eq!(
+            FormatCommand::decode("longg"),
+            Some(FormatCommand::Numeric(FormatMode::LongG))
+        );
+        assert_eq!(
+            FormatCommand::decode("rat"),
+            Some(FormatCommand::Numeric(FormatMode::Rational))
+        );
+        assert_eq!(
+            FormatCommand::decode("rational"),
+            Some(FormatCommand::Numeric(FormatMode::Rational))
+        );
+        assert_eq!(
+            FormatCommand::decode("hex"),
+            Some(FormatCommand::Numeric(FormatMode::Hex))
+        );
     }
 
     #[test]
     fn test_parse_numeric_mode_unknown() {
-        assert!(parse_numeric_mode("bank").is_err());
-        assert!(parse_numeric_mode("").is_err());
-        // Spacing modes are handled before parse_numeric_mode is called.
-        assert!(parse_numeric_mode("compact").is_err());
-        assert!(parse_numeric_mode("loose").is_err());
+        assert_eq!(FormatCommand::decode("bank"), None);
+        assert_eq!(FormatCommand::decode(""), None);
+        assert_eq!(
+            FormatCommand::decode("compact"),
+            Some(FormatCommand::Compact)
+        );
+        assert_eq!(FormatCommand::decode("loose"), Some(FormatCommand::Loose));
     }
 
     #[test]
