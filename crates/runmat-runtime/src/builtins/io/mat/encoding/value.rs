@@ -9,6 +9,7 @@ fn canonical_dims(shape: &[usize]) -> Vec<usize> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray>> {
     convert_value_with_cooperation(value, MatEncodingOwner::Save, None)
 }
