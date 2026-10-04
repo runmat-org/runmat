@@ -64,7 +64,13 @@ fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> Builti
     // A native target is a prerequisite to touching CWD, sources, or the SDK.
     // The compiler adapter still validates the exact target and artifact at
     // plan/publication time; this preflight only fixes unsupported-host order.
-    runmat_mex::MexTarget::current().map_err(|error| map_mex_build_error(builtin, error))?;
+    let target =
+        runmat_mex::MexTarget::current().map_err(|error| map_mex_build_error(builtin, error))?;
+    if cuda {
+        target
+            .validate_cuda_build()
+            .map_err(|error| map_mex_build_error(builtin, error))?;
+    }
     let working_directory = runmat_filesystem::current_dir().map_err(|error| {
         build_runtime_error(format!(
             "{builtin}: could not resolve the current directory: {error}"
@@ -174,6 +180,12 @@ mod tests {
     }
 
     #[test]
+    fn mexcuda_invalid_argument_class_precedes_target_check() {
+        let error = mexcuda_builtin(vec![Value::OutputList(Vec::new())]).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
+    }
+
+    #[test]
     fn requested_build_output_is_rejected_before_argument_or_filesystem_work() {
         let _outputs = crate::output_count::push_output_count(Some(1));
         let error = mex_builtin(Vec::new()).unwrap_err();
@@ -190,7 +202,10 @@ mod tests {
     #[test]
     fn build_error_keeps_typed_source_at_target_or_parser_boundary() {
         let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
-        let expected = if runmat_mex::MexTarget::current().is_ok() {
+        let expected = if runmat_mex::MexTarget::current()
+            .and_then(|target| target.validate_cuda_build())
+            .is_ok()
+        {
             "RunMat:MEX:InvalidBuildArguments"
         } else {
             "RunMat:MEX:UnsupportedTarget"
@@ -215,17 +230,31 @@ mod tests {
         let error = mex_builtin(vec![Value::from("missing.c")]).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:UnsupportedTarget"));
         assert!(error.source.is_some());
+        let cuda_error = mexcuda_builtin(vec![Value::from("missing.cu")]).unwrap_err();
+        assert_eq!(
+            cuda_error.identifier(),
+            Some("RunMat:MEX:UnsupportedTarget")
+        );
+        assert!(cuda_error.source.is_some());
     }
 
+    #[cfg(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "x86_64")
+    ))]
     #[test]
     fn mexcuda_requires_a_cuda_translation_unit_on_supported_targets() {
         let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
-        let expected = if runmat_mex::MexTarget::current().is_ok() {
-            "RunMat:MEX:InvalidBuildArguments"
-        } else {
-            "RunMat:MEX:UnsupportedTarget"
-        };
-        assert_eq!(error.identifier(), Some(expected));
+        assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
+        assert!(error.source.is_some());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mexcuda_rejects_unsupported_native_target_before_source_access() {
+        let error = mexcuda_builtin(vec![Value::from("missing.cu")]).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:MEX:UnsupportedTarget"));
+        assert!(error.source.is_some());
     }
 
     #[cfg(any(

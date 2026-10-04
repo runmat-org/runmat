@@ -57,6 +57,18 @@ impl MexTarget {
         Ok(())
     }
 
+    /// Admit the operating-system ABI used by the CUDA MEX toolchain.
+    /// Callers may check this before source or SDK access; the build plan
+    /// repeats it against the artifact target rather than trusting the caller.
+    pub fn validate_cuda_build(&self) -> Result<(), MexBuildError> {
+        self.validate()?;
+        if matches!(self.operating_system.as_str(), "linux" | "windows") {
+            Ok(())
+        } else {
+            Err(MexBuildError::UnsupportedCudaTarget)
+        }
+    }
+
     pub(super) fn validate_compiler(&self, family: CCompilerFamily) -> Result<(), MexBuildError> {
         let compatible = match self.operating_system.as_str() {
             "macos" | "linux" => family == CCompilerFamily::GnuLike,
@@ -75,5 +87,34 @@ impl MexTarget {
 
     pub(super) fn is_current(&self) -> bool {
         Self::current().is_ok_and(|current| current == *self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(operating_system: &str, suffix: &str) -> MexTarget {
+        MexTarget {
+            triple: format!("x86_64-unknown-{operating_system}"),
+            architecture: "x86_64".into(),
+            operating_system: operating_system.into(),
+            pointer_width: 64,
+            suffix: suffix.into(),
+        }
+    }
+
+    #[test]
+    fn cuda_target_admission_matches_build_plan_supported_hosts() {
+        assert!(target("linux", "mexa64").validate_cuda_build().is_ok());
+        assert!(target("windows", "mexw64").validate_cuda_build().is_ok());
+        assert!(matches!(
+            target("macos", "mexmaci64").validate_cuda_build(),
+            Err(MexBuildError::UnsupportedCudaTarget)
+        ));
+        assert!(matches!(
+            target("wasm", "").validate_cuda_build(),
+            Err(MexBuildError::UnsupportedTargetIdentity { .. })
+        ));
     }
 }

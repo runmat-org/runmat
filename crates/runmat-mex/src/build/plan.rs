@@ -178,9 +178,7 @@ fn validate(build: &MexBuild) -> Result<(), MexBuildError> {
         return Err(MexBuildError::MixedFortranCudaSources);
     }
     if has_cuda {
-        if !matches!(build.target.operating_system.as_str(), "linux" | "windows") {
-            return Err(MexBuildError::UnsupportedCudaTarget);
-        }
+        build.target.validate_cuda_build()?;
         if !super::is_supported_cuda_compiler(&build.cuda_compiler) {
             return Err(MexBuildError::UnsupportedCudaCompiler {
                 compiler: build.cuda_compiler.clone(),
