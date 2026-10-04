@@ -3,7 +3,6 @@
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
-use std::sync::Arc;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
@@ -428,25 +427,39 @@ async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let path = value_to_path(&args[0], "fileattrib", "path")?;
-    if args.len() > 1 {
-        apply_fileattrib_flags(&path, &args[1..]).await?;
+    let readonly = parse_fileattrib_flags(&args[1..])?;
+    let selected = CapturedFsPath::capture(path, "fileattrib")?;
+    if let Some(readonly) = readonly {
+        selected.set_readonly(readonly).await.map_err(|source| {
+            build_runtime_error(format!("fileattrib: {source}"))
+                .with_builtin("fileattrib")
+                .with_source(source)
+                .build()
+        })?;
     }
-    match vfs::metadata_async(&path).await {
+    match selected.metadata().await {
         Ok(meta) => Ok(output_list_for_count(vec![
             Value::Num(1.0),
-            Value::Struct(fileattrib_struct(&path, &meta)),
+            Value::Struct(fileattrib_struct(&selected.path, &meta)),
         ])),
-        Err(err) => Ok(output_list_for_count(vec![
-            Value::Num(0.0),
-            Value::Struct(error_struct(&err.to_string())),
-        ])),
+        Err(err) => {
+            selected.check_current().map_err(|source| {
+                build_runtime_error(format!("fileattrib: {source}"))
+                    .with_builtin("fileattrib")
+                    .with_source(source)
+                    .build()
+            })?;
+            Ok(output_list_for_count(vec![
+                Value::Num(0.0),
+                Value::Struct(error_struct(&err.to_string())),
+            ]))
+        }
     }
 }
 
-async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<()> {
+fn parse_fileattrib_flags(flags: &[Value]) -> BuiltinResult<Option<bool>> {
     // Decode the complete option list before the first filesystem mutation.
-    // Read flags have no mutation in the current provider vocabulary; the last
-    // supported writable flag determines the single required update.
+    // The last writable flag determines the single provider-owned update.
     let mut readonly = None;
     for flag_value in flags {
         let flag = scalar_text(flag_value, "fileattrib", "attribute")?;
@@ -454,8 +467,12 @@ async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<(
             "+w" | "w" => readonly = Some(false),
             "-w" => readonly = Some(true),
             "+r" | "r" | "-r" => {
-                // MATLAB exposes read flags, but the active filesystem provider only models
-                // writable/read-only state. Treat read flags as accepted no-ops.
+                return Err(build_runtime_error(
+                    "fileattrib: read permission changes require provider permission support",
+                )
+                .with_builtin("fileattrib")
+                .with_identifier("RunMat:fileattrib:UnsupportedPermission")
+                .build());
             }
             other => {
                 return Err(compat_error(
@@ -465,35 +482,25 @@ async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<(
             }
         }
     }
-    if let Some(readonly) = readonly {
-        vfs::set_readonly_async(path, readonly)
-            .await
-            .map_err(|source| {
-                build_runtime_error(format!("fileattrib: {source}"))
-                    .with_builtin("fileattrib")
-                    .with_source(source)
-                    .build()
-            })?;
-    }
-    Ok(())
+    Ok(readonly)
 }
 
 fn fileattrib_struct(path: &Path, meta: &vfs::FsMetadata) -> StructValue {
     let mut st = StructValue::new();
     st.insert("Name", char_value(&path_to_string(path)));
-    st.insert("archive", Value::Bool(false));
-    st.insert("system", Value::Bool(false));
+    st.insert("archive", Value::Num(f64::NAN));
+    st.insert("system", Value::Num(f64::NAN));
     st.insert("hidden", Value::Bool(is_hidden_path(path)));
     st.insert("directory", Value::Bool(meta.is_dir()));
-    st.insert("UserRead", Value::Bool(true));
+    st.insert("UserRead", Value::Num(f64::NAN));
     st.insert("UserWrite", Value::Bool(!meta.is_readonly()));
-    st.insert("UserExecute", Value::Bool(meta.is_dir()));
-    st.insert("GroupRead", Value::Bool(true));
-    st.insert("GroupWrite", Value::Bool(!meta.is_readonly()));
-    st.insert("GroupExecute", Value::Bool(meta.is_dir()));
-    st.insert("OtherRead", Value::Bool(true));
-    st.insert("OtherWrite", Value::Bool(!meta.is_readonly()));
-    st.insert("OtherExecute", Value::Bool(meta.is_dir()));
+    st.insert("UserExecute", Value::Num(f64::NAN));
+    st.insert("GroupRead", Value::Num(f64::NAN));
+    st.insert("GroupWrite", Value::Num(f64::NAN));
+    st.insert("GroupExecute", Value::Num(f64::NAN));
+    st.insert("OtherRead", Value::Num(f64::NAN));
+    st.insert("OtherWrite", Value::Num(f64::NAN));
+    st.insert("OtherExecute", Value::Num(f64::NAN));
     st
 }
 
@@ -639,7 +646,7 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         options.push((option, &pair[1]));
     }
-    let input = CapturedMemmapInput::capture(filename)?;
+    let input = CapturedFsPath::capture(filename, "memmapfile")?;
     let mut writable = false;
     let mut offset = 0usize;
     let mut format = MemmapFormat::default();
@@ -693,57 +700,8 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Object(object))
 }
 
-struct CapturedMemmapInput {
-    provider: Arc<dyn vfs::FsProvider>,
-    path: PathBuf,
-    resource: Option<vfs::CapturedFsResourceLease>,
-}
-
-impl CapturedMemmapInput {
-    fn capture(path: PathBuf) -> BuiltinResult<Self> {
-        let (provider, path) = if path.is_absolute() {
-            (vfs::current_provider(), path)
-        } else {
-            let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|source| {
-                build_runtime_error(format!(
-                    "memmapfile: cannot resolve current folder: {source}"
-                ))
-                .with_builtin("memmapfile")
-                .with_source(source)
-                .build()
-            })?;
-            (provider, cwd.join(path))
-        };
-        let resource = vfs::capture_resource_lease(Arc::clone(&provider));
-        Ok(Self {
-            provider,
-            path,
-            resource,
-        })
-    }
-
-    async fn read(&self) -> std::io::Result<Vec<u8>> {
-        self.check_current()?;
-        let bytes = self.provider.read(&self.path).await?;
-        self.check_current()?;
-        Ok(bytes)
-    }
-
-    fn check_current(&self) -> std::io::Result<()> {
-        if self
-            .resource
-            .as_ref()
-            .is_some_and(|lease| !lease.is_valid())
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "memmapfile captured filesystem authority was revoked",
-            ));
-        }
-        Ok(())
-    }
-}
-
+mod captured_fs_path;
+use captured_fs_path::CapturedFsPath;
 mod memmapfile;
 use memmapfile::{numeric_usize, MemmapFormat, MemmapOption};
 
@@ -904,7 +862,9 @@ mod tests {
         GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
         MEMMAPFILE_INTEGER_CAPABILITIES,
     };
+    use runmat_filesystem::FsProvider;
     use runmat_value::{IntegerStorage, Tensor};
+    use std::sync::Arc;
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -1721,7 +1681,7 @@ mod tests {
             .expect("same path on foreign owner");
         let _selected = vfs::replace_provider(selected);
         vfs::set_current_dir(&selected_dir).expect("selected cwd");
-        let captured = CapturedMemmapInput::capture(PathBuf::from("source.bin"))
+        let captured = CapturedFsPath::capture(PathBuf::from("source.bin"), "memmapfile")
             .expect("capture selected input");
         let _other = vfs::replace_provider(other);
         vfs::set_current_dir(&other_dir).expect("other cwd");
@@ -1887,6 +1847,62 @@ mod tests {
         let readonly = std::fs::metadata(&path).unwrap().permissions().readonly();
         assert!(!readonly);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fileattrib_read_flag_rejects_before_an_earlier_write_flag_mutates() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-fileattrib-preflight");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-fileattrib-preflight");
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        let path = root.join("input.bin");
+        provider.write_project_path(&path, b"value").unwrap();
+        let _installed = vfs::replace_provider(provider.clone());
+        let error = run(fileattrib_builtin(vec![
+            Value::String(path_to_string(&path)),
+            char_value("-w"),
+            char_value("+r"),
+        ]))
+        .expect_err("unsupported read permission must reject before mutation");
+        assert_eq!(
+            error.identifier(),
+            "RunMat:fileattrib:UnsupportedPermission"
+        );
+        assert!(!futures::executor::block_on(provider.metadata(&path))
+            .unwrap()
+            .is_readonly());
+    }
+
+    #[test]
+    fn fileattrib_captured_path_retains_provider_for_mutation_and_metadata() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-fileattrib-selected");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-fileattrib-selected");
+        let selected = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        let other = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        let path = root.join("input.bin");
+        selected.write_project_path(&path, b"selected").unwrap();
+        other.write_project_path(&path, b"foreign").unwrap();
+        let _selected = vfs::replace_provider(selected.clone());
+        vfs::set_current_dir(&root).unwrap();
+        let captured = CapturedFsPath::capture(PathBuf::from("input.bin"), "fileattrib").unwrap();
+        let _other = vfs::replace_provider(other.clone());
+        futures::executor::block_on(captured.set_readonly(true)).unwrap();
+        assert!(futures::executor::block_on(captured.metadata())
+            .unwrap()
+            .is_readonly());
+        assert!(futures::executor::block_on(selected.metadata(&path))
+            .unwrap()
+            .is_readonly());
+        assert!(!futures::executor::block_on(other.metadata(&path))
+            .unwrap()
+            .is_readonly());
     }
 
     #[test]
