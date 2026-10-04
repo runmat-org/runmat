@@ -324,6 +324,27 @@ fn execute_path_request(
     block_on(session.execute_request(request)).result
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn system_executes_from_ordinary_core_without_a_tokio_caller() {
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let _serial = runmat_filesystem::provider_override_lock();
+    let _native = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::NativeFsProvider,
+    ));
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    let outcome = execute_text_request(
+        &mut session,
+        "[status, output] = system('echo runmat'); assert(status == 0); assert(contains(output, 'runmat'));",
+    )
+    .expect("ordinary Core execution must drive native process I/O");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "status",
+        &runmat_value::Value::Num(0.0)
+    ));
+}
+
 fn outcome_has_named_upsert(
     outcome: &abi::ExecutionOutcome,
     name: &str,

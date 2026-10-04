@@ -18,6 +18,17 @@ fn insufficient_resource_evidence() -> RuntimeError {
         .build()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn stale_directory(source: std::io::Error) -> RuntimeError {
+    build_runtime_error(format!(
+        "system: working directory authority revoked: {source}"
+    ))
+    .with_identifier("RunMat:system:StaleFilesystem")
+    .with_builtin("system")
+    .with_source(source)
+    .build()
+}
+
 pub(super) async fn run(
     runtime: Option<&RuntimeContext>,
     command: &str,
@@ -44,7 +55,8 @@ pub(super) async fn run(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use runmat_filesystem::NativePathIntent;
+        use futures::future::{select, Either};
+        use runmat_filesystem::{NativePathIntent, NativeProcessRevocation};
         use runmat_process_host::environment::EnvironmentPolicy;
         use runmat_process_host::HostCommand;
 
@@ -66,14 +78,25 @@ pub(super) async fn run(
                     .with_builtin("system")
                     .build()
                 })?;
-        cwd.check_current().map_err(|source| {
-            build_runtime_error(format!(
-                "system: working directory authority revoked: {source}"
-            ))
+        cwd.check_current().map_err(stale_directory)?;
+        let revocation = cwd.process_revocation();
+        if matches!(revocation, NativeProcessRevocation::Unavailable) {
+            return Err(build_runtime_error(
+                "system: selected process directory has no revocation observation",
+            )
+            .with_identifier("RunMat:system:UnsupportedFilesystem")
             .with_builtin("system")
-            .with_source(source)
-            .build()
-        })?;
+            .build());
+        }
+        cwd.check_current().map_err(stale_directory)?;
+        let process = runtime
+            .and_then(|runtime| runtime.service_ports().process())
+            .ok_or_else(|| {
+                build_runtime_error("system: no native process service is installed")
+                    .with_identifier("RunMat:RuntimeContext:CapabilityUnavailable")
+                    .with_builtin("system")
+                    .build()
+            })?;
 
         #[cfg(windows)]
         let mut child = HostCommand::new("cmd");
@@ -90,24 +113,39 @@ pub(super) async fn run(
         child.working_directory = Some(cwd.path().to_path_buf());
         child.environment_policy = EnvironmentPolicy::Inherit;
 
+        let execute = async {
+            match revocation {
+                NativeProcessRevocation::Stable => {
+                    process.output_complete(child).await.map_err(process_error)
+                }
+                NativeProcessRevocation::Watch(watch) => {
+                    match select(watch, process.output_complete(child)).await {
+                        Either::Right((result, _watch)) => result.map_err(process_error),
+                        Either::Left(((), _process)) => Err(build_runtime_error(
+                            "system: selected process directory authority was revoked",
+                        )
+                        .with_identifier("RunMat:system:StaleFilesystem")
+                        .with_builtin("system")
+                        .with_source(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "process directory authority revoked",
+                        ))
+                        .build()),
+                    }
+                }
+                NativeProcessRevocation::Unavailable => unreachable!("rejected before spawn"),
+            }
+        };
         let output = if let Some(runtime) = runtime {
             runtime
                 .cpu_cooperation()
-                .await_cancellable(child.output_complete())
+                .await_cancellable(execute)
                 .await
-                .map_err(|source| source.into_runtime_error())?
-                .map_err(process_error)?
+                .map_err(|source| source.into_runtime_error())??
         } else {
-            child.output_complete().await.map_err(process_error)?
+            execute.await?
         };
-        cwd.check_current().map_err(|source| {
-            build_runtime_error(format!(
-                "system: working directory authority revoked: {source}"
-            ))
-            .with_builtin("system")
-            .with_source(source)
-            .build()
-        })?;
+        cwd.check_current().map_err(stale_directory)?;
         let code = output
             .exit
             .code
@@ -119,66 +157,5 @@ pub(super) async fn run(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::context::{ParallelCapability, RuntimeParallelResources, RuntimeParallelService};
-    use std::rc::Rc;
-
-    struct Finite;
-
-    impl RuntimeParallelService for Finite {
-        fn supports(&self, _: ParallelCapability) -> bool {
-            false
-        }
-
-        fn placement_resources(&self) -> RuntimeParallelResources {
-            RuntimeParallelResources {
-                memory_available_bytes: Some(1),
-                ..Default::default()
-            }
-        }
-    }
-
-    #[test]
-    fn finite_resource_budget_rejects_unbounded_process_before_spawn() {
-        let runtime =
-            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-                .with_service_ports(
-                    crate::context::RuntimeServicePorts::default().with_parallel(Rc::new(Finite)),
-                );
-        let error = futures::executor::block_on(run(Some(&runtime), "printf no-process"))
-            .expect_err("unbounded route cannot claim a finite certificate");
-        assert_eq!(
-            error.identifier.as_deref(),
-            Some("RunMat:Placement:InsufficientResourceEvidence")
-        );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn virtual_provider_cannot_be_used_as_native_process_cwd() {
-        let _serial = runmat_filesystem::provider_override_lock();
-        let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
-            "/virtual",
-        ));
-        let _selected = runmat_filesystem::replace_provider(provider);
-        let error = futures::executor::block_on(run(None, "printf no-process"))
-            .expect_err("virtual cwd cannot escape to an OS process");
-        assert_eq!(
-            error.identifier.as_deref(),
-            Some("RunMat:system:UnsupportedFilesystem")
-        );
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    #[wasm_bindgen_test::wasm_bindgen_test]
-    async fn browser_process_rejects_without_spawning() {
-        let error = run(None, "printf no-process")
-            .await
-            .expect_err("browser has no process host");
-        assert_eq!(
-            error.identifier.as_deref(),
-            Some("RunMat:system:UnsupportedOnWasm")
-        );
-    }
-}
+#[path = "system/tests.rs"]
+mod tests;

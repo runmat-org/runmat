@@ -64,6 +64,18 @@ pub const SYSTEM_ERROR_UNSUPPORTED_FILESYSTEM: BuiltinErrorDescriptor = BuiltinE
     when: "The selected filesystem cannot issue a native process working-directory grant.",
     message: "system: selected filesystem cannot issue a native process directory",
 };
+pub const SYSTEM_ERROR_STALE_FILESYSTEM: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SYSTEM.STALE_FILESYSTEM",
+    identifier: Some("RunMat:system:StaleFilesystem"),
+    when: "The selected process-directory grant revokes before output publication.",
+    message: "system: selected process directory authority was revoked",
+};
+pub const SYSTEM_ERROR_MISSING_PROCESS_SERVICE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SYSTEM.MISSING_PROCESS_SERVICE",
+    identifier: Some("RunMat:RuntimeContext:CapabilityUnavailable"),
+    when: "An embedding invokes system without a native process service.",
+    message: "system: no native process service is installed",
+};
 pub const SYSTEM_ERROR_INSUFFICIENT_RESOURCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SYSTEM.INSUFFICIENT_RESOURCE",
     identifier: Some("RunMat:Placement:InsufficientResourceEvidence"),
@@ -80,6 +92,8 @@ const ERRORS: &[BuiltinErrorDescriptor] = &[
     SYSTEM_ERROR_INVALID_ARGUMENT,
     SYSTEM_ERROR_UNSUPPORTED_PLATFORM,
     SYSTEM_ERROR_UNSUPPORTED_FILESYSTEM,
+    SYSTEM_ERROR_STALE_FILESYSTEM,
+    SYSTEM_ERROR_MISSING_PROCESS_SERVICE,
     SYSTEM_ERROR_INSUFFICIENT_RESOURCE,
     SYSTEM_ERROR_PROCESS,
 ];

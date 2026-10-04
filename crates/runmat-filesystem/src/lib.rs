@@ -31,6 +31,7 @@ pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_path::{
     capture_native_path, CapturedNativePath, NativePathAuthority, NativePathGrant,
+    NativeProcessRevocation,
 };
 pub use native_path_intent::NativePathIntent;
 #[cfg(not(target_arch = "wasm32"))]

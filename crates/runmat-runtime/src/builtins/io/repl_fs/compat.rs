@@ -1691,14 +1691,35 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn system_two_outputs_returns_status_and_text() {
+        use std::rc::Rc;
+        struct Process;
+        impl crate::context::RuntimeProcessService for Process {
+            fn output_complete(
+                &self,
+                command: runmat_process_host::HostCommand,
+            ) -> crate::context::RuntimeServiceFuture<
+                runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
+            > {
+                Box::pin(command.output_complete())
+            }
+        }
+        let _serial = vfs::provider_override_lock();
+        let _native = vfs::replace_provider(Arc::new(vfs::NativeFsProvider));
+        let runtime = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default().with_process(Rc::new(Process)),
+        );
         #[cfg(windows)]
         let command = "echo hello";
         #[cfg(not(windows))]
         let command = "printf hello";
         let _guard = crate::output_count::push_output_count(Some(2));
-        let value = system_builtin(None, vec![Value::String(command.to_string())])
+        let value = system_builtin(Some(runtime), vec![Value::String(command.to_string())])
             .await
             .unwrap();
         let Value::OutputList(values) = value else {

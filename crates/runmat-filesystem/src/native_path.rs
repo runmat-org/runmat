@@ -2,8 +2,10 @@
 //! consume a [`crate::FileHandle`]. This is not a memory-resource certificate.
 
 use crate::{current_provider_with_current_dir, FsProvider, NativePathIntent};
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// Provider-owned guard for an exported native path. While retained, the
@@ -13,6 +15,18 @@ use std::sync::Arc;
 /// This does not pin an inode against unrelated OS namespace mutation.
 pub trait NativePathAuthority {
     fn is_valid(&self) -> bool;
+
+    /// Process-directory grants must declare immutable mapping or supply a
+    /// wakeable revocation witness. File-only grants need not implement this.
+    fn process_revocation(&self) -> NativeProcessRevocation<'_> {
+        NativeProcessRevocation::Unavailable
+    }
+}
+
+pub enum NativeProcessRevocation<'a> {
+    Stable,
+    Watch(Pin<Box<dyn Future<Output = ()> + 'a>>),
+    Unavailable,
 }
 
 /// An opt-in provider issues this grant; ordinary callers must obtain a
@@ -83,6 +97,10 @@ impl CapturedNativePath {
                 "captured native path authority was revoked",
             ))
         }
+    }
+
+    pub fn process_revocation(&self) -> NativeProcessRevocation<'_> {
+        self.grant.authority.process_revocation()
     }
 }
 

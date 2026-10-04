@@ -39,6 +39,9 @@ impl RunMatSession {
             .with_spmd(parallel_services.spmd)
             .with_distributed(parallel_services.distributed);
         #[cfg(not(target_arch = "wasm32"))]
+        let runtime_services =
+            runtime_services.with_process(super::process_host::default_process_service());
+        #[cfg(not(target_arch = "wasm32"))]
         let (
             runtime_services,
             foreign_runtime,

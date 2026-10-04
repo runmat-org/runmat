@@ -37,6 +37,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
                 "A browser without a process host reports that process execution is unavailable after checking the command and option. It does not return a fabricated exit status.",
                 "Complete process output is currently unbounded. If the installed execution profile imposes a finite host-memory budget, the call rejects before starting a child until an enforceable output allocation bound is available.",
                 "Cancellation or abandonment terminates the owned child process tree. Operating-system spawn, output, and wait failures retain their causes; a nonzero child exit remains a returned status rather than an exception.",
+                "Core installs the native process service. An embedding that invokes this binding directly must install the same typed service; an absent service reports a capability error instead of spawning through an ambient fallback.",
             ],
         },
     ],
@@ -73,6 +74,10 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
                 label: "Native working-directory grant",
                 target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-filesystem/src/native_path.rs"),
             },
+            BuiltinDocumentationLink {
+                label: "Core process service and shared host driver",
+                target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-core/src/session/process_host.rs"),
+            },
         ],
         verification: &[
             BuiltinEvidenceReference {
@@ -84,6 +89,11 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
                 kind: BuiltinEvidenceKind::UnitTest,
                 label: "System output, invalid control, finite budget, and virtual directory fixtures",
                 location: "builtins::io::repl_fs::compat::system::tests",
+            },
+            BuiltinEvidenceReference {
+                kind: BuiltinEvidenceKind::IntegrationTest,
+                label: "Ordinary Core execution without a Tokio caller",
+                location: "runmat_core::tests::system_executes_from_ordinary_core_without_a_tokio_caller",
             },
         ],
         notes: &[],

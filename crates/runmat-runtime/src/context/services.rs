@@ -185,6 +185,18 @@ pub trait RuntimeHttpService {
     }
 }
 
+/// Native host-owned process execution. The future starts no child until
+/// polled, and dropping it must terminate its owned process tree.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait RuntimeProcessService {
+    fn output_complete(
+        &self,
+        command: runmat_process_host::HostCommand,
+    ) -> RuntimeServiceFuture<
+        runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
+    >;
+}
+
 pub trait RuntimeErrorService {
     fn report(&self, error: &RuntimeError);
 }
@@ -722,6 +734,8 @@ pub struct RuntimeServicePorts {
     http: Option<Rc<dyn RuntimeHttpService>>,
     preferences: Option<Rc<dyn RuntimePreferenceService>>,
     user_path: Option<Rc<dyn RuntimeUserPathService>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    process: Option<Rc<dyn RuntimeProcessService>>,
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
@@ -736,8 +750,8 @@ pub struct RuntimeServicePorts {
 
 impl std::fmt::Debug for RuntimeServicePorts {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RuntimeServicePorts")
+        let mut debug = formatter.debug_struct("RuntimeServicePorts");
+        debug
             .field("call", &self.call.is_some())
             .field("builtin", &self.builtin.is_some())
             .field("workspace", &self.workspace.is_some())
@@ -758,8 +772,10 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("parallel", &self.parallel.is_some())
             .field("spmd", &self.spmd.is_some())
             .field("distributed", &self.distributed.is_some())
-            .field("collective", &self.collective.is_some())
-            .finish()
+            .field("collective", &self.collective.is_some());
+        #[cfg(not(target_arch = "wasm32"))]
+        debug.field("process", &self.process.is_some());
+        debug.finish()
     }
 }
 
@@ -856,6 +872,15 @@ impl RuntimeServicePorts {
         http,
         RuntimeHttpService,
         Http
+    );
+    #[cfg(not(target_arch = "wasm32"))]
+    port_accessors!(
+        with_process,
+        process,
+        require_process,
+        process,
+        RuntimeProcessService,
+        Process
     );
     port_accessors!(
         with_preferences,

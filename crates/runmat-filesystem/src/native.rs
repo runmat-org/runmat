@@ -45,6 +45,10 @@ impl FsProvider for NativeFsProvider {
             fn is_valid(&self) -> bool {
                 true
             }
+
+            fn process_revocation(&self) -> crate::NativeProcessRevocation<'_> {
+                crate::NativeProcessRevocation::Stable
+            }
         }
         crate::NativePathGrant::issued_by_provider(
             path.to_path_buf(),

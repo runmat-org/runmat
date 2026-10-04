@@ -83,6 +83,10 @@ fn process_working_directory_is_issued_only_by_a_real_directory_owner() {
     assert_eq!(issued.path(), directory.path());
     assert_eq!(issued.intent(), NativePathIntent::ProcessWorkingDirectory);
     assert!(issued.check_current().is_ok());
+    assert!(matches!(
+        issued.process_revocation(),
+        NativeProcessRevocation::Stable
+    ));
     let missing = directory.path().join("missing");
     let error = capture_native_path(&missing, NativePathIntent::ProcessWorkingDirectory)
         .err()
