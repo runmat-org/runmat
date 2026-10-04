@@ -12,11 +12,11 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
 
 use super::client_state::{insert_client, CLIENT_HANDLE_FIELD};
-use super::control::{configure_stream, parse_timeout_value};
-use super::tcpserver::{
-    canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
-    HANDLE_ID_FIELD,
+use super::control::{
+    canonicalize_byte_order, configure_stream, default_user_data, parse_port, parse_timeout_value,
+    string_scalar,
 };
+use super::server_state::{DEFAULT_TIMEOUT_SECONDS, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,

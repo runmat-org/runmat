@@ -1,6 +1,7 @@
 //! MATLAB-compatible `tcpserver` builtin for RunMat.
 
-use once_cell::sync::OnceCell;
+use super::control::{canonicalize_byte_order, default_user_data, parse_port, string_scalar};
+use super::server_state::{insert_server, DEFAULT_TIMEOUT_SECONDS, HANDLE_ID_FIELD};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -19,9 +20,7 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
-use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
-use std::sync::{Arc, Mutex};
 
 const BUILTIN_NAME: &str = "tcpserver";
 
@@ -203,113 +202,6 @@ pub const TCPSERVER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &TCPSERVER_ERRORS,
 };
 
-pub(crate) const DEFAULT_TIMEOUT_SECONDS: f64 = 10.0;
-pub(crate) const HANDLE_ID_FIELD: &str = "__tcpserver_id";
-
-type SharedTcpServer = Arc<Mutex<TcpServerState>>;
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub(crate) struct TcpServerState {
-    pub(crate) id: u64,
-    pub(crate) listener: TcpListener,
-    pub(crate) requested_address: String,
-    pub(crate) local_addr: SocketAddr,
-    pub(crate) timeout: f64,
-    pub(crate) name: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) byte_order: String,
-}
-
-#[derive(Default)]
-struct TcpServerRegistry {
-    next_id: u64,
-    servers: HashMap<u64, SharedTcpServer>,
-}
-
-static TCP_SERVER_REGISTRY: OnceCell<Mutex<TcpServerRegistry>> = OnceCell::new();
-
-fn registry() -> &'static Mutex<TcpServerRegistry> {
-    TCP_SERVER_REGISTRY.get_or_init(|| Mutex::new(TcpServerRegistry::default()))
-}
-
-fn insert_server(
-    listener: TcpListener,
-    requested_address: String,
-    local_addr: SocketAddr,
-    options: &ParsedOptions,
-) -> u64 {
-    let mut guard = registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-
-    guard.next_id = guard.next_id.wrapping_add(1);
-    let id = guard.next_id;
-    let state = TcpServerState {
-        id,
-        listener,
-        requested_address,
-        local_addr,
-        timeout: options.timeout,
-        name: options.name.clone(),
-        byte_order: options.byte_order.clone(),
-    };
-    guard.servers.insert(id, Arc::new(Mutex::new(state)));
-    id
-}
-
-#[allow(dead_code)]
-pub(crate) fn server_handle(id: u64) -> Option<SharedTcpServer> {
-    registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .servers
-        .get(&id)
-        .cloned()
-}
-
-pub(crate) fn close_server(id: u64) -> bool {
-    let entry = {
-        let mut guard = registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.servers.remove(&id)
-    };
-    entry.is_some()
-}
-
-pub(crate) fn close_all_servers() -> usize {
-    let entries = {
-        let mut guard = registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.servers.drain().collect::<Vec<_>>()
-    };
-    entries.len()
-}
-
-#[cfg(test)]
-pub(super) fn remove_server_for_test(id: u64) {
-    if let Some(entry) = registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .servers
-        .remove(&id)
-    {
-        drop(entry);
-    }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(super) fn clear_registry_for_test() {
-    let mut guard = registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    guard.servers.clear();
-    guard.next_id = 0;
-}
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "tcpserver",
@@ -420,7 +312,14 @@ pub(crate) async fn tcpserver_builtin(
         .local_addr()
         .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, format!("tcpserver: {err}")))?;
 
-    let id = insert_server(listener, host.clone(), local_addr, &options);
+    let id = insert_server(
+        listener,
+        host.clone(),
+        local_addr,
+        options.timeout,
+        options.name.clone(),
+        options.byte_order.clone(),
+    );
     Ok(build_tcpserver_struct(id, &host, local_addr, &options))
 }
 
@@ -650,98 +549,6 @@ fn build_tcpserver_struct(
 }
 
 #[derive(Debug, Error)]
-#[error("{message}")]
-pub(crate) struct StringScalarError {
-    message: String,
-}
-
-impl StringScalarError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-pub(crate) fn string_scalar(value: &Value, context: &str) -> Result<String, StringScalarError> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        other => Err(StringScalarError::new(format!(
-            "{context} must be a string scalar or character vector (got {other:?})"
-        ))),
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("{message}")]
-pub(crate) struct PortParseError {
-    message: String,
-}
-
-impl PortParseError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-pub(crate) fn parse_port(value: &Value) -> Result<u16, PortParseError> {
-    let port = match value {
-        Value::Int(int) => {
-            let port = int
-                .try_to_u64()
-                .ok_or_else(|| PortParseError::new("port must be non-negative"))?;
-            return u16::try_from(port).map_err(|_| {
-                PortParseError::new(format!("port {port} is outside the valid range 0–65535"))
-            });
-        }
-        Value::Num(num) => {
-            if !num.is_finite() {
-                return Err(PortParseError::new("port must be finite"));
-            }
-            if num.fract() != 0.0 {
-                return Err(PortParseError::new("port must be an integer value"));
-            }
-            *num as i64
-        }
-        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
-            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                let port = int
-                    .try_to_u64()
-                    .ok_or_else(|| PortParseError::new("port must be non-negative"))?;
-                return u16::try_from(port).map_err(|_| {
-                    PortParseError::new(format!("port {port} is outside the valid range 0–65535"))
-                });
-            }
-            let raw = crate::builtins::common::tensor::tensor_value_f64(t, 0);
-            if !raw.is_finite() {
-                return Err(PortParseError::new("port must be finite"));
-            }
-            if raw.fract() != 0.0 {
-                return Err(PortParseError::new("port must be an integer value"));
-            }
-            raw as i64
-        }
-        Value::Tensor(_) => {
-            return Err(PortParseError::new("port must be a numeric scalar"));
-        }
-        _ => {
-            return Err(PortParseError::new("port must be a numeric scalar"));
-        }
-    };
-
-    if !(0..=65_535).contains(&port) {
-        return Err(PortParseError::new(format!(
-            "port {port} is outside the valid range 0–65535"
-        )));
-    }
-    Ok(port as u16)
-}
-
-#[derive(Debug, Error)]
 enum TimeoutParseError {
     #[error("Timeout must be a scalar")]
     NonScalar,
@@ -774,26 +581,9 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
     Ok(timeout)
 }
 
-pub(crate) fn canonicalize_byte_order(raw: &str) -> Option<&'static str> {
-    let mut compact = String::with_capacity(raw.len());
-    for ch in raw.trim().chars() {
-        if ch.is_ascii_alphanumeric() {
-            compact.push(ch.to_ascii_lowercase());
-        }
-    }
-    match compact.as_str() {
-        "littleendian" | "little" => Some("little-endian"),
-        "bigendian" | "big" => Some("big-endian"),
-        _ => None,
-    }
-}
-
-pub(crate) fn default_user_data() -> Value {
-    Value::Tensor(Tensor::zeros(vec![0, 0]))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::server_state::remove_server_for_test;
     use super::*;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;

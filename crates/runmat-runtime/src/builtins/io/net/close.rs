@@ -12,7 +12,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use super::client_state::{
     close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
 };
-use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
+use super::server_state::{close_all_servers, close_server, HANDLE_ID_FIELD};
 
 const BUILTIN_NAME: &str = "close";
 
@@ -312,8 +312,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::net::accept::accept_builtin;
     use crate::builtins::io::net::client_state::client_handle;
+    use crate::builtins::io::net::server_state::server_handle;
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
-    use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
+    use crate::builtins::io::net::tcpserver::tcpserver_builtin;
     use runmat_value::{
         CellArray, CharArray, IntValue, IntegerStorage, StringArray, StructValue, Tensor, Value,
     };

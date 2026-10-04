@@ -12,8 +12,8 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
 
 use super::client_state::{insert_client, CLIENT_HANDLE_FIELD};
-use super::control::{configure_stream, parse_timeout_value};
-use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
+use super::control::{configure_stream, default_user_data, parse_timeout_value};
+use super::server_state::{server_handle, TcpServerState, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -502,9 +502,8 @@ fn accept_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>)
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::client_state::remove_client_for_test;
-    use super::super::tcpserver::{
-        remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
-    };
+    use super::super::server_state::{remove_server_for_test, HANDLE_ID_FIELD as SERVER_FIELD};
+    use super::super::tcpserver::tcpserver_builtin;
     use super::*;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
