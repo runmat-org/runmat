@@ -43,23 +43,6 @@ pub fn weboptions_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
 
-pub fn jsondecode_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![
-        Type::Struct { known_fields: None },
-        Type::cell(),
-        Type::String,
-        Type::tensor(),
-        Type::logical(),
-        Type::Num,
-        Type::Bool,
-    ])
-}
-
-pub fn jsonencode_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn load_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -221,22 +204,6 @@ mod tests {
         &[],
         Type::Struct { known_fields: None }
     );
-    assert_resolver!(
-        jsondecode_type_resolver,
-        jsondecode_type,
-        &[],
-        Type::Union(vec![
-            Type::Struct { known_fields: None },
-            Type::cell(),
-            Type::String,
-            Type::tensor(),
-            Type::logical(),
-            Type::Num,
-            Type::Bool,
-        ])
-    );
-    assert_resolver!(jsonencode_type_resolver, jsonencode_type, &[], Type::String);
-
     assert_resolver!(
         load_type_resolver,
         load_type,
