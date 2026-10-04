@@ -1043,6 +1043,39 @@ pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64
     io::copy(&mut reader, &mut writer)
 }
 
+/// Copy between absolute paths through one retained provider. Unlike
+/// `copy_file`, this never consults the process-wide provider or CWD after
+/// capture. It preserves the existing synchronous stream-copy semantics.
+pub fn copy_file_on(provider: &dyn FsProvider, from: &Path, to: &Path) -> io::Result<u64> {
+    if !from.is_absolute() || !to.is_absolute() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "copy_file_on requires captured absolute paths",
+        ));
+    }
+    let mut reader = File::from_handle(provider.open(
+        from,
+        &OpenFlags {
+            read: true,
+            ..OpenFlags::default()
+        },
+    )?);
+    let mut writer = File::from_handle(provider.open(
+        to,
+        &OpenFlags {
+            write: true,
+            create: true,
+            truncate: true,
+            ..OpenFlags::default()
+        },
+    )?);
+    io::copy(&mut reader, &mut writer)
+}
+
+#[cfg(test)]
+#[path = "copy_tests.rs"]
+mod copy_tests;
+
 #[cfg(not(target_arch = "wasm32"))]
 fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
 where

@@ -1,12 +1,16 @@
-use runmat_filesystem as vfs;
 use std::io;
 use std::path::PathBuf;
 
 use super::super::outcome::TransferOutcome;
 use super::plan::{CopyPlanEntry, TargetKind};
 
-pub(super) async fn copy(pattern: &str, destination: &str, force: bool) -> TransferOutcome {
-    let matches = match super::super::target::wildcard_matches(pattern).await {
+pub(super) async fn copy(
+    fs: &super::CopyFilesystem,
+    pattern: &str,
+    destination: &str,
+    force: bool,
+) -> TransferOutcome {
+    let matches = match fs.wildcard_matches(pattern).await {
         Ok(matches) if matches.is_empty() => return super::result::source_not_found(pattern),
         Ok(matches) => matches,
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
@@ -15,44 +19,57 @@ pub(super) async fn copy(pattern: &str, destination: &str, force: bool) -> Trans
         Err(error) => return super::result::filesystem(pattern, destination, &error),
     };
     let destination_path = PathBuf::from(destination);
-    match vfs::metadata_async(&destination_path).await {
+    match fs.metadata(&destination_path).await {
         Ok(metadata) if !metadata.is_dir() => {
             return super::result::destination_not_directory(destination);
         }
         Ok(_) => {}
-        Err(_) => return super::result::destination_missing(destination),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return super::result::destination_missing(destination);
+        }
+        Err(error) => return super::result::filesystem(pattern, destination, &error),
     }
-    let entries = match plan(matches, &destination_path, force).await {
+    let entries = match plan(fs, matches, &destination_path, force).await {
         Ok(entries) => entries,
         Err(outcome) => return outcome,
     };
-    match super::plan::execute(&entries).await {
+    match super::plan::execute(fs, &entries).await {
         Ok(()) => super::result::success(),
         Err(failure) => super::result::filesystem(&failure.source, &failure.target, &failure.error),
     }
 }
 
 async fn plan(
+    fs: &super::CopyFilesystem,
     sources: Vec<PathBuf>,
     destination: &std::path::Path,
     force: bool,
 ) -> Result<Vec<CopyPlanEntry>, TransferOutcome> {
     let mut entries = Vec::with_capacity(sources.len());
     for source in sources {
-        entries.push(plan_entry(source, destination, force).await?);
+        entries.push(plan_entry(fs, source, destination, force).await?);
     }
     Ok(entries)
 }
 
 async fn plan_entry(
+    fs: &super::CopyFilesystem,
     source: PathBuf,
     destination: &std::path::Path,
     force: bool,
 ) -> Result<CopyPlanEntry, TransferOutcome> {
     let source_display = super::super::target::display(&source);
-    let metadata = vfs::metadata_async(&source)
-        .await
-        .map_err(|_| super::result::source_not_found(&source_display))?;
+    let metadata = fs.metadata(&source).await.map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            super::result::source_not_found(&source_display)
+        } else {
+            super::result::filesystem(
+                &source_display,
+                &super::super::target::display(destination),
+                &error,
+            )
+        }
+    })?;
     let name = source.file_name().ok_or_else(|| {
         super::result::filesystem(
             &source_display,
@@ -61,11 +78,11 @@ async fn plan_entry(
         )
     })?;
     let target = destination.join(name);
-    if super::super::target::same_path(&source, &target).await {
+    if fs.same_path(&source, &target).await {
         return Err(super::result::same_path(&source_display));
     }
     let target_display = super::super::target::display(&target);
-    let replace = match vfs::metadata_async(&target).await {
+    let replace = match fs.metadata(&target).await {
         Ok(_) if !force => return Err(super::result::destination_exists(&target_display)),
         Ok(existing) if existing.is_dir() => Some(TargetKind::Directory),
         Ok(_) => Some(TargetKind::File),

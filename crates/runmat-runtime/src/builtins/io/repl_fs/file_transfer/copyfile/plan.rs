@@ -23,20 +23,22 @@ pub(super) struct CopyFailure {
     pub(super) error: io::Error,
 }
 
-pub(super) async fn execute(entries: &[CopyPlanEntry]) -> Result<(), CopyFailure> {
+pub(super) async fn execute(
+    fs: &super::CopyFilesystem,
+    entries: &[CopyPlanEntry],
+) -> Result<(), CopyFailure> {
     for entry in entries {
         if let Some(kind) = entry.replace {
-            if let Err(error) = super::super::target::remove_existing(
-                &entry.target,
-                matches!(kind, TargetKind::Directory),
-            )
-            .await
+            if let Err(error) = fs
+                .remove_existing(&entry.target, matches!(kind, TargetKind::Directory))
+                .await
             {
                 return Err(failure(entry, error));
             }
         }
         if let Err(error) =
-            super::filesystem::copy(&entry.source, &entry.target, entry.source_is_directory).await
+            super::filesystem::copy(fs, &entry.source, &entry.target, entry.source_is_directory)
+                .await
         {
             return Err(failure(entry, error));
         }
