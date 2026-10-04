@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn build_xlsx_workbook(
+pub(in crate::builtins::io::tabular) fn build_xlsx_workbook(
     table: &CellTable,
     sheet_name: &str,
     start: RangeStart,
@@ -76,7 +76,7 @@ pub(super) fn build_xlsx_workbook(
     Ok(cursor.into_inner())
 }
 
-pub(super) fn write_xlsx_part(
+pub(in crate::builtins::io::tabular) fn write_xlsx_part(
     zip: &mut zip::ZipWriter<Cursor<Vec<u8>>>,
     name: &str,
     contents: &str,
@@ -100,7 +100,10 @@ pub(super) fn write_xlsx_part(
     Ok(())
 }
 
-pub(super) fn build_sheet_xml(table: &CellTable, start: RangeStart) -> String {
+pub(in crate::builtins::io::tabular) fn build_sheet_xml(
+    table: &CellTable,
+    start: RangeStart,
+) -> String {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
