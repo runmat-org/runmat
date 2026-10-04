@@ -17,7 +17,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     title: Some("restoredefaultpath"),
     slug: Some("restoredefaultpath"),
     summary: "Restore the session's captured startup search path.",
-    description: "`restoredefaultpath()` resets the active ordered search path to its captured startup layers: the application user-path setting, configured environment paths, and the known RunMat installation path. The current folder remains an implicit lookup location. An optional RunMat output returns the restored path as a character row.",
+    description: "`restoredefaultpath()` resets the active ordered search path to its captured startup layers: the application user-path setting, configured environment paths, and the known RunMat installation path. The current folder remains an implicit lookup location. A requested path output is a RunMat extension; the MATLAB-compatible form is statement-only.",
     keywords: &["restoredefaultpath", "search path", "startup"],
     related: &["path", "userpath", "addpath", "rmpath"],
     sections: &[

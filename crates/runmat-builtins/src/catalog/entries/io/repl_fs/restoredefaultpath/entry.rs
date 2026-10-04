@@ -40,7 +40,7 @@ pub const RESTOREDEFAULTPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalog
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &[super::RESTOREDEFAULTPATH_RETURN_EXTENSION],
     integer_capabilities: &[],
     integer_audit: Some(&super::RESTOREDEFAULTPATH_INTEGER_AUDIT),
     suppress_auto_output: true,

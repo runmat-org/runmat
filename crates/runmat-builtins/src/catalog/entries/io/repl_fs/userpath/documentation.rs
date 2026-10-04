@@ -27,6 +27,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
             heading: "Setting and resolution",
             paragraphs: &[
                 "The application setting is distinct from project files and from preference groups. A custom path retains its original spelling; a relative path is resolved against the captured working directory for the active session. `reset` and `clear` are separate operations: reset selects the home-directory default, while clear removes the user entry.",
+                "Relative and other partial custom paths are available in the R2026b compatibility release. With the current R2026a pin, they require RunMat extension mode; absolute custom paths, reset, and clear do not.",
                 "The default is `Documents/MATLAB` beneath the available home directory. On Linux, an absent `Documents` folder yields an empty default and no folder is created. Ordinary startup hydration and queries do not create folders. An explicit reset creates a missing default folder through the selected provider on macOS, Windows, and browser hosts; an unsupported provider reports its typed error. The active search path orders the user entry before configured environment paths and the RunMat installation path, while the current folder remains an implicit lookup location.",
             ],
         },

@@ -1,5 +1,9 @@
 //! Public userpath controls and immediate ordered search-path publication.
 
+use runmat_builtins::{
+    UserPathControl, UserPathForm, RESTOREDEFAULTPATH_RETURN_EXTENSION,
+    USERPATH_PARTIAL_PATH_EXTENSION,
+};
 use runmat_value::Value;
 
 use crate::builtins::common::path_state::CapturedUserPathAuthority;
@@ -15,9 +19,6 @@ enum Request {
 
 pub(super) async fn run(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
     let request = decode(args)?;
-    if let Request::Change(UserPathMutation::Set(ref text)) = request {
-        CapturedUserPathAuthority::validate_custom_text(text).map_err(path_error)?;
-    }
     let runtime = runtime.ok_or_else(unavailable)?;
     let service = runtime
         .service_ports()
@@ -146,6 +147,12 @@ pub(super) fn restore(runtime: Option<RuntimeContext>, args: Vec<Value>) -> Buil
                 .build(),
         );
     }
+    if crate::output_count::current_output_count() == Some(1) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &RESTOREDEFAULTPATH_RETURN_EXTENSION,
+            "restoredefaultpath",
+        )?;
+    }
     let runtime = runtime.ok_or_else(restore_unavailable)?;
     let search = runtime.search_path().ok_or_else(restore_unavailable)?;
     if !search.user_authority_current() {
@@ -184,12 +191,29 @@ fn decode(args: Vec<Value>) -> BuiltinResult<Request> {
                 .with_identifier("RunMat:userpath:InvalidPath")
                 .build()
         })?;
-    let mutation = if text.eq_ignore_ascii_case("reset") {
-        UserPathMutation::Reset
-    } else if text.eq_ignore_ascii_case("clear") {
-        UserPathMutation::Clear
-    } else {
-        UserPathMutation::Set(text)
+    let control = UserPathControl::parse(&text).map_err(|_| {
+        build_runtime_error("userpath: invalid path or command")
+            .with_builtin("userpath")
+            .with_identifier("RunMat:userpath:InvalidPath")
+            .build()
+    })?;
+    let mutation = match control {
+        UserPathControl::Reset => UserPathMutation::Reset,
+        UserPathControl::Clear => UserPathMutation::Clear,
+        UserPathControl::Custom {
+            form: UserPathForm::Absolute,
+            ..
+        } => UserPathMutation::Set(text),
+        UserPathControl::Custom {
+            form: UserPathForm::Partial,
+            ..
+        } => {
+            crate::compatibility::ensure_builtin_feature_enabled(
+                &USERPATH_PARTIAL_PATH_EXTENSION,
+                "userpath",
+            )?;
+            UserPathMutation::Set(text)
+        }
     };
     Ok(Request::Change(mutation))
 }
@@ -482,5 +506,75 @@ mod tests {
         assert_eq!(search.current_string(), "old");
         let _active = crate::context::RuntimeContextGuard::enter(runtime);
         assert!(crate::builtins::common::path_search::search_directories("lookup").is_ok());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn partial_path_is_gated_before_filesystem_or_application_settings() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let rejected = futures::executor::block_on(run(
+            None,
+            vec![super::super::char_value("relative/toolbox")],
+        ))
+        .expect_err("R2026a rejects a partial path before context capture");
+        assert_eq!(
+            rejected.identifier(),
+            USERPATH_PARTIAL_PATH_EXTENSION.error_identifier
+        );
+        #[cfg(windows)]
+        let absolute = "C:\\installed\\toolbox";
+        #[cfg(not(windows))]
+        let absolute = "/installed/toolbox";
+        let absolute_result =
+            futures::executor::block_on(run(None, vec![super::super::char_value(absolute)]))
+                .expect_err("absolute paths reach the missing service");
+        assert_eq!(
+            absolute_result.identifier(),
+            Some("RunMat:RuntimeContext:CapabilityUnavailable")
+        );
+        drop(_strict);
+        let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
+        let admitted = futures::executor::block_on(run(
+            None,
+            vec![super::super::char_value("relative/toolbox")],
+        ))
+        .expect_err("RunMat mode admits the control before service lookup");
+        assert_eq!(
+            admitted.identifier(),
+            Some("RunMat:RuntimeContext:CapabilityUnavailable")
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let search = Arc::new(SearchPath::new("factory".into()));
+        search.replace_entries(vec![crate::builtins::common::path_state::PathEntry::new(
+            "manual".into(),
+            crate::builtins::common::path_state::PathOrigin::Manual,
+        )]);
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_search_path(search.clone());
+        {
+            let _output = crate::output_count::push_output_count(Some(1));
+            let rejected = restore(Some(runtime.clone()), vec![])
+                .expect_err("MATLAB-compatible form has no requested result");
+            assert_eq!(
+                rejected.identifier(),
+                RESTOREDEFAULTPATH_RETURN_EXTENSION.error_identifier
+            );
+            assert_eq!(search.current_string(), "manual");
+        }
+        {
+            let _output = crate::output_count::push_output_count(Some(0));
+            restore(Some(runtime.clone()), vec![]).expect("statement restores the path");
+            assert_eq!(search.current_string(), "factory");
+        }
+        drop(_strict);
+        let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _output = crate::output_count::push_output_count(Some(1));
+        restore(Some(runtime), vec![]).expect("RunMat mode may request the restored path");
     }
 }

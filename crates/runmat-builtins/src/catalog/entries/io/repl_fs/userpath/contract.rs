@@ -45,6 +45,16 @@ pub const USERPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: ERRORS,
 };
+pub const USERPATH_PARTIAL_PATH_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "userpath-partial-path",
+        mode: BuiltinExtensionMode::AvailableSince(MatlabRelease {
+            year: 2026,
+            half: MatlabReleaseHalf::B,
+        }),
+        description: "userpath partial paths require R2026b or RunMat extension mode",
+        error_identifier: Some("RunMat:compatibility:UserpathPartialPathExtension"),
+    };
 pub const USERPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,

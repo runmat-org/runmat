@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use runmat_builtins::UserPathControl;
 use runmat_filesystem::{self as fs, CapturedFsResourceLease, FsProvider};
 
 use crate::context::UserPathSetting;
@@ -28,13 +29,12 @@ impl CapturedUserPathAuthority {
     /// Pure shape/control admission before provider capture or application
     /// storage. Resolution still validates the captured namespace separately.
     pub fn validate_custom_text(text: &str) -> io::Result<()> {
-        if text.is_empty() || text.contains(super::PATH_LIST_SEPARATOR) || text.contains('\0') {
-            return Err(io::Error::new(
+        UserPathControl::parse(text).map(|_| ()).map_err(|_| {
+            io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "custom user path is not one path-list entry",
-            ));
-        }
-        Ok(())
+            )
+        })
     }
 
     pub fn capture() -> io::Result<Self> {

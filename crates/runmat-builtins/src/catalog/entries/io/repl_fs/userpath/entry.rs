@@ -45,7 +45,7 @@ pub const USERPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &[super::USERPATH_PARTIAL_PATH_EXTENSION],
     integer_capabilities: &[],
     integer_audit: Some(&super::USERPATH_INTEGER_AUDIT),
     suppress_auto_output: true,

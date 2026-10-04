@@ -31,6 +31,10 @@ mod tests {
     #[test]
     fn zero_input_result_and_invalid_input_are_explicit() {
         let entry = &super::super::RESTOREDEFAULTPATH_CATALOG_ENTRY;
+        assert_eq!(
+            entry.extensions,
+            &[super::super::RESTOREDEFAULTPATH_RETURN_EXTENSION]
+        );
         let request = CallRequest {
             arguments: vec![],
             literals: LiteralContext::default(),

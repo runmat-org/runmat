@@ -51,6 +51,13 @@ pub const RESTOREDEFAULTPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: ERRORS,
 };
+pub const RESTOREDEFAULTPATH_RETURN_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "restoredefaultpath-return",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "restoredefaultpath returning a path is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:RestoredefaultpathReturnExtension"),
+    };
 pub const RESTOREDEFAULTPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
         kind: BuiltinIntegerAuditKind::NotApplicable,
