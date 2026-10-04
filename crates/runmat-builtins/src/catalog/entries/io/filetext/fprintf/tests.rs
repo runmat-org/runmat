@@ -15,7 +15,7 @@ fn formatted_write_has_double_byte_count_and_transitive_effects() {
         &request(vec![
             ValueFact::scalar(ValueKindFact::String),
             ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Uint64,
+                class: NumericClass::UInt64,
                 domain: NumericDomain::Real,
             })),
         ]),
