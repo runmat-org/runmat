@@ -45,6 +45,14 @@ async fn save_builtin(
         )?;
     }
     preflight_known_options(&args)?;
+    // Public arguments are filename, option, and workspace-selector text;
+    // saved payloads come from the workspace only after these controls pass.
+    if args.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Err(save_error_with(
+            &SAVE_ERROR_INVALID_ARGUMENT,
+            "save: filename, options, and variable selectors must be host text values",
+        ));
+    }
     let mut preparation =
         MatCodecCooperation::new(runtime.as_ref(), None, BUILTIN_NAME, &SAVE_ERROR_IO);
     preparation.completed(0).await?;

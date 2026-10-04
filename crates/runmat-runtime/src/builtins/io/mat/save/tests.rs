@@ -53,6 +53,19 @@ fn known_invalid_option_does_not_download_prior_resident_argument() {
     assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
     assert_eq!(owner.downloads(), 0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn numeric_resident_text_control_rejects_without_download() {
+    let _lock = test_support::accel_test_lock();
+    let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    let resident = owner.resident();
+    let error = block_on(save_builtin(vec![Value::GpuTensor(resident)]))
+        .expect_err("numeric resident handle cannot be a MAT filename");
+    assert_eq!(error.identifier(), Some("RunMat:save:InvalidArgument"));
+    assert_eq!(owner.downloads(), 0);
+}
 use crate::builtins::common::test_support;
 use crate::workspace::WorkspaceResolver;
 use futures::executor::block_on;
