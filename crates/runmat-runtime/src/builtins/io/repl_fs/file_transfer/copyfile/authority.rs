@@ -3,6 +3,7 @@
 use crate::context::RuntimeContext;
 use runmat_execution::cancellation::CancellationToken;
 use runmat_filesystem::{self as vfs, FsMetadata, FsProvider};
+use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,7 +13,7 @@ pub(super) struct CopyFilesystem {
     cwd: PathBuf,
     lease: Option<vfs::CapturedFsResourceLease>,
     cancellation: Option<CancellationToken>,
-    runtime: Option<RuntimeContext>,
+    cooperation: RefCell<super::cooperation::CopyCooperation>,
 }
 
 impl CopyFilesystem {
@@ -31,7 +32,7 @@ impl CopyFilesystem {
             cwd,
             lease,
             cancellation: runtime.map(RuntimeContext::cancellation),
-            runtime: runtime.cloned(),
+            cooperation: RefCell::new(super::cooperation::CopyCooperation::new(runtime)),
         })
     }
 
@@ -128,12 +129,12 @@ impl CopyFilesystem {
 
     pub(super) async fn copy_file(&self, from: &Path, to: &Path) -> io::Result<u64> {
         self.check()?;
-        let mut cooperation = super::cooperation::CopyCooperation::new(self.runtime.as_ref());
+        let mut cooperation = self.cooperation.borrow_mut();
         let result = vfs::copy_file_on_async(
             self.provider.as_ref(),
             &self.path(from),
             &self.path(to),
-            &mut cooperation,
+            &mut *cooperation,
         )
         .await
         .map_err(|error| match error {
