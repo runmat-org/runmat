@@ -269,6 +269,20 @@ pub(super) fn infer(
                         0,
                     ));
                 }
+                if request.literals.literal_string_at(0).is_some_and(|name| {
+                    super::JavaEnvironmentControl::parse(&name)
+                        == Some(super::JavaEnvironmentControl::ExecutionMode)
+                }) && request
+                    .literals
+                    .literal_string_at(1)
+                    .is_some_and(|mode| super::JavaExecutionMode::parse(&mode).is_none())
+                {
+                    diagnostics.push(argument_error(
+                        "RM-JAVA-EXECUTION-MODE",
+                        "jenv currently supports only InProcess execution mode",
+                        1,
+                    ));
+                }
             }
             vec![environment()]
         }

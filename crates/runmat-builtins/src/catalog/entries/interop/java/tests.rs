@@ -206,6 +206,11 @@ fn environment_control_names_share_the_runtime_boundary() {
         Some(JavaEnvironmentControl::ExecutionMode)
     );
     assert_eq!(JavaEnvironmentControl::parse("Mode"), None);
+    assert_eq!(
+        JavaExecutionMode::parse("inPROCESS"),
+        Some(JavaExecutionMode::InProcess)
+    );
+    assert_eq!(JavaExecutionMode::parse("OutOfProcess"), None);
 
     let mut valid = request(vec![text(), text()], 1);
     valid.literals = LiteralContext::new(vec![
@@ -224,6 +229,23 @@ fn environment_control_names_share_the_runtime_boundary() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-JAVA-OPTION"));
+
+    valid.literals = LiteralContext::new(vec![
+        LiteralValue::String("ExecutionMode".into()),
+        LiteralValue::String("OutOfProcess".into()),
+    ]);
+    assert!(infer(&valid, &JENV_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-JAVA-EXECUTION-MODE"));
+    valid.literals = LiteralContext::new(vec![
+        LiteralValue::String("ExecutionMode".into()),
+        LiteralValue::String("inPROCESS".into()),
+    ]);
+    assert!(infer(&valid, &JENV_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code != "RM-JAVA-EXECUTION-MODE"));
 }
 
 #[test]

@@ -31,12 +31,25 @@ impl JavaFeature {
     }
 }
 
-/// Validated public `jenv` name-value control. Values remain owned by the
-/// adapter because Version resolution depends on the selected host JVM.
+/// Validated public `jenv` name-value control. Version values remain owned by
+/// the adapter because their resolution depends on the selected host JVM.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JavaEnvironmentControl {
     Version,
     ExecutionMode,
+}
+
+/// The currently supported Java execution mode, independent of host spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JavaExecutionMode {
+    InProcess,
+}
+
+impl JavaExecutionMode {
+    pub fn parse(name: &str) -> Option<Self> {
+        name.eq_ignore_ascii_case("InProcess")
+            .then_some(Self::InProcess)
+    }
 }
 
 impl JavaEnvironmentControl {

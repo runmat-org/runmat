@@ -723,7 +723,7 @@ impl JavaAdapter {
                 *self.config.borrow_mut() = config;
             }
             runmat_builtins::JavaEnvironmentControl::ExecutionMode => {
-                if !value.eq_ignore_ascii_case("inprocess") {
+                if runmat_builtins::JavaExecutionMode::parse(&value).is_none() {
                     return Err(invalid_conversion(
                         "RunMat currently supports Java execution mode 'InProcess'",
                     ));
