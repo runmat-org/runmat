@@ -29,10 +29,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
                 id: BuiltinExampleFixtureId { local_name: "notes" },
                 root: BuiltinFilesystemRoot::IsolatedWorkspace,
-                entries: &[BuiltinFilesystemEntry::File { relative_path: "notes.txt", content: BuiltinFixtureContent::Utf8("hello\nsecond\n") }],
+                entries: &[BuiltinFilesystemEntry::File { relative_path: "notes.txt", content: BuiltinFixtureContent::Bytes(&[104, 101, 108, 108, 111, 10, 115, 101, 99, 111, 110, 100, 10]) }],
             }),
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(first_line, same_line)); assert(strcmp(first_line, 'hello'));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(first_line, same_line)); assert(strcmp(first_line, sprintf('hello\\n')));" },
         },
         BuiltinExample {
             id: "binary-rewind", title: "Rewind and reread binary bytes",

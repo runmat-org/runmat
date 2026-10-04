@@ -43,7 +43,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Native,
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:feof:InvalidIdentifier" },
+            verification: BuiltinExampleVerification::ExpectedError { identifier: "MATLAB:feof:InvalidIdentifier" },
         },
         BuiltinExample {
             id: "line-loop", title: "Read text lines until EOF",
