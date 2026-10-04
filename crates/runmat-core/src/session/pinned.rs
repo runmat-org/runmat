@@ -61,7 +61,10 @@ impl RunMatSession {
             .captured_project
             .as_ref()
             .filter(|project| project.inputs == inputs);
-        let dependency_lock = match prepared.map(|project| runmat_package::encode_lock(&project.lock)).transpose() {
+        let dependency_lock = match prepared
+            .map(|project| runmat_package::encode_lock(&project.lock))
+            .transpose()
+        {
             Ok(lock) => lock,
             Err(error) => return input_error(&request, error.to_string()),
         };
@@ -186,7 +189,12 @@ mod tests {
         };
         struct Sources;
         impl PackageSourceProvider for Sources {
-            fn acquire_git<'a>(&'a self, _: &'a GitAcquisitionPlan) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<GitPackageMount, String>> + 'a>> {
+            fn acquire_git<'a>(
+                &'a self,
+                _: &'a GitAcquisitionPlan,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<GitPackageMount, String>> + 'a>,
+            > {
                 Box::pin(async { Err("fixture must not acquire an external source".into()) })
             }
         }
@@ -220,8 +228,17 @@ mod tests {
         let response = session
             .execute_request_with_inputs(request, Some(inputs.clone()))
             .await;
-        let lock = runmat_package::decode_lock(response.dependency_lock.as_deref().expect("captured dependency provenance")).unwrap();
-        assert_eq!(runmat_package::encode_lock(&lock).unwrap(), response.dependency_lock.clone().unwrap());
+        let lock = runmat_package::decode_lock(
+            response
+                .dependency_lock
+                .as_deref()
+                .expect("captured dependency provenance"),
+        )
+        .unwrap();
+        assert_eq!(
+            runmat_package::encode_lock(&lock).unwrap(),
+            response.dependency_lock.clone().unwrap()
+        );
         assert!(response.result.is_ok(), "{:?}", response.result.err());
         assert!(
             session.project_handoff().is_none(),

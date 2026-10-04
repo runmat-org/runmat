@@ -383,19 +383,24 @@ fn check_block<C: AnalysisOperationCatalog + ?Sized>(
                         ),
                     }
                 }
-                FeaStatementKind::Block { header, body } => CheckedFeaStatementKind::Block {
-                    header: source[header.span.start..header.span.end].to_string(),
-                    header_span: header.span,
-                    statements: check_block(
-                        catalog,
-                        path,
-                        source,
-                        body,
-                        scope,
-                        outputs,
-                        diagnostics,
-                    ),
-                },
+                FeaStatementKind::Block { header, body } => {
+                    let text = &source[header.span.start..header.span.end];
+                    let parts = text.split_whitespace().collect::<Vec<_>>();
+                    let statements =
+                        check_block(catalog, path, source, body, scope, outputs, diagnostics);
+                    if parts.len() == 2 && parts[0] == "assessment" {
+                        CheckedFeaStatementKind::AssessmentDefinition {
+                            name: parts[1].to_string(),
+                            statements,
+                        }
+                    } else {
+                        CheckedFeaStatementKind::Block {
+                            header: text.to_string(),
+                            header_span: header.span,
+                            statements,
+                        }
+                    }
+                }
                 FeaStatementKind::Input { name, .. } => {
                     CheckedFeaStatementKind::Input(name.text.clone())
                 }

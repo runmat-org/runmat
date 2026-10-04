@@ -104,6 +104,7 @@ impl AnalysisProjection {
                 order: element.order,
                 node_indices,
                 region_id: element.region_id.clone(),
+                provenance: element.provenance.clone(),
                 signed_volume_m3,
                 centroid_m,
                 characteristic_length_m,

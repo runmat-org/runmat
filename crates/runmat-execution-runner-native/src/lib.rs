@@ -5,6 +5,11 @@ pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
 mod analysis_fluid;
+mod analysis_nonlinear;
+pub use analysis_nonlinear::source::nonlinear_solid_study_completion_from_source;
+pub use analysis_nonlinear::{
+    execute_nonlinear_solid_study_locally, NonlinearSolidStudyExecutionPolicy,
+};
 mod analysis_magnetic;
 mod analysis_maxwell;
 pub use analysis_electrical::source::electrical_study_completion_from_source;
@@ -228,16 +233,20 @@ pub use structural_study_root::{
 };
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use typed_fea::{
-    checked_fea_artifact_access, materialize_checked_fea_study_geometry, prepare_checked_fea_study,
+    checked_fea_artifact_access, complete_frozen_fea_assessments, complete_local_fea_assessments,
+    complete_remote_fea_assessments, freeze_fea_assessment_functions,
+    materialize_checked_fea_study_geometry, prepare_checked_fea_study, reassess_saved_fea_locally,
     MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
     PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
-    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
+    PreparedAuthoredNonlinearSolidStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
+    PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
     execute_checked_fea_locally, execute_prepared_fea_study_locally,
     CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
-    CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy, CompletedAuthoredThermalStudy,
-    CompletedFeaStudyResult, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
-    LocalFeaMeshObserver, LocalFeaProgressObserver,
+    CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
+    CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
+    CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
+    LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

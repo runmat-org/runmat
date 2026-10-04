@@ -23,6 +23,7 @@ fn compiled(
         study_id: "electrical".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
+        assessments: Vec::new(),
         outputs: vec![],
         model,
         properties,

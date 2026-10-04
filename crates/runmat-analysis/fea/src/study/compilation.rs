@@ -34,6 +34,8 @@ pub struct CompiledAnalysisStudy {
     pub formulation_requirement: FormulationRequirement,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
     pub outputs: Vec<AuthoredOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assessments: Vec<runmat_analysis_core::AuthoredAssessment>,
     pub model: AnalysisModel,
     pub properties: CompiledPropertyMap,
     pub solver_mesh_digest: StableDigest,
@@ -56,6 +58,12 @@ impl CompiledAnalysisStudy {
         validate_study_inputs(&self.study_inputs)?;
         validate_authored_outputs(&self.outputs, &self.model.sequence.steps)
             .map_err(|error| AnalysisStudyCompilationError::InvalidOutputs(error.to_string()))?;
+        runmat_analysis_core::validate_assessments(
+            &self.assessments,
+            &runmat_analysis_core::authored_output_types(&self.outputs, &self.model.sequence.steps)
+                .map_err(|e| AnalysisStudyCompilationError::InvalidOutputs(e.to_string()))?,
+        )
+        .map_err(AnalysisStudyCompilationError::InvalidOutputs)?;
         Ok(())
     }
 
@@ -99,7 +107,18 @@ impl CompiledAnalysisStudy {
             STUDY_IDENTITY_LIMITS,
         )
         .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))?;
-        Ok(Digest::sha256(bytes))
+        let baseline = Digest::sha256(bytes);
+        if self.assessments.is_empty() {
+            return Ok(baseline);
+        }
+        let assessed = encode_contract(
+            STUDY_IDENTITY_PREFIX,
+            "assessed-analysis-study",
+            &(baseline, &self.assessments),
+            STUDY_IDENTITY_LIMITS,
+        )
+        .map_err(|error| AnalysisStudyCompilationError::Identity(error.to_string()))?;
+        Ok(Digest::sha256(assessed))
     }
 }
 
@@ -153,6 +172,7 @@ pub fn compile_analysis_study(
         study_id: study.study_id.clone(),
         formulation_requirement: study.formulation_requirement,
         study_inputs: study.study_inputs.clone(),
+        assessments: study.assessments.clone(),
         outputs: study.outputs.clone(),
         model,
         properties,

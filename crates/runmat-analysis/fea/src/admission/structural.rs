@@ -7,6 +7,8 @@ use runmat_analysis_core::{
     TopologyImplementation,
 };
 
+#[cfg(test)]
+mod nonlinear_tests;
 mod thermo_mechanical;
 #[cfg(test)]
 mod volume_source_tests;
@@ -41,6 +43,41 @@ pub fn structural_exact_realization(
         .ok_or(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure)?;
     if input.assemblies.is_empty() {
         return Err(FormulationAdmissionRejectionReason::InvalidRealization);
+    }
+    if input.procedure == AnalysisProcedure::Nonlinear {
+        // The genuine constitutive equilibrium path admits one canonical solid basis only.
+        // Initial geometry authentication is linear; the solved operator is B^T K_alg B.
+        if input.assemblies.len() != 1 {
+            return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+                FormulationAxis::SpatialOperator,
+            ));
+        }
+        let assembly = &mut input.assemblies[0];
+        assembly.operator = match assembly.operator {
+            StructuralOperatorImplementation::Tet4LinearElasticity
+            | StructuralOperatorImplementation::Tet4SmallStrainContinuum => {
+                StructuralOperatorImplementation::Tet4SmallStrainContinuum
+            }
+            StructuralOperatorImplementation::Tet10LinearElasticity
+            | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
+                StructuralOperatorImplementation::Tet10SmallStrainContinuum
+            }
+            _ => {
+                return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+                    FormulationAxis::SpatialOperator,
+                ))
+            }
+        };
+    } else if input.assemblies.iter().any(|assembly| {
+        matches!(
+            assembly.operator,
+            StructuralOperatorImplementation::Tet4SmallStrainContinuum
+                | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+        )
+    }) {
+        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+            FormulationAxis::SpatialOperator,
+        ));
     }
     input
         .assemblies
@@ -79,13 +116,15 @@ fn structural_component(
     sources: Vec<SourceImplementation>,
 ) -> Result<ExactFormulationComponent, FormulationAdmissionRejectionReason> {
     let (topologies, recovery) = match assembly.operator {
-        StructuralOperatorImplementation::Tet4LinearElasticity => (
+        StructuralOperatorImplementation::Tet4LinearElasticity
+        | StructuralOperatorImplementation::Tet4SmallStrainContinuum => (
             vec![TopologyImplementation::CanonicalSolverMeshTet4],
             RecoveryImplementation::Structural(
                 StructuralRecoveryImplementation::Tet4ConstantStrain,
             ),
         ),
-        StructuralOperatorImplementation::Tet10LinearElasticity => (
+        StructuralOperatorImplementation::Tet10LinearElasticity
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => (
             vec![TopologyImplementation::CanonicalSolverMeshTet10],
             RecoveryImplementation::Structural(
                 StructuralRecoveryImplementation::Tet10IntegrationPointProjection,
@@ -123,7 +162,7 @@ fn structural_component(
     Ok(ExactFormulationComponent {
         spatial_operator: SpatialOperatorImplementation::Structural(assembly.operator),
         constitutive: if procedure == AnalysisProcedure::Nonlinear {
-            ConstitutiveImplementation::ReducedScalarStructuralNonlinearity
+            ConstitutiveImplementation::SmallStrainJ2IsotropicHardening
         } else {
             ConstitutiveImplementation::IsotropicLinearElasticity
         },
@@ -140,6 +179,8 @@ const fn structural_operator_order(operator: StructuralOperatorImplementation) -
         StructuralOperatorImplementation::EulerBernoulliBeam3d => 2,
         StructuralOperatorImplementation::Mitc3TriangularShell => 3,
         StructuralOperatorImplementation::SyntheticDiagonalChain => 4,
+        StructuralOperatorImplementation::Tet4SmallStrainContinuum => 5,
+        StructuralOperatorImplementation::Tet10SmallStrainContinuum => 6,
     }
 }
 
@@ -245,6 +286,13 @@ fn component_sources(
 
 fn valid_sources(operator: StructuralOperatorImplementation) -> &'static [SourceImplementation] {
     match operator {
+        StructuralOperatorImplementation::Tet4SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => &[
+            SourceImplementation::CanonicalVolumeProjection,
+            SourceImplementation::CanonicalBoundaryProjection,
+            SourceImplementation::CanonicalBoundaryPressureIntegration,
+            SourceImplementation::BoundaryResultantMomentProjection,
+        ],
         StructuralOperatorImplementation::Tet4LinearElasticity
         | StructuralOperatorImplementation::Tet10LinearElasticity => &[
             SourceImplementation::CanonicalVolumeProjection,
@@ -267,7 +315,9 @@ fn valid_sources(operator: StructuralOperatorImplementation) -> &'static [Source
 fn valid_boundary(operator: StructuralOperatorImplementation) -> BoundaryTransferImplementation {
     match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
-        | StructuralOperatorImplementation::Tet10LinearElasticity => {
+        | StructuralOperatorImplementation::Tet10LinearElasticity
+        | StructuralOperatorImplementation::Tet4SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
             BoundaryTransferImplementation::CanonicalBoundaryProjection
         }
         StructuralOperatorImplementation::EulerBernoulliBeam3d
@@ -308,7 +358,7 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
             Some(TemporalImplementation::StructuralNewmarkAverageAcceleration)
         }
         AnalysisProcedure::Nonlinear => {
-            Some(TemporalImplementation::StructuralScalarResidualIteration)
+            Some(TemporalImplementation::StructuralQuasistaticNewtonEquilibrium)
         }
         _ => None,
     }

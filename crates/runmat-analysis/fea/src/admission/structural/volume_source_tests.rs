@@ -71,3 +71,34 @@ fn volume_source_evidence_does_not_authorize_explicit_beam_or_synthetic_projecti
         );
     }
 }
+
+#[test]
+fn nonlinear_solids_retain_canonical_volume_source_evidence() {
+    for (operator, recovery) in [
+        (
+            StructuralOperatorImplementation::Tet4LinearElasticity,
+            StructuralRecoveryImplementation::Tet4ConstantStrain,
+        ),
+        (
+            StructuralOperatorImplementation::Tet10LinearElasticity,
+            StructuralRecoveryImplementation::Tet10IntegrationPointProjection,
+        ),
+    ] {
+        let mut request = input(
+            operator,
+            Some(recovery),
+            SourceImplementation::CanonicalVolumeProjection,
+        );
+        request.procedure = AnalysisProcedure::Nonlinear;
+        let realized = structural_exact_realization(request.clone()).unwrap();
+        assert_eq!(
+            realized.components[0].sources,
+            vec![SourceImplementation::CanonicalVolumeProjection]
+        );
+        request.sources = vec![SourceImplementation::UniformNodeDistribution];
+        assert_eq!(
+            structural_exact_realization(request).unwrap_err(),
+            FormulationAdmissionRejectionReason::IncompatibleAxis(FormulationAxis::Source)
+        );
+    }
+}

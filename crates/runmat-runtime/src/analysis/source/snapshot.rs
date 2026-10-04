@@ -136,6 +136,16 @@ impl PreparedFeaSourceSnapshot {
             .map_err(|error| error.to_string())
     }
 
+    /// Includes unavailable import targets so removing a dependency still
+    /// invalidates its consumers. Function imports use the compiler's resolver.
+    pub fn source_dependencies(
+        &self,
+    ) -> Result<std::collections::BTreeSet<LogicalSourcePath>, String> {
+        self.graph
+            .source_dependencies()
+            .map_err(|error| error.to_string())
+    }
+
     pub fn requests(
         &self,
         functions: impl IntoIterator<Item = FunctionFacts>,
@@ -180,7 +190,10 @@ impl PreparedFeaSourceSnapshot {
         functions: impl IntoIterator<Item = FunctionFacts>,
         profiles: impl IntoIterator<Item = ExecutionProfileFacts>,
     ) -> Result<CheckedFeaSource, String> {
-        let host = SnapshotFeaHost::new(&self.modules, &self.geometry, functions, profiles)?;
+        let mut profiles = profiles.into_iter().collect::<Vec<_>>();
+        profiles.sort_by(|left, right| left.profile.cmp(&right.profile));
+        let host =
+            SnapshotFeaHost::new(&self.modules, &self.geometry, functions, profiles.clone())?;
         if self.graph.catalog_fingerprint != host.fingerprint() {
             return Err(
                 "FEA operation catalog changed between source preparation and checking".into(),
@@ -193,6 +206,7 @@ impl PreparedFeaSourceSnapshot {
             program,
             root_module,
             source_root: self.physical_root,
+            execution_profile_facts: profiles,
         })
     }
 }

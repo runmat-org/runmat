@@ -42,6 +42,7 @@ pub(super) struct FrequencyArtifactImport<'a, Source> {
     pub access: &'a ArtifactAccess,
     pub limits: ObjectInventoryLimits,
     pub declared_publication: &'a StructuralFrequencyPublicationManifest,
+    pub mesh: &'a runmat_meshing_core::SolverMeshArtifact,
 }
 
 pub(super) fn import_frequency_artifacts<Source: CacheImport>(
@@ -66,6 +67,7 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
         access,
         limits,
         declared_publication,
+        mesh,
     } = import;
     if declared_entries.len() != result.samples().len() {
         return Err(protocol(
@@ -202,7 +204,10 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
         ));
     }
     let mut histories = Vec::with_capacity(declared_histories.len());
-    for declared in declared_histories {
+    for (declared, published) in declared_histories
+        .iter()
+        .zip(declared_publication.histories())
+    {
         let objects = import_whole_objects(
             source,
             &declared.checkpoint_root,
@@ -219,12 +224,114 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
                 "structural frequency history checkpoint names another observation",
             ));
         }
+        let finalization = match (&declared.finalization, &published.finalization) {
+            (None, None) => None,
+            (Some(roots), Some(publication)) => {
+                let catalog = import_whole_objects(
+                    source,
+                    roots.catalog.reference(),
+                    AnalysisNumericalObjectKind::ObservationFieldCatalog,
+                    declared_objects,
+                    access,
+                    limits,
+                    &mut admitted,
+                )?;
+                let decoded_catalog = runmat_analysis_fea::results::observation::ObservationFieldCatalog::from_canonical_bytes(&catalog.payload()).map_err(protocol)?;
+                // Authenticate the aggregate against fields already admitted from the
+                // original physical result, rather than trusting a matching schedule.
+                let runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } = decoded_catalog.source() else {
+                    return Err(protocol("frequency history requires its complete source catalog"));
+                };
+                if samples.len() != entries.len() || samples.iter().zip(&entries).any(|(sample, entry)| {
+                    !matches!(sample.source(), runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::Structural { manifest, .. }
+                        if manifest.as_ref() == &entry.recovered_fields.manifest)
+                }) {
+                    return Err(protocol("frequency history catalog differs from admitted physical fields"));
+                }
+                let expected =
+                    runmat_analysis_fea::results::observation::BoundedObservationHistory::resume(
+                        &publication.request.plan,
+                        &declared.observation_id,
+                        checkpoint.clone(),
+                    )
+                    .map_err(protocol)?
+                    .finish()
+                    .map_err(protocol)?;
+                let history = runmat_analysis_execution::import_observation_history(
+                    source,
+                    runmat_analysis_execution::ObservationHistoryImport {
+                        root: roots.history.reference(),
+                        expected_identity: publication.history.identity,
+                        expected_payload_digest: roots.history.expected_payload_digest(),
+                        partial_access: publication.history.partial_access,
+                        access,
+                        limits,
+                    },
+                )
+                .map_err(protocol)?;
+                if history.manifest != *expected.manifest() {
+                    return Err(protocol(
+                        "frequency finalized history differs from terminal checkpoint",
+                    ));
+                }
+                for sample in expected.samples() {
+                    let actual = runmat_analysis_execution::import_observation_history_sample(
+                        source,
+                        &history,
+                        sample.coordinate,
+                        limits,
+                    )
+                    .map_err(protocol)?;
+                    if actual != *sample {
+                        return Err(protocol(
+                            "frequency finalized sample differs from terminal checkpoint",
+                        ));
+                    }
+                }
+                let series_objects = roots
+                    .series
+                    .as_ref()
+                    .map(|root| {
+                        import_whole_objects(
+                            source,
+                            root.reference(),
+                            AnalysisNumericalObjectKind::SeriesReductionResult,
+                            declared_objects,
+                            access,
+                            limits,
+                            &mut admitted,
+                        )
+                    })
+                    .transpose()?;
+                let series_reduction = series_objects.as_ref().map(|objects| runmat_analysis_fea::results::observation::SeriesReductionResult::from_canonical_bytes(&objects.payload()).map_err(protocol)).transpose()?;
+                publication.validate_history(&checkpoint, &decoded_catalog,
+                    runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural { source: runmat_analysis_fea::execution::StructuralObservationSource::Frequency(workload), mesh: Some(mesh) },
+                    &expected, series_reduction.as_ref()).map_err(protocol)?;
+                let completion = crate::analysis_frequency_observations::CompletedStructuralFrequencyHistoryFinalization {
+                    catalog, result: runmat_analysis_execution::ImportedObservationHistoryFinalization { publication: publication.clone(), history, series_reduction, series_objects },
+                };
+                let (actual_roots, references) = completion.published_artifacts(access)?;
+                if actual_roots != *roots
+                    || references
+                        .iter()
+                        .any(|reference| !declared_objects.contains(reference))
+                {
+                    return Err(protocol(
+                        "frequency history finalization roots differ from closure",
+                    ));
+                }
+                admitted.extend(references);
+                Some(completion)
+            }
+            _ => return Err(protocol("frequency history finalization inventory differs")),
+        };
         histories.push(ExactStructuralFrequencyHistoryResult {
             observation_id: declared.observation_id.clone(),
             checkpoint: runmat_analysis_execution::ImportedObservationHistoryCheckpointTask {
                 checkpoint,
                 objects,
             },
+            finalization,
         });
     }
 
@@ -284,6 +391,10 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
                 .map(|history| StructuralFrequencyPublicationHistory {
                     observation_id: history.observation_id.clone(),
                     checkpoint: history.checkpoint.checkpoint.manifest().clone(),
+                    finalization: history
+                        .finalization
+                        .as_ref()
+                        .map(|finalization| finalization.result.publication.clone()),
                 })
                 .collect(),
             resource_usage: prepared_resource_usage.evidence.clone(),

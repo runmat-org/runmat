@@ -15,7 +15,8 @@ pub(super) fn complete(
     thermal_source: crate::analysis::ThermalStudyObjectSource,
     structural: StructuralStudyNumericalResult,
     identity: AnalysisStudyCompletionIdentity,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let invalid = |message| {
         intent_completion_error(
             &intent,
@@ -27,8 +28,14 @@ pub(super) fn complete(
     };
     thermal_source.authenticate(&thermal).map_err(invalid)?;
     thermal_source
-        .persist(&thermal, intent.authored_study_digest)
-        .map_err(invalid)?;
+        .persist(&thermal, intent.authored_study_digest, &preparation.staging)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &intent.context,
+                invalid,
+            )
+        })?;
     if thermal.compiled.model != resolved_model {
         return Err(invalid(
             "thermal completion differs from resolved model".to_string(),
@@ -131,6 +138,7 @@ pub(super) fn complete(
             *result,
             preload_run_id,
             consumer_run_ids[0].clone(),
+            preparation,
         ),
         StructuralStudyNumericalResult::StructuralPrestressedModal(result) => {
             complete_prestressed_modal_study(
@@ -140,6 +148,7 @@ pub(super) fn complete(
                 *result,
                 preload_run_id,
                 consumer_run_ids[0].clone(),
+                preparation,
             )
         }
         StructuralStudyNumericalResult::StructuralPrestressedFrequency(result) => {
@@ -153,6 +162,7 @@ pub(super) fn complete(
                 preload_run_id,
                 modal_id,
                 frequency_id,
+                preparation,
             )
         }
         _ => Err(completion_error(

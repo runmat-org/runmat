@@ -125,7 +125,13 @@
           "positive_coverage": "analysis_process_conformance.magnetic_authored",
           "negative_coverage": "solver_compatibility magnetic method and typed_fea.preparation.admission equation-aware dispatch"
         },
-        "ElectromagneticPotential": {}
+        "MaxwellHarmonic": {
+          "default": "exact harmonic Maxwell typed preparation; no vector-potential proxy",
+          "target": "harmonic Maxwell typed execution solver block",
+          "validation": "exact harmonic electromagnetic procedure and authenticated typed Maxwell completion; scientific qualification remains separate",
+          "positive_coverage": "electromagnetic_harmonic_defaults_select_genuine_maxwell_without_vector_potential",
+          "negative_coverage": "scalar_study_execution_requires_authenticated_maxwell_completion"
+        }
       }
     },
     {
@@ -475,9 +481,6 @@
         "nonlinear_results": {
           "identity": "numerical-result identity"
         },
-        "electromagnetic_results": {
-          "identity": "numerical-result identity"
-        },
         "model_validity": {
           "identity": "quality evidence"
         },
@@ -504,6 +507,15 @@
         },
         "provenance": {
           "identity": "physical attempt evidence"
+        },
+        "observation_scalars": {
+          "cardinality": "zero_or_more_authenticated_observation_evidence_records",
+          "default": "empty until original numerical evidence is attached",
+          "target": "canonical original observation evidence; not a new authored declaration",
+          "identity": "original run and observation evidence binding",
+          "validation": "derived scalar evidence and original artifact authentication before metadata reads; no independent physics certification from hashes",
+          "positive_coverage": "closed_publication_commits_original_fields_and_cold_root_in_both_stores",
+          "negative_coverage": "scalar_evidence_is_derived_and_authenticated_before_metadata_reads"
         }
       }
     },
@@ -531,8 +543,7 @@
         "mode_indices": {},
         "include_transient_results": {},
         "transient_snapshot_indices": {},
-        "include_nonlinear_results": {},
-        "include_electromagnetic_results": {}
+        "include_nonlinear_results": {}
       }
     }
   ],

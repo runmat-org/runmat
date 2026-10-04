@@ -236,7 +236,7 @@ impl StructuralTransientSolverResultManifest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StructuralTransientSolverResult {
     manifest: StructuralTransientSolverResultManifest,
     pub(crate) samples: Vec<StructuralTransientPhysicalSample>,

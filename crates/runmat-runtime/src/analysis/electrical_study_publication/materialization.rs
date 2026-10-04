@@ -76,6 +76,7 @@ pub(super) fn admit(
         fallback_events: Vec::new(),
     };
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: run_id.into(),
         run,
         render_topology: render_topology_from_solver_mesh(Some(mesh)),

@@ -17,11 +17,11 @@ pub enum SolverFormulationCompatibilityError {
     MissingStructuralStaticBalance,
     #[error("structural static balance evidence is attached to a non-static result")]
     UnexpectedStructuralStaticBalance,
-    #[error("structural static constraint result is invalid")]
+    #[error("structural constraint result is invalid")]
     InvalidStructuralConstraintResult,
-    #[error("a structural static result is missing its canonical constraint result")]
+    #[error("a structural equilibrium result is missing its canonical constraint result")]
     MissingStructuralConstraintResult,
-    #[error("a structural static constraint result is attached to a non-static result")]
+    #[error("a structural constraint result is attached to an unsupported formulation")]
     UnexpectedStructuralConstraintResult,
     #[error("structural connector result is invalid")]
     InvalidStructuralConnectorResult,
@@ -95,7 +95,7 @@ pub fn validate_solver_formulation_compatibility(
             method,
         });
     }
-    if !preconditioner_is_compatible(method, preconditioner) {
+    if !preconditioner_is_compatible(temporal, method, preconditioner) {
         return Err(
             SolverFormulationCompatibilityError::UnsupportedPreconditioner {
                 method,
@@ -159,7 +159,7 @@ const fn method_is_compatible(
                 SolverMethod::StructuralModalTransientNewmarkDenseFactorization
             ),
         },
-        TemporalImplementation::StructuralScalarResidualIteration => {
+        TemporalImplementation::StructuralQuasistaticNewtonEquilibrium => {
             matches!(method, SolverMethod::IncrementalNewtonRaphson)
         }
         TemporalImplementation::ThermalSteadyLinearSolve
@@ -178,9 +178,6 @@ const fn method_is_compatible(
         }
         TemporalImplementation::AcousticCanonicalHarmonicSolve => {
             matches!(method, SolverMethod::AcousticCanonicalHelmholtzGmres)
-        }
-        TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection => {
-            matches!(method, SolverMethod::GeneralGmres)
         }
         TemporalImplementation::CoupledSinglePassProfileTransfer
         | TemporalImplementation::CoupledFixedPointRelaxation
@@ -201,13 +198,26 @@ const fn method_is_compatible(
         TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve => {
             matches!(method, SolverMethod::GeneralGmres)
         }
+        TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection => {
+            matches!(method, SolverMethod::GeneralGmres)
+        }
     }
 }
 
 const fn preconditioner_is_compatible(
+    temporal: TemporalImplementation,
     method: SolverMethod,
     preconditioner: SolverPreconditioner,
 ) -> bool {
+    // The method name alone cannot authorize another formulation's execution claim.
+    // Canonical Maxwell applies its physical block directly; CFD uses right scaling.
+    if matches!(
+        temporal,
+        TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve
+    ) {
+        return matches!(method, SolverMethod::GeneralGmres)
+            && matches!(preconditioner, SolverPreconditioner::None);
+    }
     match method {
         SolverMethod::GeneralGmres => matches!(
             preconditioner,

@@ -71,6 +71,7 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
         study_id: "maxwell".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         properties: compile_property_map(&model, Some(&mesh)).unwrap(),
         model,

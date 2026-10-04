@@ -22,7 +22,51 @@ pub fn publish_fluid_study_result(
     context: OperationContext,
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let publication_context = context.clone();
+    let study_id = completed.compiled.study_id.clone();
+    prepare_fluid_study_publication(
+        completed,
+        source,
+        mesh,
+        meshing_evidence,
+        options,
+        definition,
+        context,
+        publication_identity,
+    )?
+    .publish_without_function_execution()
+    .map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(
+            error,
+            &publication_context,
+            |message| publication_error(&publication_context, &study_id, message),
+        )
+    })
+}
+
+pub fn prepare_fluid_study_publication(
+    completed: &FluidStudyCompletion,
+    source: &FluidStudyObjectSource,
+    mesh: &SolverMeshArtifact,
+    meshing_evidence: &MeshingEvidence,
+    options: &AnalysisCfdRunOptions,
+    definition: Digest,
+    context: OperationContext,
+    publication_identity: AnalysisStudyCompletionIdentity,
+) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
     let invalid = |message| publication_error(&context, &completed.compiled.study_id, message);
+    let preparation =
+        crate::analysis::study_publication::preparation::PublicationPreparation::capture_catalog(
+            definition,
+            &(completed, mesh, meshing_evidence, options),
+            &completed.catalog,
+        )
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+
     let fields = admission::validate(
         completed,
         source,
@@ -39,7 +83,13 @@ pub fn publish_fluid_study_result(
     );
     let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
         .map_err(invalid)?;
-    let object_artifact_paths = source.persist(completed, definition).map_err(invalid)?;
+    let object_artifact_paths = source
+        .persist(completed, definition, &preparation.staging)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
     let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
         artifact: mesh.clone(),
         evidence: meshing_evidence.clone(),
@@ -68,11 +118,12 @@ pub fn publish_fluid_study_result(
         run: super::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
         resolved_solver_options: super::AnalysisSolverOptions::IncompressibleFlow(options.clone()),
     };
-    let mut published = super::complete_study_run(
+    let published = crate::analysis::structural_study::publication::complete_study_run_prepared(
         prepared,
         vec![step],
         completed.states.clone(),
         completed.frozen_project_digest,
+        preparation,
     )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
         &completed.compiled,
@@ -81,7 +132,7 @@ pub fn publish_fluid_study_result(
             .identity()
             .map_err(|e| invalid(e.to_string()))?
             .digest(),
-        completed.workload.clone(),
+        &completed.workload,
         mesh,
         meshing_evidence,
         FluidNumericalEvidence {
@@ -90,11 +141,14 @@ pub fn publish_fluid_study_result(
             layout: completed.layout.clone(),
             object_artifact_paths,
         },
-        published.data.clone(),
+        &published,
     )
-    .map_err(invalid)?;
-    published.data.result_manifest_artifact_path = Some(manifest.persist().map_err(invalid)?);
-    Ok(published)
+    .map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)
+    })?;
+    crate::analysis::PreparedStudyPublication::new(published, manifest).map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

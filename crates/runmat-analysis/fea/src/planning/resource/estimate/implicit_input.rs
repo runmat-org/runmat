@@ -21,3 +21,18 @@ pub(super) fn implicit_resource_plan_input_facts(
         decoded_resident_bytes_admission_budget: ByteCount(decoded),
     })
 }
+
+/// In-memory original recovery has no resource-plan input closure or decoder.
+/// Its enclosing portable task, when present, owns that separate transport demand.
+pub(super) fn operator_resource_plan_input_facts(
+    phase: &FeaResourcePhase,
+) -> Result<PreparedInputResourceFacts, ResourcePlanningError> {
+    if *phase == FeaResourcePhase::StructuralNonlinearRecovery {
+        return Ok(PreparedInputResourceFacts {
+            encoded_payload_bytes: ByteCount(0),
+            transport_closure_bytes: ByteCount(0),
+            decoded_resident_bytes_admission_budget: ByteCount(0),
+        });
+    }
+    implicit_resource_plan_input_facts()
+}

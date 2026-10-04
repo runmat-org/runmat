@@ -5,7 +5,8 @@ use super::FeaResourcePhase;
 pub(super) fn requires_no_solve_policy(phase: &FeaResourcePhase) -> bool {
     matches!(
         phase,
-        FeaResourcePhase::StructuralFrequencyFieldRecovery(_)
+        FeaResourcePhase::StructuralNonlinearRecovery
+            | FeaResourcePhase::StructuralFrequencyFieldRecovery(_)
             | FeaResourcePhase::StructuralTransientScopePreparation(_)
             | FeaResourcePhase::StructuralTransientFieldRecovery(_)
             | FeaResourcePhase::StructuralModalResponseSpectrumDirection(_)

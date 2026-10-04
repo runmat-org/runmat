@@ -20,6 +20,10 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         &invocation,
         AnalysisNumericalObjectKind::ObservationFieldCatalog,
     )?;
+    let nonlinear_workload = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::NonlinearSolidWorkload,
+    )?;
     let linear_workload =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
     let frequency_workload = optional_unique_input(
@@ -40,7 +44,8 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         &invocation,
         AnalysisNumericalObjectKind::FluidSteadyWorkload,
     )?;
-    if usize::from(linear_workload.is_some())
+    if usize::from(nonlinear_workload.is_some())
+        + usize::from(linear_workload.is_some())
         + usize::from(frequency_workload.is_some())
         + usize::from(thermal_workload.is_some())
         + usize::from(magnetic_workload.is_some())
@@ -173,6 +178,38 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         );
         (workload.model, workload.backend)
+    } else if let Some(workload_objects) = nonlinear_workload {
+        let workload =
+            runmat_analysis_fea::execution::NonlinearSolidWorkload::from_canonical_bytes(
+                &workload_objects.payload(),
+            )?;
+        let source =
+            runmat_analysis_fea::execution::StructuralObservationSource::NonlinearSolid(&workload);
+        source.validate()?;
+        if workload.identity()?.digest() != workload_objects.manifest.logical_identity
+            || workload.producer_identity()? != request.producer
+            || mesh.is_none()
+            || request.event_attribution.is_some()
+            || !resource_plan.request.accelerators.is_empty()
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "nonlinear final observation source or CPU envelope differs",
+            ));
+        }
+        catalog.validate_structural_selection(&source_request.selection)?;
+        catalog.validate_structural_plan(&source_request.plan, source.model(), mesh.as_ref())?;
+        let expected = ObservationPartitionPlan::derive(
+            &source_request.plan,
+            &partition_plan.observation_id,
+            source.observation_execution(),
+        )
+        .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+        if expected != partition_plan {
+            return Err(AnalysisBridgeError::Identity(
+                "nonlinear observation partition policy differs",
+            ));
+        }
+        (workload.model, runmat_analysis_fea::ComputeBackend::Cpu)
     } else if let Some(workload) = linear_workload {
         catalog.validate_structural_selection(&source_request.selection)?;
         let workload = StructuralLinearWorkload::from_canonical_bytes(&workload.payload())?;

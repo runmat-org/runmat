@@ -7,12 +7,11 @@ use crate::operations::{
 
 use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions};
 use super::{
-    analysis_run_acoustic_with_options_op, analysis_run_cfd_with_options_op,
-    analysis_run_cht_with_options_op, analysis_run_fsi_with_options_op,
-    analysis_run_linear_static_with_executor, analysis_run_modal_with_options_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
-    analysis_run_transient_with_options_op, StructuralLinearExecutor, ANALYSIS_RUN_STUDY_OPERATION,
-    ANALYSIS_RUN_STUDY_OP_VERSION,
+    analysis_run_cfd_with_options_op, execute_acoustic_with_options, execute_cht_with_options,
+    execute_fsi_with_options, execute_modal_with_options, execute_nonlinear_with_options,
+    execute_transient_with_options, linear_static_execution::execute_linear_static_with_executor,
+    thermal_execution::execute_thermal_with_options, StructuralLinearExecutor,
+    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 pub(super) fn execute_study_step(
@@ -44,7 +43,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_linear_static_with_executor(
+            let run = execute_linear_static_with_executor(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -144,7 +143,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_modal_with_options_op(
+            let run = execute_modal_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -155,7 +154,7 @@ pub(super) fn execute_study_step(
         }
         AnalysisSolverOptions::AcousticHelmholtz(authored_options) => {
             let options = authored_options.clone();
-            let run = analysis_run_acoustic_with_options_op(
+            let run = execute_acoustic_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -170,7 +169,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_thermal_with_options_op(
+            let run = execute_thermal_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -185,7 +184,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_transient_with_options_op(
+            let run = execute_transient_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -211,7 +210,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_cht_with_options_op(
+            let run = execute_cht_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -226,7 +225,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_fsi_with_options_op(
+            let run = execute_fsi_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,
@@ -244,7 +243,7 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_nonlinear_with_options_op(
+            let run = execute_nonlinear_with_options(
                 &model,
                 execution.backend,
                 execution.requirement,

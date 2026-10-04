@@ -3,7 +3,6 @@ mod coordinated_observations;
 pub(crate) mod history_finalization;
 mod observations;
 pub(crate) mod prestress;
-mod task_closure;
 
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,
@@ -112,6 +111,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
         study_id: "thermal".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         properties: compile_property_map(&model, Some(&mesh)).unwrap(),
         model,

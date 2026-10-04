@@ -83,6 +83,7 @@ pub(super) fn admit(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
+        observation_scalars: Vec::new(),
         model_validity: QualityGate::Pass,
         solver_convergence: accuracy.solver_convergence,
         result_quality: accuracy.result_quality,

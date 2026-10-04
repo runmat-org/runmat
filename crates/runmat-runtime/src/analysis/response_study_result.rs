@@ -1,7 +1,7 @@
 //! Response results retain both receipt-source and terminal resource accounting.
 use runmat_analysis_core::ProcedureStepId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyModalResponseSpectrumNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub modal_step_id: ProcedureStepId,
@@ -26,7 +26,7 @@ pub struct StructuralStudyModalResponseSpectrumNumericalResult {
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyRandomResponseNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub modal_step_id: ProcedureStepId,

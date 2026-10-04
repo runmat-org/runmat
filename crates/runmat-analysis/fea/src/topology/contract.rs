@@ -213,6 +213,8 @@ pub struct ProjectedElement {
     pub order: ElementOrder,
     pub node_indices: Vec<usize>,
     pub region_id: PersistentEntityId,
+    /// Original CAD ownership retained by the admitted solver element.
+    pub provenance: Vec<PersistentEntityId>,
     pub signed_volume_m3: f64,
     pub centroid_m: [f64; 3],
     pub characteristic_length_m: f64,

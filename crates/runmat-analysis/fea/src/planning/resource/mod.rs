@@ -52,8 +52,20 @@ pub use result_publication::build_result_publication_resource_plan;
 mod static_profiles;
 pub use contract::SemanticStatePublicationResourceDemand;
 pub use contract::StructuralLinearPipelineResourceDemand;
+pub use contract::{
+    NonlinearSolidBlockTransportDemand, PreparedNonlinearSolidBlockResourceFacts,
+    StructuralNonlinearPipelineResourceDemand, StructuralNonlinearRecoveryResourceDemand,
+};
+mod nonlinear;
+pub(crate) use nonlinear::{
+    build_nonlinear_recovery_resource_plan, build_nonlinear_resource_plan_with_output_limit,
+};
+pub use nonlinear::{
+    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_payload_bytes_upper_bound,
+};
 pub use state_publication::build_fluid_state_publication_resource_plan;
 pub use state_publication::build_state_publication_resource_plan;
+pub use state_publication::build_state_publication_resource_plan_with_ceiling;
 pub use static_profiles::{
     projected_canonical_output_resource_facts, structural_state_profiles_output_resource_facts,
 };
@@ -230,3 +242,11 @@ mod frequency_tests;
 mod modal_tests;
 #[cfg(test)]
 mod tests;
+
+mod nonlinear_recovery;
+mod recovered_field_shape;
+pub use contract::NonlinearFieldRecoveryResourceDemand;
+pub use nonlinear_recovery::{
+    build_nonlinear_field_recovery_resource_plan, nonlinear_field_recovery_shape,
+    nonlinear_recovery_workspace,
+};

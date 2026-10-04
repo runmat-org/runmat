@@ -529,10 +529,7 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
 }
 
 fn success_response(success: AttemptSuccess) -> ProgramExecutionResponse {
-    ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: success.outputs,
-        result_objects: success.result_objects,
-    }
+    ProgramExecutionResponse::from_success_outputs(success.outputs, success.result_objects)
 }
 
 pub(crate) fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

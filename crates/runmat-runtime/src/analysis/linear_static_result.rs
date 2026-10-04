@@ -147,6 +147,7 @@ pub(super) fn admit_linear_static_result(
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     Ok(AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: input
             .assigned_run_id
             .map(str::to_owned)

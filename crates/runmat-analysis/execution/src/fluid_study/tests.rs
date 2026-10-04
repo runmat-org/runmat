@@ -139,6 +139,7 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
+        assessments: Vec::new(),
         properties: compile_property_map(&workload.model, Some(&mesh)).unwrap(),
         model: workload.model,
         solver_mesh_digest: mesh.canonical_digest,

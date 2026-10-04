@@ -52,6 +52,7 @@ fn build(request: &AccuracyEvaluationRequest) -> Result<FeaResourcePlan, Resourc
 #[test]
 fn every_accuracy_source_honors_its_authored_resident_ceiling() {
     for kind in [
+        AccuracySourceKind::NonlinearSolid,
         AccuracySourceKind::StructuralLinear,
         AccuracySourceKind::StructuralModalResponseSpectrum,
         AccuracySourceKind::StructuralRandomResponse,

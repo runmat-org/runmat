@@ -2,10 +2,6 @@ mod thermal_schedule_admission;
 mod thermal_storage_history;
 
 use crate::{
-    fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
-    fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
-    fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
-    fea_nonlinear_rotation_field_id, fea_nonlinear_von_mises_field_id,
     fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
     fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
     fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
@@ -426,31 +422,6 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         (actual - expected).abs() <= tolerance,
         "actual={actual} expected={expected} tolerance={tolerance}",
     );
-}
-
-fn assert_thermo_mechanical_consistency_diagnostic(
-    diagnostics: &[crate::diagnostics::FeaDiagnostic],
-) {
-    assert!(diagnostics.iter().any(|diag| {
-        diag.code == "FEA_TM_CONSISTENCY"
-            && diag.message.contains("constitutive_residual_ratio=")
-            && diag.message.contains("thermal_strain_energy_density_mean=")
-            && diag.message.contains("consistency_coverage_ratio=")
-    }));
-}
-
-fn assert_thermo_mechanical_temperature_field_diagnostic(
-    diagnostics: &[crate::diagnostics::FeaDiagnostic],
-) {
-    assert!(diagnostics.iter().any(|diag| {
-        diag.code == "FEA_TM_TEMPERATURE_FIELD"
-            && diag
-                .message
-                .contains("temperature_field_basis=nodal_coupling")
-            && diag.message.contains("node_count=")
-            && diag.message.contains("strain_temperature_residual_ratio=")
-            && diag.message.contains("strain_temperature_coverage_ratio=")
-    }));
 }
 
 #[test]
@@ -1541,8 +1512,14 @@ fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling(
     .expect_err("explicit connectivity must not silently drop thermomechanical coupling");
 
     let message = error.to_string();
-    assert!(message.contains("requests Coupled(Thermomechanical)"));
-    assert!(message.contains("realizes Structural"));
+    assert!(
+        matches!(
+            error,
+            crate::FeaRunError::FormulationAvailability(rejection)
+                if rejection.reason == runmat_analysis_core::FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+        ),
+        "{message}"
+    );
 }
 
 #[test]
@@ -2538,6 +2515,7 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
     );
     assert_eq!(assembled.receipt.samples().len(), 2);
     let topology = StructuralRecoveredFieldTopology::derive(workload.model(), Some(&mesh)).unwrap();
+    let mut frequency_catalogs = Vec::new();
     let fields = results
         .iter()
         .map(|entry| {
@@ -2555,10 +2533,73 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
                 .unwrap(),
             )
             .unwrap();
-            recover_structural_frequency_entry_fields(&workload, &mesh, &recovery_request, entry)
-                .unwrap()
+            let artifact = recover_structural_frequency_entry_fields(
+                &workload,
+                &mesh,
+                &recovery_request,
+                entry,
+            )
+            .unwrap();
+            frequency_catalogs.push(
+                crate::results::observation::ObservationFieldCatalog::structural(
+                    recovery_request,
+                    artifact.manifest().unwrap(),
+                )
+                .unwrap(),
+            );
+            artifact
         })
         .collect::<Vec<_>>();
+    // Results arrived in reverse order. A complete history must authenticate the
+    // original schedule, rather than inheriting the last recovery's authority.
+    frequency_catalogs.reverse();
+    use crate::results::observation::{
+        resolve_structural_observation_plan, ObservationFieldCatalog, ObservationLimits,
+    };
+    let constraints = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+        workload.model(),
+        Some(&mesh),
+    )
+    .unwrap();
+    let definitions = fields[0]
+        .fields()
+        .iter()
+        .map(|field| field.definition().clone())
+        .collect::<Vec<_>>();
+    let observation_plan = resolve_structural_observation_plan(
+        workload.procedure_step().unwrap(),
+        workload.model(),
+        Some(&mesh),
+        &constraints,
+        &definitions,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let complete =
+        ObservationFieldCatalog::structural_frequency_history(frequency_catalogs.clone()).unwrap();
+    complete
+        .validate_frequency_history_plan(&observation_plan, &workload, Some(&mesh))
+        .unwrap();
+    assert_eq!(
+        ObservationFieldCatalog::from_canonical_bytes(&complete.canonical_bytes().unwrap())
+            .unwrap(),
+        complete
+    );
+    let omitted =
+        ObservationFieldCatalog::structural_frequency_history(vec![frequency_catalogs[0].clone()])
+            .unwrap();
+    assert!(omitted
+        .validate_frequency_history_plan(&observation_plan, &workload, Some(&mesh))
+        .is_err());
+    assert!(ObservationFieldCatalog::structural_frequency_history(vec![
+        frequency_catalogs[0].clone(),
+        frequency_catalogs[0].clone()
+    ])
+    .is_err());
+    let mut reordered = frequency_catalogs;
+    reordered.reverse();
+    assert!(ObservationFieldCatalog::structural_frequency_history(reordered).is_err());
+    assert!(ObservationFieldCatalog::structural_frequency_history(vec![complete]).is_err());
     assert!(fields
         .iter()
         .any(|artifact| artifact.fields().iter().any(|field| {
@@ -3441,99 +3482,31 @@ fn nonlinear_history_schedule_splits_load_increments_and_retains_the_initial_sta
 }
 
 #[test]
-fn nonlinear_solver_events_publish_exact_attribution_and_valid_empty_histories() {
+fn nonlinear_events_require_a_physical_basis() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    let mut step = ProcedureStep::structural_nonlinear("nonlinear_events");
-    step.accuracy.resources.maximum_samples = 32;
-    step.observations = vec![
-        nodal_history_observation(
-            "first_yield_displacement",
-            runmat_analysis_core::ObservationQuantity::Displacement,
-            runmat_analysis_core::SamplingPolicy::Event(
-                runmat_analysis_core::ObservationEvent::Solver(
-                    runmat_analysis_core::SolverObservationEvent::FirstYield,
-                ),
+    let mut step = ProcedureStep::structural_nonlinear("unsupported_nonlinear");
+    step.observations = vec![nodal_history_observation(
+        "first_yield_displacement",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::SamplingPolicy::Event(
+            runmat_analysis_core::ObservationEvent::Solver(
+                runmat_analysis_core::SolverObservationEvent::FirstYield,
             ),
         ),
-        nodal_history_observation(
-            "convergence_failure_displacement",
-            runmat_analysis_core::ObservationQuantity::Displacement,
-            runmat_analysis_core::SamplingPolicy::Event(
-                runmat_analysis_core::ObservationEvent::Solver(
-                    runmat_analysis_core::SolverObservationEvent::ConvergenceFailure,
-                ),
-            ),
-        ),
-    ];
+    )];
     model.sequence.steps = vec![step];
-    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
-
-    let result = crate::run_nonlinear_with_options(
+    let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        NonlinearSolveOptions {
-            increment_count: 2,
-            solver_mesh: Some(mesh),
-            plasticity_context: Some(crate::FeaPlasticityConstitutiveContext {
-                enabled: true,
-                yield_strain: 0.0,
-                hardening_modulus_ratio: 0.1,
-                saturation_exponent: 2.0,
-            }),
-            ..experimental_nonlinear_options()
-        },
+        experimental_nonlinear_options(),
     )
-    .expect("nonlinear event histories should evaluate from accepted solver states");
-
-    let yield_history = result
-        .run
-        .observation_histories
-        .iter()
-        .find(|history| history.manifest().observation_id.0 == "first_yield_displacement")
-        .expect("first-yield history should be published");
-    assert_eq!(yield_history.samples().len(), 1);
-    let attribution = yield_history.samples()[0]
-        .event_attribution
-        .expect("yield sample should retain its source attribution");
-    assert_eq!(
-        attribution.event(),
-        runmat_analysis_core::ObservationEvent::Solver(
-            runmat_analysis_core::SolverObservationEvent::FirstYield,
-        )
-    );
-    assert_eq!(attribution.occurrence_index(), 0);
+    .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
     assert!(matches!(
-        attribution,
-        crate::results::observation::ObservationEventAttribution::Solver(
-            crate::results::observation::SolverEventAttribution {
-                source: crate::results::observation::SolverEventSource::CompletedResult { .. },
-                ..
-            }
-        )
+        error,
+        crate::FeaRunError::InvalidModel(_)
+            | crate::FeaRunError::Assembly(_)
+            | crate::FeaRunError::FormulationAdmission(_)
     ));
-    assert_eq!(
-        crate::results::observation::ObservationHistory::from_canonical_bytes(
-            &yield_history.canonical_bytes().unwrap(),
-        )
-        .unwrap(),
-        *yield_history
-    );
-
-    let failure_history = result
-        .run
-        .observation_histories
-        .iter()
-        .find(|history| history.manifest().observation_id.0 == "convergence_failure_displacement")
-        .expect("convergence-failure history should be published");
-    assert!(failure_history.samples().is_empty());
-    assert_eq!(failure_history.manifest().observed_sample_count, 0);
-    assert_eq!(
-        crate::results::observation::ObservationHistory::from_canonical_bytes(
-            &failure_history.canonical_bytes().unwrap(),
-        )
-        .unwrap(),
-        *failure_history
-    );
 }
 
 #[test]
@@ -4480,255 +4453,69 @@ fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
 }
 
 #[test]
-fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
+fn nonlinear_synthetic_fixture_requires_a_physical_canonical_basis() {
     let mut model = fixture_model(FixtureId::TransientShock);
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-    let result = crate::run_nonlinear_with_options(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
         experimental_nonlinear_options(),
     )
-    .expect("nonlinear solve should succeed");
-
-    assert!(!result.load_factors.is_empty());
-    assert_eq!(result.load_factors.len(), result.residual_norms.len());
-    assert_eq!(result.residual_norms.len(), result.increment_norms.len());
-    assert_eq!(result.residual_norms.len(), result.iteration_counts.len());
-    assert_eq!(result.load_factors.len(), result.von_mises_snapshots.len());
-    assert_eq!(
-        result.load_factors.len(),
-        result.plastic_strain_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.equivalent_plastic_strain_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.contact_pressure_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.contact_gap_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.load_factor_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.residual_norm_snapshots.len()
-    );
-    assert_eq!(
-        result.von_mises_snapshots[0].field_id,
-        fea_nonlinear_von_mises_field_id(0)
-    );
-    assert_eq!(
-        result.plastic_strain_snapshots[0].field_id,
-        fea_nonlinear_plastic_strain_field_id(0)
-    );
-    assert_eq!(
-        result.equivalent_plastic_strain_snapshots[0].field_id,
-        fea_nonlinear_equivalent_plastic_strain_field_id(0)
-    );
-    assert_eq!(
-        result.contact_pressure_snapshots[0].field_id,
-        fea_nonlinear_contact_pressure_field_id(0)
-    );
-    assert_eq!(
-        result.contact_gap_snapshots[0].field_id,
-        fea_nonlinear_contact_gap_field_id(0)
-    );
-    assert_eq!(
-        result.load_factor_snapshots[0].field_id,
-        fea_nonlinear_load_factor_field_id(0)
-    );
-    assert_eq!(
-        result.residual_norm_snapshots[0].field_id,
-        fea_nonlinear_residual_norm_field_id(0)
-    );
-    assert_eq!(
-        result.load_factor_snapshots[0]
-            .as_host_f64()
-            .expect("load factor field should be host-backed")[0],
-        result.load_factors[0]
-    );
-    assert_eq!(
-        result.residual_norm_snapshots[0]
-            .as_host_f64()
-            .expect("residual field should be host-backed")[0],
-        result.residual_norms[0]
-    );
-    assert!(result
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
-    assert!(result
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_NONLINEAR_COST"));
-    let state = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_NONLINEAR_STATE")
-        .expect("nonlinear state diagnostic should be present");
-    assert!(state.message.contains("plastic_active_element_count="));
-    assert!(state.message.contains("max_equivalent_plastic_strain="));
-    assert!(state.message.contains("contact_active_entity_count="));
-    assert!(state.message.contains("max_contact_pressure="));
-    let topology = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_NONLINEAR_STATE_TOPOLOGY")
-        .expect("nonlinear state topology diagnostic should be present");
-    assert!(topology.message.contains("basis=dof_adjacency_fallback"));
-    assert!(topology.message.contains("active_recovery_edge_count="));
-    let convergence = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE")
-        .expect("nonlinear convergence diagnostic should be present");
-    assert!(convergence.message.contains("iteration_spike_count="));
-    assert!(convergence.message.contains("convergence_stall_count="));
-    assert!(convergence.message.contains("backtrack_burst_count="));
+    .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::InvalidModel(_)
+            | crate::FeaRunError::Assembly(_)
+            | crate::FeaRunError::FormulationAdmission(_)
+    ));
 }
 
 #[test]
-fn nonlinear_beam_moment_emits_rotation_snapshots() {
+fn nonlinear_beam_moment_is_outside_the_canonical_solid_envelope() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let mut step = ProcedureStep::structural_nonlinear("beam_moment_nonlinear".to_string());
-    step.accuracy.resources.maximum_samples = 20;
-    step.observations = vec![nodal_history_observation(
-        "beam_rotation_history",
-        runmat_analysis_core::ObservationQuantity::Rotation,
-        runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement,
-    )];
-    model.sequence.steps = vec![step];
-    let result = crate::run_nonlinear_with_options(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
         experimental_nonlinear_options(),
     )
-    .expect("nonlinear beam moment solve should succeed");
-
-    assert_eq!(result.load_factors.len(), result.rotation_snapshots.len());
-    assert_eq!(
-        result.rotation_snapshots[0].field_id,
-        fea_nonlinear_rotation_field_id(0)
-    );
-    assert_eq!(result.rotation_snapshots[0].shape, vec![2, 3]);
-    let first_rotation = result.rotation_snapshots[0]
-        .as_host_f64()
-        .expect("rotation snapshot should be host-backed");
-    let final_rotation = result
-        .rotation_snapshots
-        .last()
-        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
-        .expect("final rotation snapshot should be host-backed");
-
-    assert!(final_rotation.iter().any(|value| value.abs() > 0.0));
-    assert!(
-        final_rotation
-            .iter()
-            .map(|value| value.abs())
-            .fold(0.0_f64, f64::max)
-            >= first_rotation
-                .iter()
-                .map(|value| value.abs())
-                .fold(0.0_f64, f64::max)
-    );
-    let history = result
-        .run
-        .observation_histories
-        .iter()
-        .find(|history| {
-            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Rotation
-        })
-        .expect("beam nonlinear solve should publish the requested rotation history");
-    assert_eq!(history.samples().len(), result.rotation_snapshots.len() + 1);
-    assert!(history.samples()[0]
-        .result
-        .field
-        .as_host_f64()
-        .expect("initial rotation should be host-backed")
-        .iter()
-        .all(|value| *value == 0.0));
-    for (sample, snapshot) in history.samples()[1..]
-        .iter()
-        .zip(&result.rotation_snapshots)
-    {
-        assert_eq!(sample.result.field.as_host_f64(), snapshot.as_host_f64());
-    }
+    .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::InvalidModel(_)
+            | crate::FeaRunError::Assembly(_)
+            | crate::FeaRunError::FormulationAdmission(_)
+    ));
 }
 
 #[test]
-fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
-    let options = NonlinearSolveOptions {
-        contact_context: Some(FeaContactInterfaceContext {
-            enabled: true,
-            penalty_stiffness_scale: 2.0,
-            max_penetration_ratio: 0.01,
-            friction_coefficient: 0.0,
-        }),
-        ..experimental_nonlinear_options()
-    };
-    let model = fixture_model(FixtureId::NonlinearContactFrictionlessReference);
-    let result = crate::run_nonlinear_with_options(&model, ComputeBackend::Cpu, options)
-        .expect("frictionless contact reference solve should succeed");
-
-    let final_pressure = result
-        .contact_pressure_snapshots
-        .last()
-        .expect("contact pressure snapshot should be present")
-        .as_host_f64()
-        .expect("contact pressure should be host-backed");
-    let final_gap = result
-        .contact_gap_snapshots
-        .last()
-        .expect("contact gap snapshot should be present")
-        .as_host_f64()
-        .expect("contact gap should be host-backed");
-    assert!(
-        final_pressure.iter().any(|pressure| *pressure > 0.0),
-        "reference contact should close and develop pressure"
-    );
-    assert!(
-        final_gap.iter().all(|gap| *gap >= 0.0),
-        "projected contact gap should be nonpenetrating"
-    );
-    for (pressure, gap) in final_pressure.iter().zip(final_gap.iter()) {
-        assert!(
-            *pressure == 0.0 || *gap <= 1.0e-12,
-            "active contact pressure must only occur on closed gaps"
-        );
-    }
-
-    let known_answer = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_CONTACT_KNOWN_ANSWER")
-        .expect("contact known-answer diagnostic should be present");
-    assert!(known_answer
-        .message
-        .contains("open_gap_pressure_residual=0"));
-    assert!(known_answer
-        .message
-        .contains("pressure_gap_complementarity_residual=0"));
-    assert!(known_answer
-        .message
-        .contains("closed_entity_coverage_ratio=1"));
+fn nonlinear_contact_reference_is_explicitly_unsupported() {
+    let mut model = fixture_model(FixtureId::NonlinearContactFrictionlessReference);
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        NonlinearSolveOptions {
+            contact_context: Some(FeaContactInterfaceContext {
+                enabled: true,
+                penalty_stiffness_scale: 2.0,
+                max_penetration_ratio: 0.01,
+                friction_coefficient: 0.0,
+            }),
+            ..experimental_nonlinear_options()
+        },
+    )
+    .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::InvalidModel(_)
+            | crate::FeaRunError::Assembly(_)
+            | crate::FeaRunError::FormulationAdmission(_)
+    ));
 }
 
 #[test]
-fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
+fn thermo_mechanical_nonlinear_cannot_borrow_the_uncoupled_j2_gate() {
     let mut model = fixture_model(FixtureId::NonlinearLoadPathMix);
     configure_thermo_mechanical_excitation(&mut model, 90.0, 1.4e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
@@ -4736,104 +4523,38 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
         runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
         runmat_analysis_core::AnalysisProcedure::Nonlinear,
     )];
-    let result = crate::run_nonlinear_with_options(
+    let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
         experimental_nonlinear_options(),
     )
-    .expect("thermo-mechanical nonlinear solve should succeed");
-
-    assert_eq!(
-        result.load_factors.len(),
-        result.thermo_mechanical_temperature_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.thermo_mechanical_thermal_strain_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.thermo_mechanical_thermal_stress_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.thermo_mechanical_displacement_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.thermo_mechanical_von_mises_snapshots.len()
-    );
-    assert_eq!(
-        result.load_factors.len(),
-        result.thermo_mechanical_coupling_residual_snapshots.len()
-    );
-    assert_eq!(
-        result.thermo_mechanical_temperature_snapshots[0].field_id,
-        fea_thermo_mechanical_temperature_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_temperature_snapshots[0].shape,
-        vec![result.displacement_snapshots[0].shape[0]]
-    );
-    assert_eq!(
-        result.thermo_mechanical_thermal_strain_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_strain_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_thermal_stress_snapshots[0].field_id,
-        fea_thermo_mechanical_thermal_stress_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_displacement_snapshots[0].field_id,
-        fea_thermo_mechanical_displacement_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_von_mises_snapshots[0].field_id,
-        fea_thermo_mechanical_von_mises_field_id(0)
-    );
-    assert_eq!(
-        result.thermo_mechanical_coupling_residual_snapshots[0].field_id,
-        fea_thermo_mechanical_coupling_residual_field_id(0)
-    );
-
-    let profile = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_TM_NONLINEAR")
-        .expect("thermo nonlinear profile diagnostic should be present");
-    assert!(profile
-        .message
-        .contains("convergence_residual_target_peak="));
-    assert!(profile
-        .message
-        .contains("convergence_increment_target_peak="));
-    assert_thermo_mechanical_consistency_diagnostic(&result.run.diagnostics);
-    assert_thermo_mechanical_temperature_field_diagnostic(&result.run.diagnostics);
+    .expect_err("coupled nonlinear equilibrium is unimplemented");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::FormulationAvailability(_)
+    ));
 }
 
 #[test]
-fn nonlinear_harder_fixtures_emit_difficulty_profile_signals() {
+fn nonlinear_proxy_benchmarks_do_not_claim_physical_qualification() {
     for fixture in [
         FixtureId::NonlinearSofteningBenchmark,
         FixtureId::NonlinearLoadPathMix,
     ] {
-        let model = fixture_model(fixture);
-        let result = crate::run_nonlinear_with_options(
+        let mut model = fixture_model(fixture);
+        model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+        let error = crate::run_nonlinear_with_options(
             &model,
             ComputeBackend::Cpu,
             experimental_nonlinear_options(),
         )
-        .expect("hard nonlinear fixture solves");
-        assert!(!result.load_factors.is_empty());
-        assert!(result.backtrack_burst_count > 0);
-        assert!(result.iteration_spike_count > 0);
-        assert!(result.max_line_search_backtracks_per_increment > 0);
-        assert!(result
-            .run
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+        .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
+        assert!(matches!(
+            error,
+            crate::FeaRunError::InvalidModel(_)
+                | crate::FeaRunError::Assembly(_)
+                | crate::FeaRunError::FormulationAdmission(_)
+        ));
     }
 }
 

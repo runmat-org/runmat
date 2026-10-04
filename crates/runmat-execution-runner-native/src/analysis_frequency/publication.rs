@@ -3,8 +3,8 @@ use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_artifact::{ArtifactAccess, PublishedObjectCatalog};
 use runmat_runtime::analysis::{
-    AnalysisArtifactRoot, FrequencySampleArtifactRoots, ObservationHistoryArtifactRoot,
-    StructuralFrequencyArtifactRootIndex,
+    AnalysisArtifactRoot, FrequencySampleArtifactRoots, StructuralFrequencyArtifactRootIndex,
+    StructuralFrequencyHistoryArtifactRoot,
 };
 
 use super::CompletedStructuralFrequencyStudy;
@@ -121,6 +121,13 @@ impl CompletedStructuralFrequencyStudy {
                     .unique_references(access, ValueRefKind::ResultObject)
                     .map_err(protocol)?,
             );
+            if let Some(finalization) = &history.finalization {
+                let (bindings, references) = finalization.published_artifacts(access)?;
+                roots.push(bindings.catalog.reference().clone());
+                roots.push(bindings.history.reference().clone());
+                roots.extend(bindings.series.iter().map(|root| root.reference().clone()));
+                objects.extend(references);
+            }
         }
         let history_roots = self
             .histories
@@ -131,13 +138,19 @@ impl CompletedStructuralFrequencyStudy {
                     .objects
                     .root_reference(access, ValueRefKind::ResultObject)
                     .map_err(protocol)?;
-                Ok(ObservationHistoryArtifactRoot::new(artifact_root(
+                let mut binding = StructuralFrequencyHistoryArtifactRoot::new(artifact_root(
                     &history.checkpoint.objects,
                     reference,
-                )?))
+                )?);
+                if let Some(finalization) = &history.finalization {
+                    binding =
+                        binding.with_finalization(finalization.published_artifacts(access)?.0);
+                }
+                Ok(binding)
             })
             .collect::<NativeExecutionResult<Vec<_>>>()?;
-        let catalog = PublishedObjectCatalog::new(roots, objects).map_err(protocol)?;
+        let catalog =
+            PublishedObjectCatalog::new_with_shared_objects(roots, objects).map_err(protocol)?;
         let index = StructuralFrequencyArtifactRootIndex::new(
             result_binding,
             receipt_binding,
@@ -149,6 +162,80 @@ impl CompletedStructuralFrequencyStudy {
         )
         .map_err(protocol)?;
         Ok((catalog, index))
+    }
+}
+
+impl crate::analysis_frequency_observations::CompletedStructuralFrequencyHistoryFinalization {
+    pub(crate) fn published_artifacts(
+        &self,
+        access: &ArtifactAccess,
+    ) -> NativeExecutionResult<(
+        runmat_runtime::analysis::StructuralFrequencyFinalizedHistoryArtifactRoots,
+        Vec<ValueRef>,
+    )> {
+        let catalog_reference = self
+            .catalog
+            .root_reference(access, ValueRefKind::ResultObject)
+            .map_err(protocol)?;
+        let mut references = self
+            .catalog
+            .unique_references(access, ValueRefKind::ResultObject)
+            .map_err(protocol)?;
+        let history_manifest = match &self.result.history.storage {
+            runmat_analysis_execution::ImportedObservationHistoryStorage::Whole {
+                objects, ..
+            } => {
+                references.extend(
+                    objects
+                        .unique_references(access, ValueRefKind::ResultObject)
+                        .map_err(protocol)?,
+                );
+                &objects.manifest
+            }
+            runmat_analysis_execution::ImportedObservationHistoryStorage::Partitioned(objects) => {
+                references.extend(
+                    runmat_analysis_execution::analysis_object_references(
+                        &objects.manifest,
+                        &self.result.history.root,
+                        access,
+                        ValueRefKind::ResultObject,
+                    )
+                    .map_err(protocol)?,
+                );
+                &objects.manifest
+            }
+        };
+        let history = AnalysisArtifactRoot::new(
+            self.result.history.root.clone(),
+            history_manifest.kind,
+            history_manifest.logical_identity,
+            history_manifest.payload_digest,
+        )
+        .map_err(protocol)?;
+        let series = self
+            .result
+            .series_objects
+            .as_ref()
+            .map(|objects| {
+                let reference = objects
+                    .root_reference(access, ValueRefKind::ResultObject)
+                    .map_err(protocol)?;
+                references.extend(
+                    objects
+                        .unique_references(access, ValueRefKind::ResultObject)
+                        .map_err(protocol)?,
+                );
+                artifact_root(objects, reference)
+            })
+            .transpose()?;
+        Ok((
+            runmat_runtime::analysis::StructuralFrequencyFinalizedHistoryArtifactRoots {
+                catalog: artifact_root(&self.catalog, catalog_reference)?,
+                history,
+                series,
+            },
+            references,
+        ))
     }
 }
 

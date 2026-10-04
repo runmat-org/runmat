@@ -1,6 +1,7 @@
 //! Solver-independent identity for an authored analysis and its realized formulation.
 
 pub mod accuracy;
+pub mod assessment;
 mod authored_observation;
 mod authored_output;
 pub mod authoring;

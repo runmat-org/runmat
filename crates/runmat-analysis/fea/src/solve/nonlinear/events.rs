@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::NonlinearSolveResult;
 
-const SOURCE_PREFIX: &[u8] = b"runmat-fea-nonlinear-event-source/v1\0";
+const SOURCE_PREFIX: &[u8] = b"runmat-fea-nonlinear-event-source/v4\0";
 const SOURCE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32);
 
@@ -42,6 +42,7 @@ impl std::error::Error for NonlinearEventDetectionError {}
 
 #[derive(Serialize)]
 struct NonlinearEventSource<'a> {
+    accepted_state: &'a super::AcceptedSolidState,
     converged_increments: usize,
     total_increments: usize,
     initial_load_factor: f64,
@@ -51,6 +52,9 @@ struct NonlinearEventSource<'a> {
     initial_contact_pressure: &'a [f64],
     initial_contact_gap: &'a [f64],
     displacement_snapshots: &'a [Vec<f64>],
+    internal_force_snapshots: &'a [Vec<f64>],
+    stress_snapshots: &'a [Vec<f64>],
+    total_strain_snapshots: &'a [Vec<f64>],
     von_mises_snapshots: &'a [Vec<f64>],
     plastic_strain_snapshots: &'a [Vec<f64>],
     equivalent_plastic_strain_snapshots: &'a [Vec<f64>],
@@ -58,6 +62,7 @@ struct NonlinearEventSource<'a> {
     contact_gap_snapshots: &'a [Vec<f64>],
     residual_norms: &'a [f64],
     increment_norms: &'a [f64],
+    relative_increment_norms: &'a [f64],
     iteration_counts: &'a [usize],
     failed_increments: usize,
     line_search_backtracks: usize,
@@ -140,6 +145,7 @@ pub fn nonlinear_solver_content_digest(
         SOURCE_PREFIX,
         "completed-nonlinear-solver-content",
         &NonlinearEventSource {
+            accepted_state: &result.accepted_state,
             converged_increments: result.converged_increments,
             total_increments: result.total_increments,
             initial_load_factor: result.initial_load_factor,
@@ -149,6 +155,9 @@ pub fn nonlinear_solver_content_digest(
             initial_contact_pressure: &result.initial_contact_pressure,
             initial_contact_gap: &result.initial_contact_gap,
             displacement_snapshots: &result.displacement_snapshots,
+            internal_force_snapshots: &result.internal_force_snapshots,
+            stress_snapshots: &result.stress_snapshots,
+            total_strain_snapshots: &result.total_strain_snapshots,
             von_mises_snapshots: &result.von_mises_snapshots,
             plastic_strain_snapshots: &result.plastic_strain_snapshots,
             equivalent_plastic_strain_snapshots: &result.equivalent_plastic_strain_snapshots,
@@ -156,6 +165,7 @@ pub fn nonlinear_solver_content_digest(
             contact_gap_snapshots: &result.contact_gap_snapshots,
             residual_norms: &result.residual_norms,
             increment_norms: &result.increment_norms,
+            relative_increment_norms: &result.relative_increment_norms,
             iteration_counts: &result.iteration_counts,
             failed_increments: result.failed_increments,
             line_search_backtracks: result.line_search_backtracks,
@@ -184,6 +194,9 @@ fn validate_event_source(
     let count = result.load_factors.len();
     let snapshot_counts = [
         result.displacement_snapshots.len(),
+        result.internal_force_snapshots.len(),
+        result.stress_snapshots.len(),
+        result.total_strain_snapshots.len(),
         result.von_mises_snapshots.len(),
         result.plastic_strain_snapshots.len(),
         result.equivalent_plastic_strain_snapshots.len(),
@@ -191,6 +204,7 @@ fn validate_event_source(
         result.contact_gap_snapshots.len(),
         result.residual_norms.len(),
         result.increment_norms.len(),
+        result.relative_increment_norms.len(),
         result.iteration_counts.len(),
     ];
     if !result.initial_load_factor.is_finite()
@@ -216,6 +230,9 @@ fn validate_event_source(
         .chain(std::iter::once(result.initial_contact_pressure.as_slice()))
         .chain(std::iter::once(result.initial_contact_gap.as_slice()))
         .chain(result.displacement_snapshots.iter().map(Vec::as_slice))
+        .chain(result.internal_force_snapshots.iter().map(Vec::as_slice))
+        .chain(result.stress_snapshots.iter().map(Vec::as_slice))
+        .chain(result.total_strain_snapshots.iter().map(Vec::as_slice))
         .chain(result.von_mises_snapshots.iter().map(Vec::as_slice))
         .chain(result.plastic_strain_snapshots.iter().map(Vec::as_slice))
         .chain(
@@ -237,6 +254,7 @@ fn validate_event_source(
         .residual_norms
         .iter()
         .chain(&result.increment_norms)
+        .chain(&result.relative_increment_norms)
         .any(|value| !value.is_finite())
     {
         return Err(NonlinearEventDetectionError::Invalid(
@@ -293,7 +311,23 @@ mod tests {
     use super::*;
 
     fn result() -> NonlinearSolveResult {
+        // Synthetic event histories below are not a physical/restart qualification.
+        let (model, mesh, summary) = crate::assembly::nonlinear_solid::tests::fixture(
+            runmat_meshing_core::ElementOrder::Tet4,
+            false,
+        );
+        let basis = crate::assembly::nonlinear_solid::CanonicalNonlinearSolidBasis::prepare(
+            &model, &mesh, &summary,
+        )
+        .unwrap();
         NonlinearSolveResult {
+            accepted_state: super::super::AcceptedSolidState {
+                scope_identity: Digest::sha256(b"synthetic-event-test"),
+                load_factor: 1.0,
+                displacement: vec![0.0; summary.dof_count],
+                constitutive: basis.zero_state(),
+                accumulated_plastic_dissipation_j: 0.0,
+            },
             converged_increments: 2,
             total_increments: 2,
             initial_load_factor: 0.0,
@@ -303,6 +337,9 @@ mod tests {
             initial_contact_pressure: vec![0.0],
             initial_contact_gap: vec![1.0],
             displacement_snapshots: vec![vec![0.5], vec![1.0]],
+            internal_force_snapshots: vec![vec![1.0], vec![2.0]],
+            stress_snapshots: vec![vec![1.0; 6], vec![2.0; 6]],
+            total_strain_snapshots: vec![vec![0.001; 6], vec![0.002; 6]],
             von_mises_snapshots: vec![vec![1.0], vec![2.0]],
             plastic_strain_snapshots: vec![vec![0.0], vec![0.1]],
             equivalent_plastic_strain_snapshots: vec![vec![0.0], vec![0.1]],
@@ -310,6 +347,7 @@ mod tests {
             contact_gap_snapshots: vec![vec![-0.1], vec![0.2]],
             residual_norms: vec![1.0e-8, 1.0e-9],
             increment_norms: vec![1.0e-7, 1.0e-8],
+            relative_increment_norms: vec![1.0e-8, 1.0e-9],
             iteration_counts: vec![3, 4],
             failed_increments: 0,
             line_search_backtracks: 0,
@@ -361,6 +399,12 @@ mod tests {
     fn source_identity_binds_numerical_state_but_not_execution_diagnostics() {
         let baseline = result();
         let baseline_digest = nonlinear_solver_content_digest(&baseline).unwrap();
+        let mut substituted_strain = baseline.clone();
+        substituted_strain.total_strain_snapshots[1][0] += 0.001;
+        assert_ne!(
+            baseline_digest,
+            nonlinear_solver_content_digest(&substituted_strain).unwrap()
+        );
 
         let mut diagnostic_only = baseline.clone();
         diagnostic_only.diagnostics.push(FeaDiagnostic {

@@ -4,7 +4,7 @@ use crate::{
 };
 use runmat_parser::fea::{FeaImportKind, FeaModuleItem, FeaSyntaxModule};
 use runmat_types::Span;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct ParsedFeaModule {
@@ -33,6 +33,17 @@ pub struct FeaModuleGraph {
 }
 
 impl FeaModuleGraph {
+    /// Source invalidation includes unresolved import targets as well as loaded modules.
+    pub fn source_dependencies(&self) -> Result<BTreeSet<LogicalSourcePath>, FunctionRequestError> {
+        let mut paths = self.modules.keys().cloned().collect::<BTreeSet<_>>();
+        paths.extend(self.edges.iter().map(|edge| edge.target.clone()));
+        paths.extend(
+            self.function_requests()?
+                .into_iter()
+                .map(|request| request.module_path),
+        );
+        Ok(paths)
+    }
     pub fn is_valid(&self) -> bool {
         !self.diagnostics.iter().any(|diagnostic| {
             diagnostic.severity == crate::FeaDiagnosticSeverity::Error

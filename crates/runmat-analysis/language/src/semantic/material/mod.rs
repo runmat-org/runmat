@@ -265,23 +265,25 @@ fn lower_material(
         })
     });
     let plastic = values::block(&declaration.statements, "plastic").and_then(|statements| {
-        Some(MaterialPlasticModel {
-            yield_strain: values::required_ratio(
+        values::require_closed_law(
+            declaration,
+            statements,
+            "j2_isotropic_linear_hardening",
+            diagnostics,
+        )?;
+        Some(MaterialPlasticModel::J2IsotropicLinearHardening {
+            yield_stress_pa: values::required_quantity(
                 declaration,
                 statements,
-                "yield_strain",
+                "yield_stress",
+                PhysicalDimension::PRESSURE,
                 diagnostics,
             )?,
-            hardening_modulus_ratio: values::required_ratio(
+            isotropic_hardening_modulus_pa: values::required_quantity(
                 declaration,
                 statements,
-                "hardening_modulus_ratio",
-                diagnostics,
-            )?,
-            saturation_exponent: values::required_ratio(
-                declaration,
-                statements,
-                "saturation_exponent",
+                "isotropic_hardening_modulus",
+                PhysicalDimension::PRESSURE,
                 diagnostics,
             )?,
         })
@@ -347,11 +349,7 @@ fn validate_authored_shape(
         ),
         (
             "plastic",
-            &[
-                "yield_strain",
-                "hardening_modulus_ratio",
-                "saturation_exponent",
-            ],
+            &["law", "yield_stress", "isotropic_hardening_modulus"],
         ),
     ];
     let mut seen = BTreeSet::new();

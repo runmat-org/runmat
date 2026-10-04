@@ -8,6 +8,20 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (
+                Self::StructuralNonlinearPipeline(demand),
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ) => match &demand.block_transport {
+                Some(block) => Some(&block.receipt_output),
+                None => None,
+            },
+            (
+                Self::StructuralNonlinearPipeline(demand),
+                AnalysisNumericalObjectKind::NonlinearSolidBlockArtifact,
+            ) => match &demand.block_transport {
+                Some(block) => Some(&block.output),
+                None => None,
+            },
             (Self::FluidFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }
@@ -30,6 +44,9 @@ impl FeaResourceDemand {
                 Self::MaxwellHarmonic(demand),
                 AnalysisNumericalObjectKind::StatePublicationProfiles,
             ) => Some(&demand.state_profiles_output),
+            (Self::NonlinearFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
+                Some(&demand.output)
+            }
             (Self::MagneticFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }
@@ -74,6 +91,10 @@ impl FeaResourceDemand {
             (Self::ResultPublication(demand), AnalysisNumericalObjectKind::PublishedResult) => {
                 Some(&demand.output)
             }
+            (
+                Self::StructuralNonlinearPipeline(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
             (
                 Self::StructuralLinearPipeline(demand),
                 AnalysisNumericalObjectKind::StatePublicationProfiles,
@@ -212,9 +233,15 @@ impl FeaResourceDemand {
     }
 
     pub const fn governs_prepared_outputs(&self) -> bool {
+        if let Self::StructuralNonlinearPipeline(demand) = self {
+            return demand.block_transport.is_some();
+        }
         !matches!(
             self,
-            Self::StructuralLinearPipeline(_) | Self::StructuralTransientFieldRecovery(_)
+            Self::StructuralLinearPipeline(_)
+                | Self::StructuralNonlinearPipeline(_)
+                | Self::StructuralNonlinearRecovery(_)
+                | Self::StructuralTransientFieldRecovery(_)
         )
     }
 }

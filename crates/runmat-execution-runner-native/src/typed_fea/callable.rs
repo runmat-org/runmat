@@ -37,7 +37,8 @@ pub(super) async fn compile_imported_function(
             definition.qualified_name
         )
     })?;
-    let source_bytes = runmat_filesystem::read_async(&definition.source_path)
+    let source_bytes = source
+        .read_source(&definition.source_path)
         .await
         .map_err(|error| {
             format!(
@@ -88,18 +89,30 @@ pub(super) async fn compile_imported_function(
         .next()
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "FEA function has an empty function name".to_string())?;
-    let unit = session
-        .compile_executable_unit(
-            runmat_core::ExecutableSource::frozen(
-                source_id.package_instance.to_string(),
-                source_id.relative_path.as_str(),
-                definition.source_path.to_string_lossy(),
-                source_text,
-            ),
-            Some(revision.clone()),
-        )
-        .await
-        .map_err(|error| format!("cannot compile FEA function: {error}"))?;
+    let executable_source = runmat_core::ExecutableSource::frozen(
+        source_id.package_instance.to_string(),
+        source_id.relative_path.as_str(),
+        definition.source_path.to_string_lossy(),
+        source_text,
+    );
+    let unit = match source.captured_sources() {
+        Some(captured) => {
+            session
+                .compile_executable_unit_from_snapshot(
+                    executable_source,
+                    revision.clone(),
+                    &runmat_package::FrozenProjectHandoff::new(frozen.clone()),
+                    captured,
+                )
+                .await
+        }
+        None => {
+            session
+                .compile_executable_unit(executable_source, Some(revision.clone()))
+                .await
+        }
+    }
+    .map_err(|error| format!("cannot compile FEA function: {error}"))?;
     let executable = unit
         .portable_envelope_for(Some(entrypoint))
         .map_err(|error| error.to_string())?;

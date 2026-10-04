@@ -1,33 +1,9 @@
-use runmat_analysis_language::{
-    FeaDiagnostic, FeaDiagnosticSeverity, LogicalSourcePath, SourceAvailability,
-};
+use runmat_analysis_language::{FeaDiagnostic, FeaDiagnosticSeverity, SourceAvailability};
 use serde::{Deserialize, Serialize};
 
 use super::CheckedFeaSource;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeaCheckStatus {
-    Valid,
-    Invalid,
-    Incomplete,
-}
-
-impl FeaCheckStatus {
-    pub const fn is_valid(self) -> bool {
-        matches!(self, Self::Valid)
-    }
-}
-
-impl std::fmt::Display for FeaCheckStatus {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Valid => "valid",
-            Self::Invalid => "invalid",
-            Self::Incomplete => "incomplete",
-        })
-    }
-}
+pub use runmat_fea_source::{FeaCheckStatus, FeaSourceCheckResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -51,24 +27,45 @@ impl FeaRootSelector {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FeaSourceCheckResult {
-    pub status: FeaCheckStatus,
-    pub root_module: LogicalSourcePath,
-    pub program: super::FeaSemanticProgram,
-    pub source_index: super::FeaSourceIndex,
-    pub diagnostics: Vec<FeaDiagnostic>,
-}
-
 impl CheckedFeaSource {
     pub fn check_result(&self) -> FeaSourceCheckResult {
         let diagnostics = self.diagnostics().cloned().collect::<Vec<_>>();
         let status = check_status(&diagnostics);
+        let program = self.semantic_program();
+        let functions = self.program.bound.functions.values().collect::<Vec<_>>();
+        let geometry = self
+            .program
+            .geometry_inspections
+            .values()
+            .map(|inspection| {
+                (
+                    &inspection.module,
+                    &inspection.geometry,
+                    &inspection.source_path,
+                    &inspection.facts,
+                )
+            })
+            .collect::<Vec<_>>();
+        let revision = super::source_digest(
+            &serde_json::to_vec(&(
+                "runmat-fea-checked-v1",
+                &self.root_module,
+                self.program.bound.graph.catalog_fingerprint,
+                self.program.bound.graph.source_digests(),
+                functions,
+                geometry,
+                &self.execution_profile_facts,
+                &program,
+                &diagnostics,
+            ))
+            .expect("checked source facts are serializable"),
+        );
         FeaSourceCheckResult {
+            contract: runmat_fea_source::FeaSourceCheckContract::AssessmentsV1,
+            revision,
             status,
             root_module: self.root_module.clone(),
-            program: self.semantic_program(),
+            program,
             source_index: self.source_index(),
             diagnostics,
         }

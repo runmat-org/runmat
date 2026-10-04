@@ -264,3 +264,5 @@ pub use validate::{
 
 #[cfg(test)]
 mod tests;
+
+pub use study::assessment::*;

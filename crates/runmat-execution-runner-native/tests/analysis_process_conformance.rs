@@ -58,6 +58,11 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
+#[path = "analysis_process_conformance/assessment.rs"]
+mod assessment;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/assessment_publication.rs"]
+mod assessment_publication;
 #[path = "analysis_process_conformance/electrothermal.rs"]
 mod electrothermal;
 #[cfg(feature = "occt-native")]
@@ -73,6 +78,11 @@ mod magnetic_authored;
 mod maxwell_authored;
 #[path = "analysis_process_conformance/modal_transient.rs"]
 mod modal_transient;
+#[path = "analysis_process_conformance/nonlinear.rs"]
+mod nonlinear;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/nonlinear_authored.rs"]
+mod nonlinear_authored;
 #[path = "analysis_process_conformance/publication_chain.rs"]
 mod publication_chain;
 #[path = "analysis_process_conformance/signal.rs"]
@@ -132,7 +142,9 @@ fn main() {
             .block_on(run_durable_driver());
         return;
     }
-    let mut runtime = if std::env::args_os().any(|argument| argument == "--fluid-authored-only") {
+    let mut runtime = if std::env::args_os().any(|argument| {
+        argument == "--fluid-authored-only" || argument == "--nonlinear-authored-only"
+    }) {
         tokio::runtime::Builder::new_multi_thread()
     } else {
         tokio::runtime::Builder::new_current_thread()
@@ -141,9 +153,30 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--nonlinear-authored-only") {
+        #[cfg(feature = "occt-native")]
+        nonlinear_authored::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("authored J2 conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--nonlinear-only") {
+        nonlinear::run().await;
+        return;
+    }
+    #[cfg(feature = "occt-native")]
+    if std::env::args_os().any(|argument| argument == "--assessment-publication-only") {
+        assessment_publication::run().await;
+        return;
+    }
     #[cfg(feature = "occt-native")]
     if std::env::args_os().any(|argument| argument == "--fluid-authored-only") {
         fluid_authored::run().await;
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--assessment-only") {
+        assessment::run().await;
         return;
     }
     if std::env::args_os().any(|argument| argument == "--maxwell-authored-only") {

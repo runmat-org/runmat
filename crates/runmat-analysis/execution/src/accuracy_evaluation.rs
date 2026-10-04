@@ -1,3 +1,5 @@
+mod source_host;
+use source_host::receipt_matches_solve;
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::ProcedureStep;
@@ -61,6 +63,7 @@ pub fn prepare_accuracy(
 ) -> AnalysisBridgeResult<PreparedAccuracy> {
     preparation.solve_host.validate()?;
     let expected_work_kind = match preparation.source_kind {
+        AccuracySourceKind::NonlinearSolid => AnalysisWorkKind::SolveNonlinearSolidBlock,
         AccuracySourceKind::FluidSteady => AnalysisWorkKind::SolveFluidSteady,
         AccuracySourceKind::ElectricalStatic => AnalysisWorkKind::SolveElectricalStatic,
         AccuracySourceKind::Magnetostatic => AnalysisWorkKind::SolveMagnetostatic,
@@ -132,6 +135,7 @@ pub fn prepare_accuracy(
     if !matches!(
         preparation.source_kind,
         AccuracySourceKind::Thermal
+            | AccuracySourceKind::NonlinearSolid
             | AccuracySourceKind::FluidSteady
             | AccuracySourceKind::AcousticHarmonic
             | AccuracySourceKind::ElectricalStatic
@@ -164,7 +168,11 @@ pub fn prepare_accuracy(
     ];
     let source_context_start = inputs.len();
     inputs.extend(preparation.source_context_inputs.into_iter().map(|input| {
-        let kind = if input.manifest.kind == AnalysisNumericalObjectKind::SolverResult {
+        let kind = if matches!(
+            input.manifest.kind,
+            AnalysisNumericalObjectKind::SolverResult
+                | AnalysisNumericalObjectKind::NonlinearSolidBlockArtifact
+        ) {
             ValueRefKind::ResultObject
         } else {
             ValueRefKind::DriverObject
@@ -252,111 +260,6 @@ pub fn prepare_accuracy(
         inputs,
         resource_plan,
     })
-}
-
-fn receipt_matches_solve(receipt: &AccuracySourceReceipt, host: &AnalysisHostWorkload) -> bool {
-    match receipt {
-        AccuracySourceReceipt::FluidSteady(fluid) => {
-            let mut workloads = host
-                .workload
-                .inputs
-                .iter()
-                .filter(|input| input.kind == AnalysisNumericalObjectKind::FluidSteadyWorkload);
-            let mut meshes = host
-                .workload
-                .inputs
-                .iter()
-                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
-            matches!(workloads.next(),Some(input) if input.logical_identity==fluid.source_workload().digest())
-                && workloads.next().is_none()
-                && matches!(meshes.next(),Some(input) if input.logical_identity==fluid.receipt().mesh_digest)
-                && meshes.next().is_none()
-                && fluid.receipt().producer == host.workload.step
-        }
-        AccuracySourceReceipt::MaxwellHarmonic(maxwell) => {
-            let mut workloads =
-                host.workload.inputs.iter().filter(|input| {
-                    input.kind == AnalysisNumericalObjectKind::MaxwellHarmonicWorkload
-                });
-            let mut meshes = host
-                .workload
-                .inputs
-                .iter()
-                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
-            matches!(workloads.next(), Some(input) if input.logical_identity == maxwell.source_workload().digest())
-                && workloads.next().is_none()
-                && matches!(meshes.next(), Some(input) if input.logical_identity == maxwell.receipt().topology_digest)
-                && meshes.next().is_none()
-                && maxwell.receipt().producer == host.workload.step
-        }
-        AccuracySourceReceipt::Magnetostatic(magnetic) => {
-            let mut workloads =
-                host.workload.inputs.iter().filter(|input| {
-                    input.kind == AnalysisNumericalObjectKind::MagnetostaticWorkload
-                });
-            let mut meshes = host
-                .workload
-                .inputs
-                .iter()
-                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
-            matches!(workloads.next(), Some(input) if input.logical_identity == magnetic.source_workload().digest())
-                && workloads.next().is_none()
-                && matches!(meshes.next(), Some(input) if input.logical_identity == magnetic.receipt().topology_digest)
-                && meshes.next().is_none()
-                && magnetic.receipt().producer == host.workload.step
-        }
-        AccuracySourceReceipt::ElectricalStatic(electrical) => {
-            let mut workloads = host.workload.inputs.iter().filter(|input| {
-                input.kind == AnalysisNumericalObjectKind::ElectricalStaticWorkload
-            });
-            let mut meshes = host
-                .workload
-                .inputs
-                .iter()
-                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
-            matches!(workloads.next(), Some(input) if input.logical_identity == electrical.source_workload().digest())
-                && workloads.next().is_none()
-                && matches!(meshes.next(), Some(input) if input.logical_identity == electrical.receipt().topology_digest)
-                && meshes.next().is_none()
-                && electrical.receipt().producer == host.workload.step
-        }
-        AccuracySourceReceipt::AcousticHarmonic(acoustic) => {
-            let mut workloads = host.workload.inputs.iter().filter(|input| {
-                input.kind == AnalysisNumericalObjectKind::AcousticHarmonicWorkload
-            });
-            let mut meshes = host
-                .workload
-                .inputs
-                .iter()
-                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
-            matches!(workloads.next(), Some(input) if input.logical_identity == acoustic.source_workload().digest())
-                && workloads.next().is_none()
-                && matches!(meshes.next(), Some(input) if input.logical_identity == acoustic.receipt().topology_digest)
-                && meshes.next().is_none()
-                && acoustic.receipt().producer == host.workload.step
-        }
-        AccuracySourceReceipt::Thermal(thermal) => {
-            let inputs_of_kind = |kind| {
-                host.workload
-                    .inputs
-                    .iter()
-                    .filter(move |input| input.kind == kind)
-            };
-            let mut workloads = inputs_of_kind(AnalysisNumericalObjectKind::ThermalWorkload);
-            let mut meshes = inputs_of_kind(AnalysisNumericalObjectKind::Mesh);
-            // Thermal receipts bind numerical intent, not the transport/placement host identity.
-            matches!(workloads.next(), Some(input) if input.logical_identity == thermal.source_workload.digest())
-                && workloads.next().is_none()
-                && matches!(meshes.next(), Some(input) if input.logical_identity == thermal.receipt().topology_digest)
-                && meshes.next().is_none()
-                && thermal.receipt().producer == host.workload.step
-        }
-        AccuracySourceReceipt::StructuralLinear(_)
-        | AccuracySourceReceipt::StructuralModalResponseSpectrum(_)
-        | AccuracySourceReceipt::StructuralRandomResponse(_) => {
-            receipt.source_workload() == host.workload.identity
-        }
-    }
 }
 
 pub fn import_accuracy(

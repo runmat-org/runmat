@@ -14,7 +14,9 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
+mod backend;
 mod linearization;
+pub use backend::require_executable_static_backend;
 
 use super::{
     assembly_sizing::{
@@ -45,20 +47,6 @@ const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 9;
 // and projected von-Mises require seven values per node.
 const STRUCTURAL_RECOVERY_PEAK_VALUES_PER_ELEMENT: usize = 123;
 const STRUCTURAL_RECOVERY_VALUES_PER_NODE: usize = 7;
-
-/// Execution capability gate shared by portable task preparation and numerical preassembly.
-/// The estimator may still model future GPU demand, but it is not an executable admission.
-pub fn require_executable_static_backend(
-    backend: crate::ComputeBackend,
-) -> Result<(), ResourcePlanningError> {
-    if backend == crate::ComputeBackend::Gpu {
-        return Err(ResourcePlanningError::Invalid(
-            "static GPU execution requires a native sparse solver and accelerator-bound admission; CPU fallback is not a GPU solve"
-                .into(),
-        ));
-    }
-    Ok(())
-}
 
 /// Builds the canonical resource plan from authoritative post-projection numerical inputs.
 ///
@@ -116,6 +104,12 @@ pub(crate) struct StaticResourcePreflight<'a> {
 pub(crate) fn build_static_resource_plan(
     input: StaticResourcePreflight<'_>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    build_resource_plan(build_static_resource_input(input)?)
+}
+
+pub(super) fn build_static_resource_input(
+    input: StaticResourcePreflight<'_>,
+) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
     let StaticResourcePreflight {
         model,
         step,
@@ -163,7 +157,11 @@ pub(crate) fn build_static_resource_plan(
     )?;
     let dofs = facts.sparse.rows.0;
     let stiffness_nonzeros = facts.sparse.maximum_nonzeros();
-    let admission_pattern = if constraints.enforcement != ConstraintEnforcement::DirectElimination {
+    // Newton always solves Tᵀ K T, including direct fixed-DOF constraints;
+    // linear direct elimination instead retains the full matrix dimension.
+    let admission_pattern = if constraints.enforcement != ConstraintEnforcement::DirectElimination
+        || step.procedure == runmat_analysis_core::AnalysisProcedure::Nonlinear
+    {
         facts
             .constraint_matrix
             .affine_reduction()
@@ -268,7 +266,7 @@ pub(crate) fn build_static_resource_plan(
     let fixed_assembly_scratch = local_execution
         .checked_fixed_scratch_bytes(ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER))
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    build_resource_plan(FeaResourcePlanningInput {
+    Ok(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralLinearPipeline,
         demand: FeaResourceDemand::StructuralLinearPipeline(

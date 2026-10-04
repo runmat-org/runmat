@@ -47,6 +47,7 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
     let properties = crate::properties::compile_property_map(&model, Some(&mesh)).unwrap();
     (
         CompiledAnalysisStudy {
+            assessments: Vec::new(),
             module_path: "tests/fluid.fea".into(),
             study_id: "flow".into(),
             formulation_requirement: FormulationRequirement::Experimental,

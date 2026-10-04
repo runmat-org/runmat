@@ -30,7 +30,7 @@ pub(super) struct ObservationAttachment {
     run_id: String,
     run_digest: Digest,
     publication: ThermalObservationPublication,
-    objects: PublishedObjectCatalog,
+    pub(in crate::analysis::storage) objects: PublishedObjectCatalog,
 }
 
 impl ObservationAttachment {
@@ -61,7 +61,11 @@ impl ObservationAttachment {
         })
     }
 
-    fn validate(&self, run: &AnalysisRunResult, run_digest: Digest) -> Result<(), String> {
+    pub(in crate::analysis::storage) fn validate(
+        &self,
+        run: &AnalysisRunResult,
+        run_digest: Digest,
+    ) -> Result<(), String> {
         if self.schema_version != 1 || self.run_id != run.run_id || self.run_digest != run_digest {
             return Err("observation attachment differs from immutable run metadata".into());
         }
@@ -117,19 +121,63 @@ pub fn load_observation_history_sample(
         .load_observation_history_sample(run_id, observation_id, sample)
 }
 
+#[cfg(test)]
 pub(super) fn prune_attachment(root: &Path, run_id: &str) -> Result<(), String> {
+    let store = FilesystemAnalysisArtifactStore::new(root.to_path_buf());
+    prune_attachment_scoped(&store.access(true)?, run_id)
+}
+#[cfg(test)]
+pub(super) fn prune_attachment_scoped(
+    store: &access::FilesystemAccess<'_>,
+    run_id: &str,
+) -> Result<(), String> {
+    let root = &store.root;
     validate_run_id_token(run_id)?;
     let directory = root.join("observations");
-    if !owned_directory_exists(&directory, "observation attachments")? {
+    if !store
+        .owned_directory_exists(&directory, "observation attachments")
+        .map_err(|e| e.to_string())?
+    {
         return Ok(());
     }
     let path = directory.join(format!("{run_id}.json"));
-    match fs_symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type() == FsFileType::File => {
-            fs_remove_file(path).map_err(|error| error.to_string())
-        }
+    match store.fs_symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type() == FsFileType::File => store
+            .fs_remove_file(path)
+            .map_err(|error| error.to_string()),
         Ok(_) => Err("observation attachment must be a regular file".into()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// Authenticate/ingest outside the write fence; sources may read this same provider.
+pub(super) fn prepare_filesystem_observations(
+    store: &FilesystemAnalysisArtifactStore,
+    run_id: &str,
+    completed: &ThermalStudyCompletion,
+    source: &ThermalStudyObjectSource,
+) -> Result<(ObservationAttachment, BTreeMap<Digest, Vec<u8>>), String> {
+    let access = store.access(false)?;
+    let run = access
+        .load_run(run_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("observation run is absent")?;
+    let digest = access
+        .read_standard(run_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("observation run is absent")?
+        .run_digest;
+    drop(access);
+    let attachment = ObservationAttachment::prepare(&run, completed, source, digest)?;
+    binding::validate_run(&run, completed, source)?;
+    let mut objects = BTreeMap::new();
+    attachment.ingest(source, |digest, bytes| {
+        if objects.get(&digest).is_some_and(|old| old != &bytes) {
+            return Err("observation object collision".into());
+        }
+        objects.insert(digest, bytes);
+        Ok(())
+    })?;
+    Ok((attachment, objects))
 }

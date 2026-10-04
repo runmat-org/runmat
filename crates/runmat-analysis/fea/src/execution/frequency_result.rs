@@ -133,7 +133,7 @@ impl StructuralFrequencySolverResultManifest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StructuralFrequencySolverResult {
     manifest: StructuralFrequencySolverResultManifest,
     samples: Vec<StructuralFrequencyPhysicalSample>,

@@ -3,17 +3,22 @@ use crate::{
     AtomicCreateResult, DirEntry, FileHandle, FsMetadata, FsProvider, MemoryFsProvider, OpenFlags,
 };
 use async_trait::async_trait;
-use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+type OutputVersions = (BTreeMap<PathBuf, String>, BTreeMap<String, Vec<u8>>);
 
 struct Versions {
     live: MemoryFsProvider,
-    outputs: Mutex<(BTreeMap<PathBuf, String>, BTreeMap<String, Vec<u8>>)>,
+    outputs: Mutex<OutputVersions>,
 }
 
 #[tokio::test]
 async fn output_versions_survive_peer_edits_and_reject_stale_writes_and_deletes() {
-    let base = Arc::new(Versions { live: MemoryFsProvider::new(), outputs: Mutex::default() });
+    let base = Arc::new(Versions {
+        live: MemoryFsProvider::new(),
+        outputs: Mutex::default(),
+    });
     let pinned = PinnedFsProvider::new(base.clone(), manifest("v1")).unwrap();
     let path = Path::new("/result.txt");
     pinned.write(path, b"first").await.unwrap();
@@ -29,10 +34,18 @@ async fn output_versions_survive_peer_edits_and_reject_stale_writes_and_deletes(
 #[tokio::test]
 async fn buffered_output_handles_use_exact_versions_for_every_flush() {
     use std::io::{Read, Seek, SeekFrom, Write};
-    let base = Arc::new(Versions { live: MemoryFsProvider::new(), outputs: Mutex::default() });
+    let base = Arc::new(Versions {
+        live: MemoryFsProvider::new(),
+        outputs: Mutex::default(),
+    });
     let pinned = PinnedFsProvider::new(base.clone(), manifest("v1")).unwrap();
     let path = Path::new("/result.txt");
-    let flags = OpenFlags { read: true, write: true, create: true, ..Default::default() };
+    let flags = OpenFlags {
+        read: true,
+        write: true,
+        create: true,
+        ..Default::default()
+    };
     let mut a = pinned.open_async(path, &flags).await.unwrap();
     a.write_all(b"first").unwrap();
     a.flush_async().await.unwrap();
@@ -55,7 +68,10 @@ async fn buffered_output_handles_use_exact_versions_for_every_flush() {
 
 #[tokio::test]
 async fn owned_outputs_can_be_removed_and_recreated_but_cannot_steal_new_paths() {
-    let base = Arc::new(Versions { live: MemoryFsProvider::new(), outputs: Mutex::default() });
+    let base = Arc::new(Versions {
+        live: MemoryFsProvider::new(),
+        outputs: Mutex::default(),
+    });
     let pinned = PinnedFsProvider::new(base.clone(), manifest("v1")).unwrap();
     let path = Path::new("/result.txt");
     pinned.write(path, b"first").await.unwrap();
@@ -73,8 +89,11 @@ impl FsProvider for Versions {
         self.live.open(path, flags)
     }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        { let outputs = self.outputs.lock().unwrap();
-          if let Some(version) = outputs.0.get(path) { return Ok(outputs.1[version].clone()); }
+        {
+            let outputs = self.outputs.lock().unwrap();
+            if let Some(version) = outputs.0.get(path) {
+                return Ok(outputs.1[version].clone());
+            }
         }
         self.live.read(path).await
     }
@@ -85,7 +104,9 @@ impl FsProvider for Versions {
         _: u64,
         _: &str,
     ) -> io::Result<Vec<u8>> {
-        if let Some(bytes) = self.outputs.lock().unwrap().1.get(version).cloned() { return Ok(bytes); }
+        if let Some(bytes) = self.outputs.lock().unwrap().1.get(version).cloned() {
+            return Ok(bytes);
+        }
         if path == Path::new("/data/manifest.json") && version == "dataset-v1" {
             return Ok(serde_json::to_vec(&descriptor()).unwrap());
         }
@@ -104,9 +125,16 @@ impl FsProvider for Versions {
         outputs.1.insert(version, data.to_vec());
         Ok(())
     }
-    async fn publish_output(&self, path: &Path, data: &[u8], expected: Option<&str>) -> io::Result<String> {
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
         let mut outputs = self.outputs.lock().unwrap();
-        if outputs.0.get(path).map(String::as_str) != expected { return Err(io::ErrorKind::PermissionDenied.into()); }
+        if outputs.0.get(path).map(String::as_str) != expected {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
         let version = uuid::Uuid::new_v4().to_string();
         outputs.0.insert(path.to_owned(), version.clone());
         outputs.1.insert(version.clone(), data.to_vec());
@@ -114,7 +142,9 @@ impl FsProvider for Versions {
     }
     async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
         let mut outputs = self.outputs.lock().unwrap();
-        if outputs.0.get(path).map(String::as_str) != Some(expected) { return Err(io::ErrorKind::PermissionDenied.into()); }
+        if outputs.0.get(path).map(String::as_str) != Some(expected) {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
         outputs.0.remove(path);
         Ok(())
     }
@@ -333,23 +363,70 @@ async fn dependency_mounts_are_readonly_and_cannot_shadow_workspace_authority() 
     let base = Arc::new(MemoryFsProvider::new());
     let pinned = PinnedFsProvider::new(base.clone(), manifest("v1")).unwrap();
     let cache = Arc::new(MemoryFsProvider::new());
-    cache.create_dir_all(Path::new("/packages/lib")).await.unwrap();
-    cache.write(Path::new("/packages/lib/function.m"), b"immutable package").await.unwrap();
-    pinned.mount_readonly_dependency(Path::new("/packages/lib"), cache.clone()).unwrap();
-    assert_eq!(pinned.read(Path::new("/packages/lib/function.m")).await.unwrap(), b"immutable package");
-    assert_eq!(pinned.read_dir(Path::new("/packages/lib")).await.unwrap().len(), 1);
-    assert!(pinned.metadata(Path::new("/packages/lib/function.m")).await.unwrap().is_readonly());
-    assert!(pinned.write(Path::new("/packages/lib/function.m"), b"overwrite").await.is_err());
-    assert!(pinned.atomic_create_new(Path::new("/packages/lib/new.m"), b"new").await.is_err());
-    assert!(pinned.atomic_create_new(Path::new("/packages"), b"shadow directory").await.is_err());
-    assert!(pinned.remove_file(Path::new("/packages/lib/function.m")).await.is_err());
-    assert!(pinned.mount_readonly_dependency(Path::new("/packages"), Arc::new(MemoryFsProvider::new())).is_err());
-    pinned.mount_readonly_dependency(Path::new("/packages/lib/nested"), cache.clone()).unwrap();
-    assert!(pinned.mount_readonly_dependency(Path::new("/"), cache.clone()).is_err());
+    cache
+        .create_dir_all(Path::new("/packages/lib"))
+        .await
+        .unwrap();
+    cache
+        .write(Path::new("/packages/lib/function.m"), b"immutable package")
+        .await
+        .unwrap();
+    pinned
+        .mount_readonly_dependency(Path::new("/packages/lib"), cache.clone())
+        .unwrap();
+    assert_eq!(
+        pinned
+            .read(Path::new("/packages/lib/function.m"))
+            .await
+            .unwrap(),
+        b"immutable package"
+    );
+    assert_eq!(
+        pinned
+            .read_dir(Path::new("/packages/lib"))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(pinned
+        .metadata(Path::new("/packages/lib/function.m"))
+        .await
+        .unwrap()
+        .is_readonly());
+    assert!(pinned
+        .write(Path::new("/packages/lib/function.m"), b"overwrite")
+        .await
+        .is_err());
+    assert!(pinned
+        .atomic_create_new(Path::new("/packages/lib/new.m"), b"new")
+        .await
+        .is_err());
+    assert!(pinned
+        .atomic_create_new(Path::new("/packages"), b"shadow directory")
+        .await
+        .is_err());
+    assert!(pinned
+        .remove_file(Path::new("/packages/lib/function.m"))
+        .await
+        .is_err());
+    assert!(pinned
+        .mount_readonly_dependency(Path::new("/packages"), Arc::new(MemoryFsProvider::new()))
+        .is_err());
+    pinned
+        .mount_readonly_dependency(Path::new("/packages/lib/nested"), cache.clone())
+        .unwrap();
+    assert!(pinned
+        .mount_readonly_dependency(Path::new("/"), cache.clone())
+        .is_err());
     for entry in manifest("v1").entries {
-        assert!(pinned.mount_readonly_dependency(Path::new(&entry.path), cache.clone()).is_err());
+        assert!(pinned
+            .mount_readonly_dependency(Path::new(&entry.path), cache.clone())
+            .is_err());
     }
     pinned.write(Path::new("/owned"), b"output").await.unwrap();
-    assert!(pinned.mount_readonly_dependency(Path::new("/owned"), cache).is_err());
+    assert!(pinned
+        .mount_readonly_dependency(Path::new("/owned"), cache)
+        .is_err());
     assert_eq!(base.read(Path::new("/owned")).await.unwrap(), b"output");
 }

@@ -52,6 +52,14 @@ impl InMemoryAnalysisArtifactStore {
             .observations
             .write()
             .map_err(|_| "observation store lock poisoned")?;
+        if self
+            .publication_runs
+            .read()
+            .map_err(|_| "publication ownership lock poisoned")?
+            .contains_key(run_id)
+        {
+            return Err("committed publication cannot accept additional observations".into());
+        }
         if let Some(existing) = attachments.get(run_id) {
             return if existing == &attachment {
                 Ok(())
@@ -104,8 +112,8 @@ impl InMemoryAnalysisArtifactStore {
     }
 }
 
-impl FilesystemAnalysisArtifactStore {
-    fn observation_run_digest(&self, run_id: &str) -> Result<Digest, String> {
+impl access::FilesystemAccess<'_> {
+    fn observation_run_digest(&self, run_id: &str) -> Result<Digest, AnalysisPublicationError> {
         Ok(self
             .read_standard(run_id)?
             .ok_or("observation run is absent")?
@@ -114,7 +122,7 @@ impl FilesystemAnalysisArtifactStore {
     pub(in crate::analysis::storage) fn observation_publication(
         &self,
         run_id: &str,
-    ) -> Result<Option<ThermalObservationPublication>, String> {
+    ) -> Result<Option<ThermalObservationPublication>, AnalysisPublicationError> {
         let Some(run) = self.load_run_metadata(run_id)? else {
             return Ok(None);
         };
@@ -122,72 +130,62 @@ impl FilesystemAnalysisArtifactStore {
             .read_observation_attachment(&run)?
             .map(|attachment| attachment.publication))
     }
-    fn read_observation_attachment(
+    pub(in crate::analysis::storage) fn read_observation_attachment(
         &self,
         run: &AnalysisRunResult,
-    ) -> Result<Option<ObservationAttachment>, String> {
-        if !owned_directory_exists(&self.root.join("observations"), "observation attachments")? {
+    ) -> Result<Option<ObservationAttachment>, AnalysisPublicationError> {
+        let path = self.observation_path(&run.run_id)?;
+        let parent = path.parent().ok_or("observation parent absent")?;
+        if !self.owned_directory_exists(parent, "observation attachments")? {
             return Ok(None);
         }
-        let path = self.observation_path(&run.run_id)?;
-        let bytes = match fs_symlink_metadata(&path) {
+        let bytes = match self.fs_symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type() == FsFileType::File => {
-                fs_read(path).map_err(|error| error.to_string())?
+                self.fs_read(path).map_err(|error| error.to_string())?
             }
             Ok(_) => return Err("observation attachment must be a regular file".into()),
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.to_string()),
+            Err(error) => return Err(error.to_string().into()),
         };
-        let attachment: ObservationAttachment =
-            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        let attachment: ObservationAttachment = self.decode_metadata(&bytes)?;
+        self.validate_bound_observation(&run.run_id, &attachment)?;
         attachment.validate(run, self.observation_run_digest(&run.run_id)?)?;
         Ok(Some(attachment))
     }
-    fn observation_path(&self, run_id: &str) -> Result<PathBuf, String> {
+    fn observation_path(&self, run_id: &str) -> Result<PathBuf, AnalysisPublicationError> {
         validate_run_id_token(run_id)?;
-        Ok(self
-            .root
-            .join("observations")
-            .join(format!("{run_id}.json")))
+        self.publication_observation_path(run_id)?
+            .ok_or_else(|| "observation publication is not committed".into())
     }
 
-    pub(in crate::analysis::storage) fn persist_observations(
+    pub(in crate::analysis::storage) fn install_observations(
         &self,
         run_id: &str,
-        completed: &ThermalStudyCompletion,
-        source: &ThermalStudyObjectSource,
-    ) -> Result<(), String> {
+        attachment: ObservationAttachment,
+        objects: BTreeMap<Digest, Vec<u8>>,
+    ) -> Result<(), AnalysisPublicationError> {
+        self.reserve_standalone(run_id)?;
         let run = self
             .load_run_metadata(run_id)?
             .ok_or("observation run is absent")?;
-        let attachment = ObservationAttachment::prepare(
-            &run,
-            completed,
-            source,
-            self.observation_run_digest(run_id)?,
-        )?;
-        binding::validate_run(
-            &self.load_run(run_id)?.ok_or("observation run is absent")?,
-            completed,
-            source,
-        )?;
+        attachment.validate(&run, self.observation_run_digest(run_id)?)?;
         self.ensure_objects_directory()?;
-        attachment.ingest(
-            source,
-            |digest, bytes| match runmat_filesystem::atomic_create_new(
-                self.object_path(digest),
-                &bytes,
-            )
-            .map_err(|error| error.to_string())?
+        for (digest, bytes) in objects {
+            match self
+                .atomic_create_new(self.object_path(digest), &bytes)
+                .map_err(|error| error.to_string())?
             {
-                AtomicCreateResult::Published { .. } => Ok(()),
-                AtomicCreateResult::Existing(existing) if existing == bytes => Ok(()),
-                AtomicCreateResult::Existing(_) => Err("observation object collision".into()),
-            },
-        )?;
-        ensure_owned_directory(&self.root.join("observations"), "observation attachments")?;
+                AtomicCreateResult::Published { .. } => {}
+                AtomicCreateResult::Existing(existing) if existing == bytes => {}
+                AtomicCreateResult::Existing(_) => {
+                    return Err("observation object collision".into())
+                }
+            }
+        }
+        self.ensure_owned_directory(&self.root.join("observations"), "observation attachments")?;
         let bytes = serde_json::to_vec(&attachment).map_err(|error| error.to_string())?;
-        match runmat_filesystem::atomic_create_new(self.observation_path(run_id)?, &bytes)
+        match self
+            .atomic_create_new(self.observation_path(run_id)?, &bytes)
             .map_err(|error| error.to_string())?
         {
             AtomicCreateResult::Published { .. } => Ok(()),
@@ -203,7 +201,7 @@ impl FilesystemAnalysisArtifactStore {
         run_id: &str,
         observation_id: &ObservationId,
         sample: RecoveredFieldSample,
-    ) -> Result<ObservationHistoryLookup, String> {
+    ) -> Result<ObservationHistoryLookup, AnalysisPublicationError> {
         let Some(run) = self.load_run_metadata(run_id)? else {
             return Ok(ObservationHistoryLookup::RunNotFound);
         };
@@ -211,7 +209,8 @@ impl FilesystemAnalysisArtifactStore {
             return Ok(ObservationHistoryLookup::ObservationNotFound);
         };
         history::load(&attachment, observation_id, sample, |digest| {
-            self.read_chunk(digest)
+            self.read_chunk(digest).map_err(|e| e.to_string())
         })
+        .map_err(Into::into)
     }
 }

@@ -20,6 +20,34 @@ fn prepared(chunk_bytes: usize) -> ChunkedAnalysisPayload {
 }
 
 #[test]
+fn whole_payload_partition_binds_the_complete_object_and_rejects_substitution() {
+    let object = chunk_numerical_payload(
+        AnalysisNumericalObjectKind::SeriesReductionResult,
+        Digest::sha256(b"series"),
+        b"accepted series payload",
+        4,
+    )
+    .unwrap();
+    object.manifest.whole_payload_partition().unwrap();
+    let restored =
+        AnalysisObjectManifest::from_canonical_bytes(&object.manifest.canonical_bytes().unwrap())
+            .unwrap();
+    restored.whole_payload_partition().unwrap();
+    for substitute_identity in [true, false] {
+        let mut substituted = restored.clone();
+        if substitute_identity {
+            substituted.partitions[0].logical_identity = Digest::sha256(b"foreign series");
+        } else {
+            substituted.partitions[0].payload_digest = Digest::sha256(b"foreign payload");
+        }
+        // Structurally valid descriptors must not be mistaken for the whole object role.
+        substituted.validate().unwrap();
+        assert!(substituted.whole_payload_partition().is_err());
+    }
+    assert!(prepared(4).manifest.whole_payload_partition().is_err());
+}
+
+#[test]
 fn incremental_digest_matches_concatenation_across_chunk_boundaries() {
     for chunk_bytes in [1, 2, 3, 4, 5, 12, 16, usize::MAX] {
         let object = prepared(chunk_bytes);

@@ -3,7 +3,7 @@
 use std::fs;
 
 use runmat_core::RunMatSession;
-use runmat_runtime::analysis::{FeaCheckStatus, FeaRootSelector};
+use runmat_runtime::analysis::FeaCheckStatus;
 
 const COMPLETE_STUDY: &str = r#"
 geometry part {
@@ -48,12 +48,8 @@ fn session_checks_a_complete_fea_source() {
         result.diagnostics
     );
     assert_eq!(result.root_module.as_str(), "project/study.fea");
-    assert_eq!(
-        result.roots,
-        vec![FeaRootSelector::Study {
-            id: "static".to_string(),
-        }]
-    );
+    assert_eq!(result.program.studies.len(), 1);
+    assert_eq!(result.program.studies[0].study_id, "static");
 }
 
 #[test]
@@ -88,6 +84,6 @@ fn session_reports_an_unavailable_import_as_incomplete() {
 
     assert_eq!(result.status, FeaCheckStatus::Incomplete);
     assert_eq!(result.root_module.as_str(), "project/study.fea");
-    assert!(result.roots.is_empty());
+    assert!(result.program.studies.is_empty());
     assert!(!result.diagnostics.is_empty());
 }

@@ -680,6 +680,15 @@ fn frequency_components(
         histories.push(ExactStructuralFrequencyHistoryClosure {
             observation_id: history.observation_id.clone(),
             checkpoint_root,
+            finalization: history
+                .finalization
+                .as_ref()
+                .map(|finalization| {
+                    finalization
+                        .published_artifacts(access)
+                        .map(|(roots, _)| roots)
+                })
+                .transpose()?,
         });
     }
     Ok((

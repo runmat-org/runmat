@@ -29,7 +29,10 @@ pub enum OperationTypePattern {
     IntegerScalar,
     StringScalar,
     NumericArray,
+    LogicalScalar,
     LogicalArray,
+    /// A complete scalar record contract; field names and types are statically known.
+    Record(std::collections::BTreeMap<String, OperationTypePattern>),
     Size,
     Prototype,
     Axes,

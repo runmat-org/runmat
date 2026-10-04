@@ -100,9 +100,18 @@ pub(super) fn matching_elements<'a>(
     } else {
         None
     };
+    if let Some(projection) = projection {
+        if topology.finite_volume.is_some() || !target.resolved_entities().is_empty() {
+            validate_exact_coverage(
+                target,
+                projection.elements.iter().flat_map(|element| {
+                    std::iter::once(&element.region_id).chain(element.provenance.iter())
+                }),
+            )?;
+        }
+    }
     let source_indices =
         if let (Some(layout), Some(projection)) = (&topology.finite_volume, projection) {
-            validate_exact_coverage(target, projection.elements.iter().map(|e| &e.region_id))?;
             let by_identity = projection
                 .elements
                 .iter()
@@ -131,7 +140,12 @@ pub(super) fn matching_elements<'a>(
             let source_index = source_indices
                 .as_ref()
                 .map_or(index, |indices| indices[index]);
-            target.matches_persistent_entity(&projection.elements[source_index].region_id)
+            let element = &projection.elements[source_index];
+            target.matches_persistent_entity(&element.region_id)
+                || element
+                    .provenance
+                    .iter()
+                    .any(|entity| target.matches_persistent_entity(entity))
         }
         None => elements[index].region_id == target.region_id,
     }))
@@ -219,5 +233,69 @@ pub(super) fn enforce_cardinality(
         ))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_analysis_core::{EntityDimension, ExpectedTopology, RegionTarget};
+    use runmat_meshing_core::{
+        fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
+        PersistentEntityKind, StableDigest,
+    };
+
+    #[test]
+    fn solid_observation_uses_original_cad_provenance_and_rejects_partial_coverage() {
+        let solid = PersistentEntityId {
+            kind: PersistentEntityKind::Solid,
+            source_topology_id: "cad-body".into(),
+            assembly_path: vec!["part".into()],
+        };
+        let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let region = mesh.topology.volume_elements[0].region_id.clone();
+        assert_ne!(region, solid);
+        for element in &mut mesh.topology.volume_elements {
+            element.provenance.push(solid.clone());
+            element.provenance.sort();
+        }
+        mesh.canonical_digest = StableDigest::ZERO;
+        mesh.seal_canonical_digest().unwrap();
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        assert_eq!(projection.elements[0].region_id, region);
+        assert!(projection.elements[0].provenance.contains(&solid));
+        let topology = ObservationTopology::from_projection(&projection);
+        let mut target = RegionTarget::new(
+            "body",
+            EntityDimension::Volume,
+            ExpectedTopology::MeshElement,
+            TargetCardinality::OneOrMore,
+        );
+        target.bind_resolved_entities(vec![solid.clone()]).unwrap();
+        assert_eq!(
+            matching_elements(
+                &target,
+                RecoveredFieldEntityDomain::VolumeElements,
+                &topology
+            )
+            .unwrap()
+            .collect::<Vec<_>>(),
+            (0..projection.elements.len()).collect::<Vec<_>>()
+        );
+        let missing = PersistentEntityId {
+            source_topology_id: "absent-body".into(),
+            ..solid.clone()
+        };
+        target.bind_resolved_entities(vec![solid, missing]).unwrap();
+        assert!(matches!(
+            matching_elements(
+                &target,
+                RecoveredFieldEntityDomain::VolumeElements,
+                &topology
+            ),
+            Err(ObservationError::Identity(
+                "native observation target contains an absent original entity"
+            ))
+        ));
     }
 }

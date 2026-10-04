@@ -8,14 +8,16 @@ const TERMINALS = new Map([
   ["i8", "number"], ["i16", "number"], ["i32", "number"], ["i64", "number"], ["isize", "number"],
   ["u8", "number"], ["u16", "number"], ["u32", "number"], ["u64", "number"], ["usize", "number"],
   ["LogicalSourcePath", "string"], ["SourceSymbol", "string"], ["ExecutionProfileIdentity", "string"],
+  ["PathBuf", "string"], ["ContentDigest", "string"], ["Digest", "string"], ["NormalizedRelativePath", "string"],
   ["Span", "{ start: number; end: number }"],
 ]);
 
-function renderReachable(registry, roots) {
+function renderReachable(registry, roots, { externalTypes = [] } = {}) {
+  const external = new Set(externalTypes);
   const reachable = new Set();
   const visiting = new Set();
   const visit = (name) => {
-    if (reachable.has(name) || TERMINALS.has(name)) return;
+    if (reachable.has(name) || TERMINALS.has(name) || external.has(name)) return;
     const declaration = registry.get(name);
     if (!declaration) throw new Error(`Unresolved serialized Rust type ${name}`);
     if (declaration.conflicts?.length) {
@@ -64,8 +66,12 @@ function renderFields(body, containerAttrs, registry, generics) {
     const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*):\s*([\s\S]+)$/);
     if (!match || hasSerde(match[1], "skip") || hasSerde(match[1], "skip_serializing")) return [];
     const option = unwrap(match[3].trim(), "Option");
-    const optional = Boolean(option && hasSerde(match[1], "skip_serializing_if"));
-    const type = renderType(option ?? match[3].trim(), registry, generics) + (option && !optional ? " | null" : "");
+    const omission = serde(match[1], "skip_serializing_if");
+    const optional = omission !== null;
+    const omitsNone = option && omission === "Option::is_none";
+    const binary = serde(match[1], "with") === "serde_bytes";
+    if (binary && match[3].trim() !== "Vec<u8>") throw new Error("serde_bytes requires a byte vector");
+    const type = (binary ? "Uint8Array | number[]" : renderType(option ?? match[3].trim(), registry, generics)) + (option && !omitsNone ? " | null" : "");
     const explicit = serde(match[1], "rename");
     const name = explicit ?? rename(match[2], renameAll);
     return [`  ${safeProperty(name)}${optional ? "?" : ""}: ${type};`];

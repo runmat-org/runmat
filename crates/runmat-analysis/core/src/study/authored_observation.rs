@@ -17,7 +17,8 @@ use crate::{
 
 use super::authored_output::field_domain;
 
-#[derive(Debug, Clone, PartialEq)]
+// Serialization supports borrowed resource profiling; import remains checked lowering.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct LoweredAuthoredObservation {
     pub step_id: ProcedureStepId,
     pub request: ObservationRequest,

@@ -52,6 +52,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         study_id: "acoustic".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         properties: compile_property_map(&model, Some(&mesh)).unwrap(),
         model,

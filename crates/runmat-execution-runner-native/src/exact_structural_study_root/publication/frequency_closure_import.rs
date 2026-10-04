@@ -100,15 +100,24 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
     semantic_roots.extend(closure.entries.iter().flat_map(|entry| {
         std::iter::once(entry.fields_root.clone()).chain(entry.observations_root.iter().cloned())
     }));
-    semantic_roots.extend(
-        closure
-            .histories
-            .iter()
-            .map(|history| history.checkpoint_root.clone()),
-    );
-    let object_catalog =
-        runmat_execution::value::PublishedObjectCatalog::new(semantic_roots, objects.clone())
-            .map_err(protocol)?;
+    for history in &closure.histories {
+        semantic_roots.push(history.checkpoint_root.clone());
+        if let Some(finalization) = &history.finalization {
+            semantic_roots.push(finalization.catalog.reference().clone());
+            semantic_roots.push(finalization.history.reference().clone());
+            semantic_roots.extend(
+                finalization
+                    .series
+                    .iter()
+                    .map(|root| root.reference().clone()),
+            );
+        }
+    }
+    let object_catalog = runmat_execution::value::PublishedObjectCatalog::new_with_shared_objects(
+        semantic_roots,
+        objects.clone(),
+    )
+    .map_err(protocol)?;
     let (entries, histories, resource_usage, publication) =
         import_frequency_artifacts(FrequencyArtifactImport {
             source,
@@ -124,6 +133,7 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
             access,
             limits,
             declared_publication: &closure.publication,
+            mesh,
         })?;
     admit_publication(
         &workload,
@@ -170,14 +180,16 @@ pub(super) fn import_frequency_closure<Source: CacheImport>(
                 .objects
                 .root_reference(access, ValueRefKind::ResultObject)
                 .map_err(protocol)?;
-            Ok(
-                runmat_runtime::analysis::ObservationHistoryArtifactRoot::new(
-                    super::result_import::runtime_artifact_root(
-                        &history.checkpoint.objects,
-                        reference,
-                    )?,
-                ),
-            )
+            let mut binding = runmat_runtime::analysis::StructuralFrequencyHistoryArtifactRoot::new(
+                super::result_import::runtime_artifact_root(
+                    &history.checkpoint.objects,
+                    reference,
+                )?,
+            );
+            if let Some(finalization) = &history.finalization {
+                binding = binding.with_finalization(finalization.published_artifacts(access)?.0);
+            }
+            Ok(binding)
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let artifact_roots = runmat_runtime::analysis::StructuralFrequencyArtifactRootIndex::new(

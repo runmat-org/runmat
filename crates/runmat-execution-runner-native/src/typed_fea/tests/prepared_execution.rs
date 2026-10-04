@@ -1,4 +1,5 @@
 //! Prepared handoff metadata are fenced before any geometry/solver execution.
+use super::prepared_validation::validate_prepared_execution;
 use super::*;
 
 const SOURCE: &str = r#"

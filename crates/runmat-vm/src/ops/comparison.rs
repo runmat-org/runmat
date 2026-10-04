@@ -347,11 +347,7 @@ where
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
-                        Value::Num(if scalar_relation(&a, &b, predicate)? {
-                            1.0
-                        } else {
-                            0.0
-                        })
+                        Value::Bool(scalar_relation(&a, &b, predicate)?)
                     }
                 }
             }
@@ -363,11 +359,7 @@ where
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
-                        Value::Num(if scalar_relation(&a, &b, predicate)? {
-                            1.0
-                        } else {
-                            0.0
-                        })
+                        Value::Bool(scalar_relation(&a, &b, predicate)?)
                     }
                 }
             }
@@ -376,11 +368,7 @@ where
             if rel_binary_use_builtin(&a, &b) {
                 call_builtin(name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if scalar_relation(&a, &b, predicate)? {
-                    1.0
-                } else {
-                    0.0
-                })
+                Value::Bool(scalar_relation(&a, &b, predicate)?)
             }
         }
     };
@@ -412,22 +400,14 @@ where
                     match call_method(Value::Object(obj.clone()), spec.inverse_name, b.clone())
                         .await
                     {
-                        Ok(v) => Value::Num(
-                            if !logical_truth(v, "comparison result".to_string()).await? {
-                                1.0
-                            } else {
-                                0.0
-                            },
-                        ),
+                        Ok(v) => {
+                            Value::Bool(!logical_truth(v, "comparison result".to_string()).await?)
+                        }
                         Err(_) => {
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
+                                Value::Bool(scalar_relation(&a, &b, spec.predicate)?)
                             }
                         }
                     }
@@ -445,22 +425,14 @@ where
                     )
                     .await
                     {
-                        Ok(v) => Value::Num(
-                            if !logical_truth(v, "comparison result".to_string()).await? {
-                                1.0
-                            } else {
-                                0.0
-                            },
-                        ),
+                        Ok(v) => {
+                            Value::Bool(!logical_truth(v, "comparison result".to_string()).await?)
+                        }
                         Err(_) => {
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
-                                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
+                                Value::Bool(scalar_relation(&a, &b, spec.predicate)?)
                             }
                         }
                     }
@@ -471,11 +443,7 @@ where
             if rel_binary_use_builtin(&a, &b) {
                 call_builtin(spec.name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if scalar_relation(&a, &b, spec.predicate)? {
-                    1.0
-                } else {
-                    0.0
-                })
+                Value::Bool(scalar_relation(&a, &b, spec.predicate)?)
             }
         }
     };
@@ -571,7 +539,7 @@ where
                     } else {
                         let aa: f64 = (&a).try_into()?;
                         let bb: f64 = (&b).try_into()?;
-                        stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
+                        stack.push(Value::Bool(aa == bb))
                     }
                 }
             }
@@ -585,7 +553,7 @@ where
                     } else {
                         let aa: f64 = (&a).try_into()?;
                         let bb: f64 = (&b).try_into()?;
-                        stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
+                        stack.push(Value::Bool(aa == bb))
                     }
                 }
             }
@@ -704,9 +672,7 @@ where
                 runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("eq: {e}"))?,
             ));
         }
-        (Value::String(a_s), Value::String(b_s)) => {
-            stack.push(Value::Num(if a_s == b_s { 1.0 } else { 0.0 }))
-        }
+        (Value::String(a_s), Value::String(b_s)) => stack.push(Value::Bool(a_s == b_s)),
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
                 ordering == std::cmp::Ordering::Equal
@@ -715,7 +681,7 @@ where
                 let bb: f64 = (&b).try_into()?;
                 aa == bb
             };
-            stack.push(Value::Num(if equal { 1.0 } else { 0.0 }));
+            stack.push(Value::Bool(equal));
         }
     }
     Ok(())
@@ -745,12 +711,8 @@ where
             match call_method(Value::Object(obj.clone()), "ne", b.clone()).await {
                 Ok(v) => stack.push(v),
                 Err(_) => match call_method(Value::Object(obj.clone()), "eq", b.clone()).await {
-                    Ok(v) => stack.push(Value::Num(
-                        if !logical_truth(v, "comparison result".to_string()).await? {
-                            1.0
-                        } else {
-                            0.0
-                        },
+                    Ok(v) => stack.push(Value::Bool(
+                        !logical_truth(v, "comparison result".to_string()).await?,
                     )),
                     Err(_) => {
                         if rel_binary_use_builtin(&a, &b) {
@@ -758,7 +720,7 @@ where
                         } else {
                             let aa: f64 = (&a).try_into()?;
                             let bb: f64 = (&b).try_into()?;
-                            stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+                            stack.push(Value::Bool(aa != bb));
                         }
                     }
                 },
@@ -768,12 +730,8 @@ where
             match call_method(Value::Object(obj.clone()), "ne", a.clone()).await {
                 Ok(v) => stack.push(v),
                 Err(_) => match call_method(Value::Object(obj.clone()), "eq", a.clone()).await {
-                    Ok(v) => stack.push(Value::Num(
-                        if !logical_truth(v, "comparison result".to_string()).await? {
-                            1.0
-                        } else {
-                            0.0
-                        },
+                    Ok(v) => stack.push(Value::Bool(
+                        !logical_truth(v, "comparison result".to_string()).await?,
                     )),
                     Err(_) => {
                         if rel_binary_use_builtin(&a, &b) {
@@ -781,7 +739,7 @@ where
                         } else {
                             let aa: f64 = (&a).try_into()?;
                             let bb: f64 = (&b).try_into()?;
-                            stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
+                            stack.push(Value::Bool(aa != bb));
                         }
                     }
                 },
@@ -870,9 +828,7 @@ where
                 runmat_value::Tensor::new(out, sa.shape.clone()).map_err(|e| format!("ne: {e}"))?,
             ));
         }
-        (Value::String(a_s), Value::String(b_s)) => {
-            stack.push(Value::Num(if a_s != b_s { 1.0 } else { 0.0 }))
-        }
+        (Value::String(a_s), Value::String(b_s)) => stack.push(Value::Bool(a_s != b_s)),
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
                 ordering == std::cmp::Ordering::Equal
@@ -881,7 +837,7 @@ where
                 let bb: f64 = (&b).try_into()?;
                 aa == bb
             };
-            stack.push(Value::Num(if !equal { 1.0 } else { 0.0 }));
+            stack.push(Value::Bool(!equal));
         }
     }
     Ok(())

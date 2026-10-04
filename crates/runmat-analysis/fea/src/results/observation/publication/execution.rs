@@ -293,12 +293,22 @@ impl ObservationPublicationCatalog {
                         .iter()
                         .zip(&history.checkpoint.partition_evidence)
                     {
+                        let mut source_catalog = &self.source;
                         let coordinate = match self.source.source() {
                             ObservationFieldCatalogSource::SampledRecovery { .. }
                             | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. } => {
                                 return Err(invalid("sampled native histories are not admitted"));
                             }
                             ObservationFieldCatalogSource::Structural { .. } => {
+                                ObservationSelectionCoordinate::StructuralRecovery
+                            }
+                            ObservationFieldCatalogSource::StructuralFrequencyHistory {
+                                samples,
+                            } => {
+                                source_catalog = samples.iter().find(|catalog| {
+                                    matches!(catalog.source(), ObservationFieldCatalogSource::Structural { manifest, .. }
+                                        if manifest.fields.iter().any(|field| field.field == evidence.source_field && field.sample == sample.coordinate))
+                                }).ok_or_else(|| invalid("frequency history execution source sample is absent"))?;
                                 ObservationSelectionCoordinate::StructuralRecovery
                             }
                             ObservationFieldCatalogSource::Thermal { manifest } => {
@@ -317,7 +327,8 @@ impl ObservationPublicationCatalog {
                                 ObservationSelectionCoordinate::ThermalSample { ordinal }
                             }
                         };
-                        let selection = self.source.canonical_selection(&self.plan, coordinate)?;
+                        let selection =
+                            source_catalog.canonical_selection(&self.plan, coordinate)?;
                         let request =
                             ObservationEvaluationRequest::new(selection, self.plan.clone())?;
                         visit(

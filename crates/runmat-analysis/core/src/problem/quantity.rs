@@ -131,6 +131,7 @@ impl FiniteQuantity for ComplexPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Position {
     pub meters: [f64; 3],

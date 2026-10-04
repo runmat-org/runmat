@@ -76,13 +76,16 @@ impl ThermalStudyObjectSource {
         &self,
         completed: &ThermalStudyCompletion,
         study_digest: Digest,
-    ) -> Result<Vec<String>, String> {
+        staging: &crate::analysis::storage::AnalysisPublicationBuilder,
+    ) -> Result<Vec<String>, crate::analysis::storage::AnalysisPublicationError> {
+        staging.require_source_objects(&completed.catalog.objects)?;
         self.authenticate(completed)?;
         super::super::study_result_manifest::persist_catalog_objects(
             self,
             &completed.catalog,
             study_digest,
             "thermal-object",
+            staging,
         )
     }
 }

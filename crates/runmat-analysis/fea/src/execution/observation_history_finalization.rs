@@ -228,6 +228,46 @@ impl ObservationHistoryFinalizationRequest {
                 }
             }
             (
+                ObservationFieldCatalogSource::StructuralFrequencyHistory { samples },
+                ObservationHistorySourceContext::Structural {
+                    source: super::StructuralObservationSource::Frequency(workload),
+                    mesh,
+                },
+            ) => {
+                if workload.procedure_step()?.step_id != self.plan.step_id {
+                    return Err(invalid("frequency source workload selects another step"));
+                }
+                catalog.validate_frequency_history_plan(&self.plan, workload, mesh)?;
+                for sample in samples {
+                    let ObservationFieldCatalogSource::Structural {
+                        recovery_request,
+                        manifest,
+                    } = sample.source()
+                    else {
+                        return Err(invalid("frequency history contains a nonstructural sample"));
+                    };
+                    if recovery_request.producer != self.producer
+                        || manifest.topology_digest != self.plan.topology_digest
+                    {
+                        return Err(invalid("frequency producer or topology differs"));
+                    }
+                    for entry in &manifest.fields {
+                        if entry.definition.identity()
+                            == observation.source_field_definition_identity
+                            && resolved_observation_accepts_sample(
+                                &self.plan,
+                                observation,
+                                entry.sample,
+                                None,
+                            )
+                            .map_err(invalid)?
+                        {
+                            expected.push(entry);
+                        }
+                    }
+                }
+            }
+            (
                 ObservationFieldCatalogSource::Thermal { manifest },
                 ObservationHistorySourceContext::Thermal { workload, mesh },
             ) => {

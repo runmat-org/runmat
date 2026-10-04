@@ -80,6 +80,7 @@ pub(super) fn lower(
     let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
     let formulation_requirement = formulation_requirement(declaration, diagnostics);
+    let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
     match runmat_analysis_core::attach_authored_outputs(&outputs, &mut sequence) {
         Ok(()) => {}
         Err(error) => lower::error(
@@ -116,6 +117,7 @@ pub(super) fn lower(
         formulation_requirement,
         inputs,
         outputs,
+        assessments,
         sequence,
     };
     if let Err(error) = study.validate(model, geometry_definition) {

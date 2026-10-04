@@ -16,7 +16,7 @@ use crate::operations::{
 
 use super::{
     classify_run_status, contracts, diagnostic_metric, evaluate_production_publication,
-    install_fea_solver_context, map_fea_run_error, persist_fea_run_result_with_progress,
+    install_fea_solver_context, map_fea_run_error, publish_standalone_run,
     render_topology_from_solver_mesh, resolve_solver_mesh_artifact, storage,
     validate_thermal_run_model, AnalysisOperation, AnalysisRunResult, AnalysisThermalRunOptions,
     FallbackEvent, QualityGate, QualityPolicy, QualityReason, QualityReasonCode, RunProvenance,
@@ -24,6 +24,19 @@ use super::{
 };
 
 pub fn analysis_run_thermal_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
+    options: AnalysisThermalRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    publish_standalone_run(
+        execute_thermal_with_options(model, backend, formulation_requirement, options, context)?,
+        "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
+    )
+}
+
+pub(super) fn execute_thermal_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -239,6 +252,7 @@ pub fn analysis_run_thermal_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: storage::next_run_id(),
         run,
         render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
@@ -279,14 +293,6 @@ pub fn analysis_run_thermal_with_options_op(
             fallback_events,
         },
     };
-
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Thermal.name(),
-        AnalysisOperation::Thermal.version(),
-        "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::Thermal.name(),

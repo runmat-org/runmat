@@ -203,6 +203,9 @@ struct ExactStructuralFrequencyEntryClosure {
 struct ExactStructuralFrequencyHistoryClosure {
     observation_id: runmat_analysis_core::ObservationId,
     checkpoint_root: ValueRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    finalization:
+        Option<runmat_runtime::analysis::StructuralFrequencyFinalizedHistoryArtifactRoots>,
 }
 
 impl ExactStructuralStudyAnalysisClosure {
@@ -745,6 +748,9 @@ pub struct ExactStructuralFrequencyEntryResult {
 pub struct ExactStructuralFrequencyHistoryResult {
     pub observation_id: runmat_analysis_core::ObservationId,
     pub checkpoint: runmat_analysis_execution::ImportedObservationHistoryCheckpointTask,
+    pub finalization: Option<
+        crate::analysis_frequency_observations::CompletedStructuralFrequencyHistoryFinalization,
+    >,
 }
 
 pub(crate) enum ExactStructuralAnalysisPublication<'a> {

@@ -21,6 +21,23 @@ pub fn build_state_publication_resource_plan(
     source_payload_digest: Digest,
     facts: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    build_state_publication_resource_plan_with_ceiling(
+        request,
+        catalog,
+        source_payload_digest,
+        facts,
+        super::post_process::post_process_ceiling(),
+    )
+}
+
+/// Source families with an original authored ceiling use the same estimator directly.
+pub fn build_state_publication_resource_plan_with_ceiling(
+    request: &SemanticStatePublicationRequest,
+    catalog: &StatePublicationProfiles,
+    source_payload_digest: Digest,
+    facts: PreparedPhaseResourceFacts,
+    accuracy_ceiling: runmat_analysis_core::AccuracyResourceCeiling,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let invalid = |error: &dyn std::fmt::Display| ResourcePlanningError::Invalid(error.to_string());
     catalog
         .validate_source(
@@ -49,6 +66,10 @@ pub fn build_state_publication_resource_plan(
             "publication input facts omit source result or metadata".into(),
         ));
     }
+    let mut worker = super::post_process::post_process_worker();
+    worker.maximum_wall_milliseconds = worker
+        .maximum_wall_milliseconds
+        .min(accuracy_ceiling.maximum_wall_time_milliseconds);
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::SemanticStatePublication(request_identity),
@@ -72,7 +93,7 @@ pub fn build_state_publication_resource_plan(
             },
         ),
         output_set: Some(facts.output_set),
-        worker: super::post_process::post_process_worker(),
-        accuracy_ceiling: super::post_process::post_process_ceiling(),
+        worker,
+        accuracy_ceiling,
     })
 }

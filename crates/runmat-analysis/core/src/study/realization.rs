@@ -46,6 +46,8 @@ pub struct RealizedStudy {
     pub included_models: Vec<AuthoredModel>,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
     pub outputs: Vec<crate::AuthoredOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assessments: Vec<crate::AuthoredAssessment>,
     pub sequence: AnalysisSequence,
 }
 
@@ -101,6 +103,7 @@ impl AuthoredStudy {
                 })
                 .collect(),
             outputs,
+            assessments: self.assessments.clone(),
             sequence: self.sequence.clone(),
         })
     }

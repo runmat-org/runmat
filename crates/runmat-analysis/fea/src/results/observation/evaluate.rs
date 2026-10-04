@@ -64,13 +64,7 @@ pub(super) fn evaluate_observations_for_topology(
     plan.observations
         .iter()
         .map(|observation| {
-            let terminal_time = match plan.independent_domain {
-                runmat_analysis_core::IndependentDomain::TimeSeconds { end, .. } => {
-                    Some(RecoveredFieldSample::TimeSeconds(end))
-                }
-                _ => None,
-            };
-            let physical = terminal_time.filter(|sample| {
+            let physical = terminal_physical_sample(&plan.independent_domain).filter(|sample| {
                 fields
                     .get(observation.source_field_definition_identity, *sample)
                     .is_some()
@@ -218,18 +212,32 @@ pub fn resolved_observation_accepts_sample(
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<bool, ObservationError> {
     if observation.spec.sampling == SamplingPolicy::Final {
-        // A transient producer retains physical coordinates, including its terminal field.
+        // Sampled producers retain physical coordinates, including their terminal field.
         // Select the authored endpoint without relabeling the field or changing provenance.
         let terminal = sample == RecoveredFieldSample::Final
-            || matches!((&plan.independent_domain, sample),
-                (runmat_analysis_core::IndependentDomain::TimeSeconds { end, .. },
-                    RecoveredFieldSample::TimeSeconds(time)) if time == *end);
+            || terminal_physical_sample(&plan.independent_domain) == Some(sample);
         return Ok(event_attribution.is_none() && terminal);
     }
     Ok(
         sample_matches_history_policy(&observation.spec.sampling, sample, event_attribution)?
             && sample_matches_domain(&plan.independent_domain, sample),
     )
+}
+
+fn terminal_physical_sample(
+    domain: &runmat_analysis_core::IndependentDomain,
+) -> Option<RecoveredFieldSample> {
+    match domain {
+        runmat_analysis_core::IndependentDomain::TimeSeconds { end, .. } => {
+            Some(RecoveredFieldSample::TimeSeconds(*end))
+        }
+        // Authored frequency domains are validated as nonempty and strictly increasing.
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(values) => values
+            .last()
+            .copied()
+            .map(RecoveredFieldSample::FrequencyHertz),
+        _ => None,
+    }
 }
 
 fn evaluate_sample(

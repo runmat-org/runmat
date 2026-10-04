@@ -764,7 +764,9 @@ fn action_class(action: &ExcitationAction) -> &'static str {
         ExcitationAction::AcousticPressure(_)
         | ExcitationAction::AcousticIncidentPressure(_)
         | ExcitationAction::NormalVelocity(_)
-        | ExcitationAction::VolumeVelocity(_) => ACOUSTIC_EXCITATION_CLASS,
+        | ExcitationAction::VolumeVelocity(_) => {
+            ACOUSTIC_EXCITATION_CLASS
+        }
         ExcitationAction::InletVelocity(_)
         | ExcitationAction::MassFlow(_)
         | ExcitationAction::WallMotion(_) => FLUID_EXCITATION_CLASS,

@@ -8,7 +8,7 @@ use runmat_execution::{
     Digest,
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ThermalStudyCompletion {
     pub observations: Option<super::ThermalObservationPublication>,
     pub compiled: runmat_analysis_fea::study::CompiledAnalysisStudy,

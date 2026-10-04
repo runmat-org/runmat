@@ -19,11 +19,12 @@ use crate::analysis::{
     ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
-mod evidence;
+pub(in crate::analysis) mod evidence;
 #[cfg(test)]
 pub(in crate::analysis) use evidence::persist_immutable_study_evidence;
 pub(in crate::analysis) use evidence::{
     persist_content_addressed_study_evidence, run_evidence_stage, study_evidence_root,
+    StudyEvidenceReadError,
 };
 
 mod completion_contract;
@@ -86,15 +87,20 @@ struct CompletedRunFacts {
 mod run_facts;
 mod state_publication;
 use state_publication::{validate_and_persist_states, validate_entry_scoped_acoustic_states};
+mod deferred;
+pub(in crate::analysis) use deferred::DeferredStudyRun;
+mod preparation;
 mod run_persistence;
+pub(in crate::analysis) use preparation::complete_study_run;
 use run_facts::completed_run_facts;
 
-pub(in crate::analysis) fn complete_study_run(
+pub(in crate::analysis) fn complete_study_run_prepared(
     mut prepared: PreparedStudyCompletion,
     mut completed_steps: Vec<CompletedStudyStep>,
     mut states: Vec<CanonicalSemanticState>,
     frozen_project_digest: Option<runmat_execution::Digest>,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let mut thermal_observations = None;
     if let Some(prefix) = prepared.thermal_prefix.take() {
         if prefix.thermal.observations.is_some() {
@@ -127,6 +133,11 @@ pub(in crate::analysis) fn complete_study_run(
         solver_mesh_artifact_path,
         meshing_evidence_artifact_path,
     } = prepared;
+    let crate::analysis::study_publication::preparation::PublicationPreparation {
+        staging,
+        store,
+        ..
+    } = preparation;
     if completed_steps.len() != authored_steps.len() {
         return Err(completion_error(
             &context,
@@ -212,35 +223,36 @@ pub(in crate::analysis) fn complete_study_run(
             requirement: authored.authored_execution.requirement,
             solver_options: completed.resolved_solver_options,
         };
-        let evidence_artifact_path = persist_content_addressed_study_evidence(
-            &study_fingerprint,
-            &run_evidence_stage(&run.run_id),
-            serde_json::json!({
-                "schema_version": "fea_study_sequence_step_artifact/v1",
-                "study_id": study_id.clone(),
-                "sequence_identity": sequence_identity,
-                "ordinal": ordinal,
-                "procedure_step": authored.procedure_step,
-                "execution": resolved_execution,
-                "solver_result_identity": completed.solver_result_identity,
-                "identity": run.identity,
-                "run_operation": run.operation,
-                "run_op_version": run.op_version,
-                "run_id": run.run_id,
-                "run_status": run.run_status,
-                "numerically_acceptable": run.numerically_acceptable,
-                "production_publishable": run.production_publishable,
-                "solver_convergence": run.solver_convergence,
-                "result_quality": run.result_quality,
-                "quality_reasons": run.quality_reasons,
-                "production_publication_reasons": run.production_publication_reasons,
-                "provenance": run.provenance,
-                "numerical_result": run.numerical_result,
-            }),
-        )
-        .map_err(|error| {
-            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-        })?;
+        let evidence_artifact_path = staging
+            .persist_evidence(
+                &study_fingerprint,
+                &run_evidence_stage(&run.run_id),
+                serde_json::json!({
+                    "schema_version": "fea_study_sequence_step_artifact/v1",
+                    "study_id": study_id.clone(),
+                    "sequence_identity": sequence_identity,
+                    "ordinal": ordinal,
+                    "procedure_step": authored.procedure_step,
+                    "execution": resolved_execution,
+                    "solver_result_identity": completed.solver_result_identity,
+                    "identity": run.identity,
+                    "run_operation": run.operation,
+                    "run_op_version": run.op_version,
+                    "run_id": run.run_id,
+                    "run_status": run.run_status,
+                    "numerically_acceptable": run.numerically_acceptable,
+                    "production_publishable": run.production_publishable,
+                    "solver_convergence": run.solver_convergence,
+                    "result_quality": run.result_quality,
+                    "quality_reasons": run.quality_reasons,
+                    "production_publication_reasons": run.production_publication_reasons,
+                    "provenance": run.provenance,
+                    "numerical_result": run.numerical_result,
+                }),
+            )
+            .map_err(|error| {
+                completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+            })?;
         solver_results.insert(
             authored.procedure_step.step_id.clone(),
             completed.solver_result_identity,
@@ -287,24 +299,41 @@ pub(in crate::analysis) fn complete_study_run(
         &solver_results,
         states,
         &entry_scoped_state_steps,
+        &staging,
     )?;
     for run in &runs_to_persist {
-        run_persistence::persist(&context, run)?;
+        run_persistence::stage(&context, &staging, run)?;
     }
     if let Some((run_id, completed, source)) = thermal_observations {
-        storage::persist_thermal_observations(&run_id, &completed, &source).map_err(|error| {
-            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-        })?;
+        staging
+            .stage_thermal_observations(&run_id, &completed, &source)
+            .map_err(|error| {
+                completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+            })?;
     }
     for (step, persistence) in &frequency_runs_to_persist {
-        storage::persist_structural_frequency_result(step, persistence).map_err(|error| {
-            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-        })?;
+        staging
+            .stage_structural_frequency(
+                step,
+                &persistence.object_catalog,
+                &persistence.artifact_roots,
+                persistence.source.as_ref(),
+            )
+            .map_err(|error| {
+                completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+            })?;
     }
     for (step, persistence) in &acoustic_frequency_runs_to_persist {
-        storage::persist_acoustic_frequency_result(step, persistence).map_err(|error| {
-            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-        })?;
+        staging
+            .stage_acoustic_frequency(
+                step,
+                &persistence.publication_catalog,
+                &persistence.publication_roots,
+                &persistence.source,
+            )
+            .map_err(|error| {
+                completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+            })?;
     }
     let run_status = step_results
         .iter()
@@ -319,36 +348,38 @@ pub(in crate::analysis) fn complete_study_run(
     });
     let numerically_acceptable = step_results.iter().all(|step| step.numerically_acceptable);
     let production_publishable = step_results.iter().all(|step| step.production_publishable);
-    let evidence_artifact_path = persist_content_addressed_study_evidence(
-        &study_fingerprint,
-        "sequence-run",
-        serde_json::json!({
-            "schema_version": "fea_study_sequence_run_artifact/v1",
-            "study_id": study_id.clone(),
-            "model_id": model.model_id.0.clone(),
-            "sequence_identity": sequence_identity,
-            "steps": step_results.clone(),
-            "states": state_results.clone(),
-            "solver_mesh_artifact_path": solver_mesh_artifact_path.clone(),
-            "meshing_evidence_artifact_path": meshing_evidence_artifact_path.clone(),
-            "study_fingerprint": study_fingerprint.clone(),
-            "operation_sequence": operation_sequence.clone(),
-            "run_status": run_status,
-            "numerically_acceptable": numerically_acceptable,
-            "production_publishable": production_publishable,
-            "solver_convergence": solver_convergence,
-            "result_quality": result_quality,
-        }),
-    )
-    .map_err(|error| {
-        completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-    })?;
+    let evidence_artifact_path = staging
+        .persist_evidence(
+            &study_fingerprint,
+            "sequence-run",
+            serde_json::json!({
+                "schema_version": "fea_study_sequence_run_artifact/v1",
+                "study_id": study_id.clone(),
+                "model_id": model.model_id.0.clone(),
+                "sequence_identity": sequence_identity,
+                "steps": step_results.clone(),
+                "states": state_results.clone(),
+                "solver_mesh_artifact_path": solver_mesh_artifact_path.clone(),
+                "meshing_evidence_artifact_path": meshing_evidence_artifact_path.clone(),
+                "study_fingerprint": study_fingerprint.clone(),
+                "operation_sequence": operation_sequence.clone(),
+                "run_status": run_status,
+                "numerically_acceptable": numerically_acceptable,
+                "production_publishable": production_publishable,
+                "solver_convergence": solver_convergence,
+                "result_quality": result_quality,
+            }),
+        )
+        .map_err(|error| {
+            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+        })?;
 
-    Ok(OperationEnvelope::new(
+    let published = OperationEnvelope::new(
         ANALYSIS_RUN_STUDY_OPERATION,
         ANALYSIS_RUN_STUDY_OP_VERSION,
         &context,
         AnalysisStudyRunData {
+            assessments: Vec::new(),
             study_id,
             model_id: model.model_id.0.clone(),
             sequence_identity,
@@ -366,7 +397,13 @@ pub(in crate::analysis) fn complete_study_run(
             evidence_artifact_path,
             result_manifest_artifact_path: None,
         },
-    ))
+    );
+    Ok(DeferredStudyRun {
+        published,
+        staging,
+        store,
+        definition: authored_study_digest,
+    })
 }
 
 fn worst_gate(left: QualityGate, right: QualityGate) -> QualityGate {
@@ -405,22 +442,28 @@ fn completion_error(
     )
 }
 
-fn completion_storage_error(
+pub(in crate::analysis) fn completion_storage_error(
     context: &OperationContext,
     code: &'static str,
-    message: impl std::fmt::Display,
+    message: impl Into<storage::AnalysisPublicationError>,
 ) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
+    crate::analysis::prepared_study_publication::publication_failure(
+        message.into(),
         context,
-        OperationErrorSpec {
-            error_code: code,
-            error_type: OperationErrorType::Internal,
-            retryable: true,
-            severity: OperationErrorSeverity::Error,
+        |message| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                context,
+                OperationErrorSpec {
+                    error_code: code,
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                message.to_string(),
+                BTreeMap::new(),
+            )
         },
-        message.to_string(),
-        BTreeMap::new(),
     )
 }

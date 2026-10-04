@@ -151,6 +151,7 @@ fn compiled(model: runmat_analysis_core::AnalysisModel) -> CompiledAnalysisStudy
         study_id: "planning".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         model,
         properties,

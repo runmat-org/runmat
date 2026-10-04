@@ -38,6 +38,106 @@ storage.
 output object. Case `min` and `max` retain the governing case coordinates. Sweep operations accept
 only outputs declared by the source study.
 
+## Acceptance assessments
+
+An `assessment` inside a study compares a declared real scalar output with a
+dimensionally compatible bound. Use `maximum`, `minimum`, or both for an inclusive
+range. The evidence policy is required.
+
+```fea
+output spatial_peak = max(
+    magnitude(analysis.response.field.node.displacement),
+    over = geometry.bracket.region.body,
+)
+output peak_history = sample(
+    output.spatial_peak,
+    over = time,
+    at = [0 s, 0.05 s, 0.1 s],
+)
+output peak = max(output.peak_history, over = time)
+assessment deflection {
+    value = output.peak
+    maximum = 1 mm
+    evidence = authored_samples
+}
+```
+
+This example checks the three declared times. Choose sampling coordinates that
+cover the engineering requirement; three samples alone do not establish the peak
+throughout a transient. Spatial reduction occurs before sampling, and the time
+reduction preserves the governing sample and entity.
+
+`authored_samples` compares the declared output when its numerical result is
+acceptable. `certified_bound` additionally requires a certified absolute error
+bound. Unavailable evidence or uncertainty crossing the limit produces an
+indeterminate result. Acceptance status is separate from solver convergence.
+
+Study setup should preserve a user's criterion while checking output coverage and
+available execution evidence. A final-time output cannot answer a peak-over-time
+requirement. Do not replace such a requirement with a final-time comparison or
+claim continuous coverage from a sampled maximum.
+
+### Imported assessment functions
+
+Use an imported function when a comparison needs custom logic. The function receives
+the scalar output first, followed by the declared parameters. Values are passed in
+canonical SI units: `1 mm` is passed as `0.001`, for example. A function assessment
+cannot also declare `minimum` or `maximum`.
+
+```fea
+import function within_limit from "./within_limit.m"
+
+// Inside a study, after declaring output.peak:
+assessment deflection {
+    value = output.peak
+    function = function.within_limit
+    parameters = [1 mm]
+    evidence = authored_samples
+}
+```
+
+```matlab
+function result = within_limit(value, limit)
+arguments
+    value (1,1) double
+    limit (1,1) double
+end
+result = struct('evaluated', true, 'accepted', value <= limit);
+end
+```
+
+The checked function must have a complete signature with real scalar inputs and a
+scalar record containing exactly two logical fields, `evaluated` and `accepted`.
+It cannot capture workspace values or require ambient capabilities such as file
+access or randomness. The executable must match the frozen imported source.
+
+`evaluated = false` produces an indeterminate verdict. A thrown exception or an
+invalid return also produces an indeterminate verdict, with an execution diagnostic.
+A function that has not run is unavailable, not failed. The logical return does not
+certify an error bound or establish coverage between authored samples. Checking the
+source establishes its language contract; execution still requires a host that
+admits the portable function and its bounded task resources.
+
+### Reassessing saved results
+
+To compare existing results against revised criteria, save the revised assessment
+declarations and reassess the original result publication. This produces a separate
+immutable assessment report. It does not solve again, replace the original report,
+or apply revised geometry, materials or loads to the old numerical result.
+
+```sh
+runmat fea reassess bracket.fea --study bracket \
+    --original-definition sha256:<original-definition-digest> \
+    --result-manifest <saved-study-result-manifest> --json
+```
+
+Use the original definition digest and content-addressed manifest recorded by the
+solve. Changed bounds or compatible custom assessment functions can reuse that
+publication. Each referenced output must retain its original quantity, region,
+sampling and producer. Changing an output while keeping its name requires new
+numerical evidence. Imported functions still require checked frozen sources and
+bounded executable admission. Missing evidence remains indeterminate.
+
 ## Diagnostics
 
 Operation errors report the resolved argument types, physical dimensions, locations, available

@@ -1,7 +1,51 @@
 //! In-memory artifact backend, including exact frequency publication storage.
 use super::*;
+mod assessment;
+mod installation;
+
+impl InMemoryAnalysisArtifactStore {
+    pub fn new() -> Self {
+        Self {
+            retain_standalone: true,
+            publications: RwLock::new(HashMap::new()),
+            publication_runs: RwLock::new(HashMap::new()),
+            observations: RwLock::new(HashMap::new()),
+            runs: RwLock::new(HashMap::new()),
+            chunks: RwLock::new(HashMap::new()),
+        }
+    }
+    pub(super) fn staging() -> Self {
+        Self {
+            retain_standalone: false,
+            ..Self::new()
+        }
+    }
+}
 
 impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
+    fn commit_publication(
+        &self,
+        publication: PreparedAnalysisPublication,
+    ) -> Result<AnalysisPublicationReceipt, AnalysisPublicationError> {
+        publication::memory::commit(self, publication).map_err(Into::into)
+    }
+    fn load_publication(
+        &self,
+        identity: Digest,
+        maximum_bytes: u64,
+    ) -> Result<Option<serde_json::Value>, String> {
+        publication::memory::load(self, identity, maximum_bytes).map_err(|e| e.to_string())
+    }
+
+    fn load_publication_manifest_path(
+        &self,
+        _: &Path,
+        _: u64,
+    ) -> Result<serde_json::Value, AssessmentStoreError> {
+        Err(AssessmentStoreError::Invalid(
+            "memory publication has no filesystem manifest".into(),
+        ))
+    }
     fn load_observation_publication(
         &self,
         run_id: &str,
@@ -27,40 +71,11 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         validate_run_identity(run)?;
         let prepared = prepare_run_artifact(run, Utc::now().to_rfc3339())?;
-        let mut guard = self
-            .runs
-            .write()
-            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        if let Some(existing) = guard.get(&run.run_id) {
-            let PersistedAnalysisArtifact::Standard(existing) = existing else {
-                return Err("analysis run identity already contains another result kind".into());
-            };
-            validate_persisted_run(existing, &run.run_id)?;
-            if !same_persisted_content(existing, &prepared.persisted) {
-                return Err("analysis run identity already contains different content".into());
-            }
-            return artifact_record(run, existing.created_at.clone());
-        }
-        let created_at = prepared.persisted.created_at.clone();
-        let mut chunks = self
-            .chunks
-            .write()
-            .map_err(|_| "analysis field chunk store lock poisoned".to_string())?;
-        for (digest, bytes) in prepared.chunks {
-            match chunks.get(&digest) {
-                Some(existing) if existing.as_ref() != bytes.as_slice() => {
-                    return Err("analysis field chunk digest collision".to_string());
-                }
-                Some(_) => {}
-                None => {
-                    chunks.insert(digest, Arc::from(bytes));
-                }
-            }
-        }
-        guard.insert(
-            run.run_id.clone(),
+        let created_at = self.install_standalone(
+            &run.run_id,
             PersistedAnalysisArtifact::Standard(Box::new(prepared.persisted)),
-        );
+            prepared.chunks.into_iter().collect(),
+        )?;
         artifact_record(run, created_at)
     }
 
@@ -94,6 +109,23 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         };
         validate_persisted_run(persisted, run_id)?;
         Ok(Some(persisted.metadata.clone()))
+    }
+
+    fn load_assessment_metadata(
+        &self,
+        run_id: &str,
+        maximum_bytes: u64,
+    ) -> Result<Option<AssessmentRunEvidence>, AssessmentStoreError> {
+        // This public limit is encoded artifact bytes. Project standalone decode work
+        // through the shared codec; prepared publication supplies its actual remaining host
+        // allowance to the same implementation instead.
+        let resident =
+            runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+                maximum_bytes,
+                3,
+            )
+            .ok_or(AssessmentStoreError::ResourceLimit)?;
+        self.load_assessment_metadata_with_workspace(run_id, maximum_bytes, resident)
     }
 
     fn load_field_inventory(&self, run_id: &str) -> Result<Option<Vec<AnalysisField>>, String> {
@@ -318,40 +350,12 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             Utc::now().to_rfc3339(),
         )?;
         let objects = frequency::ingest_objects(&prepared, source)?;
-        let mut runs = self
-            .runs
-            .write()
-            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        if let Some(existing) = runs.get(&step.run_id) {
-            let PersistedAnalysisArtifact::StructuralFrequency(existing) = existing else {
-                return Err("analysis run identity already contains another result kind".into());
-            };
-            frequency::validate_artifact(existing, &step.run_id)?;
-            if !frequency::same_content(existing, &prepared) {
-                return Err("analysis run identity already contains different content".into());
-            }
-            return Ok(frequency::artifact_record(existing));
-        }
-        let mut stored_objects = self
-            .chunks
-            .write()
-            .map_err(|_| "analysis object store lock poisoned".to_string())?;
-        for (digest, bytes) in objects {
-            match stored_objects.get(&digest) {
-                Some(existing) if existing.as_ref() != bytes.as_slice() => {
-                    return Err("analysis object digest collision".into());
-                }
-                Some(_) => {}
-                None => {
-                    stored_objects.insert(digest, Arc::from(bytes));
-                }
-            }
-        }
-        let record = frequency::artifact_record(&prepared);
-        runs.insert(
-            step.run_id.clone(),
+        let mut record = frequency::artifact_record(&prepared);
+        record.created_at = self.install_standalone(
+            &step.run_id,
             PersistedAnalysisArtifact::StructuralFrequency(Box::new(prepared)),
-        );
+            objects.into_iter().collect(),
+        )?;
         Ok(record)
     }
 
@@ -386,40 +390,12 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             Utc::now().to_rfc3339(),
         )?;
         let objects = frequency_sample::ingest_objects(&prepared, source)?;
-        let mut runs = self
-            .runs
-            .write()
-            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        if let Some(existing) = runs.get(&step.run_id) {
-            let PersistedAnalysisArtifact::AcousticFrequency(existing) = existing else {
-                return Err("analysis run identity already contains another result kind".into());
-            };
-            frequency_sample::validate_artifact(existing, &step.run_id)?;
-            if !frequency_sample::same_content(existing, &prepared) {
-                return Err("analysis run identity already contains different content".into());
-            }
-            return Ok(frequency_sample::artifact_record(existing));
-        }
-        let mut stored_objects = self
-            .chunks
-            .write()
-            .map_err(|_| "analysis object store lock poisoned".to_string())?;
-        for (digest, bytes) in objects {
-            match stored_objects.get(&digest) {
-                Some(existing) if existing.as_ref() != bytes.as_slice() => {
-                    return Err("analysis object digest collision".into());
-                }
-                Some(_) => {}
-                None => {
-                    stored_objects.insert(digest, Arc::from(bytes));
-                }
-            }
-        }
-        let record = frequency_sample::artifact_record(&prepared);
-        runs.insert(
-            step.run_id.clone(),
+        let mut record = frequency_sample::artifact_record(&prepared);
+        record.created_at = self.install_standalone(
+            &step.run_id,
             PersistedAnalysisArtifact::AcousticFrequency(Box::new(prepared)),
-        );
+            objects.into_iter().collect(),
+        )?;
         Ok(record)
     }
 

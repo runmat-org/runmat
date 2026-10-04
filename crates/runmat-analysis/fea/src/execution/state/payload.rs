@@ -12,6 +12,9 @@ use super::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum CanonicalSemanticStatePayload {
+    NonlinearSolid {
+        state: std::sync::Arc<super::CanonicalNonlinearSolidStatePayload>,
+    },
     Fluid {
         state: Box<CanonicalFluidStatePayload>,
     },

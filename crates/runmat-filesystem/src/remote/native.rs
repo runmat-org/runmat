@@ -1,3 +1,4 @@
+use crate::workspace::{WorkspaceCaptureRequest, WorkspaceSnapshot, WorkspacePublicationRequest, WorkspacePublicationOutcome};
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
@@ -207,6 +208,21 @@ impl RemoteInner {
         Err(io::Error::other("request retries exhausted"))
     }
 
+    fn workspace_request<I: Serialize, O: serde::de::DeserializeOwned>(&self, route: &str, request: &I) -> io::Result<O> {
+        let bytes = super::workspace_wire::encode(request)?;
+        let response = handle_error(self.request(reqwest::Method::POST, route, &[])
+            .header(reqwest::header::CONTENT_TYPE, "application/cbor")
+            .header(reqwest::header::ACCEPT, "application/cbor")
+            .body(bytes).send().map_err(map_http_err)?)?;
+        if response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next()) != Some("application/cbor") {
+            return Err(io::Error::new(ErrorKind::InvalidData, "invalid workspace response content type"));
+        }
+        let mut bytes = Vec::new();
+        response.take(super::workspace_wire::MAX_WIRE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+        super::workspace_wire::decode(&bytes)
+    }
+
     fn endpoint(&self, route: &str) -> Url {
         self.base
             .join(route.trim_start_matches('/'))
@@ -226,8 +242,12 @@ impl RemoteInner {
                 pairs.append_pair(k, v);
             }
             if method == reqwest::Method::GET && matches!(route, "/fs/read" | "/fs/download-url") {
-                if let Some(version) = &self.pinned_version { pairs.append_pair("versionId", version); }
-                if let Some(snapshot) = &self.pinned_snapshot { pairs.append_pair("snapshotId", snapshot); }
+                if let Some(version) = &self.pinned_version {
+                    pairs.append_pair("versionId", version);
+                }
+                if let Some(snapshot) = &self.pinned_snapshot {
+                    pairs.append_pair("snapshotId", snapshot);
+                }
             }
         }
         let mut builder = self.client.request(method, url);
@@ -396,9 +416,14 @@ impl RemoteInner {
         )
     }
 
-    fn upload_session_complete(&self, params: UploadSessionCompleteParams<'_>) -> io::Result<Option<String>> {
+    fn upload_session_complete(
+        &self,
+        params: UploadSessionCompleteParams<'_>,
+    ) -> io::Result<Option<String>> {
         #[derive(Deserialize)]
-        struct Commit { version_id: Option<String> }
+        struct Commit {
+            version_id: Option<String>,
+        }
         let response: Commit = self.post_json(
             "/fs/upload-session/complete",
             &UploadSessionCompleteRequest {
@@ -835,12 +860,17 @@ impl RemoteFsProvider {
         create_new: bool,
         allow_legacy_fallback: bool,
     ) -> io::Result<()> {
-        self.upload_versioned_file(path, data, create_new, allow_legacy_fallback, None).map(|_| ())
+        self.upload_versioned_file(path, data, create_new, allow_legacy_fallback, None)
+            .map(|_| ())
     }
 
     fn upload_versioned_file(
-        &self, path: &str, data: &[u8], create_new: bool,
-        allow_legacy_fallback: bool, expected_version_id: Option<&str>,
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        allow_legacy_fallback: bool,
+        expected_version_id: Option<&str>,
     ) -> io::Result<Option<String>> {
         if data.is_empty() && allow_legacy_fallback {
             self.inner.upload_chunk(FsWriteChunkRequest {
@@ -863,7 +893,9 @@ impl RemoteFsProvider {
         ) {
             Ok(session) => session,
             Err(err) if err.kind() == ErrorKind::NotFound && allow_legacy_fallback => {
-                return self.upload_multipart_file_legacy(path, data, create_new).map(|_| None);
+                return self
+                    .upload_multipart_file_legacy(path, data, create_new)
+                    .map(|_| None);
             }
             Err(err) if err.kind() == ErrorKind::NotFound => {
                 return Err(io::Error::new(
@@ -1173,21 +1205,32 @@ impl FsProvider for RemoteFsProvider {
         }
     }
 
-    async fn read_version(&self, path: &Path, version: &str, size: u64, snapshot: &str) -> io::Result<Vec<u8>> {
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
         let mut inner = self.inner.as_ref().clone();
         inner.pinned_version = Some(version.to_owned());
         inner.pinned_snapshot = (!snapshot.is_empty()).then(|| snapshot.to_owned());
         // The read endpoint also reconstructs sharded file versions. Do not
         // bypass it by directly downloading a large manifest object's JSON.
         inner.direct_read_threshold_bytes = u64::MAX;
-        let pinned = Self { inner: Arc::new(inner) };
+        let pinned = Self {
+            inner: Arc::new(inner),
+        };
         let bytes = if size == 0 {
             pinned.inner.download_chunk(&self.normalize(path), 0, 1)?
         } else {
             pinned.download_raw_file(&self.normalize(path), size)?
         };
         if bytes.len() as u64 != size {
-            return Err(io::Error::new(ErrorKind::InvalidData, "immutable version length mismatch"));
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "immutable version length mismatch",
+            ));
         }
         Ok(bytes)
     }
@@ -1198,14 +1241,48 @@ impl FsProvider for RemoteFsProvider {
         self.upload_entire_file(&normalized, data, false)
     }
 
-    async fn publish_output(&self, path: &Path, data: &[u8], expected: Option<&str>) -> io::Result<String> {
-        self.upload_versioned_file(&self.normalize(path), data, expected.is_none(), false, expected)?
-            .filter(|version| !version.is_empty())
-            .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "conditional publication returned no version"))
+    async fn capture_workspace(&self, request: WorkspaceCaptureRequest) -> io::Result<WorkspaceSnapshot> {
+        self.inner.workspace_request("/collaboration/workspace/capture", &request)
+    }
+
+    async fn lookup_workspace_publication(&self, request: &WorkspacePublicationRequest) -> io::Result<Option<WorkspacePublicationOutcome>> {
+        self.inner.workspace_request("/collaboration/workspace/lookup", request)
+    }
+
+    async fn publish_workspace(&self, request: WorkspacePublicationRequest) -> io::Result<WorkspacePublicationOutcome> {
+        self.inner.workspace_request("/collaboration/workspace/publish", &request)
+    }
+
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
+        self.upload_versioned_file(
+            &self.normalize(path),
+            data,
+            expected.is_none(),
+            false,
+            expected,
+        )?
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                "conditional publication returned no version",
+            )
+        })
     }
 
     async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
-        self.inner.delete_empty("/fs/file", &[("path", self.normalize(path)), ("expectedVersionId", expected.to_owned())])
+        self.inner.delete_empty(
+            "/fs/file",
+            &[
+                ("path", self.normalize(path)),
+                ("expectedVersionId", expected.to_owned()),
+            ],
+        )
     }
 
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
@@ -2133,7 +2210,9 @@ mod tests {
         }
         let mut versions = harness.versions.lock().unwrap();
         if let Some(expected) = &req.expected_version_id {
-            if versions.get(&req.path) != Some(expected) { return Err(StatusCode::CONFLICT); }
+            if versions.get(&req.path) != Some(expected) {
+                return Err(StatusCode::CONFLICT);
+            }
         }
         let target_path = harness.resolve(&state.path);
         if let Some(parent) = target_path.parent() {
@@ -2180,7 +2259,9 @@ mod tests {
     ) -> Result<(), StatusCode> {
         let mut versions = harness.versions.lock().unwrap();
         if let Some(expected) = &params.expected_version_id {
-            if versions.get(&params.path) != Some(expected) { return Err(StatusCode::CONFLICT); }
+            if versions.get(&params.path) != Some(expected) {
+                return Err(StatusCode::CONFLICT);
+            }
         }
         versions.remove(&params.path);
         std::fs::remove_file(harness.resolve(&params.path)).map_err(|_| StatusCode::NOT_FOUND)?;
@@ -2556,13 +2637,21 @@ mod tests {
     #[test]
     fn remote_conditional_publication_tracks_versions_without_falling_back() {
         let (base, harness, _rt) = spawn_server();
-        let provider = RemoteFsProvider::new(RemoteFsConfig { base_url: base, ..RemoteFsConfig::default() }).unwrap();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            ..RemoteFsConfig::default()
+        })
+        .unwrap();
         let path = Path::new("/output.bin");
         let first = executor::block_on(provider.publish_output(path, b"first", None)).unwrap();
-        let second = executor::block_on(provider.publish_output(path, b"second", Some(&first))).unwrap();
+        let second =
+            executor::block_on(provider.publish_output(path, b"second", Some(&first))).unwrap();
         assert_ne!(first, second);
         assert!(executor::block_on(provider.publish_output(path, b"stale", Some(&first))).is_err());
-        assert_eq!(std::fs::read(harness.resolve("/output.bin")).unwrap(), b"second");
+        assert_eq!(
+            std::fs::read(harness.resolve("/output.bin")).unwrap(),
+            b"second"
+        );
         assert!(executor::block_on(provider.remove_output(path, &first)).is_err());
         executor::block_on(provider.remove_output(path, &second)).unwrap();
         assert!(!harness.resolve("/output.bin").exists());

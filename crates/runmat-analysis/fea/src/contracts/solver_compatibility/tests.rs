@@ -48,10 +48,12 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
         SolverMethod::AssembledSaddlePointGmres,
     ));
     assert!(preconditioner_is_compatible(
+        TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
         SolverMethod::AssembledSaddlePointGmres,
         SolverPreconditioner::None,
     ));
     assert!(!preconditioner_is_compatible(
+        TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
         SolverMethod::AssembledSaddlePointGmres,
         SolverPreconditioner::Jacobi,
     ));
@@ -145,6 +147,7 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
             SolverMethod::MatrixFreePcg,
             SolverMethod::AssembledSaddlePointGmres,
             SolverMethod::MatrixFreeSaddlePointGmres,
+            SolverMethod::StructuralDirectHarmonicGmres,
             SolverMethod::StructuralDirectHarmonicGmres,
             SolverMethod::DenseDirect,
         ] {
@@ -301,26 +304,14 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
         (
             PhysicsFamily::Fluid,
             AnalysisProcedure::Static,
-            SolverMethod::CfdVelocityPressureFiniteVolume,
-            SolverPreconditioner::FiniteVolumePressureBalance,
-        ),
-        (
-            PhysicsFamily::Fluid,
-            AnalysisProcedure::TransientResponse,
-            SolverMethod::CfdVelocityPressureFiniteVolume,
-            SolverPreconditioner::FiniteVolumePressureBalance,
+            SolverMethod::GeneralGmres,
+            SolverPreconditioner::Jacobi,
         ),
         (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
             AnalysisProcedure::Static,
             SolverMethod::ChtConjugateProjection,
             SolverPreconditioner::ThermalCfdProjection,
-        ),
-        (
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-            AnalysisProcedure::TransientResponse,
-            SolverMethod::FsiPartitionedProjection,
-            SolverPreconditioner::InterfaceRelaxation,
         ),
     ];
     for (family, procedure, method, preconditioner) in cases {

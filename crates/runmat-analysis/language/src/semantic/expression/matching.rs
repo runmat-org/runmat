@@ -117,6 +117,18 @@ pub(crate) fn pattern_matches(pattern: &OperationTypePattern, value: &FeaType) -
         OperationTypePattern::NumericArray | OperationTypePattern::Axes => {
             matches!(value, FeaType::Vector { element, .. } if element.is_numeric())
         }
+        OperationTypePattern::LogicalScalar => matches!(value, FeaType::Boolean),
+        OperationTypePattern::Record(fields) => match value {
+            FeaType::Record(values) => {
+                fields.len() == values.len()
+                    && fields.iter().all(|(key, pattern)| {
+                        values
+                            .get(key)
+                            .is_some_and(|value| pattern_matches(pattern, value))
+                    })
+            }
+            _ => false,
+        },
         OperationTypePattern::LogicalArray => match value {
             FeaType::Boolean => true,
             FeaType::Vector { element, .. } => matches!(element.as_ref(), FeaType::Boolean),
@@ -239,6 +251,13 @@ fn pattern_type(pattern: &OperationTypePattern) -> FeaType {
             element: Box::new(FeaType::Real),
             length: None,
         },
+        OperationTypePattern::LogicalScalar => FeaType::Boolean,
+        OperationTypePattern::Record(fields) => FeaType::Record(
+            fields
+                .iter()
+                .map(|(key, pattern)| (key.clone(), pattern_type(pattern)))
+                .collect(),
+        ),
         OperationTypePattern::LogicalArray => FeaType::Vector {
             element: Box::new(FeaType::Boolean),
             length: None,

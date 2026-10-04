@@ -8,6 +8,7 @@ use crate::planning::resource::ResourceUsageEvidence;
 use crate::results::field::{RecoveredFieldArtifactManifest, RecoveredFieldSample};
 use crate::results::observation::{
     ObservationArtifactManifest, ObservationHistoryCheckpointManifest,
+    ObservationHistoryPublication,
 };
 
 use super::{
@@ -19,7 +20,7 @@ use super::{
 };
 
 const FREQUENCY_PUBLICATION_PREFIX: &[u8] = b"runmat-structural-frequency-publication/v1\0";
-const FREQUENCY_PUBLICATION_LIMITS: CanonicalLimits =
+pub(super) const FREQUENCY_PUBLICATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(256 * 1024 * 1024, 2_000_000, 65_536, 64);
 
 /// Semantic publication for one frequency sample. Physical object locations are deliberately
@@ -39,6 +40,8 @@ pub struct StructuralFrequencyPublicationSample {
 pub struct StructuralFrequencyPublicationHistory {
     pub observation_id: ObservationId,
     pub checkpoint: ObservationHistoryCheckpointManifest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalization: Option<ObservationHistoryPublication>,
 }
 
 pub struct StructuralFrequencyPublicationInput<'a> {
@@ -339,6 +342,16 @@ impl StructuralFrequencyPublicationManifest {
                 .checkpoint
                 .validate()
                 .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            if let Some(finalization) = &history.finalization {
+                finalization.validate()?;
+                if finalization.checkpoint != history.checkpoint
+                    || finalization.request.observation_id != history.observation_id
+                {
+                    return Err(AnalysisExecutionError::Identity(
+                        "frequency history finalization differs from its terminal checkpoint",
+                    ));
+                }
+            }
             if history.observation_id != history.checkpoint.stream.observation_id
                 || !history_ids.insert(&history.observation_id)
             {
@@ -356,8 +369,7 @@ impl StructuralFrequencyPublicationManifest {
     }
 
     fn derive_identity(&self) -> AnalysisExecutionResult<StructuralFrequencyPublicationIdentity> {
-        StructuralFrequencyPublicationIdentity::derive(
-            "structural-frequency-publication",
+        StructuralFrequencyPublicationIdentity::derive_publication(
             &(
                 self.schema_version,
                 self.workload,
@@ -367,6 +379,7 @@ impl StructuralFrequencyPublicationManifest {
                 &self.histories,
                 &self.resource_usage,
             ),
+            FREQUENCY_PUBLICATION_LIMITS,
         )
     }
 }

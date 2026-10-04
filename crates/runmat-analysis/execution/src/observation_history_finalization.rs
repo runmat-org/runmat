@@ -155,6 +155,9 @@ pub fn prepare_observation_history_finalization_task(
                     }
                     frequency.canonical_bytes()?
                 }
+                AdmittedObservationWorkload::NonlinearSolid(_) => {
+                    return Err(invalid("nonlinear history needs an original accepted-path source; only final fields are admitted"));
+                }
                 AdmittedObservationWorkload::Thermal(_)
                 | AdmittedObservationWorkload::FluidSteady(_)
                 | AdmittedObservationWorkload::Magnetostatic(_)
@@ -217,6 +220,9 @@ pub fn prepare_observation_history_finalization_task(
         }
     };
     let context = match &decoded_workload {
+        AdmittedObservationWorkload::NonlinearSolid(_) => {
+            return Err(invalid("nonlinear history needs an original accepted-path source; only final fields are admitted"));
+        }
         AdmittedObservationWorkload::Magnetostatic(_)
         | AdmittedObservationWorkload::FluidSteady(_)
         | AdmittedObservationWorkload::MaxwellHarmonic(_) => {

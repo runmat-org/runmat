@@ -19,6 +19,8 @@ mod electrical_run_options;
 pub use electrical_run_options::AnalysisElectricalRunOptions;
 mod frequency_results;
 pub use frequency_results::{AcousticFrequencyResultsData, StructuralFrequencyResultsData};
+mod nonlinear_run_options;
+pub use nonlinear_run_options::AnalysisNonlinearRunOptions;
 mod field_units;
 use field_units::infer_field_unit;
 
@@ -50,14 +52,6 @@ pub enum QualityPolicy {
     Strict,
     Balanced,
     Exploratory,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PlasticityConstitutiveOptions {
-    pub enabled: bool,
-    pub yield_strain: f64,
-    pub hardening_modulus_ratio: f64,
-    pub saturation_exponent: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -509,110 +503,6 @@ impl Default for AnalysisBucklingRunOptions {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisNonlinearRunOptions {
-    pub deterministic_mode: bool,
-    pub precision_mode: PrecisionMode,
-    pub quality_policy: QualityPolicy,
-    pub increment_count: usize,
-    pub max_newton_iters: usize,
-    pub tolerance: f64,
-    pub residual_convergence_factor: f64,
-    pub increment_norm_tolerance: f64,
-    pub line_search: bool,
-    pub max_line_search_backtracks: usize,
-    pub line_search_reduction: f64,
-    pub tangent_refresh_interval: usize,
-    #[serde(default)]
-    pub contact_enforcement: Option<ContactEnforcementOptions>,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
-}
-
-impl Default for AnalysisNonlinearRunOptions {
-    fn default() -> Self {
-        Self {
-            deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            increment_count: 12,
-            max_newton_iters: 24,
-            tolerance: 1.0e-6,
-            residual_convergence_factor: 5.0,
-            increment_norm_tolerance: 1.0e-7,
-            line_search: true,
-            max_line_search_backtracks: 6,
-            line_search_reduction: 0.5,
-            tangent_refresh_interval: 2,
-            contact_enforcement: None,
-            solver_mesh_artifact_path: None,
-        }
-    }
-}
-
-impl AnalysisNonlinearRunOptions {
-    pub fn coarse() -> Self {
-        Self {
-            deterministic_mode: false,
-            precision_mode: PrecisionMode::Fp32,
-            quality_policy: QualityPolicy::Exploratory,
-            increment_count: 8,
-            max_newton_iters: 16,
-            tolerance: 5.0e-6,
-            residual_convergence_factor: 8.0,
-            increment_norm_tolerance: 5.0e-7,
-            line_search: false,
-            max_line_search_backtracks: 0,
-            line_search_reduction: 0.6,
-            tangent_refresh_interval: 4,
-            contact_enforcement: None,
-            solver_mesh_artifact_path: None,
-        }
-    }
-
-    pub fn balanced() -> Self {
-        Self::default()
-    }
-
-    pub fn high_accuracy() -> Self {
-        Self {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Strict,
-            increment_count: 24,
-            max_newton_iters: 40,
-            tolerance: 1.0e-7,
-            residual_convergence_factor: 3.0,
-            increment_norm_tolerance: 5.0e-8,
-            line_search: true,
-            max_line_search_backtracks: 10,
-            line_search_reduction: 0.5,
-            tangent_refresh_interval: 1,
-            contact_enforcement: None,
-            solver_mesh_artifact_path: None,
-        }
-    }
-
-    pub fn solid_recommended() -> Self {
-        Self {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            increment_count: 24,
-            max_newton_iters: 28,
-            tolerance: 1.0e-6,
-            residual_convergence_factor: 4.0,
-            increment_norm_tolerance: 8.0e-8,
-            line_search: true,
-            max_line_search_backtracks: 8,
-            line_search_reduction: 0.5,
-            tangent_refresh_interval: 2,
-            contact_enforcement: None,
-            solver_mesh_artifact_path: None,
-        }
-    }
-}
-
 impl Default for AnalysisModalRunOptions {
     fn default() -> Self {
         Self {
@@ -785,6 +675,9 @@ pub struct AnalysisRenderTriangleRange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisRunResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observation_scalars:
+        Vec<runmat_analysis_fea::results::assessment::ScalarObservationEvidence>,
     pub run_id: String,
     pub run: FeaRunResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -936,6 +829,44 @@ pub struct AnalysisRuntimeCapabilities {
     pub procedure_ids: Vec<String>,
     pub output_operation_ids: Vec<String>,
     pub language_reference_paths: Vec<String>,
+    pub language_reference_digest: runmat_execution::Digest,
+    pub language_compiler_version: String,
+}
+
+/// Execution is admitted by the host; source and observation contracts are
+/// shared. A check-only host must never advertise solver execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisExecutionCapability {
+    CheckOnly,
+    Local { live_progress: bool },
+}
+impl AnalysisRuntimeCapabilities {
+    pub fn for_runtime(
+        execution: AnalysisExecutionCapability,
+        supported_geometry_extensions: Vec<String>,
+    ) -> Self {
+        let (supports_run, supports_live_progress) = match execution {
+            AnalysisExecutionCapability::CheckOnly => (false, false),
+            AnalysisExecutionCapability::Local { live_progress } => (true, live_progress),
+        };
+        Self {
+            supported_document_extensions: vec![".fea".into()],
+            supported_geometry_extensions,
+            supports_check: true,
+            supports_run,
+            supports_results: true,
+            supports_live_progress,
+            visualization_backend: "runmat-plot".into(),
+            authoring_workflow: analysis_authoring_workflow(),
+            procedure_ids: analysis_procedure_ids(),
+            output_operation_ids: analysis_output_operation_ids(),
+            language_reference_paths: analysis_language_reference_paths(),
+            language_reference_digest: runmat_execution::Digest::from_bytes(
+                runmat_analysis_language::reference::reference_bundle_digest_bytes(),
+            ),
+            language_compiler_version: runmat_analysis_language::reference::COMPILER_VERSION.into(),
+        }
+    }
 }
 
 pub fn analysis_authoring_workflow() -> Vec<String> {
@@ -970,16 +901,10 @@ pub fn analysis_output_operation_ids() -> Vec<String> {
 }
 
 pub fn analysis_language_reference_paths() -> Vec<String> {
-    [
-        "docs/fea/language/index.md",
-        "docs/fea/language/reference/declarations.md",
-        "docs/fea/language/reference/procedures.md",
-        "docs/fea/language/reference/operations-and-output-queries.md",
-        "docs/fea/language/diagnostics-and-tooling.md",
-    ]
-    .into_iter()
-    .map(str::to_string)
-    .collect()
+    runmat_analysis_language::reference::FEA_LANGUAGE_REFERENCE_IDS
+        .iter()
+        .map(|id| (*id).to_owned())
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -998,6 +923,10 @@ pub struct AnalysisDocumentCheckResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisDocumentRunResult {
+    #[serde(default)]
+    pub assessments: Vec<super::assessment::PublishedStudyAssessment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_assessments: Option<Vec<super::assessment::PublishedCaseAssessments>>,
     pub path: String,
     pub document_kind: AnalysisDocumentKind,
     pub run: JsonValue,
@@ -1099,6 +1028,12 @@ pub struct AnalysisRunDatasetFieldPagingPolicy {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisRunDatasetPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reassessments: Option<Vec<super::assessment::PublishedStudyReassessment>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assessments: Option<Vec<super::assessment::PublishedStudyAssessment>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_assessments: Option<Vec<super::assessment::PublishedCaseAssessments>>,
     pub schema_version: u32,
     pub kind: String,
     pub session_id: String,
@@ -2302,6 +2237,8 @@ pub struct AnalysisStudyStatePublicationData {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudyRunData {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assessments: Vec<super::assessment::PublishedStudyAssessment>,
     pub study_id: String,
     pub model_id: String,
     pub sequence_identity: SequenceIdentity,

@@ -11,6 +11,7 @@ build = "build.rs"
 links = "runmat_runtime_native"
 
 [dependencies]
+runmat-fea-source = { workspace = true }
 runmat-value = { workspace = true }
 runmat-types = { workspace = true }
 inventory = { workspace = true }
@@ -30,6 +31,7 @@ runmat-geometry-core = { workspace = true }
 runmat-geometry-io = { workspace = true }
 runmat-geometry-ops = { workspace = true }
 runmat-analysis-core = { workspace = true }
+runmat-canonical-codec = { workspace = true }
 runmat-analysis-fea = { workspace = true }
 runmat-analysis-language = { workspace = true }
 runmat-mir = { workspace = true }

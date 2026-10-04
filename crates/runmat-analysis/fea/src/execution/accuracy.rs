@@ -18,6 +18,7 @@ const ACCURACY_EVALUATION_LIMITS: CanonicalLimits =
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccuracySourceKind {
+    NonlinearSolid,
     FluidSteady,
     MaxwellHarmonic,
     Magnetostatic,
@@ -74,7 +75,7 @@ impl ObservationPublicationCatalog {
                 crate::results::observation::ObservationFieldCatalogSource::Thermal { manifest },
             ) if manifest.producer == producer && manifest.identity() == result => Ok(()),
             (
-                AccuracySourceKind::StructuralLinear,
+                AccuracySourceKind::StructuralLinear | AccuracySourceKind::NonlinearSolid,
                 crate::results::observation::ObservationFieldCatalogSource::Structural {
                     recovery_request,
                     manifest,

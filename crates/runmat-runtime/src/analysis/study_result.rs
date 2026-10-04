@@ -8,13 +8,17 @@ mod acoustic;
 mod electrical;
 mod fluid;
 mod magnetic;
-pub use fluid::{FluidStudyCompletion, FluidStudyObjectSource, FluidStudySource};
 mod maxwell;
+mod nonlinear;
 pub use electrical::{
     ElectricalStudyCompletion, ElectricalStudyObjectSource, ElectricalStudySource,
 };
+pub use fluid::{FluidStudyCompletion, FluidStudyObjectSource, FluidStudySource};
 pub use magnetic::{MagneticStudyCompletion, MagneticStudyObjectSource, MagneticStudySource};
 pub use maxwell::{MaxwellStudyCompletion, MaxwellStudyObjectSource, MaxwellStudySource};
+pub use nonlinear::{
+    NonlinearSolidStudyCompletion, NonlinearSolidStudyObjectSource, NonlinearSolidStudySource,
+};
 pub(super) mod thermal;
 pub use acoustic::{
     AcousticStudyCompletion, AcousticStudyEntryCompletion, AcousticStudyObjectSource,
@@ -36,7 +40,7 @@ pub use thermal_source::{ThermalStudyObjectSource, ThermalStudySource};
 /// The compiled analysis definition, canonical mesh, governed meshing evidence, and numerical
 /// result travel together. Local execution and a verified remote import must construct this same
 /// type; paths, worker identities, retry state, and transport authority do not belong here.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyResult {
     compiled: CompiledAnalysisStudy,
     mesh: SolverMeshArtifact,

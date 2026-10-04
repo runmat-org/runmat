@@ -19,6 +19,7 @@ use runmat_analysis_fea::{
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ProgramExecutionResponse};
 use runmat_execution_runner::AttemptResourceAccounting;
+mod storage;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SteadyStudyPhase {
@@ -55,12 +56,16 @@ pub(crate) enum TerminalStatePublicationSource {
         topology: Digest,
     },
     FluidOriginal,
+    NonlinearOriginal,
 }
 
 pub(crate) struct SteadyStudyTail {
     source: SteadyStudySource,
+    retained_context_bytes: u64,
+    original_import_workspace_bytes: Option<u64>,
     pub phase: SteadyStudyPhase,
     pub accuracy_task: Option<PreparedAccuracy>,
+    completed_accuracy_host: Option<AnalysisHostWorkload>,
     pub state_task: Option<PreparedSemanticStatePublication>,
     pub publication_task: Option<PreparedResultPublication>,
     pub accuracy: Option<ImportedAccuracy>,
@@ -75,8 +80,11 @@ impl SteadyStudyTail {
     pub fn new(source: SteadyStudySource, usage: PreparedResourceUsage) -> Self {
         Self {
             source,
+            retained_context_bytes: 0,
+            original_import_workspace_bytes: None,
             phase: SteadyStudyPhase::ReadyForAccuracy,
             accuracy_task: None,
+            completed_accuracy_host: None,
             state_task: None,
             publication_task: None,
             accuracy: None,
@@ -114,6 +122,7 @@ impl SteadyStudyTail {
             chunk_bytes: self.source.output_policy.chunk_bytes(),
             inventory_limits: self.source.output_policy.inventory_limits(),
         })?;
+        self.require_retained_budget(&task.resource_plan)?;
         self.accuracy_task = Some(task);
         self.phase = SteadyStudyPhase::AwaitingAccuracy;
         Ok(self.accuracy_task.as_ref().expect("just prepared"))
@@ -135,8 +144,24 @@ impl SteadyStudyTail {
             self.source.output_policy.inventory_limits(),
         )?;
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
+        let host = task.host.clone();
         self.accuracy = Some(accuracy);
         self.usage = Some(usage);
+        // Publication needs exact producer lineage, not completed task input/program copies.
+        self.completed_accuracy_host = Some(host);
+        self.accuracy_task = None;
+        if matches!(
+            self.source.state,
+            TerminalStatePublicationSource::NonlinearOriginal
+        ) {
+            // Accuracy authenticated workload/mesh/result together. Subsequent original-state
+            // tasks use only workload plus source.result; publication uses accuracy lineage.
+            // Release the completed accuracy's mesh and duplicate result input buffers.
+            self.source.context_inputs.retain(|input| {
+                input.manifest.kind
+                    == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::NonlinearSolidWorkload
+            });
+        }
         self.advance_state();
         Ok(())
     }
@@ -177,7 +202,17 @@ impl SteadyStudyTail {
                     inventory_limits: self.source.output_policy.inventory_limits(),
                 })?
             }
+            TerminalStatePublicationSource::NonlinearOriginal => {
+                let workload = self.source.context_inputs.iter().find(|i| i.manifest.kind
+                    == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::NonlinearSolidWorkload)
+                    .ok_or_else(|| invalid("original nonlinear workload missing"))?;
+                crate::prepare_nonlinear_solid_state_publication(crate::NonlinearSolidStatePublicationPreparation {
+                    source_host: self.source.host.clone(), workload: workload.clone(), block: self.source.result.clone(),
+                    declaration, program_revision: self.source.program_revision.clone(), output_policy: self.source.output_policy,
+                })?
+            }
         };
+        self.require_retained_budget(&task.resource_plan)?;
         self.state_task = Some(task);
         self.phase = SteadyStudyPhase::AwaitingState { ordinal };
         Ok(self.state_task.as_ref().expect("just prepared"))
@@ -194,13 +229,18 @@ impl SteadyStudyTail {
         })?;
         let task = self.state_task.as_ref().expect("awaited state");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let state = import_semantic_state_completion(
+        let mut state = import_semantic_state_completion(
             source,
             response,
             task,
             self.source.output_policy.inventory_limits(),
         )?;
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
+        for previous in &self.states {
+            state
+                .state
+                .share_original_nonlinear_payload(&previous.state);
+        }
         self.states.push(state);
         self.usage = Some(usage);
         self.state_task = None;
@@ -220,10 +260,9 @@ impl SteadyStudyTail {
         self.require(SteadyStudyPhase::ReadyForPublication)?;
         let task = prepare_result_publication(ResultPublicationPreparation {
             accuracy_host: self
-                .accuracy_task
+                .completed_accuracy_host
                 .as_ref()
-                .expect("completed accuracy task")
-                .host
+                .expect("completed accuracy host")
                 .clone(),
             source_accuracy: self
                 .accuracy
@@ -242,6 +281,7 @@ impl SteadyStudyTail {
             chunk_bytes: self.source.output_policy.chunk_bytes(),
             inventory_limits: self.source.output_policy.inventory_limits(),
         })?;
+        self.require_retained_budget(&task.resource_plan)?;
         self.publication_task = Some(task);
         self.phase = SteadyStudyPhase::AwaitingPublication;
         Ok(self.publication_task.as_ref().expect("just prepared"))
@@ -275,6 +315,7 @@ impl SteadyStudyTail {
         )?;
         self.publication = Some(publication);
         self.terminal = Some(terminal);
+        self.publication_task = None;
         self.phase = SteadyStudyPhase::Complete;
         Ok(())
     }
@@ -285,6 +326,48 @@ impl SteadyStudyTail {
                 "steady study phase {:?} does not permit {:?}",
                 self.phase, expected
             )));
+        }
+        Ok(())
+    }
+
+    /// Additional caller-owned context profiled by a coordinating adapter. This is a
+    /// conservative admission component, not process-RSS evidence or a new worker plan.
+    pub(crate) fn set_retained_context_bytes(
+        &mut self,
+        bytes: u64,
+        original_import_workspace_bytes: Option<u64>,
+    ) {
+        self.retained_context_bytes = bytes;
+        self.original_import_workspace_bytes = original_import_workspace_bytes;
+    }
+
+    fn require_retained_budget(&self, plan: &FeaResourcePlan) -> AnalysisBridgeResult<()> {
+        if self.retained_context_bytes == 0 {
+            return Ok(());
+        }
+        let additional = match self.original_import_workspace_bytes {
+            Some(workspace) if workspace <= self.retained_context_bytes => {
+                // The coordinating importer already includes the entire original
+                // closure's transport/decode workspace in retained_context_bytes.
+                // It covers this saved phase; no source program executes here.
+                0
+            }
+            Some(_) => return Err(invalid("original phase import lacks retained workspace")),
+            None => plan.request.memory_bytes,
+        };
+        let bytes = self
+            .retained_context_bytes
+            .checked_add(additional)
+            .ok_or_else(|| invalid("terminal retained context overflow"))?;
+        if bytes > self.source.step.accuracy.resources.maximum_resident_bytes {
+            return Err(
+                runmat_analysis_fea::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                    resource: "terminal retained resident bytes",
+                    required: bytes,
+                    maximum: self.source.step.accuracy.resources.maximum_resident_bytes,
+                }
+                .into(),
+            );
         }
         Ok(())
     }

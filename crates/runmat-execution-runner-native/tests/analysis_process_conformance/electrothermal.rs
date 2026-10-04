@@ -45,6 +45,7 @@ pub(super) async fn run() {
             study_id: "one_way_heat".into(),
             formulation_requirement: FormulationRequirement::Experimental,
             study_inputs: vec![],
+            assessments: Vec::new(),
             outputs: vec![],
             properties: compile_property_map(&model, Some(&mesh)).unwrap(),
             model,

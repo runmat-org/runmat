@@ -244,16 +244,21 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     }
 
     if let Some(plastic) = &material.plastic {
-        require_positive(material, "yield strain", plastic.yield_strain)?;
+        let crate::MaterialPlasticModel::J2IsotropicLinearHardening {
+            yield_stress_pa,
+            isotropic_hardening_modulus_pa,
+        } = plastic;
+        material.require_mechanical().map_err(|_| {
+            invalid_material(
+                material,
+                "J2 plasticity requires isotropic linear elasticity",
+            )
+        })?;
+        require_positive(material, "yield stress", *yield_stress_pa)?;
         require_nonnegative(
             material,
-            "hardening modulus ratio",
-            plastic.hardening_modulus_ratio,
-        )?;
-        require_positive(
-            material,
-            "plastic saturation exponent",
-            plastic.saturation_exponent,
+            "isotropic hardening modulus",
+            *isotropic_hardening_modulus_pa,
         )?;
     }
     Ok(())

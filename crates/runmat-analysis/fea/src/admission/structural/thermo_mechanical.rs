@@ -15,6 +15,9 @@ use super::{
 pub fn thermomechanical_exact_realization(
     mut input: ThermomechanicalRealizationInput,
 ) -> Result<ExactFormulationRealization, FormulationAdmissionRejectionReason> {
+    if input.structural.procedure == AnalysisProcedure::Nonlinear {
+        return Err(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure);
+    }
     if input.structural.coupling == CouplingImplementation::OneWaySolvedThermoelasticState {
         return solved_thermal_realization(input);
     }

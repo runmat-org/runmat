@@ -7,12 +7,6 @@ pub struct TransientPolicy {
     pub nonconverged_shrink: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NonlinearPolicy {
-    pub convergence_residual_target: f64,
-    pub convergence_increment_target: f64,
-}
-
 pub fn severity(context: Option<&ThermoMechanicalAssemblySummary>) -> f64 {
     let Some(context) = context else {
         return 0.0;
@@ -32,22 +26,6 @@ pub fn transient_policy(base_residual_target: f64, severity: f64) -> TransientPo
     }
 }
 
-pub fn nonlinear_policy(
-    tolerance: f64,
-    residual_convergence_factor: f64,
-    increment_norm_tolerance: f64,
-    severity: f64,
-) -> NonlinearPolicy {
-    let thermo_residual_relaxation = 1.0 + 2.0 * severity;
-    let thermo_increment_relaxation = 1.0 + 1.4 * severity;
-    NonlinearPolicy {
-        convergence_residual_target: tolerance
-            * residual_convergence_factor.max(1.0)
-            * thermo_residual_relaxation,
-        convergence_increment_target: increment_norm_tolerance * thermo_increment_relaxation,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,9 +36,5 @@ mod tests {
         assert!(transient.effective_residual_target >= 1.0e-6);
         assert!((0.75..=1.0).contains(&transient.growth_limit));
         assert!((0.65..=1.0).contains(&transient.nonconverged_shrink));
-
-        let nonlinear = nonlinear_policy(1.0e-6, 5.0, 1.0e-7, 0.8);
-        assert!(nonlinear.convergence_residual_target >= 1.0e-6);
-        assert!(nonlinear.convergence_increment_target >= 1.0e-7);
     }
 }

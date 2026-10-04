@@ -12,6 +12,7 @@ mod explicit_system;
 pub mod identity;
 mod mixed_structural;
 mod moment_projection;
+pub(crate) mod nonlinear_solid;
 mod reduced_material_summary;
 mod reduced_rhs;
 mod solid_matrix;
@@ -29,9 +30,6 @@ pub(crate) mod thermoelastic_load;
 
 use std::{collections::BTreeMap, fmt};
 
-pub(crate) use entry_points::*;
-pub(crate) use mixed_structural::mixed_dof_layout;
-
 #[cfg(test)]
 use runmat_analysis_core::StructuralElementKind;
 use runmat_analysis_core::{
@@ -41,6 +39,7 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
+pub(crate) use {entry_points::*, mixed_structural::mixed_dof_layout};
 
 use self::explicit_system::assemble_explicit_structural_system;
 use self::{

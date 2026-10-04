@@ -182,6 +182,24 @@ pub enum ProgramExecutionResponse {
 }
 
 impl ProgramExecutionResponse {
+    /// Preserve inline versus object-backed delivery when projecting admitted task outputs.
+    /// The resulting response still requires validation against its original request.
+    pub fn from_success_outputs(outputs: Vec<ValuePayload>, result_objects: Vec<ValueRef>) -> Self {
+        if result_objects.is_empty() && outputs.len() == 1 {
+            Self::Success {
+                value: outputs
+                    .into_iter()
+                    .next()
+                    .expect("one output was established"),
+            }
+        } else {
+            Self::ExternalizedSuccess {
+                outputs,
+                result_objects,
+            }
+        }
+    }
+
     pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
         request.validate()?;
         match self {
@@ -400,6 +418,39 @@ mod tests {
                 runmat_execution::value::InlineValue::String("unexpected".into()),
             )));
         assert!(script.validate().is_err());
+    }
+
+    #[test]
+    fn task_success_projection_preserves_inline_delivery_and_request_arity() {
+        let request = request();
+        let value = ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Logical(
+            true,
+        )));
+        let response = ProgramExecutionResponse::from_success_outputs(vec![value.clone()], vec![]);
+        assert_eq!(
+            response,
+            ProgramExecutionResponse::Success {
+                value: value.clone()
+            }
+        );
+        response.validate_against(&request).unwrap();
+        for outputs in [vec![], vec![value.clone(), value]] {
+            assert!(
+                ProgramExecutionResponse::from_success_outputs(outputs, vec![])
+                    .validate_against(&request)
+                    .is_err()
+            );
+        }
+        let root = result_reference(b"root");
+        let response = ProgramExecutionResponse::from_success_outputs(
+            vec![ValuePayload::Object(Box::new(root.clone()))],
+            vec![root],
+        );
+        assert!(matches!(
+            response,
+            ProgramExecutionResponse::ExternalizedSuccess { .. }
+        ));
+        response.validate_against(&request).unwrap();
     }
 
     #[test]

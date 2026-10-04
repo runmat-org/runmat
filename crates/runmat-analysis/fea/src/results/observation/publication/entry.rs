@@ -30,6 +30,11 @@ impl SeriesReductionPublication {
         plan: &ResolvedObservationPlan,
     ) -> AnalysisExecutionResult<Self> {
         result.validate_source(plan, history).map_err(invalid)?;
+        Self::from_result(result)
+    }
+
+    fn from_result(result: &SeriesReductionResult) -> AnalysisExecutionResult<Self> {
+        result.validate().map_err(invalid)?;
         Ok(Self {
             identity: result.identity,
             source_history: result.source_history,
@@ -48,6 +53,23 @@ impl SeriesReductionPublication {
                 .collect(),
             evidence_digest: digest("series-evidence", &result.evidence)?,
         })
+    }
+
+    /// Admit a saved reduction against the authenticated publication without reading field arrays.
+    /// The execution/import owner has already admitted its complete source history.
+    pub fn validate_published_result(
+        &self,
+        result: &SeriesReductionResult,
+        history: &ObservationHistoryManifest,
+        request: &ObservationHistoryFinalizationRequest,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate(history, request)?;
+        if result.observation_id != request.observation_id || *self != Self::from_result(result)? {
+            return Err(invalid(
+                "saved series reduction differs from publication authority",
+            ));
+        }
+        Ok(())
     }
     pub fn validate_series(
         &self,
@@ -272,7 +294,7 @@ impl ObservationHistoryPublication {
         }
         Ok(())
     }
-    pub(super) fn validate(&self) -> AnalysisExecutionResult<()> {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.request.validate()?;
         self.checkpoint.validate().map_err(invalid)?;
         self.history.validate().map_err(invalid)?;

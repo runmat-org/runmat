@@ -12,6 +12,8 @@ mod acoustic;
 mod admission;
 mod electrical;
 mod fluid;
+mod nonlinear;
+pub use nonlinear::PreparedAuthoredNonlinearSolidStudy;
 mod magnetic;
 mod maxwell;
 mod thermal;
@@ -28,6 +30,7 @@ pub enum PreparedFeaStudyRoot {
     Magnetic(PreparedAuthoredMagneticStudy),
     Maxwell(PreparedAuthoredMaxwellStudy),
     Fluid(PreparedAuthoredFluidStudy),
+    Nonlinear(Box<PreparedAuthoredNonlinearSolidStudy>),
     Structural(crate::PreparedStructuralStudyRoot),
     Thermal(PreparedAuthoredThermalStudy),
 }
@@ -55,6 +58,7 @@ pub async fn prepare_study(
     if matches!(
         family,
         admission::PreparedFamily::Acoustic
+            | admission::PreparedFamily::Nonlinear
             | admission::PreparedFamily::Fluid
             | admission::PreparedFamily::Magnetic
             | admission::PreparedFamily::Maxwell
@@ -62,7 +66,7 @@ pub async fn prepare_study(
         || !options.accelerators.is_empty())
     {
         return Err(
-            "authored acoustic/fluid/magnetic/Maxwell execution has no admitted accelerator envelope"
+            "authored J2/acoustic/fluid/magnetic/Maxwell execution has no admitted accelerator envelope"
                 .into(),
         );
     }
@@ -140,6 +144,31 @@ pub async fn prepare_study(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let root = match family {
+        admission::PreparedFamily::Nonlinear => {
+            if !input_materializations.is_empty() {
+                return Err(
+                    "authored J2 execution does not yet admit source materializations".into(),
+                );
+            }
+            PreparedFeaStudyRoot::Nonlinear(Box::new(PreparedAuthoredNonlinearSolidStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+                controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
+                    formulation_requirement: resolved.study.formulation_requirement,
+                    ..Default::default()
+                },
+                accepted_block_limit:
+                    runmat_analysis_execution::DEFAULT_NONLINEAR_SOLID_ACCEPTED_BLOCK_LIMIT,
+            }))
+        }
         admission::PreparedFamily::Fluid => {
             if !input_materializations.is_empty() {
                 return Err(

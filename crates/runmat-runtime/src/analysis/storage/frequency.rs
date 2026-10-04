@@ -1,3 +1,4 @@
+use runmat_analysis_fea::execution::AnalysisObjectManifest;
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_execution::value::{PublishedObjectCatalog, PublishedObjectSource};
@@ -216,6 +217,15 @@ fn all_roots(
             roots.push(observations);
         }
     }
-    roots.extend(index.histories().iter().map(|history| history.checkpoint()));
+    for history in index.histories() {
+        roots.push(history.checkpoint());
+        if let Some(finalization) = history.finalization() {
+            roots.push(&finalization.catalog);
+            roots.push(&finalization.history);
+            roots.extend(finalization.series.iter());
+        }
+    }
     roots
 }
+mod assessment;
+pub(super) use assessment::assessment_evidence;

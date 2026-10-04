@@ -16,6 +16,8 @@ pub enum FormulationRequirement {
 pub enum StructuralOperatorImplementation {
     Tet4LinearElasticity,
     Tet10LinearElasticity,
+    Tet4SmallStrainContinuum,
+    Tet10SmallStrainContinuum,
     EulerBernoulliBeam3d,
     Mitc3TriangularShell,
     SyntheticDiagonalChain,
@@ -51,7 +53,7 @@ pub enum TemporalImplementation {
     StructuralModalResponseSpectrumCombination,
     StructuralRandomResponseIntegration,
     StructuralNewmarkAverageAcceleration,
-    StructuralScalarResidualIteration,
+    StructuralQuasistaticNewtonEquilibrium,
     ThermalSteadyLinearSolve,
     ThermalBackwardEuler,
     ThermalSteadyDampedNewton,
@@ -74,7 +76,7 @@ pub enum TemporalImplementation {
 #[serde(rename_all = "snake_case")]
 pub enum ConstitutiveImplementation {
     IsotropicLinearElasticity,
-    ReducedScalarStructuralNonlinearity,
+    SmallStrainJ2IsotropicHardening,
     ReducedThermalCoefficientProfile,
     ElementOwnedIsotropicThermalExpansion,
     IsotropicThermalConduction,

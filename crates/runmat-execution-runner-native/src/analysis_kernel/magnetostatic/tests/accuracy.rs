@@ -56,6 +56,7 @@ fn native_magnetic_authored_plan_accuracy_preserves_unknown_spatial_evidence() {
             study_id: "magnetic".into(),
             formulation_requirement: source.formulation_requirement,
             study_inputs: Vec::new(),
+            assessments: Vec::new(),
             outputs: Vec::new(),
             properties: compile_property_map(&source.model, Some(&mesh)).unwrap(),
             model: source.model,

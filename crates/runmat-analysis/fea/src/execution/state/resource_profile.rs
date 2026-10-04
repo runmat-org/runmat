@@ -30,6 +30,10 @@ mod thermal;
 /// complete result on the driver solely to obtain this projection. Thermal requires metadata
 /// only; no field partitions are consumed.
 pub enum SemanticStatePublicationProfileSource<'a> {
+    NonlinearSolidOriginalState {
+        workload: &'a crate::execution::NonlinearSolidWorkload,
+        block: &'a crate::execution::NonlinearSolidBlockArtifact,
+    },
     FluidPrimaryFields {
         workload: &'a crate::execution::FluidSteadyWorkload,
         mesh: &'a runmat_meshing_core::SolverMeshArtifact,
@@ -56,6 +60,28 @@ impl SemanticStatePublicationRequest {
     ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
         self.validate()?;
         match (self.source, source) {
+            (
+                SemanticStatePublicationSource::NonlinearSolidOriginalState,
+                SemanticStatePublicationProfileSource::NonlinearSolidOriginalState {
+                    workload,
+                    block,
+                },
+            ) => {
+                super::nonlinear::validate_request(self, workload, block)?;
+                #[derive(Serialize)]
+                struct Projection<'a> {
+                    workload: &'a crate::execution::NonlinearSolidWorkload,
+                    block: &'a crate::execution::NonlinearSolidBlockArtifact,
+                }
+                profile_state_payload(
+                    self,
+                    &Tagged {
+                        kind: "nonlinear_solid",
+                        key: "state",
+                        value: &Projection { workload, block },
+                    },
+                )
+            }
             (
                 SemanticStatePublicationSource::FluidPrimaryFields,
                 SemanticStatePublicationProfileSource::FluidPrimaryFields {

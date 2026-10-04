@@ -46,6 +46,7 @@ fn resolve_statements(
             CheckedFeaStatementKind::GeneratedByFunction { statements, .. }
             | CheckedFeaStatementKind::SignalDefinition { statements, .. }
             | CheckedFeaStatementKind::ModelDefinition { statements, .. }
+            | CheckedFeaStatementKind::AssessmentDefinition { statements, .. }
             | CheckedFeaStatementKind::Block { statements, .. }
             | CheckedFeaStatementKind::OutputDefinition { statements, .. } => {
                 resolve_statements(bound, module, geometries, statements)

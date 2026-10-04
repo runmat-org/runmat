@@ -1,5 +1,21 @@
 use super::*;
 pub trait AnalysisArtifactStore: Send + Sync {
+    /// Publish one privately prepared closed inventory; no child is made visible first.
+    fn commit_publication(
+        &self,
+        publication: PreparedAnalysisPublication,
+    ) -> Result<AnalysisPublicationReceipt, AnalysisPublicationError>;
+    fn load_publication(
+        &self,
+        identity: Digest,
+        maximum_bytes: u64,
+    ) -> Result<Option<serde_json::Value>, String>;
+    /// Resolve only a committed manifest owned by this backend; charge all proof metadata.
+    fn load_publication_manifest_path(
+        &self,
+        path: &Path,
+        maximum_bytes: u64,
+    ) -> Result<serde_json::Value, AssessmentStoreError>;
     fn load_observation_publication(
         &self,
         run_id: &str,
@@ -19,6 +35,13 @@ pub trait AnalysisArtifactStore: Send + Sync {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String>;
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
     fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
+    /// Authenticate scalar evidence without exceeding the caller's artifact byte budget.
+    /// Every store implements this boundary; an unbounded metadata fallback is not permitted.
+    fn load_assessment_metadata(
+        &self,
+        run_id: &str,
+        maximum_bytes: u64,
+    ) -> Result<Option<AssessmentRunEvidence>, AssessmentStoreError>;
     fn load_field_inventory(&self, run_id: &str) -> Result<Option<Vec<AnalysisField>>, String>;
     fn load_render_tile_index(&self, run_id: &str) -> Result<Option<RenderTileIndex>, String>;
     fn plan_render_view(

@@ -95,6 +95,12 @@ fn available_qualifications(
     family: PhysicsFamily,
     procedure: runmat_analysis_core::AnalysisProcedure,
 ) -> Vec<FormulationMaturity> {
+    if family
+        == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
+        && procedure == runmat_analysis_core::AnalysisProcedure::Nonlinear
+    {
+        return Vec::new();
+    }
     if matches!(
         family,
         PhysicsFamily::Structural

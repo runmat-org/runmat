@@ -1,17 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_execution::identity::ArtifactId;
-use runmat_execution::resource::ResourceRequest;
-use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{
-    Digest, ExecutableEntrypointKind, ExecutableUnitEnvelope, ExecutionScopeId, OutputContract,
-    PoolId, TaskId,
-};
+use runmat_execution::task::{Callable, TaskRequest};
+use runmat_execution::{Digest, ExecutableUnitEnvelope, OutputContract, TaskId};
 use runmat_execution_artifact::{
-    ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
-    ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ExecutableForm, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
+    ProgramExecutionObjectLocation, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_runner::TaskSubmission;
 
@@ -23,7 +17,7 @@ use crate::{
 };
 
 pub const GENERATOR_EXECUTION_MODE: &str = "analysis-generator";
-pub const GENERATOR_TARGET_PROFILE: &str = "portable-executable-unit-v3";
+pub const GENERATOR_TARGET_PROFILE: &str = crate::named_callable::ANALYSIS_CALLABLE_TARGET_PROFILE;
 
 pub trait GeneratorProgramAdmission {
     fn invocation_admission(&self) -> GeneratorProgramAdmissionRef<'_>;
@@ -393,15 +387,7 @@ pub(crate) fn rebind_generator_inputs(
     Ok(())
 }
 
-#[derive(Clone, Debug)]
-pub struct GeneratorExecutionContext {
-    pub scope_id: ExecutionScopeId,
-    pub pool_id: PoolId,
-    pub resources: ResourceRequest,
-    pub retry: RetryPolicy,
-    pub deadline_unix_millis: Option<u64>,
-    pub priority: i16,
-}
+pub type GeneratorExecutionContext = crate::named_callable::NamedCallableExecutionContext;
 
 /// Bind admitted callable facts to the exact portable executable without planning materialization
 /// chunks. This descriptor preserves executable authority while topology-dependent cardinality is
@@ -411,55 +397,17 @@ pub fn prepare_generator_descriptor(
     executable: ExecutableUnitEnvelope,
 ) -> AnalysisBridgeResult<ProgramExecutionDescriptor> {
     let admission = admitted.invocation_admission();
-    executable.validate()?;
-    let identity = &executable.manifest.identity;
-    if &identity.program != admission.program_revision
-        || identity.root_package != admission.callable.owner_identity
-        || identity.entrypoint_kind != ExecutableEntrypointKind::Function
-        || identity.entrypoint_function != admission.function
-        || identity.source_digest != admission.executable_source_digest
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "portable executable differs from the admitted frozen callable",
-        ));
-    }
-    if !admission
-        .required_capabilities
-        .is_subset(&executable.manifest.capabilities.0)
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "portable executable omits admitted callable capabilities",
-        ));
-    }
-    let executable_bytes = executable.canonical_bytes()?;
-    let entrypoint = usize::try_from(admission.function.0).map_err(|_| {
-        AnalysisBridgeError::Invalid("signal function identity exceeds this host".into())
-    })?;
-    let recipe = ProgramBuildRecipe {
-        schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        program_revision: admission.program_revision.clone(),
-        entrypoint: entrypoint.to_string(),
-        outputs: OutputContract {
-            requested_outputs: 1,
+    crate::named_callable::prepare_named_callable_descriptor(
+        crate::named_callable::NamedCallableAdmissionRef {
+            program_revision: admission.program_revision,
+            callable: admission.callable,
+            executable_source_digest: admission.executable_source_digest,
+            function: admission.function,
+            required_capabilities: admission.required_capabilities,
         },
-        execution_mode: GENERATOR_EXECUTION_MODE.into(),
-        target: ProgramTarget::portable(GENERATOR_TARGET_PROFILE),
-        features: BTreeSet::new(),
-        compile_options: BTreeSet::new(),
-        source_objects: Vec::new(),
-        expected_artifact_id: None,
-    };
-    let artifact =
-        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, executable_bytes)?;
-    let descriptor = ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-        recipe,
-        artifact,
-        function: entrypoint,
-        requested_outputs: 1,
-    };
-    descriptor.validate_for_portable_host()?;
-    Ok(descriptor)
+        executable,
+        crate::named_callable::AnalysisCallablePurpose::Generator,
+    )
 }
 
 /// Bind admitted callable facts to the exact portable executable and produce one request per

@@ -54,6 +54,7 @@ fn compiled_duct() -> CompiledAnalysisStudy {
         study_id: "duct".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         model,
         properties,

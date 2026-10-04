@@ -92,6 +92,8 @@ study static {
     formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
+    output peak = max(magnitude(output.displacement), over = geometry.bracket.region.pad)
+    assessment limit { value = output.peak; maximum = 1 mm; evidence = authored_samples }
 }
 "#;
     let path = temporary.path().join("main.fea");
@@ -141,6 +143,33 @@ study static {
             ..
         } if member_id == "downward"
     )));
+    let assessment_page = report
+        .browse(&runmat_fea_source::FeaBrowseRequest {
+            revision: report.revision,
+            module_path: None,
+            filter: runmat_fea_source::FeaQueryFilter::StudyMember {
+                kind: runmat_fea_source::FeaStudyMemberKind::Assessment,
+            },
+            after: None,
+            limit: 1,
+            detail: runmat_fea_source::FeaQueryDetail::Definition,
+        })
+        .unwrap();
+    assert_eq!(assessment_page.total, 1);
+    let entry = &assessment_page.entries[0];
+    assert!(source[entry.location.span.start..entry.location.span.end].contains("assessment limit"));
+    let runmat_fea_source::FeaObjectDefinition::Assessment(definition) =
+        &assessment_page.details[0].definition
+    else {
+        panic!("assessment query returned another object kind")
+    };
+    assert_eq!(definition, &report.program.studies[0].assessments[0]);
+    let dependencies = assessment_page.details[0].setup_dependencies().unwrap();
+    assert!(
+        matches!(&dependencies[0], runmat_fea_source::FeaSourceIdentity::StudyMember {
+        member_kind: runmat_fea_source::FeaStudyMemberKind::Output, member_id, ..
+    } if member_id == "peak")
+    );
     let model = &report.program.models[0];
     assert_eq!(model.constraints[0].constraint_id, "support");
     assert_eq!(model.excitations[0].excitation_id, "load.downward");
@@ -259,9 +288,31 @@ import function impactPulse from \"./signals.m\"\n";
         runmat_analysis_language::SourceSymbol::new("impactPulse").unwrap()
     );
     assert_eq!(
+        prepared.source_dependencies().unwrap(),
+        [
+            LogicalSourcePath::new("project/main.fea").unwrap(),
+            LogicalSourcePath::new("project/signals.m").unwrap(),
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
         fs::read_to_string(path).unwrap(),
         "this saved source is intentionally invalid\n"
     );
+}
+
+#[test]
+fn prepared_dependency_closure_keeps_unavailable_import_targets() {
+    let temporary = tempdir().unwrap();
+    let path = temporary.path().join("main.fea");
+    let prepared = prepare_fea_sources_in_root(temporary.path(), &path, &[(
+        path.clone(), b"import model supports from \"./missing.fea\"\nmodel assembly { include model.supports }\n".to_vec(),
+    )]).unwrap();
+    assert!(prepared
+        .source_dependencies()
+        .unwrap()
+        .contains(&LogicalSourcePath::new("project/missing.fea").unwrap()));
 }
 
 #[test]
@@ -414,7 +465,6 @@ geometry bracket {
             diagnostic.code == "fea.host.geometry_inspection_failed"
                 && diagnostic.message.contains("GEOMETRY_BACKEND_UNAVAILABLE")
         }));
-        return;
     }
     #[cfg(feature = "occt-native")]
     assert_eq!(

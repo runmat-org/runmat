@@ -107,6 +107,7 @@ mod history_finalization;
 mod magnetostatic;
 mod maxwell_harmonic;
 mod modal;
+mod nonlinear_block;
 mod observation;
 mod random_response;
 #[cfg(test)]
@@ -128,6 +129,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         match invocation.kind {
+            AnalysisWorkKind::SolveNonlinearSolidBlock => nonlinear_block::execute(invocation),
             AnalysisWorkKind::Solve => structural_linear::execute(invocation),
             AnalysisWorkKind::SolveThermal => thermal::execute(invocation),
             AnalysisWorkKind::SolveAcousticHarmonic => acoustic_harmonic::execute(invocation),

@@ -86,6 +86,21 @@ identity_type!(StructuralFrequencyEntryRequestIdentity);
 identity_type!(StructuralFrequencyEntryResultIdentity);
 identity_type!(StructuralFrequencyResultAssemblyRequestIdentity);
 identity_type!(StructuralFrequencyPublicationIdentity);
+
+impl StructuralFrequencyPublicationIdentity {
+    /// A publication closure owns a larger bounded metadata inventory than a compact task
+    /// identity. Use its contract's limits while preserving the canonical identity encoding.
+    pub(in crate::execution) fn derive_publication<T: Serialize>(
+        input: &T,
+        limits: runmat_canonical_codec::CanonicalLimits,
+    ) -> AnalysisExecutionResult<Self> {
+        Ok(Self(super::derive_digest_with_limits(
+            "structural-frequency-publication",
+            input,
+            limits,
+        )?))
+    }
+}
 identity_type!(StructuralModalWorkloadIdentity);
 identity_type!(StructuralModalResponseSpectrumWorkloadIdentity);
 identity_type!(StructuralModalResponseSpectrumScopeIdentity);
@@ -102,6 +117,7 @@ identity_type!(StructuralBucklingWorkloadIdentity);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisWorkKind {
+    SolveNonlinearSolidBlock,
     SolveFluidSteady,
     SolveThermal,
     SolveAcousticHarmonic,

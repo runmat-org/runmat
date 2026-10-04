@@ -34,12 +34,22 @@ impl PreparedFeaSource {
             .map_err(|error| error.to_string())
     }
 
+    pub fn source_dependencies(
+        &self,
+    ) -> Result<std::collections::BTreeSet<LogicalSourcePath>, String> {
+        self.graph
+            .source_dependencies()
+            .map_err(|error| error.to_string())
+    }
+
     pub fn check(
         self,
         functions: impl IntoIterator<Item = FunctionFacts>,
         profiles: impl IntoIterator<Item = ExecutionProfileFacts>,
     ) -> Result<CheckedFeaSource, String> {
-        let host = ProjectFeaHost::new(&self.source_root, functions, profiles)?;
+        let mut profiles = profiles.into_iter().collect::<Vec<_>>();
+        profiles.sort_by(|left, right| left.profile.cmp(&right.profile));
+        let host = ProjectFeaHost::new(&self.source_root, functions, profiles.clone())?;
         if self.graph.catalog_fingerprint
             != runmat_analysis_language::AnalysisOperationCatalog::fingerprint(&host)
         {
@@ -54,6 +64,7 @@ impl PreparedFeaSource {
             program,
             root_module,
             source_root: self.source_root,
+            execution_profile_facts: profiles,
         })
     }
 }
@@ -61,6 +72,7 @@ impl PreparedFeaSource {
 /// Canonical checked source product shared by CLI, editor, browser, and runtime adapters.
 #[derive(Debug)]
 pub struct CheckedFeaSource {
+    pub(super) execution_profile_facts: Vec<ExecutionProfileFacts>,
     pub program: CheckedFeaProgram,
     pub root_module: LogicalSourcePath,
     pub source_root: PathBuf,

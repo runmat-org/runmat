@@ -32,6 +32,10 @@ mod tests;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisNumericalObjectKind {
+    NonlinearSolidWorkload,
+    NonlinearSolidBlockRequest,
+    NonlinearSolidBlockArtifact,
+    NonlinearSolidStudyCompletion,
     FluidSteadyWorkload,
     FluidStudyCompletion,
     AcousticStudyCompletion,
@@ -154,6 +158,28 @@ pub struct AnalysisObjectManifest {
 }
 
 impl AnalysisObjectManifest {
+    /// Admit the canonical single partition used for a whole numerical payload. A whole
+    /// payload still has a partition descriptor; its identity must match the object root.
+    pub fn whole_payload_partition(
+        &self,
+    ) -> AnalysisExecutionResult<&AnalysisPayloadPartitionDescriptor> {
+        self.validate()?;
+        let [partition] = self.partitions.as_slice() else {
+            return Err(AnalysisExecutionError::Invalid(
+                "whole payload requires exactly one partition".into(),
+            ));
+        };
+        if partition.logical_identity != self.logical_identity
+            || partition.payload_digest != self.payload_digest
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "whole payload partition differs from its object root",
+            ));
+        }
+        // validate() establishes complete contiguous chunk coverage and equal byte lengths.
+        Ok(partition)
+    }
+
     /// Requested Rust storage for the borrowed identity sort buffer, excluding allocator overhead.
     pub fn validation_scratch_bytes(partition_count: usize) -> AnalysisExecutionResult<u64> {
         partition_count

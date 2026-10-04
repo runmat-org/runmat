@@ -27,7 +27,9 @@ use super::render_tiles::{
     self, RenderFieldSummary, RenderTile, RenderTileIndex, RenderViewRequest, RenderViewSelection,
 };
 
+mod assessment;
 mod discovery;
+pub use assessment::{AssessmentRunEvidence, AssessmentStoreError};
 mod filesystem;
 mod frequency;
 pub(super) mod frequency_page;
@@ -59,6 +61,18 @@ struct PersistedRunArtifact {
     materialized_field_ids: Vec<String>,
     fields: Vec<PersistedFieldArtifact>,
     render_tiles: Option<RenderTileIndex>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    observation_histories: Vec<PersistedObservationHistory>,
+}
+
+/// Histories own sample-local field identities; they cannot be flattened into the
+/// run's field-id index. Keep their canonical objects and authenticate their roots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedObservationHistory {
+    identity: runmat_analysis_fea::results::observation::ObservationHistoryIdentity,
+    observation_id: runmat_analysis_core::ObservationId,
+    manifest: AnalysisObjectManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,6 +105,11 @@ pub enum AnalysisFieldPageLookup {
     Page(Box<AnalysisFieldPageResult>),
 }
 
+pub(in crate::analysis) mod publication;
+pub use publication::{
+    AnalysisPublicationBuilder, AnalysisPublicationError, AnalysisPublicationReceipt,
+    PreparedAnalysisPublication,
+};
 mod store_contract;
 pub use store_contract::AnalysisArtifactStore;
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,19 +125,13 @@ pub struct AnalysisArtifactRetentionConfig {
 }
 
 pub struct InMemoryAnalysisArtifactStore {
+    // Private builder staging is governed by its byte cap; retention applies at commit.
+    retain_standalone: bool,
+    publications: RwLock<HashMap<Digest, Vec<u8>>>,
+    publication_runs: RwLock<HashMap<String, Digest>>,
     observations: RwLock<HashMap<String, observations::ObservationAttachment>>,
     runs: RwLock<HashMap<String, PersistedAnalysisArtifact>>,
     chunks: RwLock<HashMap<Digest, Arc<[u8]>>>,
-}
-
-impl InMemoryAnalysisArtifactStore {
-    pub fn new() -> Self {
-        Self {
-            observations: RwLock::new(HashMap::new()),
-            runs: RwLock::new(HashMap::new()),
-            chunks: RwLock::new(HashMap::new()),
-        }
-    }
 }
 
 impl Default for InMemoryAnalysisArtifactStore {
@@ -128,6 +141,7 @@ impl Default for InMemoryAnalysisArtifactStore {
 }
 
 pub struct FilesystemAnalysisArtifactStore {
+    provider: Arc<dyn runmat_filesystem::FsProvider>,
     root: PathBuf,
     manifests: RwLock<FilesystemManifestCache>,
 }
@@ -136,12 +150,14 @@ pub struct FilesystemAnalysisArtifactStore {
 struct FilesystemManifestCache {
     entries: HashMap<String, Arc<PersistedRunArtifact>>,
     order: VecDeque<String>,
+    identities: HashMap<String, Digest>,
 }
 
 impl FilesystemAnalysisArtifactStore {
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
+            provider: runmat_filesystem::current_provider(),
             manifests: RwLock::new(FilesystemManifestCache::default()),
         }
     }
@@ -150,96 +166,15 @@ impl FilesystemAnalysisArtifactStore {
         validate_run_id_token(run_id)?;
         Ok(self.root.join("runs").join(format!("{run_id}.json")))
     }
+}
 
-    fn ensure_runs_directory(&self) -> Result<(), String> {
-        ensure_owned_directory(&self.root, "analysis artifact root")?;
-        let runs = self.root.join("runs");
-        ensure_owned_directory(&runs, "analysis artifact runs directory")?;
-        Ok(())
-    }
-
+impl FilesystemAnalysisArtifactStore {
     fn objects_directory(&self) -> PathBuf {
         self.root.join("objects")
     }
 
     fn object_path(&self, digest: Digest) -> PathBuf {
         self.objects_directory().join(digest_hex(digest))
-    }
-
-    fn ensure_objects_directory(&self) -> Result<(), String> {
-        ensure_owned_directory(
-            &self.objects_directory(),
-            "analysis artifact objects directory",
-        )
-    }
-
-    fn read_chunk(&self, digest: Digest) -> Result<Option<Vec<u8>>, String> {
-        let path = self.object_path(digest);
-        match fs_symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type() == FsFileType::File => {}
-            Ok(metadata) => {
-                return Err(format!(
-                    "analysis field chunk must be a regular file, found {:?}",
-                    metadata.file_type()
-                ));
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("failed to inspect analysis field chunk: {error}")),
-        }
-        let bytes =
-            fs_read(path).map_err(|error| format!("failed to read field chunk: {error}"))?;
-        if Digest::sha256(&bytes) != digest {
-            return Err("analysis field chunk differs from its content address".to_string());
-        }
-        Ok(Some(bytes))
-    }
-
-    fn read_standard(&self, run_id: &str) -> Result<Option<Arc<PersistedRunArtifact>>, String> {
-        validate_run_id_token(run_id)?;
-        if let Some(run) = self
-            .manifests
-            .read()
-            .map_err(|_| "analysis manifest cache lock poisoned")?
-            .entries
-            .get(run_id)
-        {
-            return Ok(Some(run.clone()));
-        }
-        let path = self.run_path(run_id)?;
-        let bytes = match fs_symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type() == FsFileType::File => {
-                fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?
-            }
-            Ok(_) => return Err("analysis run artifact must be a regular file".into()),
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
-        };
-        match decode_persisted_artifact(&bytes, run_id)? {
-            PersistedAnalysisArtifact::Standard(run) => {
-                let run: Arc<PersistedRunArtifact> = Arc::from(run);
-                let mut cache = self
-                    .manifests
-                    .write()
-                    .map_err(|_| "analysis manifest cache lock poisoned")?;
-                if let Some(existing) = cache.entries.get(run_id) {
-                    return Ok(Some(existing.clone()));
-                }
-                if cache.entries.len() == 8 {
-                    if let Some(oldest) = cache.order.pop_front() {
-                        cache.entries.remove(&oldest);
-                    }
-                }
-                cache.order.push_back(run_id.into());
-                cache.entries.insert(run_id.into(), run.clone());
-                Ok(Some(run))
-            }
-            PersistedAnalysisArtifact::StructuralFrequency(_)
-            | PersistedAnalysisArtifact::AcousticFrequency(_) => Ok(None),
-        }
-    }
-
-    fn list_persisted_runs(&self) -> Result<Vec<PersistedAnalysisArtifact>, String> {
-        discovery::list_supported_artifacts(&self.root, decode_persisted_artifact)
     }
 }
 
@@ -284,245 +219,10 @@ fn decode_persisted_artifact(
     }
 }
 
-fn prepare_run_artifact(
-    run: &AnalysisRunResult,
-    created_at: String,
-) -> Result<PreparedRunArtifact, String> {
-    let mut fields = BTreeMap::<String, PersistedFieldArtifact>::new();
-    let mut chunks = HashMap::new();
-    let mut seen_field_ids = HashSet::new();
-    let mut preparation_error = None;
-    super::operations::visit_analysis_result_fields(run, |field| {
-        if preparation_error.is_some() {
-            return;
-        }
-        if let Err(error) = validate_field_id(&field.field_id) {
-            preparation_error = Some(error);
-            return;
-        }
-        if !seen_field_ids.insert(field.field_id.clone()) {
-            preparation_error = Some(format!(
-                "analysis field ID `{}` appears more than once in one run",
-                field.field_id
-            ));
-            return;
-        }
-        let expected_count = match checked_element_count(&field.shape) {
-            Ok(count) => count,
-            Err(error) => {
-                preparation_error = Some(error);
-                return;
-            }
-        };
-        match &field.values {
-            AnalysisFieldValues::HostF64(values) => {
-                if values.len() != expected_count {
-                    preparation_error = Some(format!(
-                        "analysis field `{}` shape requires {expected_count} values but contains {}",
-                        field.field_id,
-                        values.len()
-                    ));
-                    return;
-                }
-                if values.is_empty() {
-                    return;
-                }
-                let payload = encode_field_values(values);
-                let payload_digest = Digest::sha256(&payload);
-                let logical_identity = field_logical_identity(field, payload_digest);
-                let chunked = match chunk_numerical_payload(
-                    AnalysisNumericalObjectKind::Field,
-                    logical_identity,
-                    &payload,
-                    DEFAULT_ANALYSIS_CHUNK_BYTES,
-                ) {
-                    Ok(chunked) => chunked,
-                    Err(error) => {
-                        preparation_error = Some(format!(
-                            "failed to chunk analysis field `{}`: {error}",
-                            field.field_id
-                        ));
-                        return;
-                    }
-                };
-                let artifact = PersistedFieldArtifact {
-                    field_id: field.field_id.clone(),
-                    shape: field.shape.clone(),
-                    template: AnalysisField::host_f64(
-                        &field.field_id,
-                        field.shape.clone(),
-                        Vec::new(),
-                    ),
-                    manifest: chunked.manifest.clone(),
-                };
-                for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
-                    match chunks.get(&descriptor.digest) {
-                        Some(existing) if existing != &bytes => {
-                            preparation_error =
-                                Some("analysis field chunk digest collision".to_string());
-                            return;
-                        }
-                        Some(_) => {}
-                        None => {
-                            chunks.insert(descriptor.digest, bytes);
-                        }
-                    }
-                }
-                fields.insert(field.field_id.clone(), artifact);
-            }
-            AnalysisFieldValues::DeviceRef(reference) => {
-                if reference.element_count != expected_count {
-                    preparation_error = Some(format!(
-                        "device field `{}` shape requires {expected_count} values but its reference declares {}",
-                        field.field_id, reference.element_count
-                    ));
-                } else {
-                    preparation_error = Some(format!(
-                        "device field `{}` is a process-local reference; materialize it through typed runtime value admission before persistence",
-                        field.field_id
-                    ));
-                }
-            }
-        }
-    });
-    if let Some(error) = preparation_error {
-        return Err(error);
-    }
-
-    let render_tiles = if let Some(topology) = run.render_topology.as_ref() {
-        let (mut index, objects) = render_tiles::partition(topology)?;
-        index.field_summaries = summarize_render_fields(run, index.volume_element_count)?;
-        index.validate()?;
-        for (digest, bytes) in objects {
-            match chunks.entry(digest) {
-                std::collections::hash_map::Entry::Occupied(existing)
-                    if existing.get() != &bytes =>
-                {
-                    return Err("render tile digest collision".into());
-                }
-                std::collections::hash_map::Entry::Occupied(_) => {}
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(bytes);
-                }
-            }
-        }
-        Some(index)
-    } else {
-        None
-    };
-    let mut stripped_run = run.clone();
-    stripped_run.render_topology = None;
-    super::operations::visit_analysis_result_fields_mut(&mut stripped_run, |field| {
-        if let AnalysisFieldValues::HostF64(values) = &mut field.values {
-            if !values.is_empty() {
-                values.clear();
-            }
-        }
-    });
-    let field_inventory = super::operations::collect_analysis_result_fields(&stripped_run);
-    let run_value = serde_json::to_value(&stripped_run)
-        .map_err(|error| format!("failed to encode stripped analysis run: {error}"))?;
-    let materialized_field_ids = fields.keys().cloned().collect::<Vec<_>>();
-    let run_digest = persisted_run_digest(
-        &run_value,
-        &field_inventory,
-        &materialized_field_ids,
-        render_tiles.as_ref(),
-    )?;
-    let mut metadata = stripped_run;
-    metadata.run.observations.clear();
-    metadata.run.series_reductions.clear();
-    Ok(PreparedRunArtifact {
-        persisted: PersistedRunArtifact {
-            schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-            created_at,
-            op_version: run_operation_version(run)?,
-            run_digest,
-            run: run_value,
-            metadata,
-            field_inventory,
-            materialized_field_ids,
-            fields: fields.into_values().collect(),
-            render_tiles,
-        },
-        chunks,
-    })
-}
-
-fn summarize_render_fields(
-    run: &AnalysisRunResult,
-    volume_element_count: usize,
-) -> Result<Vec<RenderFieldSummary>, String> {
-    let mut summaries = Vec::new();
-    let mut failure = None;
-    super::operations::visit_analysis_result_fields(run, |field| {
-        if failure.is_some() {
-            return;
-        }
-        let descriptor = AnalysisFieldDescriptor::from_field(field);
-        if !matches!(
-            descriptor.location,
-            super::AnalysisFieldLocation::Node | super::AnalysisFieldLocation::Element
-        ) {
-            return;
-        }
-        let Some(values) = field.as_host_f64() else {
-            return;
-        };
-        let components = descriptor.component_count.unwrap_or(1);
-        if components == 0 || values.is_empty() || values.len() % components != 0 {
-            return;
-        }
-        let stride = if descriptor.location == super::AnalysisFieldLocation::Element {
-            let entities = values.len() / components;
-            if volume_element_count == 0 || entities % volume_element_count != 0 {
-                return;
-            }
-            entities / volume_element_count
-        } else {
-            1
-        };
-        let mut minimum = f64::INFINITY;
-        let mut maximum = f64::NEG_INFINITY;
-        for samples in values.chunks_exact(components * stride) {
-            let value = samples
-                .chunks_exact(components)
-                .map(|components| {
-                    if components.len() == 1 {
-                        components[0]
-                    } else {
-                        components
-                            .iter()
-                            .map(|value| value * value)
-                            .sum::<f64>()
-                            .sqrt()
-                    }
-                })
-                .sum::<f64>()
-                / stride as f64;
-            if !value.is_finite() {
-                failure = Some(format!(
-                    "field '{}' contains a non-finite plotted value",
-                    field.field_id
-                ));
-                return;
-            }
-            minimum = minimum.min(value);
-            maximum = maximum.max(value);
-        }
-        if minimum.is_finite() {
-            summaries.push(RenderFieldSummary {
-                field_id: field.field_id.clone(),
-                minimum,
-                maximum,
-            });
-        }
-    });
-    if let Some(error) = failure {
-        return Err(error);
-    }
-    Ok(summaries)
-}
+mod field_reader;
+use field_reader::{field_page_from_artifact, materialize_run, persisted_field_inventory};
+mod preparation;
+use preparation::prepare_run_artifact;
 
 fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtifact) -> bool {
     left.schema_version == right.schema_version
@@ -534,235 +234,7 @@ fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtif
         && left.materialized_field_ids == right.materialized_field_ids
         && left.fields == right.fields
         && left.render_tiles == right.render_tiles
-}
-
-fn materialize_run(
-    persisted: &PersistedRunArtifact,
-    mut read_chunk: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
-) -> Result<AnalysisRunResult, String> {
-    let mut values = HashMap::with_capacity(persisted.fields.len());
-    for field in &persisted.fields {
-        let payload = read_field_payload(field, &mut read_chunk)?;
-        values.insert(
-            field.field_id.clone(),
-            (field.shape.clone(), decode_field_values(&payload)?),
-        );
-    }
-    let mut run = persisted.run.clone();
-    hydrate_field_values(&mut run, &values)?;
-    let mut run = serde_json::from_value::<AnalysisRunResult>(run)
-        .map_err(|error| format!("failed to decode hydrated analysis run: {error}"))?;
-    if let Some(index) = &persisted.render_tiles {
-        run.render_topology = Some(render_tiles::reconstruct(index, |digest| {
-            read_chunk(digest)
-        })?);
-    }
-    validate_run_identity(&run)?;
-    Ok(run)
-}
-
-fn hydrate_field_values(
-    value: &mut serde_json::Value,
-    fields: &HashMap<String, (Vec<usize>, Vec<f64>)>,
-) -> Result<(), String> {
-    match value {
-        serde_json::Value::Array(values) => {
-            for value in values {
-                hydrate_field_values(value, fields)?;
-            }
-        }
-        serde_json::Value::Object(object) => {
-            let field_id = object
-                .get("field_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned);
-            if let Some(field_id) = field_id {
-                if let Some((shape, values)) = fields.get(&field_id) {
-                    let stored_shape = object
-                        .get("shape")
-                        .cloned()
-                        .ok_or_else(|| format!("analysis field `{field_id}` omits its shape"))?;
-                    if stored_shape
-                        != serde_json::to_value(shape).map_err(|error| error.to_string())?
-                    {
-                        return Err(format!(
-                            "analysis field `{field_id}` shape differs from its persisted manifest"
-                        ));
-                    }
-                    object.insert(
-                        "values".to_string(),
-                        serde_json::to_value(AnalysisFieldValues::HostF64(values.clone()))
-                            .map_err(|error| error.to_string())?,
-                    );
-                    return Ok(());
-                }
-            }
-            for value in object.values_mut() {
-                hydrate_field_values(value, fields)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn read_field_payload(
-    field: &PersistedFieldArtifact,
-    read_chunk: &mut impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
-) -> Result<Vec<u8>, String> {
-    let capacity = usize::try_from(field.manifest.encoded_length)
-        .map_err(|_| "analysis field byte length is not representable".to_string())?;
-    let mut payload = Vec::with_capacity(capacity);
-    for descriptor in &field.manifest.chunks {
-        let bytes = read_chunk(descriptor.digest)?.ok_or_else(|| {
-            format!(
-                "analysis field `{}` is missing chunk {}",
-                field.field_id, descriptor.ordinal
-            )
-        })?;
-        validate_chunk(descriptor, &bytes)?;
-        payload.extend_from_slice(&bytes);
-    }
-    if payload.len() as u64 != field.manifest.encoded_length
-        || Digest::sha256(&payload) != field.manifest.payload_digest
-    {
-        return Err(format!(
-            "analysis field `{}` payload differs from its manifest",
-            field.field_id
-        ));
-    }
-    Ok(payload)
-}
-
-fn field_page_from_artifact(
-    persisted: &PersistedRunArtifact,
-    selection: &AnalysisFieldSelection,
-    options: AnalysisFieldRequestOptions,
-    mut read_chunk: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
-) -> Result<AnalysisFieldPageLookup, String> {
-    let field_id = &selection.field_id;
-    validate_field_id(field_id)?;
-    if selection.sample.is_some() {
-        return Ok(AnalysisFieldPageLookup::SampleNotFound);
-    }
-    let template = match select_persisted_field(&persisted.fields, field_id) {
-        Ok(Some(template)) => template,
-        Ok(None) => return Ok(AnalysisFieldPageLookup::FieldNotFound),
-        Err(available) => return Ok(AnalysisFieldPageLookup::FieldSelectionAmbiguous(available)),
-    };
-    let selected_field_id = template.field_id.clone();
-    let mut descriptor = AnalysisFieldDescriptor::from_field(&template);
-    if descriptor.storage == super::contracts::AnalysisFieldStorage::HostF64 {
-        descriptor.storage_ref.kind = "chunked_field".to_string();
-    }
-    let total_count = checked_element_count(&template.shape)?;
-    let offset = options.offset.unwrap_or(0).min(total_count);
-    let limit = options
-        .limit
-        .unwrap_or(super::contracts::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT)
-        .min(super::contracts::ANALYSIS_FIELD_DEFAULT_PAGE_SIZE);
-    let count = limit.min(total_count.saturating_sub(offset));
-    if count == 0 {
-        return Ok(AnalysisFieldPageLookup::Page(Box::new(
-            AnalysisFieldPageResult {
-                run_id: persisted.metadata.run_id.clone(),
-                field_id: selected_field_id,
-                descriptor,
-                values: AnalysisFieldPageValues::Real(Vec::new()),
-                offset,
-                count: 0,
-                total_count,
-                truncated: offset > 0 || total_count > 0,
-            },
-        )));
-    }
-    let Some(stored) = persisted
-        .fields
-        .iter()
-        .find(|field| field.field_id == selected_field_id)
-    else {
-        return Err(format!(
-            "analysis field `{field_id}` is device-resident and has no materialized host artifact"
-        ));
-    };
-    let start_byte = offset
-        .checked_mul(std::mem::size_of::<f64>())
-        .ok_or_else(|| "analysis field page byte offset overflow".to_string())?;
-    let end_byte = offset
-        .checked_add(count)
-        .and_then(|end| end.checked_mul(std::mem::size_of::<f64>()))
-        .ok_or_else(|| "analysis field page byte end overflow".to_string())?;
-    let mut page = Vec::with_capacity(count * std::mem::size_of::<f64>());
-    let mut chunk_start = 0_usize;
-    for chunk in &stored.manifest.chunks {
-        let chunk_len = usize::try_from(chunk.encoded_length)
-            .map_err(|_| "analysis field chunk length is not representable".to_string())?;
-        let chunk_end = chunk_start
-            .checked_add(chunk_len)
-            .ok_or_else(|| "analysis field chunk range overflow".to_string())?;
-        let overlap_start = start_byte.max(chunk_start);
-        let overlap_end = end_byte.min(chunk_end);
-        if overlap_start < overlap_end {
-            let bytes = read_chunk(chunk.digest)?.ok_or_else(|| {
-                format!(
-                    "analysis field `{field_id}` is missing chunk {}",
-                    chunk.ordinal
-                )
-            })?;
-            validate_chunk(chunk, &bytes)?;
-            page.extend_from_slice(&bytes[overlap_start - chunk_start..overlap_end - chunk_start]);
-        }
-        chunk_start = chunk_end;
-        if chunk_start >= end_byte {
-            break;
-        }
-    }
-    let values = decode_field_values(&page)?;
-    if values.len() != count {
-        return Err(format!(
-            "analysis field `{field_id}` page is incomplete: expected {count} values, found {}",
-            values.len()
-        ));
-    }
-    Ok(AnalysisFieldPageLookup::Page(Box::new(
-        AnalysisFieldPageResult {
-            run_id: persisted.metadata.run_id.clone(),
-            field_id: selected_field_id,
-            descriptor,
-            values: AnalysisFieldPageValues::Real(values),
-            offset,
-            count,
-            total_count,
-            truncated: offset > 0 || offset.saturating_add(count) < total_count,
-        },
-    )))
-}
-
-fn select_persisted_field(
-    fields: &[PersistedFieldArtifact],
-    requested: &str,
-) -> Result<Option<AnalysisField>, Vec<String>> {
-    if let Some(field) = fields.iter().find(|field| field.field_id == requested) {
-        return Ok(Some(field.template.clone()));
-    }
-    let mut matches = fields
-        .iter()
-        .filter(|field| super::field_selection::field_id_matches(&field.field_id, requested));
-    let Some(first) = matches.next() else {
-        return Ok(None);
-    };
-    if matches.next().is_none() {
-        return Ok(Some(first.template.clone()));
-    }
-    Err(fields
-        .iter()
-        .filter(|field| super::field_selection::field_id_matches(&field.field_id, requested))
-        .map(|field| field.field_id.clone())
-        .collect())
-}
-
-fn persisted_field_inventory(persisted: &PersistedRunArtifact) -> Vec<AnalysisField> {
-    persisted.field_inventory.clone()
+        && left.observation_histories == right.observation_histories
 }
 
 fn validate_chunk(
@@ -839,6 +311,23 @@ fn digest_hex(digest: Digest) -> String {
         .collect()
 }
 
+fn compact_run_metadata(run: &serde_json::Value) -> Result<AnalysisRunResult, String> {
+    // Persisted field shells intentionally have no numerical values. Remove the two
+    // materialized observation collections before their strict numerical decoders run.
+    let mut projection = run.clone();
+    let numerical_run = projection
+        .get_mut("run")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| "authenticated analysis run has no numerical run".to_string())?;
+    numerical_run.insert("observations".into(), serde_json::Value::Array(Vec::new()));
+    numerical_run.insert(
+        "series_reductions".into(),
+        serde_json::Value::Array(Vec::new()),
+    );
+    serde_json::from_value(projection)
+        .map_err(|error| format!("invalid authenticated compact analysis run: {error}"))
+}
+
 fn validate_persisted_run(
     persisted: &PersistedRunArtifact,
     expected_run_id: &str,
@@ -854,6 +343,7 @@ fn validate_persisted_run(
         &persisted.field_inventory,
         &persisted.materialized_field_ids,
         persisted.render_tiles.as_ref(),
+        &persisted.observation_histories,
     )? != persisted.run_digest
     {
         return Err("analysis run metadata differs from its content digest".into());
@@ -870,6 +360,34 @@ fn validate_persisted_run(
             "analysis run artifact operation version `{}` does not match derived version `{expected_op_version}`",
             persisted.op_version
         ));
+    }
+    let mut history_ids = HashSet::new();
+    for history in &persisted.observation_histories {
+        history
+            .manifest
+            .validate()
+            .map_err(|error| error.to_string())?;
+        if history.manifest.kind != AnalysisNumericalObjectKind::History
+            || history.manifest.logical_identity != history.identity.digest()
+            || !history_ids.insert(&history.observation_id)
+        {
+            return Err(
+                "observation history inventory has invalid or duplicated identities".into(),
+            );
+        }
+    }
+    let authenticated_scalars: Vec<
+        runmat_analysis_fea::results::assessment::ScalarObservationEvidence,
+    > = match persisted.run.get("observation_scalars") {
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid scalar observation inventory: {error}"))?,
+        None => Vec::new(),
+    };
+    if authenticated_scalars != persisted.metadata.observation_scalars {
+        return Err("scalar observation inventory differs from authenticated run content".into());
+    }
+    if compact_run_metadata(&persisted.run)? != persisted.metadata {
+        return Err("compact analysis metadata differs from authenticated run content".into());
     }
     validate_run_identity(&persisted.metadata)?;
     if persisted.metadata.render_topology.is_some() {
@@ -1017,33 +535,22 @@ fn persisted_run_digest(
     field_inventory: &[AnalysisField],
     materialized_field_ids: &[String],
     render_tiles: Option<&RenderTileIndex>,
+    observation_histories: &[PersistedObservationHistory],
 ) -> Result<Digest, String> {
+    if !observation_histories.is_empty() {
+        return serde_json::to_vec(&(
+            value,
+            field_inventory,
+            materialized_field_ids,
+            render_tiles,
+            observation_histories,
+        ))
+        .map(Digest::sha256)
+        .map_err(|error| error.to_string());
+    }
     serde_json::to_vec(&(value, field_inventory, materialized_field_ids, render_tiles))
         .map(Digest::sha256)
         .map_err(|error| format!("failed to encode analysis run metadata: {error}"))
-}
-
-pub(super) fn ensure_owned_directory(path: &Path, label: &str) -> Result<(), String> {
-    match fs_symlink_metadata(path) {
-        Ok(metadata) => return validate_owned_directory_metadata(metadata, path, label),
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("failed to inspect {label}: {error}")),
-    }
-    fs_create_dir_all(path).map_err(|error| format!("failed to create {label}: {error}"))?;
-    let metadata = fs_symlink_metadata(path)
-        .map_err(|error| format!("failed to inspect created {label}: {error}"))?;
-    validate_owned_directory_metadata(metadata, path, label)
-}
-
-pub(super) fn owned_directory_exists(path: &Path, label: &str) -> Result<bool, String> {
-    match fs_symlink_metadata(path) {
-        Ok(metadata) => {
-            validate_owned_directory_metadata(metadata, path, label)?;
-            Ok(true)
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("failed to inspect {label}: {error}")),
-    }
 }
 
 fn validate_owned_directory_metadata(
@@ -1131,6 +638,7 @@ fn validate_run_id_token(run_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+mod access;
 mod retention;
 use retention::prune_filesystem_runs;
 #[derive(Debug)]
@@ -1183,13 +691,6 @@ fn retention_config() -> &'static RwLock<AnalysisArtifactRetentionConfig> {
     CONFIG.get_or_init(|| RwLock::new(AnalysisArtifactRetentionConfig::default()))
 }
 
-fn current_retention_config() -> AnalysisArtifactRetentionConfig {
-    retention_config()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
-}
-
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_run_id() -> String {
@@ -1204,34 +705,12 @@ pub fn persist_run_result(run: &AnalysisRunResult) -> Result<AnalysisArtifactRec
     guard.persist_run(run)
 }
 
-pub(in crate::analysis) fn persist_structural_frequency_result(
-    step: &AnalysisStudyStepRunData,
-    persistence: &crate::analysis::frequency_result::StructuralFrequencyPersistence,
-) -> Result<AnalysisArtifactRecord, String> {
-    let guard = global_store()
+pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisArtifactStore>, String>
+{
+    global_store()
         .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.persist_structural_frequency(
-        step,
-        &persistence.object_catalog,
-        &persistence.artifact_roots,
-        persistence.source.as_ref(),
-    )
-}
-
-pub(in crate::analysis) fn persist_acoustic_frequency_result(
-    step: &AnalysisStudyStepRunData,
-    persistence: &crate::analysis::study_publication::AcousticFrequencyPersistence,
-) -> Result<AnalysisArtifactRecord, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.persist_acoustic_frequency(
-        step,
-        &persistence.publication_catalog,
-        &persistence.publication_roots,
-        &persistence.source,
-    )
+        .map(|store| Arc::clone(&store))
+        .map_err(|_| "analysis artifact store lock poisoned".to_owned())
 }
 
 pub fn load_run_result(run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
@@ -1264,6 +743,16 @@ pub fn load_run_metadata(run_id: &str) -> Result<Option<AnalysisRunResult>, Stri
         .read()
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
     guard.load_run_metadata(run_id)
+}
+
+pub fn load_assessment_metadata(
+    run_id: &str,
+    maximum_bytes: u64,
+) -> Result<Option<AssessmentRunEvidence>, AssessmentStoreError> {
+    let guard = global_store().read().map_err(|_| {
+        AssessmentStoreError::Invalid("analysis artifact store lock poisoned".into())
+    })?;
+    guard.load_assessment_metadata(run_id, maximum_bytes)
 }
 
 pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {
@@ -1393,34 +882,6 @@ pub fn default_filesystem_artifact_root() -> PathBuf {
     PathBuf::from(".artifacts")
 }
 
-fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
-    runmat_filesystem::create_dir_all(path.into())
-}
-
-fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
-    runmat_filesystem::read(path.into())
-}
-
-fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
-    match runmat_filesystem::remove_file(path.into()) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
-fn fs_read_dir(path: impl Into<PathBuf>) -> std::io::Result<Vec<DirEntry>> {
-    runmat_filesystem::read_dir(path.into())
-}
-
-fn fs_symlink_metadata(path: impl Into<PathBuf>) -> std::io::Result<FsMetadata> {
-    runmat_filesystem::symlink_metadata(path.into())
-}
-
-fn fs_modified(path: impl Into<PathBuf>) -> std::io::Result<Option<std::time::SystemTime>> {
-    runmat_filesystem::metadata(path.into()).map(|metadata| metadata.modified())
-}
-
 #[cfg(test)]
 pub fn set_artifact_store_for_tests(store: Arc<dyn AnalysisArtifactStore>) {
     let mut guard = global_store()
@@ -1453,4 +914,67 @@ pub(crate) fn artifact_store_test_guard() -> MutexGuard<'static, ()> {
 #[test]
 fn generated_run_sequence_breaks_timestamp_ties_numerically() {
     assert!(generated_run_id_order("run_1000_10") > generated_run_id_order("run_1000_9"));
+}
+
+#[cfg(test)]
+#[test]
+fn scalar_evidence_is_derived_and_authenticated_before_metadata_reads() {
+    let _guard = super::tests::analysis_test_guard();
+    let mut run = super::analysis_run_linear_static_with_options(
+        &super::tests::sample_model(),
+        super::ComputeBackend::Cpu,
+        runmat_analysis_core::FormulationRequirement::Experimental,
+        super::AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: super::PrecisionMode::Fp64,
+            preconditioner_mode: super::PreconditionerMode::Auto,
+            quality_policy: super::QualityPolicy::Balanced,
+            solver_mesh_artifact_path: None,
+        },
+        crate::operations::OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data;
+    let forged = runmat_analysis_fea::results::assessment::ScalarObservationEvidence {
+        observation_id: runmat_analysis_core::ObservationId("forged_peak".into()),
+        value: 0.0,
+        source_identity: Digest::sha256("substituted observation"),
+        sample: None,
+        entity: None,
+    };
+    run.observation_scalars.push(forged.clone());
+    let mut artifact = prepare_run_artifact(&run, Utc::now().to_rfc3339())
+        .unwrap()
+        .persisted;
+    assert!(!artifact.metadata.observation_scalars.contains(&forged));
+    validate_persisted_run(&artifact, &run.run_id).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let stores: Vec<Box<dyn AnalysisArtifactStore>> = vec![
+        Box::new(InMemoryAnalysisArtifactStore::new()),
+        Box::new(FilesystemAnalysisArtifactStore::new(
+            directory.path().into(),
+        )),
+    ];
+    for store in &stores {
+        store.persist_run(&run).unwrap();
+        assert!(matches!(
+            store.load_assessment_metadata(&run.run_id, 0),
+            Err(AssessmentStoreError::ResourceLimit)
+        ));
+        let metadata = store
+            .load_assessment_metadata(&run.run_id, 64 * 1024 * 1024)
+            .unwrap()
+            .unwrap();
+        assert!(!metadata.observation_scalars.contains(&forged));
+        assert_eq!(metadata.identity, run.run.identity);
+    }
+    let mut substituted = artifact.clone();
+    substituted.metadata.numerically_acceptable = !substituted.metadata.numerically_acceptable;
+    assert!(validate_persisted_run(&substituted, &run.run_id)
+        .unwrap_err()
+        .contains("compact analysis metadata"));
+    artifact.metadata.observation_scalars.push(forged);
+    assert!(validate_persisted_run(&artifact, &run.run_id)
+        .unwrap_err()
+        .contains("scalar observation inventory"));
 }

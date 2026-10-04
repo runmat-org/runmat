@@ -13,6 +13,7 @@ use super::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    NonlinearSolid(super::NonlinearSolidNumericalReceiptArtifact),
     FluidSteady(FluidNumericalReceiptArtifact),
     MaxwellHarmonic(MaxwellNumericalReceiptArtifact),
     Magnetostatic(MagneticNumericalReceiptArtifact),
@@ -30,6 +31,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::NonlinearSolid => Self::NonlinearSolid(
+                super::NonlinearSolidNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::FluidSteady => {
                 Self::FluidSteady(FluidNumericalReceiptArtifact::from_canonical_bytes(bytes)?)
             }
@@ -66,6 +70,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::NonlinearSolid(_) => AccuracySourceKind::NonlinearSolid,
             Self::FluidSteady(_) => AccuracySourceKind::FluidSteady,
             Self::MaxwellHarmonic(_) => AccuracySourceKind::MaxwellHarmonic,
             Self::Magnetostatic(_) => AccuracySourceKind::Magnetostatic,
@@ -82,6 +87,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::NonlinearSolid(receipt) => receipt.source_workload(),
             Self::FluidSteady(receipt) => receipt.source_workload(),
             Self::MaxwellHarmonic(receipt) => receipt.source_workload(),
             Self::Magnetostatic(receipt) => receipt.source_workload(),
@@ -96,6 +102,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::NonlinearSolid(receipt) => receipt.source_result(),
             Self::FluidSteady(receipt) => receipt.source_result(),
             Self::MaxwellHarmonic(receipt) => receipt.source_result(),
             Self::Magnetostatic(receipt) => receipt.source_result(),
@@ -110,6 +117,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::NonlinearSolid(receipt) => receipt.identity(),
             Self::FluidSteady(receipt) => receipt.identity(),
             Self::MaxwellHarmonic(receipt) => receipt.identity(),
             Self::Magnetostatic(receipt) => receipt.identity(),
@@ -175,8 +183,22 @@ impl AccuracySourceReceipt {
             }
         }
         let mut evidence = Vec::new();
+        if let Self::NonlinearSolid(receipt) = self {
+            if receipt.receipt().producer != request.producer || !receipt.receipt().complete {
+                return Err(AnalysisExecutionError::Identity(
+                    "nonlinear accuracy requires original producer and complete load schedule",
+                ));
+            }
+        }
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::NonlinearSolid(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Nonlinear
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().accepted_relative_residual_maximum.max(receipt.receipt().accepted_relative_increment_maximum),
+                        "maximum accepted original free-equilibrium relative residual and undamped pending Newton correction normalized by offset-free current/committed displacement; nonlinear closure only, not mesh/load-step accuracy or constitutive qualification"))
+                }
                 Self::FluidSteady(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -330,6 +352,7 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::NonlinearSolid(receipt) => receipt.validate(),
             Self::FluidSteady(receipt) => receipt.validate(),
             Self::MaxwellHarmonic(receipt) => receipt.validate(),
             Self::Magnetostatic(receipt) => receipt.validate(),

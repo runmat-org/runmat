@@ -46,6 +46,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::NativeAnalysisKernel;
 
+#[path = "frequency_tests/cold_history.rs"]
+mod cold_history;
+
 struct OversizedSecondOutputKernel {
     second_payload_bytes: usize,
 }

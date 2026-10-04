@@ -12,6 +12,7 @@ pub(in super::super) fn completed_summary(
     match completed {
         CompletedFeaStudyResult::Structural(result) => local_summary(root_id, result, publication),
         CompletedFeaStudyResult::Electrical(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: match result
                 .completion
@@ -49,6 +50,7 @@ pub(in super::super) fn completed_summary(
                 })?,
         }),
         CompletedFeaStudyResult::Magnetic(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: "magnetostatics",
             study_definition_digest: result
@@ -74,6 +76,7 @@ pub(in super::super) fn completed_summary(
                 })?,
         }),
         CompletedFeaStudyResult::Maxwell(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: "harmonic_maxwell",
             study_definition_digest: result
@@ -98,7 +101,34 @@ pub(in super::super) fn completed_summary(
                     anyhow::anyhow!("typed Maxwell publication omitted its result manifest")
                 })?,
         }),
+        CompletedFeaStudyResult::Nonlinear(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
+            root_id: root_id.into(),
+            procedure: "quasistatic_j2_solid",
+            study_definition_digest: result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(anyhow::Error::msg)?
+                .to_string(),
+            mesh_digest: super::stable_digest_hex(&result.mesh.canonical_digest),
+            nodes: result.mesh.topology.nodes.len(),
+            elements: result.mesh.topology.volume_elements.len(),
+            boundary_faces: result.mesh.topology.boundary_faces.len(),
+            step_run_ids: publication
+                .steps
+                .iter()
+                .map(|step| step.run_id.clone())
+                .collect(),
+            result_manifest_artifact_path: publication
+                .result_manifest_artifact_path
+                .clone()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("typed nonlinear publication omitted its result manifest")
+                })?,
+        }),
         CompletedFeaStudyResult::Fluid(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: "steady_incompressible_fluid",
             study_definition_digest: result
@@ -124,6 +154,7 @@ pub(in super::super) fn completed_summary(
                 })?,
         }),
         CompletedFeaStudyResult::Acoustic(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: "acoustic_harmonic",
             study_definition_digest: result
@@ -149,6 +180,7 @@ pub(in super::super) fn completed_summary(
                 })?,
         }),
         CompletedFeaStudyResult::Thermal(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: match result.completion.workload.procedure {
                 runmat_analysis_fea::ThermalProcedureControl::Steady => "thermal_steady",

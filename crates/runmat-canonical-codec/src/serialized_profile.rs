@@ -22,6 +22,16 @@ pub struct SerializedCanonicalProfile {
     pub materialization_resident_bytes_estimate: u64,
 }
 
+impl SerializedCanonicalProfile {
+    /// Incremental structural storage when a collection already reserves the shared
+    /// contract envelope. This must not replace admission of an independent contract.
+    /// Synthetic profiles below the shared envelope are rejected rather than rounded up.
+    pub fn materialization_bytes_without_envelope(&self) -> Option<u64> {
+        self.materialization_resident_bytes_estimate
+            .checked_sub(crate::materialization::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)
+    }
+}
+
 /// Projects canonical materialization residency directly from a borrowed Serde value.
 ///
 /// The traversal itself allocates no value tree, output buffer, or owned strings. Custom
@@ -84,19 +94,27 @@ struct Counter {
 
 impl Counter {
     fn encoded(&mut self, bytes: u64) -> Result<(), CanonicalCodecError> {
-        self.encoded_bytes = self
-            .encoded_bytes
-            .checked_add(bytes)
-            .ok_or_else(|| invalid("encoded byte count overflow"))?;
+        self.encoded_bytes = self.encoded_bytes.checked_add(bytes).ok_or_else(|| {
+            CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "encoded byte count overflow",
+            )
+        })?;
         if self.encoded_bytes > self.limits.maximum_encoded_bytes as u64 {
-            return Err(invalid("projected encoded bytes exceed the contract limit"));
+            return Err(CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "projected encoded bytes exceed the contract limit",
+            ));
         }
         Ok(())
     }
 
     fn depth(&self, depth: usize) -> Result<(), CanonicalCodecError> {
         if depth > self.limits.maximum_nesting_depth {
-            Err(invalid("nesting depth exceeds the contract limit"))
+            Err(CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "nesting depth exceeds the contract limit",
+            ))
         } else {
             Ok(())
         }
@@ -104,25 +122,31 @@ impl Counter {
 
     fn node(&mut self, depth: usize) -> Result<(), CanonicalCodecError> {
         self.depth(depth)?;
-        self.profile.value_nodes = self
-            .profile
-            .value_nodes
-            .checked_add(1)
-            .ok_or_else(|| invalid("value count overflow"))?;
+        self.profile.value_nodes = self.profile.value_nodes.checked_add(1).ok_or_else(|| {
+            CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "value count overflow",
+            )
+        })?;
         self.encoded(9)
     }
 
     fn string(&mut self, len: usize, key: bool, depth: usize) -> Result<(), CanonicalCodecError> {
         self.depth(depth)?;
         if len > self.limits.maximum_string_bytes {
-            return Err(invalid("string bytes exceed the contract limit"));
+            return Err(CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "string bytes exceed the contract limit",
+            ));
         }
         if key {
-            self.profile.map_entries = self
-                .profile
-                .map_entries
-                .checked_add(1)
-                .ok_or_else(|| invalid("map entry count overflow"))?;
+            self.profile.map_entries =
+                self.profile.map_entries.checked_add(1).ok_or_else(|| {
+                    CanonicalCodecError::resource_limit(
+                        "serialized materialization profile",
+                        "map entry count overflow",
+                    )
+                })?;
             self.encoded(9)?;
         } else {
             self.node(depth)?;
@@ -131,7 +155,12 @@ impl Counter {
             .profile
             .string_bytes
             .checked_add(len as u64)
-            .ok_or_else(|| invalid("string byte count overflow"))?;
+            .ok_or_else(|| {
+                CanonicalCodecError::resource_limit(
+                    "serialized materialization profile",
+                    "string byte count overflow",
+                )
+            })?;
         self.encoded(len as u64)
     }
 }
@@ -181,8 +210,12 @@ impl<'a> Profiler<'a> {
                     .saturating_sub(9) as usize,
             ),
         };
-        write!(&mut count, "{value}")
-            .map_err(|_| invalid("formatted string failed or exceeded the contract limit"))?;
+        write!(&mut count, "{value}").map_err(|_| {
+            CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "formatted string failed or exceeded the contract limit",
+            )
+        })?;
         self.counter.string(count.len, self.key, self.depth)
     }
 
@@ -198,24 +231,31 @@ impl<'a> Profiler<'a> {
             return Err(invalid("non-unit enum map keys are unsupported"));
         }
         if self.counter.limits.maximum_collection_items == 0 {
-            return Err(invalid("enum wrapper exceeds the collection limit"));
+            return Err(CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "enum wrapper exceeds the collection limit",
+            ));
         }
         self.counter.node(self.depth)?;
         self.counter.string(variant.len(), true, self.depth)?;
-        let depth = self
-            .depth
-            .checked_add(1)
-            .ok_or_else(|| invalid("depth overflow"))?;
+        let depth = self.depth.checked_add(1).ok_or_else(|| {
+            CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "depth overflow",
+            )
+        })?;
         self.counter.depth(depth)?;
         Ok(Self::value(self.counter, depth))
     }
 
     fn transparent<T: Serialize + ?Sized>(self, value: &T) -> Result<(), CanonicalCodecError> {
         // Bound Rust traversal even for wrappers that vanish from the serialized value tree.
-        let depth = self
-            .depth
-            .checked_add(1)
-            .ok_or_else(|| invalid("depth overflow"))?;
+        let depth = self.depth.checked_add(1).ok_or_else(|| {
+            CanonicalCodecError::resource_limit(
+                "serialized materialization profile",
+                "depth overflow",
+            )
+        })?;
         self.counter.depth(depth)?;
         value.serialize(Self { depth, ..self })
     }

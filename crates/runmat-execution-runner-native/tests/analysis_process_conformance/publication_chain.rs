@@ -425,10 +425,10 @@ pub(super) struct MeteredProgramResponse {
 }
 
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
-    ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: success.outputs.clone(),
-        result_objects: success.result_objects.clone(),
-    }
+    ProgramExecutionResponse::from_success_outputs(
+        success.outputs.clone(),
+        success.result_objects.clone(),
+    )
 }
 
 pub(super) fn metered_response(success: AttemptSuccess) -> MeteredProgramResponse {

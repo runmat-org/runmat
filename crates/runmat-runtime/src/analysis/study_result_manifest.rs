@@ -11,8 +11,10 @@ pub(super) fn persist_catalog_objects(
     catalog: &runmat_execution::value::PublishedObjectCatalog,
     definition: Digest,
     object_stage_prefix: &str,
-) -> Result<Vec<String>, String> {
+    staging: &super::storage::AnalysisPublicationBuilder,
+) -> Result<Vec<String>, super::storage::AnalysisPublicationError> {
     catalog.validate().map_err(|e| e.to_string())?;
+    staging.require_source_objects(&catalog.objects)?;
     catalog
         .objects
         .iter()
@@ -23,7 +25,7 @@ pub(super) fn persist_catalog_objects(
             {
                 return Err("study catalog object digest or length mismatch".into());
             }
-            super::structural_study::persist_content_addressed_study_evidence(
+            staging.persist_evidence(
                 &definition.to_string(),
                 &format!(
                     "{object_stage_prefix}-{}",
@@ -54,16 +56,74 @@ pub(super) struct StudyResultManifest<Workloads, NumericalEvidence> {
     public_run: AnalysisStudyRunData,
 }
 
+pub(super) fn load_for_reassessment(
+    definition: Digest,
+    path: &std::path::Path,
+    maximum_bytes: u64,
+) -> Result<
+    (CompiledAnalysisStudy, AnalysisStudyRunData),
+    super::structural_study::StudyEvidenceReadError,
+> {
+    let store = super::storage::capture_artifact_store()?;
+    let payload = store
+        .load_publication_manifest_path(path, maximum_bytes)
+        .map_err(|e| match e {
+            super::storage::AssessmentStoreError::ResourceLimit => {
+                super::structural_study::StudyEvidenceReadError::ResourceLimit
+            }
+            super::storage::AssessmentStoreError::Invalid(message) => {
+                super::structural_study::StudyEvidenceReadError::Invalid(message)
+            }
+        })?;
+    // Opaque family-owned numerical values are not duplicated into an assessment input. The
+    // evidence envelope authenticates them; scalar lookup uses the individual run's store.
+    let manifest: StudyResultManifest<serde::de::IgnoredAny, serde::de::IgnoredAny> =
+        serde_json::from_value(payload).map_err(|error| error.to_string())?;
+    if manifest.schema_version != 1
+        || manifest.study_definition_digest != definition
+        || manifest
+            .compiled
+            .definition_digest()
+            .map_err(|error| error.to_string())?
+            != definition
+        || manifest.public_run.study_fingerprint != definition.to_string()
+        || manifest.public_run.study_id != manifest.compiled.study_id
+        || manifest.public_run.model_id != manifest.compiled.model.model_id.0
+        || manifest.solver_mesh_digest != manifest.compiled.solver_mesh_digest
+    {
+        return Err("saved study publication differs from its compiled revision".into());
+    }
+    Ok((manifest.compiled, manifest.public_run))
+}
+
 impl<Workloads, NumericalEvidence> StudyResultManifest<Workloads, NumericalEvidence> {
+    pub(super) fn compiled(&self) -> &CompiledAnalysisStudy {
+        &self.compiled
+    }
+    pub(super) fn set_public_run(&mut self, public_run: AnalysisStudyRunData) {
+        self.public_run = public_run;
+    }
     pub(super) fn new(
         compiled: &CompiledAnalysisStudy,
         workload_digest: Digest,
-        workloads: Workloads,
+        workloads: &Workloads,
         mesh: &SolverMeshArtifact,
         meshing_evidence: &MeshingEvidence,
         numerical_evidence: NumericalEvidence,
-        public_run: AnalysisStudyRunData,
-    ) -> Result<Self, String> {
+        publication: &super::structural_study::publication::DeferredStudyRun,
+    ) -> Result<Self, super::storage::AnalysisPublicationError>
+    where
+        Workloads: serde::Serialize + Clone,
+        NumericalEvidence: serde::Serialize,
+    {
+        let public_run = &publication.published.data;
+        publication.staging.admit_manifest_copy(&(
+            compiled,
+            workloads,
+            meshing_evidence,
+            &numerical_evidence,
+            public_run,
+        ))?;
         let definition = compiled
             .definition_digest()
             .map_err(|error| error.to_string())?;
@@ -75,26 +135,12 @@ impl<Workloads, NumericalEvidence> StudyResultManifest<Workloads, NumericalEvide
             study_definition_digest: definition,
             compiled: compiled.clone(),
             workload_digest,
-            workloads,
+            workloads: workloads.clone(),
             solver_mesh_digest: mesh.canonical_digest,
             meshing_evidence: meshing_evidence.clone(),
             numerical_evidence,
-            public_run,
+            public_run: public_run.clone(),
         })
-    }
-}
-
-impl<Workloads: serde::Serialize, NumericalEvidence: serde::Serialize>
-    StudyResultManifest<Workloads, NumericalEvidence>
-{
-    pub(super) fn persist(&self) -> Result<String, String> {
-        let value = serde_json::to_value(self)
-            .map_err(|error| format!("failed to encode typed study result manifest: {error}"))?;
-        super::structural_study::persist_content_addressed_study_evidence(
-            &self.study_definition_digest.to_string(),
-            "study-result-manifest",
-            value,
-        )
     }
 }
 
@@ -105,9 +151,10 @@ mod tests {
         artifact_object_value_id, PublishedObjectCatalog, PublishedObjectSource, ValueRef,
         ValueRefKind,
     };
-    struct SubstitutedSource;
+    struct SubstitutedSource(std::sync::atomic::AtomicUsize);
     impl PublishedObjectSource for SubstitutedSource {
         fn read_verified(&self, _: &ValueRef) -> Result<Vec<u8>, String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(b"other".to_vec())
         }
     }
@@ -129,21 +176,43 @@ mod tests {
         };
         let catalog =
             PublishedObjectCatalog::new(vec![reference.clone()], vec![reference]).unwrap();
+        let mut staging = crate::analysis::storage::AnalysisPublicationBuilder::new(
+            Digest::sha256(b"test"),
+            128 << 20,
+        )
+        .unwrap();
+        let source = SubstitutedSource(std::sync::atomic::AtomicUsize::new(0));
+        assert!(matches!(
+            persist_catalog_objects(
+                &source,
+                &catalog,
+                Digest::sha256(b"study"),
+                "test-object",
+                &staging
+            ),
+            Err(crate::analysis::storage::AnalysisPublicationError::ResourceLimit { .. })
+        ));
+        assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        staging.admit_source_objects(&catalog.objects).unwrap();
         assert!(persist_catalog_objects(
-            &SubstitutedSource,
+            &source,
             &catalog,
             Digest::sha256(b"study"),
-            "test-object"
+            "test-object",
+            &staging,
         )
         .unwrap_err()
+        .to_string()
         .contains("digest or length mismatch"));
+        assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 1);
         let mut absent = catalog;
         absent.objects.clear();
         assert!(persist_catalog_objects(
-            &SubstitutedSource,
+            &source,
             &absent,
             Digest::sha256(b"study"),
-            "test-object"
+            "test-object",
+            &staging,
         )
         .is_err());
     }

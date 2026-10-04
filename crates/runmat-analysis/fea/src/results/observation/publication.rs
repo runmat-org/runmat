@@ -301,6 +301,19 @@ impl ObservationPublicationCatalog {
                 self.source
                     .validate_structural_plan(&self.plan, model, mesh)?;
             }
+            (
+                ObservationFieldCatalogSource::StructuralFrequencyHistory { .. },
+                ObservationHistorySourceContext::Structural {
+                    source: crate::execution::StructuralObservationSource::Frequency(workload),
+                    mesh,
+                },
+            ) => {
+                if workload.procedure_step()? != step {
+                    return Err(invalid("frequency publication authored step differs"));
+                }
+                self.source
+                    .validate_frequency_history_plan(&self.plan, workload, mesh)?;
+            }
             _ => return Err(invalid("publication source context differs")),
         }
         self.validate_execution_for(context)?;
@@ -447,6 +460,25 @@ impl ObservationPublicationCatalog {
                         }
                         ObservationFieldCatalogSource::Structural { manifest, .. } => {
                             manifest.fields.iter().collect::<Vec<_>>()
+                        }
+                        ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
+                            let mut fields = Vec::new();
+                            for sample in samples {
+                                let ObservationFieldCatalogSource::Structural {
+                                    recovery_request,
+                                    manifest,
+                                } = sample.source()
+                                else {
+                                    return Err(invalid(
+                                        "frequency history contains a nonstructural sample",
+                                    ));
+                                };
+                                if recovery_request.producer != self.producer {
+                                    return Err(invalid("frequency history producer differs"));
+                                }
+                                fields.extend(manifest.fields.iter());
+                            }
+                            fields
                         }
                         ObservationFieldCatalogSource::Thermal { manifest } => {
                             if manifest.producer != self.producer {

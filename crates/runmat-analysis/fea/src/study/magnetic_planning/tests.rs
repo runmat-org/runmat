@@ -11,6 +11,7 @@ fn compiled() -> CompiledAnalysisStudy {
         study_id: "magnetic".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
+        assessments: Vec::new(),
         outputs: vec![],
         model,
         properties,

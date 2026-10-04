@@ -33,7 +33,6 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
         ),
         (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse),
         (PhysicsFamily::Fluid, AnalysisProcedure::Static),
-        (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse),
         (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
             AnalysisProcedure::Static,
@@ -43,16 +42,8 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
             AnalysisProcedure::TransientResponse,
         ),
         (
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-            AnalysisProcedure::TransientResponse,
-        ),
-        (
             PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
             AnalysisProcedure::Static,
-        ),
-        (
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-            AnalysisProcedure::Nonlinear,
         ),
     ]
 }
@@ -148,6 +139,14 @@ fn registered_realizations(
     if family == PhysicsFamily::Structural {
         structural_assembly_realizations()
             .into_iter()
+            .filter(|assembly| {
+                procedure != AnalysisProcedure::Nonlinear
+                    || matches!(
+                        assembly.operator,
+                        StructuralOperatorImplementation::Tet4LinearElasticity
+                            | StructuralOperatorImplementation::Tet10LinearElasticity
+                    )
+            })
             .map(|assembly| {
                 structural_exact_realization(StructuralRealizationInput {
                     assemblies: vec![assembly],
@@ -238,28 +237,65 @@ fn availability_gate_rejects_production_for_every_registered_procedure() {
 }
 
 #[test]
+fn unimplemented_transient_fluid_cannot_borrow_the_steady_realization() {
+    let family = PhysicsFamily::Fluid;
+    let procedure = AnalysisProcedure::TransientResponse;
+    assert!(registered_formulations(family, procedure).is_empty());
+    let steady = registered_formulations(family, AnalysisProcedure::Static)
+        .remove(0)
+        .realization()
+        .clone();
+    for requirement in [
+        FormulationRequirement::Experimental,
+        FormulationRequirement::Production,
+    ] {
+        let availability =
+            require_qualified_formulation(family, procedure, SolutionSpace::Direct, requirement)
+                .expect_err("transient CFD is unimplemented, not an implicit channel fallback");
+        assert_eq!(
+            availability.reason,
+            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+        );
+        let exact = admit_formulation(FormulationAdmissionRequest {
+            family,
+            procedure,
+            solution_space: SolutionSpace::Direct,
+            requirement,
+            realization: steady.clone(),
+        })
+        .expect_err("the actual steady realization must not be relabeled transient");
+        assert_eq!(
+            exact.reason,
+            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+        );
+    }
+}
+
+#[test]
 fn thermomechanical_structural_procedures_are_available_experimentally() {
-    for procedure in [AnalysisProcedure::Static, AnalysisProcedure::Nonlinear] {
-        require_qualified_formulation(
+    require_qualified_formulation(
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
+        AnalysisProcedure::Static,
+        SolutionSpace::Direct,
+        FormulationRequirement::Experimental,
+    )
+    .expect("the implemented static thermomechanical procedure is available");
+    for procedure in [
+        AnalysisProcedure::TransientResponse,
+        AnalysisProcedure::Nonlinear,
+    ] {
+        let rejection = require_qualified_formulation(
             PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
             procedure,
             SolutionSpace::Direct,
             FormulationRequirement::Experimental,
         )
-        .expect("thermomechanical structural procedures should pass pre-availability");
+        .expect_err("unimplemented coupled evolution must not borrow the J2 identity");
+        assert_eq!(
+            rejection.reason,
+            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
+        );
     }
-
-    let rejection = require_qualified_formulation(
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-        AnalysisProcedure::TransientResponse,
-        SolutionSpace::Direct,
-        FormulationRequirement::Experimental,
-    )
-    .expect_err("thermomechanical transient requires a solver-owned coupled thermal state");
-    assert_eq!(
-        rejection.reason,
-        FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
-    );
 }
 
 #[test]

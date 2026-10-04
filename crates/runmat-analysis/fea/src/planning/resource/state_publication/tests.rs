@@ -21,6 +21,7 @@ fn fixture(
     .unwrap();
     let mut declaration = step.state_outputs[0].clone();
     declaration.kind = match source {
+        SemanticStatePublicationSource::NonlinearSolidOriginalState => StateKind::MaterialHistory,
         SemanticStatePublicationSource::FluidPrimaryFields => StateKind::Fluid,
         SemanticStatePublicationSource::MaxwellNativeFields => StateKind::ElectromagneticComplex,
         SemanticStatePublicationSource::StructuralPrimaryFields => StateKind::StructuralPrimary,
@@ -84,6 +85,7 @@ fn fixture(
 #[test]
 fn all_sources_bind_canonical_request_and_account_owned_state_and_verification() {
     for source in [
+        SemanticStatePublicationSource::NonlinearSolidOriginalState,
         SemanticStatePublicationSource::StructuralPrimaryFields,
         SemanticStatePublicationSource::ThermalPrimaryField,
         SemanticStatePublicationSource::AcousticNativeFields,
@@ -143,6 +145,43 @@ fn all_sources_bind_canonical_request_and_account_owned_state_and_verification()
         );
         assert_ne!(larger_plan.identity, plan.identity);
     }
+}
+
+#[test]
+fn original_publication_ceiling_governs_wall_and_exact_memory_admission() {
+    let (request, catalog, facts) =
+        fixture(SemanticStatePublicationSource::NonlinearSolidOriginalState);
+    let mut ceiling = super::super::post_process::post_process_ceiling();
+    ceiling.maximum_wall_time_milliseconds = 17;
+    let first = build_state_publication_resource_plan_with_ceiling(
+        &request,
+        &catalog,
+        Digest::sha256(b"payload"),
+        facts.clone(),
+        ceiling,
+    )
+    .unwrap();
+    assert_eq!(first.input.worker.maximum_wall_milliseconds, 17);
+    assert_eq!(first.request.max_wall_millis, 17);
+    ceiling.maximum_resident_bytes = first.request.memory_bytes;
+    let exact = build_state_publication_resource_plan_with_ceiling(
+        &request,
+        &catalog,
+        Digest::sha256(b"payload"),
+        facts.clone(),
+        ceiling,
+    )
+    .unwrap();
+    assert_eq!(exact.request.memory_bytes, ceiling.maximum_resident_bytes);
+    ceiling.maximum_resident_bytes -= 1;
+    assert!(build_state_publication_resource_plan_with_ceiling(
+        &request,
+        &catalog,
+        Digest::sha256(b"payload"),
+        facts,
+        ceiling
+    )
+    .is_err());
 }
 
 #[test]

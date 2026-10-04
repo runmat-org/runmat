@@ -3,6 +3,40 @@ use std::collections::BTreeMap;
 use serde::ser::{SerializeMap, SerializeSeq};
 
 use super::*;
+
+#[test]
+fn retained_collection_envelope_and_increments_bound_combined_structural_profile() {
+    let limits = CanonicalLimits::new(16 << 20, 100_000_000, 65_536, 64);
+    for count in [0, 1, 2, 256] {
+        let values: Vec<_> = (0..count)
+            .map(|ordinal| format!("original/{ordinal}/Δ/{}", "x".repeat(71)))
+            .collect();
+        let mut composed = profile_serialized(&Vec::<String>::new(), limits)
+            .unwrap()
+            .materialization_resident_bytes_estimate;
+        for value in &values {
+            composed += profile_serialized(&[value], limits)
+                .unwrap()
+                .materialization_bytes_without_envelope()
+                .unwrap();
+        }
+        let combined = profile_serialized(&values, limits)
+            .unwrap()
+            .materialization_resident_bytes_estimate;
+        assert!(
+            composed >= combined,
+            "incremental accounting undercounts the original combined contract"
+        );
+    }
+    assert_eq!(
+        SerializedCanonicalProfile {
+            encoded_bytes_upper_bound: 0,
+            materialization_resident_bytes_estimate: 0,
+        }
+        .materialization_bytes_without_envelope(),
+        None
+    );
+}
 use crate::{canonical_payload_materialization_resident_bytes_estimate, encode_contract};
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1_000_000, 10_000, 4096, 64);

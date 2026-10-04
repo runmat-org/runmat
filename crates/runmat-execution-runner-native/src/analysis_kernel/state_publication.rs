@@ -1,6 +1,7 @@
 use super::*;
 use runmat_analysis_fea::execution::SemanticStatePublicationProfileSource;
 mod fluid;
+mod nonlinear;
 
 #[cfg(test)]
 mod magnetic_tests;
@@ -8,6 +9,14 @@ mod magnetic_tests;
 pub(super) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    if optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::NonlinearSolidWorkload,
+    )?
+    .is_some()
+    {
+        return nonlinear::execute(invocation);
+    }
     if optional_unique_input(
         &invocation,
         AnalysisNumericalObjectKind::FluidSteadyWorkload,
@@ -67,6 +76,11 @@ pub(super) fn execute(
         Ok(())
     };
     let state = match publication.source {
+        SemanticStatePublicationSource::NonlinearSolidOriginalState => {
+            return Err(AnalysisBridgeError::Identity(
+                "nonlinear material history requires its original typed workload/block closure",
+            ));
+        }
         SemanticStatePublicationSource::FluidPrimaryFields => {
             return Err(AnalysisBridgeError::Identity(
                 "fluid state requires its original immutable closure",

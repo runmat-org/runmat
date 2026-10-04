@@ -1348,7 +1348,7 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_run_cfd_rejects_vector_boundaries_in_the_reduced_executor() {
+fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
     let mut model = contract_linear_static_model();
     model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
         "cfd_steady".to_string(),
@@ -1378,12 +1378,12 @@ fn analysis_run_cfd_rejects_vector_boundaries_in_the_reduced_executor() {
         Default::default(),
         OperationContext::new(Some("trace-contract-cfd-1".to_string()), None),
     )
-    .expect_err("the reduced executor cannot erase vector boundary authority");
+    .expect_err("the removed reduced executor cannot publish fields");
     assert_eq!(envelope.operation, "fea.run_cfd");
     assert_eq!(envelope.op_version, "fea.run_cfd/v1");
     assert_eq!(
         envelope.error_code,
-        "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS"
+        "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED"
     );
     assert!(!envelope.retryable);
     assert!(envelope.message.contains("canonical finite-volume"));

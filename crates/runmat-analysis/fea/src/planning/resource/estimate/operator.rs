@@ -6,45 +6,103 @@ pub(super) fn build_operator_resource_plan(
     demand: &StructuralOperatorResourceDemand,
     inputs: Option<&PreparedInputResourceFacts>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    build_operator_resource_plan_with_persistent_storage(input, demand, inputs, ByteCount(0))
+}
+
+pub(super) fn build_operator_resource_plan_with_persistent_storage(
+    input: FeaResourcePlanningInput,
+    demand: &StructuralOperatorResourceDemand,
+    inputs: Option<&PreparedInputResourceFacts>,
+    additional_persistent_bytes: ByteCount,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_operator_demand(&input, demand)?;
-    if matches!(input.demand, FeaResourceDemand::StructuralLinearPipeline(_))
-        && inputs.is_some_and(|facts| {
-            facts.encoded_payload_bytes.0 == 0
+    if matches!(
+        input.demand,
+        FeaResourceDemand::StructuralLinearPipeline(_)
+            | FeaResourceDemand::StructuralNonlinearPipeline(_)
+    ) && inputs.is_some_and(|facts| {
+        facts.encoded_payload_bytes.0 == 0
                 // Transport counts unique chunks; repeated logical payloads need not
                 // increase that closure, unlike their independent materializations.
                 || facts.transport_closure_bytes.0 == 0
                 || facts.decoded_resident_bytes_admission_budget < facts.encoded_payload_bytes
-        })
-    {
+    }) {
         return Err(ResourcePlanningError::Invalid(
             "operator prepared input transport or materialization is underreserved".into(),
         ));
     }
-    let (catalog_construction, catalog_transport) =
-        if let FeaResourceDemand::StructuralLinearPipeline(pipeline) = &input.demand {
-            let output = &pipeline.state_profiles_output;
-            let materialization = runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(output.encoded_payload_bytes_upper_bound.0, 1)
-            .ok_or(ResourcePlanningError::Overflow("static catalog materialization"))?;
-            let minimum = add(
-                materialization,
-                output.transport_closure_bytes_upper_bound.0,
-                "static catalog construction",
+    if let FeaResourceDemand::StructuralNonlinearPipeline(pipeline) = &input.demand {
+        if let Some(block) = &pipeline.block_transport {
+            let transport = add(
+                block.output.transport_closure_bytes_upper_bound.0,
+                block.receipt_output.transport_closure_bytes_upper_bound.0,
+                "nonlinear outputs",
             )?;
-            if !prepared_output_is_valid(output)
-                || output.construction_resident_bytes_admission_budget.0 < minimum
+            let construction = add(
+                block.output.construction_resident_bytes_admission_budget.0,
+                block
+                    .receipt_output
+                    .construction_resident_bytes_admission_budget
+                    .0,
+                "nonlinear output construction",
+            )?;
+            if block.request != demand.numerical_scope_digest
+                || !prepared_output_is_valid(&block.output)
+                || !prepared_output_is_valid(&block.receipt_output)
+                || block.receipt_output.encoded_payload_bytes_upper_bound.0
+                    != crate::execution::NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES
+                || input
+                    .output_set
+                    .as_ref()
+                    .is_none_or(|set| set.encoded_bytes_upper_bound.0 == 0)
+                || demand.publication.result_artifact_bytes.0 < transport
+                || pipeline.additional_persistent_bytes.0 < construction
             {
                 return Err(ResourcePlanningError::Invalid(
-                    "static state profile catalog output is underreserved".into(),
+                    "nonlinear block transport authority is incomplete".into(),
                 ));
             }
-            (
-                output.construction_resident_bytes_admission_budget.0,
-                output.transport_closure_bytes_upper_bound.0,
+        }
+    }
+    let catalog = match &input.demand {
+        FeaResourceDemand::StructuralLinearPipeline(pipeline) => {
+            Some(&pipeline.state_profiles_output)
+        }
+        FeaResourceDemand::StructuralNonlinearPipeline(pipeline) => {
+            Some(&pipeline.state_profiles_output)
+        }
+        _ => None,
+    };
+    let (catalog_construction, catalog_transport) = if let Some(output) = catalog {
+        let materialization =
+            runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+                output.encoded_payload_bytes_upper_bound.0,
+                1,
             )
-        } else {
-            (0, 0)
-        };
-    let resource_plan_input = implicit_resource_plan_input_facts()?;
+            .ok_or(ResourcePlanningError::Overflow(
+                "static catalog materialization",
+            ))?;
+        let minimum = add(
+            materialization,
+            output.transport_closure_bytes_upper_bound.0,
+            "static catalog construction",
+        )?;
+        if !prepared_output_is_valid(output)
+            || output.construction_resident_bytes_admission_budget.0 < minimum
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "static state profile catalog output is underreserved".into(),
+            ));
+        }
+        (
+            output.construction_resident_bytes_admission_budget.0,
+            output.transport_closure_bytes_upper_bound.0,
+        )
+    } else {
+        (0, 0)
+    };
+    let resource_plan_input =
+        super::implicit_input::operator_resource_plan_input_facts(&input.phase)?;
     let output_set_bytes = input
         .output_set
         .as_ref()
@@ -109,6 +167,7 @@ pub(super) fn build_operator_resource_plan(
             csr_value_bytes.0,
             constraint_bytes.0,
             demand.excitation_workspace.resident_bytes_upper_bound.0,
+            additional_persistent_bytes.0,
         ],
         "persistent numerical memory",
     )?;
@@ -237,7 +296,11 @@ pub(super) fn build_operator_resource_plan(
         constraint_bytes,
         phase_resident_bytes,
         phase_scratch_bytes: demand.phase_resources.scratch_bytes,
-        phase_retained_bytes: demand.phase_resources.retained_bytes,
+        phase_retained_bytes: ByteCount(add(
+            demand.phase_resources.retained_bytes.0,
+            additional_persistent_bytes.0,
+            "nonlinear persistent phase storage",
+        )?),
         field_recovery_requirement_count: demand.field_recovery.requirement_count,
         field_recovery_source_entity_count: demand.field_recovery.source_entity_count,
         field_recovery_output_entity_count: demand.field_recovery.output_entity_count,

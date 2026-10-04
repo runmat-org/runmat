@@ -1,4 +1,5 @@
 //! Source-bound sampled fanout, ordered reductions and publication assembly.
+mod retention;
 use crate::{
     import_observation_assembly, import_observation_partition_contribution,
     import_reduced_observation, prepare_observation_assembly, prepare_observation_fanout,

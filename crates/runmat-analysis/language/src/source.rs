@@ -1,7 +1,7 @@
 use crate::SourceDiagnostic;
 use runmat_types::{
-    AnalysisValueType, CapabilitySet, EffectSet, OperationParameter, OperationTypePattern,
-    ShapeFact, Span, ValueFact, ValueKindFact,
+    AnalysisValueType, CapabilitySet, EffectSet, OperationParameter, OperationTypePattern, Span,
+    ValueFact, ValueKindFact,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
@@ -9,6 +9,7 @@ use std::fmt;
 macro_rules! source_identity {
     ($name:ident, $error:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+        #[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -53,6 +54,7 @@ source_identity!(ExecutionProfileIdentity, "execution profile");
 pub struct SourceIdentityError(&'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct SourceDigest(pub [u8; 32]);
 
@@ -101,10 +103,20 @@ pub trait RunMatFunctionSource {
 
 pub fn operation_pattern_from_value_fact(fact: &ValueFact) -> OperationTypePattern {
     match (&fact.kind, &fact.shape) {
-        (ValueKindFact::Numeric(_), ShapeFact::Scalar) => OperationTypePattern::NumericScalar,
+        (ValueKindFact::Numeric(_), _) if fact.is_scalar() => OperationTypePattern::NumericScalar,
         (ValueKindFact::Numeric(_), _) => OperationTypePattern::NumericArray,
+        (ValueKindFact::Logical, _) if fact.is_scalar() => OperationTypePattern::LogicalScalar,
         (ValueKindFact::Logical, _) => OperationTypePattern::LogicalArray,
-        (ValueKindFact::Character | ValueKindFact::String, ShapeFact::Scalar) => {
+        (ValueKindFact::Struct(record), _) if fact.is_scalar() && record.fields_complete => {
+            OperationTypePattern::Record(
+                record
+                    .fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), operation_pattern_from_value_fact(value)))
+                    .collect(),
+            )
+        }
+        (ValueKindFact::Character | ValueKindFact::String, _) if fact.is_scalar() => {
             OperationTypePattern::StringScalar
         }
         (ValueKindFact::Object(object), shape) if shape.element_count() == Some(1) => {
@@ -127,6 +139,58 @@ pub fn operation_pattern_from_value_fact(fact: &ValueFact) -> OperationTypePatte
             }
         }
         _ => OperationTypePattern::Any,
+    }
+}
+
+#[cfg(test)]
+mod assessment_callable_fact_tests {
+    use super::*;
+    use runmat_types::StructFact;
+
+    #[test]
+    fn complete_scalar_record_retains_logical_result_fields_for_singletons() {
+        let fields = std::collections::BTreeMap::from([
+            (
+                "evaluated".into(),
+                ValueFact::scalar(ValueKindFact::Logical),
+            ),
+            ("accepted".into(), ValueFact::scalar(ValueKindFact::Logical)),
+        ]);
+        let fact = ValueFact::scalar(ValueKindFact::Struct(StructFact {
+            fields,
+            fields_complete: true,
+        }));
+        assert_eq!(
+            operation_pattern_from_value_fact(&fact),
+            OperationTypePattern::Record(std::collections::BTreeMap::from([
+                ("evaluated".into(), OperationTypePattern::LogicalScalar),
+                ("accepted".into(), OperationTypePattern::LogicalScalar),
+            ]))
+        );
+        let mut explicit_singleton = fact.clone();
+        explicit_singleton.shape = runmat_types::ShapeFact::from(vec![Some(1), Some(1)]);
+        let ValueKindFact::Struct(record) = &mut explicit_singleton.kind else {
+            unreachable!()
+        };
+        for value in record.fields.values_mut() {
+            value.shape = runmat_types::ShapeFact::from(vec![Some(1), Some(1)]);
+        }
+        assert_eq!(
+            operation_pattern_from_value_fact(&explicit_singleton),
+            operation_pattern_from_value_fact(&fact)
+        );
+    }
+
+    #[test]
+    fn incomplete_record_is_not_a_proven_return_contract() {
+        let fact = ValueFact::scalar(ValueKindFact::Struct(StructFact {
+            fields: std::collections::BTreeMap::new(),
+            fields_complete: false,
+        }));
+        assert_eq!(
+            operation_pattern_from_value_fact(&fact),
+            OperationTypePattern::Any
+        );
     }
 }
 

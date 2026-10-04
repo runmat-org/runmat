@@ -17,15 +17,15 @@ pub(in crate::analysis) use admission::{
     CompletedStructuralFrequencyStep, StructuralFrequencyPersistence,
 };
 
-use super::{AnalysisArtifactRoot, FrequencySampleArtifactRoots, ObservationHistoryArtifactRoot};
+use super::{AnalysisArtifactRoot, FrequencySampleArtifactRoots};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum StructuralStudyPrestressedFrequencyReductionResult {
     Direct,
     ModalReduced(Box<StructuralStudyPrestressedModalFrequencyReductionResult>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyPrestressedModalFrequencyReductionResult {
     pub modal_step_id: ProcedureStepId,
     pub modal_result: runmat_analysis_fea::execution::StructuralModalSolverResult,
@@ -33,7 +33,49 @@ pub struct StructuralStudyPrestressedModalFrequencyReductionResult {
     pub basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
 
-#[derive(Debug, Clone)]
+/// Ordered artifact root for one published structural-frequency history.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralFrequencyHistoryArtifactRoot {
+    checkpoint: AnalysisArtifactRoot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    finalization: Option<StructuralFrequencyFinalizedHistoryArtifactRoots>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralFrequencyFinalizedHistoryArtifactRoots {
+    pub catalog: AnalysisArtifactRoot,
+    pub history: AnalysisArtifactRoot,
+    pub series: Option<AnalysisArtifactRoot>,
+}
+
+impl StructuralFrequencyHistoryArtifactRoot {
+    pub const fn new(checkpoint: AnalysisArtifactRoot) -> Self {
+        Self {
+            checkpoint,
+            finalization: None,
+        }
+    }
+
+    pub fn with_finalization(
+        mut self,
+        roots: StructuralFrequencyFinalizedHistoryArtifactRoots,
+    ) -> Self {
+        self.finalization = Some(roots);
+        self
+    }
+
+    pub const fn finalization(&self) -> Option<&StructuralFrequencyFinalizedHistoryArtifactRoots> {
+        self.finalization.as_ref()
+    }
+
+    pub const fn checkpoint(&self) -> &AnalysisArtifactRoot {
+        &self.checkpoint
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyPrestressedFrequencyNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
@@ -61,7 +103,7 @@ pub struct StructuralFrequencyArtifactRootIndex {
     receipt: AnalysisArtifactRoot,
     resource_usage: AnalysisArtifactRoot,
     samples: Vec<FrequencySampleArtifactRoots>,
-    histories: Vec<ObservationHistoryArtifactRoot>,
+    histories: Vec<StructuralFrequencyHistoryArtifactRoot>,
 }
 
 impl StructuralFrequencyArtifactRootIndex {
@@ -70,7 +112,7 @@ impl StructuralFrequencyArtifactRootIndex {
         receipt: AnalysisArtifactRoot,
         resource_usage: AnalysisArtifactRoot,
         samples: Vec<FrequencySampleArtifactRoots>,
-        histories: Vec<ObservationHistoryArtifactRoot>,
+        histories: Vec<StructuralFrequencyHistoryArtifactRoot>,
         publication: &StructuralFrequencyPublicationManifest,
         object_catalog: &PublishedObjectCatalog,
     ) -> Result<Self, String> {
@@ -101,7 +143,7 @@ impl StructuralFrequencyArtifactRootIndex {
         &self.samples
     }
 
-    pub fn histories(&self) -> &[ObservationHistoryArtifactRoot] {
+    pub fn histories(&self) -> &[StructuralFrequencyHistoryArtifactRoot] {
         &self.histories
     }
 
@@ -151,6 +193,31 @@ impl StructuralFrequencyArtifactRootIndex {
                 history.checkpoint.identity.digest(),
                 "history-checkpoint",
             )?;
+            match (&root.finalization, &history.finalization) {
+                (Some(roots), Some(publication)) => {
+                    roots.catalog.validate_role(
+                        AnalysisNumericalObjectKind::ObservationFieldCatalog,
+                        publication.request.source_catalog,
+                        "history source catalog",
+                    )?;
+                    roots.history.validate_role(
+                        AnalysisNumericalObjectKind::History,
+                        publication.history.identity.digest(),
+                        "finalized history",
+                    )?;
+                    match (&roots.series, &publication.series) {
+                        (Some(root), Some(series)) => root.validate_role(
+                            AnalysisNumericalObjectKind::SeriesReductionResult,
+                            series.identity.digest(),
+                            "history series reduction",
+                        )?,
+                        (None, None) => {}
+                        _ => return Err("frequency series roots differ from publication".into()),
+                    }
+                }
+                (None, None) => {}
+                _ => return Err("frequency finalization roots differ from publication".into()),
+            }
         }
 
         let mut declared_roots =
@@ -164,11 +231,18 @@ impl StructuralFrequencyArtifactRootIndex {
                 declared_roots.push(observations.reference.clone());
             }
         }
-        declared_roots.extend(
-            self.histories
-                .iter()
-                .map(|history| history.checkpoint.reference.clone()),
-        );
+        for history in &self.histories {
+            declared_roots.push(history.checkpoint.reference.clone());
+            if let Some(finalization) = &history.finalization {
+                declared_roots.push(finalization.catalog.reference.clone());
+                declared_roots.push(finalization.history.reference.clone());
+                if let Some(series) = &finalization.series {
+                    declared_roots.push(series.reference.clone());
+                }
+            }
+        }
+        declared_roots.sort_by_key(|reference| reference.id);
+        declared_roots.dedup();
         super::artifact_root::validate_complete_root_inventory(declared_roots, object_catalog)
     }
 }
@@ -179,7 +253,7 @@ impl StructuralFrequencyArtifactRootIndex {
 /// authority-bound object catalog and source are erased only at the generic content-addressed
 /// storage boundary, allowing local filesystem and remote downloaded sources to share one
 /// admission and persistence path without embedding paths in FEA.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub struct StructuralStudyFrequencyNumericalResult {
     pub frozen_project_digest: Option<Digest>,
     pub step_id: ProcedureStepId,
@@ -188,6 +262,7 @@ pub struct StructuralStudyFrequencyNumericalResult {
     pub publication: StructuralFrequencyPublicationManifest,
     pub object_catalog: PublishedObjectCatalog,
     artifact_roots: StructuralFrequencyArtifactRootIndex,
+    #[serde(skip_serializing)]
     source: Arc<dyn PublishedObjectSource>,
 }
 

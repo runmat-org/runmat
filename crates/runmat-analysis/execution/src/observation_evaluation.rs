@@ -206,6 +206,7 @@ fn admit_recovery_source(
     let workload = preparation.source_workload.decode()?;
     match (&workload, source_request.source) {
         (AdmittedObservationWorkload::Linear(_), FieldRecoverySource::SolverResult(_))
+        | (AdmittedObservationWorkload::NonlinearSolid(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::FluidSteady(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::Magnetostatic(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::MaxwellHarmonic(_), FieldRecoverySource::SolverResult(_))

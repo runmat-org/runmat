@@ -8,6 +8,7 @@ pub(super) enum PreparedFamily {
     Acoustic,
     Electrical,
     Fluid,
+    Nonlinear,
     Magnetic,
     Maxwell,
     Structural,
@@ -20,6 +21,25 @@ pub(super) fn select_family(
     sequence: &AnalysisSequence,
     electromagnetic: Option<&ElectromagneticDomain>,
 ) -> Result<PreparedFamily, String> {
+    if let [step] = sequence.steps.as_slice() {
+        if step.family == PhysicsFamily::Structural
+            && step.procedure == AnalysisProcedure::Nonlinear
+            && step.solution_space == SolutionSpace::Direct
+            && step.restart == RestartPolicy::Fresh
+            && step.state_inputs.is_empty()
+            && step.activations.is_empty()
+            && sequence.dependencies.is_empty()
+            && sequence.transitions.is_empty()
+            && sequence.branches.is_empty()
+        {
+            return Ok(PreparedFamily::Nonlinear);
+        }
+    }
+    if sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Structural && step.procedure == AnalysisProcedure::Nonlinear
+    }) {
+        return Err(unsupported());
+    }
     if sequence
         .steps
         .iter()
@@ -126,6 +146,32 @@ fn unsupported() -> String {
 mod tests {
     use super::*;
     use runmat_analysis_core::ProcedureStep;
+
+    #[test]
+    fn nonlinear_dispatch_preserves_fresh_standalone_authority() {
+        let step = ProcedureStep::structural_nonlinear("plastic");
+        assert_eq!(
+            super::select_family(
+                &AnalysisSequence::from_steps("plastic", vec![step.clone()]),
+                None
+            )
+            .unwrap(),
+            PreparedFamily::Nonlinear
+        );
+        let mut resumed = step.clone();
+        resumed.restart = RestartPolicy::ResumeCheckpoint {
+            checkpoint_id: "foreign".into(),
+            required_state_digest: "foreign".into(),
+        };
+        let mut reduced = step.clone();
+        reduced.solution_space = SolutionSpace::ModalReduced;
+        for steps in [vec![resumed], vec![reduced], vec![step.clone(), step]] {
+            assert!(
+                super::select_family(&AnalysisSequence::from_steps("plastic", steps), None)
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn fluid_dispatch_requires_one_fresh_independent_direct_static_step() {
@@ -422,9 +468,14 @@ mod tests {
             wrong.activations[0].lifecycle = lifecycle;
             variants.push(wrong);
         }
-        let mut wrong = selected;
-        wrong.activations[0].object = StepObjectRef::MaterialParameter("parameter".into());
-        variants.push(wrong);
+        // Non-initial objects are validated by shared model/sequence planning, not
+        // interpreted as thermal state selections by this pre-mesh family gate.
+        let mut parameter = selected;
+        parameter.activations[0].object = StepObjectRef::MaterialParameter("parameter".into());
+        assert_eq!(
+            select_family(&AnalysisSequence::from_steps("heat", vec![parameter])).unwrap(),
+            PreparedFamily::Thermal
+        );
         for step in variants {
             assert!(select_family(&AnalysisSequence::from_steps("heat", vec![step])).is_err());
         }

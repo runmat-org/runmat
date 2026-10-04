@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::quantity::Position;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CoordinateFrame {
     Global,
@@ -29,6 +30,7 @@ impl CoordinateFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct CartesianFrame {
     pub frame_id: String,
@@ -38,6 +40,7 @@ pub struct CartesianFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct AxialFrame {
     pub frame_id: String,
@@ -47,6 +50,7 @@ pub struct AxialFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SphericalFrame {
     pub frame_id: String,

@@ -430,6 +430,10 @@ pub(crate) async fn execute_with_pool(
                 .map(|history| StructuralFrequencyPublicationHistory {
                     observation_id: history.observation_id.clone(),
                     checkpoint: history.checkpoint.checkpoint.manifest().clone(),
+                    finalization: history
+                        .finalization
+                        .as_ref()
+                        .map(|finalization| finalization.result.publication.clone()),
                 })
                 .collect(),
             resource_usage: resource_usage.evidence.clone(),

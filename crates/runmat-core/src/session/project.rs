@@ -33,6 +33,7 @@ impl RunMatSession {
                 runmat_package::FrozenProjectHandoffError::Revision(error.to_string())
             })?;
         self.project_handoff = Some(handoff);
+        self.checked_fea_sources = Default::default();
         self.pending_companion_source_discovery = None;
         self.dynamic_function_cache
             .lock()
@@ -48,6 +49,7 @@ impl RunMatSession {
             .publish_project_revision(None)
             .expect("native project dependency generation is valid");
         self.project_handoff = None;
+        self.checked_fea_sources = Default::default();
         self.runtime_context = self.runtime_context.clone().with_program_revision(None);
         self.pending_companion_source_discovery = None;
         self.dynamic_function_cache

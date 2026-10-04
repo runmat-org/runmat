@@ -90,6 +90,7 @@ pub(in crate::analysis) fn admit(
     let [temperature_snapshots, temperature_gradient_snapshots, heat_flux_snapshots, energy_storage_rate_snapshots] =
         histories;
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: run_id.into(),
         run,
         render_topology: render_topology_from_solver_mesh(Some(mesh)),

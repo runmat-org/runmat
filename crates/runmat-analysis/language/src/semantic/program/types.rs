@@ -97,6 +97,10 @@ pub enum CheckedFeaStatementKind {
         name: String,
         statements: Vec<CheckedFeaStatement>,
     },
+    AssessmentDefinition {
+        name: String,
+        statements: Vec<CheckedFeaStatement>,
+    },
     Block {
         header: String,
         header_span: Span,

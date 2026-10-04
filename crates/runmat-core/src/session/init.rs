@@ -50,6 +50,7 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             native_tiering_enabled,
             project_handoff: None,
+            checked_fea_sources: Default::default(),
             pinned_inputs: None,
             captured_project: None,
             source_pool: SourcePool::default(),

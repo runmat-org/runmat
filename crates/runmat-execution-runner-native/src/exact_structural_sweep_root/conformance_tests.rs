@@ -920,10 +920,30 @@ async fn run_direct_exact_study_conformance(input: DirectExactStudyConformance) 
         assert_eq!(resolved_workload.step_id().as_str(), "frequency");
         assert_eq!(result.samples().len(), 2);
         assert_eq!(entries.len(), 2);
-        assert!(histories.is_empty());
+        assert_eq!(histories.len(), 1);
+        let finalized = histories[0]
+            .finalization
+            .as_ref()
+            .expect("frequency history finalization");
+        let series = finalized
+            .result
+            .series_reduction
+            .as_ref()
+            .expect("frequency peak series");
+        let evidence = runmat_analysis_fea::results::assessment::scalar_series_evidence(series)
+            .expect("admitted scalar frequency evidence");
+        assert!(evidence.value.is_finite() && evidence.value > 0.0);
+        assert!(matches!(
+            evidence.sample,
+            Some(
+                runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+                    20.0 | 40.0
+                )
+            )
+        ));
         numerical_receipt.validate_for_result(&result).unwrap();
         assert!(entries.iter().all(|entry| {
-            !entry.recovered_fields.manifest.fields.is_empty() && entry.observations.is_none()
+            !entry.recovered_fields.manifest.fields.is_empty() && entry.observations.is_some()
         }));
         assert_eq!(
             resource_usage.evidence.result_digest,
@@ -1293,10 +1313,38 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
 }
 
 fn box_structural_frequency_workload() -> StructuralFrequencyWorkload {
+    use runmat_analysis_core::*;
     let mut model = box_structural_workload().model;
     let mut step = runmat_analysis_core::ProcedureStep::structural_harmonic("frequency");
     step.independent_domain =
         runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![20.0, 40.0]);
+    step.observations = vec![ObservationRequest::History(ObservationSpec {
+        observation_id: ObservationId("frequency_peak".into()),
+        quantity: ObservationQuantity::Displacement,
+        value_shape: ObservationValueShape::Vector3,
+        target: ObservationTarget::WholeModel,
+        source_location: FieldLocation::Node,
+        output_location: FieldLocation::Node,
+        recovery: RecoveryPolicy::Native,
+        component: ObservationComponent::Magnitude,
+        frame: CoordinateFrame::Global,
+        sign_convention: SignConvention::Native,
+        complex_representation: ComplexRepresentation::Magnitude,
+        sampling: SamplingPolicy::FrequencyHertz(vec![20.0, 40.0]),
+        reduction: Some(ReductionPolicy {
+            spatial: SpatialReduction::Maximum,
+            series: SeriesReduction::Maximum,
+            extrema_ties: ExtremaTiePolicy::FirstCanonical,
+        }),
+        storage: ObservationStoragePolicy {
+            precision: SignalPrecision::Real64,
+            compression: CompressionPolicy::Lossless,
+            retention: RetentionPolicy::Canonical,
+            partial_access: PartialAccessPolicy::ManifestAndChunks,
+        },
+        purpose: ObservationPurpose::Publication,
+        cost: ObservationCostPolicy::Automatic,
+    })];
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
         "box-structural-frequency-sequence",
         vec![step.clone()],

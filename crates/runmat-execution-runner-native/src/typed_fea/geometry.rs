@@ -144,11 +144,9 @@ pub(super) async fn prepare_geometry_source(
         GeometryDefinitionSource::Constructed(_) => Ok(PreparedGeometrySource::constructed()),
         GeometryDefinitionSource::Imported(imported) => {
             let path = physical_source_path(&source.source_root, &imported.logical_path)?;
-            let bytes = runmat_filesystem::read_async(&path)
-                .await
-                .map_err(|error| {
-                    format!("cannot read imported geometry {}: {error}", path.display())
-                })?;
+            let bytes = source.read_source(&path).await.map_err(|error| {
+                format!("cannot read imported geometry {}: {error}", path.display())
+            })?;
             if Digest::sha256(&bytes).bytes() != imported.content_digest.bytes() {
                 return Err(format!(
                     "imported geometry {} changed after typed source checking",

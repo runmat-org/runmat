@@ -255,6 +255,7 @@ pub struct ResolvedGeometryRegion {
 pub type ResolvedGeometryRegions = BTreeMap<String, ResolvedGeometryRegion>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum GeometryRegionRole {
     Vertex,

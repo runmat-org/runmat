@@ -47,12 +47,32 @@ pub enum FeaCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Evaluate checked criteria against an immutable saved result without solving again
+    Reassess {
+        /// Checked .fea source containing the revised assessment declarations
+        file: PathBuf,
+        /// Select one study declared by the root module
+        #[arg(long)]
+        study: Option<String>,
+        /// Original saved study definition (sha256: followed by 64 lowercase hex digits)
+        #[arg(long)]
+        original_definition: runmat_execution::Digest,
+        /// Content-addressed whole-study result manifest
+        #[arg(long)]
+        result_manifest: PathBuf,
+        /// Emit the typed reassessment publication as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 impl FeaCommand {
     pub fn machine_output(&self) -> bool {
         match self {
-            Self::Check { json, .. } | Self::Plan { json, .. } | Self::Run { json, .. } => *json,
+            Self::Check { json, .. }
+            | Self::Plan { json, .. }
+            | Self::Run { json, .. }
+            | Self::Reassess { json, .. } => *json,
         }
     }
 }

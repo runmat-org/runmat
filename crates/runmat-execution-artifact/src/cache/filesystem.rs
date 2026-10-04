@@ -51,20 +51,31 @@ impl FilesystemObjectStore {
     }
 
     fn read_required(&self, digest: Digest) -> ArtifactResult<Vec<u8>> {
-        let file = OpenOptions::new().read(true).open(self.path(digest))?;
-        let length = file.metadata()?.len();
-        if length > self.max_object_bytes {
+        self.read_required_bounded(digest, self.max_object_bytes)
+    }
+
+    fn read_required_bounded(&self, digest: Digest, maximum_bytes: u64) -> ArtifactResult<Vec<u8>> {
+        let bound = maximum_bytes.min(self.max_object_bytes);
+        if bound == 0 {
             return Err(ArtifactError::Limit(
-                "filesystem object exceeds its configured byte bound".into(),
+                "filesystem read has no admitted payload allowance".into(),
+            ));
+        }
+        let mut file = OpenOptions::new().read(true).open(self.path(digest))?;
+        let length = file.metadata()?.len();
+        if length > bound {
+            return Err(ArtifactError::Limit(
+                "filesystem object exceeds the admitted byte bound".into(),
             ));
         }
         let capacity = usize::try_from(length).map_err(|_| {
             ArtifactError::Limit("filesystem object length does not fit this host".into())
         })?;
-        let mut bytes = Vec::with_capacity(capacity);
-        file.take(self.max_object_bytes.saturating_add(1))
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 != length || Digest::sha256(&bytes) != digest {
+        let mut bytes = vec![0; capacity];
+        file.read_exact(&mut bytes)?;
+        // File growth never grows the admitted buffer. Inspect at most one stack byte.
+        let mut extra = [0];
+        if file.read(&mut extra)? != 0 || Digest::sha256(&bytes) != digest {
             return Err(ArtifactError::Identity(
                 "filesystem object bytes do not match their content identity".into(),
             ));
@@ -74,6 +85,20 @@ impl FilesystemObjectStore {
 }
 
 impl CacheImport for FilesystemObjectStore {
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        match self.read_required_bounded(digest, maximum_bytes) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(ArtifactError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         match self.read_required(digest) {
             Ok(bytes) => Ok(Some(bytes)),
@@ -176,3 +201,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "filesystem/bounded_tests.rs"]
+mod bounded_tests;

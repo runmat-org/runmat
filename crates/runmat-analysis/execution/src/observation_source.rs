@@ -2,8 +2,8 @@ use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
         AnalysisNumericalObjectKind, FluidSteadyWorkload, MagnetostaticWorkload,
-        MaxwellHarmonicWorkload, StructuralFrequencyWorkload, StructuralLinearWorkload,
-        ThermalWorkload,
+        MaxwellHarmonicWorkload, NonlinearSolidWorkload, StructuralFrequencyWorkload,
+        StructuralLinearWorkload, ThermalWorkload,
     },
     results::observation::ObservationExecutionPolicy,
     ComputeBackend,
@@ -18,6 +18,7 @@ use crate::{AnalysisBridgeError, AnalysisBridgeResult, PreparedAnalysisObjects};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObservationWorkloadSource {
     Linear(PreparedAnalysisObjects),
+    NonlinearSolid(PreparedAnalysisObjects),
     Frequency(PreparedAnalysisObjects),
     Thermal(PreparedAnalysisObjects),
     Magnetostatic(PreparedAnalysisObjects),
@@ -29,6 +30,7 @@ impl ObservationWorkloadSource {
     pub(crate) const fn kind(&self) -> AnalysisNumericalObjectKind {
         match self {
             Self::Linear(_) => AnalysisNumericalObjectKind::SolverInvocation,
+            Self::NonlinearSolid(_) => AnalysisNumericalObjectKind::NonlinearSolidWorkload,
             Self::Frequency(_) => AnalysisNumericalObjectKind::StructuralFrequencyWorkload,
             Self::Thermal(_) => AnalysisNumericalObjectKind::ThermalWorkload,
             Self::Magnetostatic(_) => AnalysisNumericalObjectKind::MagnetostaticWorkload,
@@ -40,6 +42,7 @@ impl ObservationWorkloadSource {
     pub(crate) fn objects(&self) -> &PreparedAnalysisObjects {
         match self {
             Self::Linear(objects)
+            | Self::NonlinearSolid(objects)
             | Self::Frequency(objects)
             | Self::Thermal(objects)
             | Self::Magnetostatic(objects)
@@ -56,6 +59,21 @@ impl ObservationWorkloadSource {
             ));
         }
         match self {
+            Self::NonlinearSolid(_) => {
+                let workload = NonlinearSolidWorkload::from_canonical_bytes(&objects.payload())?;
+                if workload.identity()?.digest() != objects.manifest.logical_identity {
+                    return Err(AnalysisBridgeError::Identity(
+                        "nonlinear observation workload identity differs",
+                    ));
+                }
+                runmat_analysis_fea::execution::StructuralObservationSource::NonlinearSolid(
+                    &workload,
+                )
+                .validate()?;
+                Ok(AdmittedObservationWorkload::NonlinearSolid(Box::new(
+                    workload,
+                )))
+            }
             Self::FluidSteady(_) => Ok(AdmittedObservationWorkload::FluidSteady(
                 FluidSteadyWorkload::from_canonical_bytes(&objects.payload())?,
             )),
@@ -80,6 +98,7 @@ impl ObservationWorkloadSource {
 
 pub(crate) enum AdmittedObservationWorkload {
     Linear(StructuralLinearWorkload),
+    NonlinearSolid(Box<NonlinearSolidWorkload>),
     Frequency(StructuralFrequencyWorkload),
     Thermal(ThermalWorkload),
     Magnetostatic(MagnetostaticWorkload),
@@ -91,6 +110,7 @@ impl AdmittedObservationWorkload {
     pub(crate) fn model(&self) -> &AnalysisModel {
         match self {
             Self::Linear(workload) => &workload.model,
+            Self::NonlinearSolid(workload) => &workload.model,
             Self::Frequency(workload) => workload.model(),
             Self::Thermal(workload) => &workload.model,
             Self::Magnetostatic(workload) => &workload.model,
@@ -104,9 +124,10 @@ impl AdmittedObservationWorkload {
             Self::Linear(workload) => workload.backend,
             Self::Frequency(workload) => workload.backend(),
             Self::Thermal(workload) => workload.backend,
-            Self::Magnetostatic(_) | Self::MaxwellHarmonic(_) | Self::FluidSteady(_) => {
-                ComputeBackend::Cpu
-            }
+            Self::NonlinearSolid(_)
+            | Self::Magnetostatic(_)
+            | Self::MaxwellHarmonic(_)
+            | Self::FluidSteady(_) => ComputeBackend::Cpu,
         }
     }
 
@@ -116,7 +137,8 @@ impl AdmittedObservationWorkload {
             Self::Frequency(workload) => workload.observation_execution(),
             // ThermalWorkload has no authored partition override. Use the shared immutable
             // serial policy, also reconstructed by workers; never accept an unbound caller hint.
-            Self::Thermal(_)
+            Self::NonlinearSolid(_)
+            | Self::Thermal(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
             | Self::FluidSteady(_) => ObservationExecutionPolicy::serial(),

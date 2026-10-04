@@ -1,6 +1,7 @@
 use crate::results::field::RecoveredFieldSample;
 use runmat_analysis_core::{
     AnalysisField, ComplexRepresentation, ExtremaTiePolicy, SeriesReduction, SeriesWeighting,
+    SpatialReduction,
 };
 
 use super::super::{
@@ -41,7 +42,7 @@ pub fn reduce_observation_history(
             "series reduction requires the complete retained history".into(),
         ));
     }
-    validate_series_inputs(history, reduction.series)?;
+    validate_series_inputs(history, reduction.series, reduction.spatial)?;
 
     let partition_count = history
         .samples()
@@ -97,7 +98,15 @@ fn canonical_sample_ranges(count: usize, partitions: usize) -> Vec<std::ops::Ran
 fn validate_series_inputs(
     history: &ObservationHistory,
     operation: SeriesReduction,
+    spatial: SpatialReduction,
 ) -> Result<(), ObservationError> {
+    // Spatial extrema have stable value lanes, but their entities are sample-local
+    // governing locations. A different node may govern at each time/frequency.
+    // Unreduced fields retain entity-indexed lanes and must keep their exact layout.
+    let sample_local_entities = matches!(
+        spatial,
+        SpatialReduction::Minimum | SpatialReduction::Maximum
+    );
     let first = &history.samples()[0].result;
     let first_values = first
         .field
@@ -119,7 +128,7 @@ fn validate_series_inputs(
                 "series reduction requires host-resident f64 values",
             ))?;
         if sample.result.field.shape != first.field.shape
-            || sample.result.entities != first.entities
+            || (!sample_local_entities && sample.result.entities != first.entities)
             || values.len() != first_values.len()
         {
             return Err(ObservationError::Identity(

@@ -56,11 +56,12 @@ pub(crate) struct MaterializedFeaSweep {
     pub entries: Vec<MaterializedFeaSweepEntry>,
 }
 
-pub(crate) fn materialize_fea_study(
+pub(crate) async fn materialize_fea_study(
     run_id: &str,
     response: ProgramExecutionResponse,
     objects: Vec<ProgramExecutionObject>,
     mut expectation: StructuralStudyResultExpectation,
+    functions: &[runmat_analysis_execution::assessment_program::FrozenAssessmentCallable],
 ) -> Result<MaterializedFeaStudy> {
     expectation.artifact_access = artifact_access(run_id);
     expectation.validate()?;
@@ -72,18 +73,19 @@ pub(crate) fn materialize_fea_study(
         ObjectInventoryLimits::default(),
     )?;
     let result = exact_result(exact, cache)?;
-    let publication = publish_materialized_result(&result, run_id)?;
+    let publication = publish_materialized_result(&result, run_id, functions).await?;
     Ok(MaterializedFeaStudy {
         result,
         publication,
     })
 }
 
-pub(crate) fn materialize_fea_sweep(
+pub(crate) async fn materialize_fea_sweep(
     run_id: &str,
     response: ProgramExecutionResponse,
     objects: Vec<ProgramExecutionObject>,
     mut expectation: StructuralSweepResultExpectation,
+    functions: &[Vec<runmat_analysis_execution::assessment_program::FrozenAssessmentCallable>],
 ) -> Result<MaterializedFeaSweep> {
     let access = artifact_access(run_id);
     expectation.artifact_access = access.clone();
@@ -98,52 +100,57 @@ pub(crate) fn materialize_fea_sweep(
         &expectation,
         ObjectInventoryLimits::default(),
     )?;
-    let entries = imported
-        .entries
-        .into_iter()
-        .map(|entry| {
-            let terminal = match entry.terminal {
-                ExactStructuralSweepTerminal::Succeeded(result) => {
-                    let result = exact_result(*result, cache.clone())?;
-                    let publication = publish_materialized_result(
-                        &result,
-                        &format!("{run_id}_study_{}", entry.study_index),
-                    )?;
-                    MaterializedFeaSweepTerminal::Succeeded(Box::new(MaterializedFeaStudy {
-                        result,
-                        publication,
-                    }))
-                }
-                ExactStructuralSweepTerminal::Failed(message) => {
-                    MaterializedFeaSweepTerminal::Failed(message)
-                }
-                ExactStructuralSweepTerminal::Cancelled => MaterializedFeaSweepTerminal::Cancelled,
-                ExactStructuralSweepTerminal::Indeterminate(message) => {
-                    MaterializedFeaSweepTerminal::Indeterminate(message)
-                }
-            };
-            Ok(MaterializedFeaSweepEntry {
-                study_index: entry.study_index,
-                terminal,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut entries = Vec::with_capacity(imported.entries.len());
+    for entry in imported.entries {
+        let terminal = match entry.terminal {
+            ExactStructuralSweepTerminal::Succeeded(result) => {
+                let result = exact_result(*result, cache.clone())?;
+                let publication = publish_materialized_result(
+                    &result,
+                    &format!("{run_id}_study_{}", entry.study_index),
+                    functions
+                        .get(entry.study_index)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                )
+                .await?;
+                MaterializedFeaSweepTerminal::Succeeded(Box::new(MaterializedFeaStudy {
+                    result,
+                    publication,
+                }))
+            }
+            ExactStructuralSweepTerminal::Failed(message) => {
+                MaterializedFeaSweepTerminal::Failed(message)
+            }
+            ExactStructuralSweepTerminal::Cancelled => MaterializedFeaSweepTerminal::Cancelled,
+            ExactStructuralSweepTerminal::Indeterminate(message) => {
+                MaterializedFeaSweepTerminal::Indeterminate(message)
+            }
+        };
+        entries.push(MaterializedFeaSweepEntry {
+            study_index: entry.study_index,
+            terminal,
+        });
+    }
     Ok(MaterializedFeaSweep { entries })
 }
 
-fn publish_materialized_result(
+async fn publish_materialized_result(
     result: &runmat_runtime::analysis::StructuralStudyResult,
     run_id: &str,
+    functions: &[runmat_analysis_execution::assessment_program::FrozenAssessmentCallable],
 ) -> Result<AnalysisStudyRunData> {
     let publication = runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(run_id)
         .map_err(anyhow::Error::msg)?;
-    runmat_runtime::analysis::publish_structural_study_result(
+    let prepared = runmat_runtime::analysis::prepare_structural_study_publication(
         result,
         runmat_runtime::operations::OperationContext::new(None, Some(run_id.to_string())),
         publication,
     )
-    .map(|envelope| envelope.data)
-    .map_err(super::super::report_operation_error)
+    .map_err(super::super::report_operation_error)?;
+    runmat_execution_runner_native::complete_frozen_fea_assessments(prepared, functions)
+        .await
+        .map_err(anyhow::Error::msg)
 }
 
 fn exact_result(

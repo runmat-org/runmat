@@ -132,6 +132,12 @@ pub(super) fn execute(
         (ObservationFieldCatalogSource::Structural { .. }, None, Some(source), mesh) => {
             ObservationHistorySourceContext::Structural { source, mesh }
         }
+        (
+            ObservationFieldCatalogSource::StructuralFrequencyHistory { .. },
+            None,
+            Some(source @ StructuralObservationSource::Frequency(_)),
+            mesh,
+        ) => ObservationHistorySourceContext::Structural { source, mesh },
         _ => {
             return Err(AnalysisBridgeError::Identity(
                 "history source context differs from catalog",

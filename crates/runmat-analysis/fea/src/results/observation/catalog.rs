@@ -15,6 +15,7 @@ use crate::execution::{
 use crate::results::field::RecoveredFieldArtifactManifest;
 
 mod finite_volume;
+mod frequency;
 mod sampled;
 mod selection;
 pub use selection::ObservationSelectionCoordinate;
@@ -39,6 +40,11 @@ pub enum ObservationFieldCatalogSource {
     Structural {
         recovery_request: Box<FieldRecoveryRequest>,
         manifest: Box<RecoveredFieldArtifactManifest>,
+    },
+    /// Complete, ordered source authority for a frequency history. Children are
+    /// individual structural recoveries; nested history catalogs are inadmissible.
+    StructuralFrequencyHistory {
+        samples: Vec<ObservationFieldCatalog>,
     },
     Thermal {
         manifest: Box<ThermalSolverResultManifest>,
@@ -233,6 +239,9 @@ impl ObservationFieldCatalog {
                 }
             }
             ObservationFieldCatalogSource::Thermal { manifest } => manifest.validate()?,
+            ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
+                frequency::validate_samples(samples)?;
+            }
         }
         if self.schema_version != 1 || self.identity != self.derive_identity()? {
             return Err(invalid("unsupported schema or catalog identity mismatch"));
@@ -251,6 +260,7 @@ impl ObservationFieldCatalog {
                 manifest,
             } => selection.validate_structural(recovery_request, manifest),
             ObservationFieldCatalogSource::Thermal { .. }
+            | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
             | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected structural catalog"))
@@ -270,6 +280,7 @@ impl ObservationFieldCatalog {
                 selection.validate_thermal(workload, manifest, mesh)
             }
             ObservationFieldCatalogSource::Structural { .. }
+            | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
             | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected thermal catalog"))

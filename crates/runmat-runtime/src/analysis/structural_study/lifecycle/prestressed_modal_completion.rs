@@ -10,7 +10,8 @@ pub(in crate::analysis) fn complete_prestressed_modal_study(
     numerical: crate::analysis::StructuralStudyPrestressedModalNumericalResult,
     preload_run_id: String,
     modal_run_id: String,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let [preload_step, modal_step] = prepared.steps.as_slice() else {
         return Err(completion_error(
             &prepared,
@@ -205,7 +206,7 @@ pub(in crate::analysis) fn complete_prestressed_modal_study(
         AnalysisSolverOptions::StructuralLinear(preload_options.clone());
     prepared.steps[1].authored_execution.solver_options =
         AnalysisSolverOptions::StructuralModes(modal_options.clone());
-    complete_study_run(
+    complete_study_run_prepared(
         prepared,
         vec![
             CompletedStudyStep {
@@ -223,6 +224,7 @@ pub(in crate::analysis) fn complete_prestressed_modal_study(
         ],
         states,
         numerical.frozen_project_digest,
+        preparation,
     )
 }
 
@@ -237,7 +239,8 @@ pub(super) fn complete_structural_prestressed_modal(
     >,
     numerical: crate::analysis::StructuralStudyPrestressedModalNumericalResult,
     completion_identity: AnalysisStudyCompletionIdentity,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let [preload_step, modal_step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
             &intent,
@@ -283,5 +286,6 @@ pub(super) fn complete_structural_prestressed_modal(
         numerical,
         preload_run_id,
         modal_run_id,
+        preparation,
     )
 }

@@ -177,14 +177,6 @@ pub struct FeaElectroThermalContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaPlasticityConstitutiveContext {
-    pub enabled: bool,
-    pub yield_strain: f64,
-    pub hardening_modulus_ratio: f64,
-    pub saturation_exponent: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaContactInterfaceContext {
     pub enabled: bool,
     pub penalty_stiffness_scale: f64,
@@ -561,6 +553,9 @@ impl TryFrom<StructuralInitialStateEvidenceData> for StructuralInitialStateEvide
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaNonlinearRunResult {
     pub run: FeaRunResult,
+    /// Complete original converged point history. Element fields are projections,
+    /// not restart authority; deserialization alone does not admit continuation.
+    pub accepted_state: crate::solve::nonlinear::AcceptedSolidState,
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub rotation_snapshots: Vec<AnalysisField>,

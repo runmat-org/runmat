@@ -551,6 +551,15 @@ async fn compose_frozen_project_async(
     frozen: &runmat_package::FrozenProject,
     compat_mode: runmat_parser::CompatMode,
 ) -> Result<CompanionSourceDiscovery, String> {
+    compose_frozen_source_view_async(context, frozen, compat_mode, None).await
+}
+
+async fn compose_frozen_source_view_async(
+    context: &ProjectCompilationContext,
+    frozen: &runmat_package::FrozenProject,
+    compat_mode: runmat_parser::CompatMode,
+    captured: Option<&std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>>,
+) -> Result<CompanionSourceDiscovery, String> {
     let options = ParserOptions::new(compat_mode);
     let mut out = CompanionSourceDiscovery::default();
     out.source_catalog = context.source_catalog.clone();
@@ -562,10 +571,18 @@ async fn compose_frozen_project_async(
             continue;
         }
         let file_path = access_path.to_path_buf();
-        let file_path =
+        let (file_path, contents) = if let Some(captured) = captured {
+            let bytes = captured.get(&file_path).ok_or_else(|| format!("captured source is unavailable: {}", file_path.display()))?;
+            if runmat_package::ContentDigest::sha256(bytes) != source.id.content_digest {
+                return Err(format!("captured source differs from its frozen identity: {}", file_path.display()));
+            }
+            let text = String::from_utf8(bytes.clone()).map_err(|_| format!("captured MATLAB source is not UTF-8: {}", file_path.display()))?;
+            (file_path, text)
+        } else {
+            let file_path =
             runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
                 .await;
-        let contents =
+            let contents =
             runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
                 .await
                 .map_err(|error| {
@@ -574,6 +591,8 @@ async fn compose_frozen_project_async(
                         file_path.display()
                     )
                 })?;
+            (file_path, contents)
+        };
         if !contents.contains("classdef") && !contents.contains("function") {
             continue;
         }
@@ -762,6 +781,37 @@ impl RunMatSession {
         source: crate::ExecutableSource,
         program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        self.compile_executable_source_view(source, program_revision, None).await
+    }
+
+    /// Compile against an explicit immutable source inventory. Missing captures
+    /// are errors, never permission to discover live bytes from a provider.
+    pub async fn compile_executable_unit_from_snapshot(
+        &mut self,
+        source: crate::ExecutableSource,
+        program_revision: runmat_execution::ProgramRevision,
+        handoff: &runmat_package::FrozenProjectHandoff,
+        captured: &std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        handoff.validate().map_err(|error| RunError::Runtime(build_runtime_error(error.to_string()).with_identifier("RunMat:CapturedSourceIdentity").build()))?;
+        let captured_bytes = captured.get(Path::new(source.lookup_path()));
+        let descriptor = handoff.project.all_sources().find(|(_, path)| path.as_path() == Path::new(source.lookup_path())).map(|(descriptor, _)| descriptor);
+        let project = handoff.project.revision();
+        if !matches!((captured_bytes, descriptor), (Some(bytes), Some(descriptor))
+            if bytes.as_slice() == source.text.as_bytes() && runmat_package::ContentDigest::sha256(bytes) == descriptor.id.content_digest)
+            || *program_revision.graph_digest() != runmat_execution::Digest::from_bytes(*project.graph_digest.bytes())
+            || *program_revision.source_digest() != runmat_execution::Digest::from_bytes(*project.source_revision.bytes()) {
+            return Err(RunError::Runtime(build_runtime_error("captured executable source does not match its admitted project revision").with_identifier("RunMat:CapturedSourceIdentity").build()));
+        }
+        self.compile_executable_source_view(source, Some(program_revision), Some((handoff, captured))).await
+    }
+
+    async fn compile_executable_source_view(
+        &mut self,
+        source: crate::ExecutableSource,
+        program_revision: Option<runmat_execution::ProgramRevision>,
+        snapshot: Option<(&runmat_package::FrozenProjectHandoff, &std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>)>,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
         {
@@ -784,7 +834,12 @@ impl RunMatSession {
         self.active_source_name = source.relative_path.clone();
         self.active_source_fullpath_name = Some(source.lookup_path().to_string());
 
-        let companion_result = if let Some(handoff) = self.project_handoff.as_ref() {
+        let companion_result = if let Some((handoff, captured)) = snapshot {
+            match project_compilation_context_from_handoff(source.lookup_path(), handoff) {
+                Ok(context) => compose_frozen_source_view_async(&context, &handoff.project, self.compat_mode, Some(captured)).await,
+                Err(error) => Err(error),
+            }
+        } else if let Some(handoff) = self.project_handoff.as_ref() {
             companion_source_statements_from_handoff_async(
                 source.lookup_path(),
                 self.compat_mode,

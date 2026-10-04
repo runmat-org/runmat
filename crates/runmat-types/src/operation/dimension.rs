@@ -8,6 +8,8 @@ use super::QuantityDimension;
 /// the authority for derived results such as a pressure integrated over an area or a resultant
 /// moment about a point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
 pub struct PhysicalDimension {
     pub length: i8,
     pub mass: i8,

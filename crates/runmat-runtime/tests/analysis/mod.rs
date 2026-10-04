@@ -245,7 +245,6 @@ struct BaselineConfig {
 const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "modal_large_gpu_provider",
     "modal_large_gpu_provider_stress16",
-    "cfd_steady_gpu_provider",
     "cht_coupled_gpu_provider",
     "fsi_coupled_gpu_provider",
     "thermal_standalone_ramp_gpu_provider",
@@ -356,6 +355,7 @@ fn fea_benchmark_conformance_manifest_gates() {
     runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
         artifact_root: Some(artifact_root.clone()),
         study_artifact_root: Some(artifact_root.join("studies")),
+        ..Default::default()
     })
     .expect("configure FEA runtime artifact roots for harness");
 

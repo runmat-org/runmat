@@ -1256,6 +1256,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "ciborium"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42e69ffd6f0917f5c029256a24d0161db17cea3997d185db0d35926308770f0e"
+dependencies = [
+ "ciborium-io",
+ "ciborium-ll",
+ "serde",
+]
+
+[[package]]
+name = "ciborium-io"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05afea1e0a06c9be33d539b876f1ce3692f4afea2cb41f740e7743225ed1c757"
+
+[[package]]
+name = "ciborium-ll"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
+dependencies = [
+ "ciborium-io",
+ "half",
+]
+
+[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5563,6 +5590,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "version_check",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6327,6 +6378,7 @@ version = "0.6.2"
 dependencies = [
  "runmat-geometry-core",
  "runmat-types",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -6351,6 +6403,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -6385,6 +6438,7 @@ dependencies = [
  "runmat-meshing-core",
  "runmat-parser",
  "runmat-types",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6493,6 +6547,7 @@ dependencies = [
  "runmat-config",
  "runmat-execution",
  "runmat-execution-artifact",
+ "runmat-fea-source",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
@@ -6645,18 +6700,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-fea-source"
+version = "0.6.2"
+dependencies = [
+ "runmat-analysis-core",
+ "runmat-analysis-language",
+ "runmat-geometry-core",
+ "runmat-meshing-core",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-filesystem"
 version = "0.6.2"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
  "chrono",
+ "ciborium",
  "crossbeam-utils",
+ "fs2",
  "futures",
  "js-sys",
  "log",
  "once_cell",
  "reqwest 0.12.28",
+ "runmat-canonical-codec",
+ "runmat-workspace-contracts",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6709,6 +6782,7 @@ name = "runmat-geometry-core"
 version = "0.6.2"
 dependencies = [
  "runmat-canonical-codec",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7208,7 +7282,9 @@ dependencies = [
  "runmat-analysis-language",
  "runmat-async",
  "runmat-builtins",
+ "runmat-canonical-codec",
  "runmat-execution",
+ "runmat-fea-source",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
@@ -7388,6 +7464,7 @@ dependencies = [
 name = "runmat-types"
 version = "0.6.2"
 dependencies = [
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -7489,6 +7566,22 @@ dependencies = [
  "wasm-bindgen-test",
  "web-sys",
  "zeroize",
+]
+
+[[package]]
+name = "runmat-workspace-contracts"
+version = "0.6.2"
+dependencies = [
+ "ciborium",
+ "schemars",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "ts-rs",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]
@@ -7929,6 +8022,16 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -9113,6 +9216,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ts-rs"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
+dependencies = [
+ "lazy_static",
+ "thiserror 2.0.18",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "10.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e9d8656589772eeec2cf7a8264d9cda40fb28b9bc53118ceb9e8c07f8f38730"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+ "termcolor",
+]
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9387,6 +9513,30 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utoipa"
+version = "4.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5afb1a60e207dca502682537fefcfd9921e71d0b83e9576060f09abc6efab23"
+dependencies = [
+ "indexmap 2.14.0",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "4.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20c24e8ab68ff9ee746aad22d39b5535601e6416d1b0feeabf78be986a5c4392"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
 
 [[package]]
 name = "uuid"

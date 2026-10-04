@@ -21,6 +21,48 @@ pub struct PreparedAnalysisProgram {
 }
 
 impl PreparedAnalysisProgram {
+    /// Requested storage of both owned transport inventories and immutable request metadata.
+    /// These buffers coexist on a coordinating driver; this is not measured process memory.
+    pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {
+        let metadata = runmat_canonical_codec::profile_serialized(
+            &self.request,
+            runmat_canonical_codec::CanonicalLimits::new(
+                1024 * 1024 * 1024,
+                100_000_000,
+                65_536,
+                64,
+            ),
+        )?;
+        let mut bytes = crate::object::logical_objects_storage(&self.logical_objects)?
+            .checked_add(metadata.materialization_resident_bytes_estimate)
+            .and_then(|n| {
+                n.checked_add(
+                    (self.objects.capacity() as u64)
+                        .checked_mul(std::mem::size_of::<ProgramExecutionObject>() as u64)?,
+                )
+            })
+            .ok_or_else(|| {
+                AnalysisBridgeError::Invalid("retained program storage overflow".into())
+            })?;
+        for object in &self.objects {
+            let reference = runmat_canonical_codec::profile_serialized(
+                &object.reference,
+                runmat_canonical_codec::CanonicalLimits::new(
+                    1024 * 1024 * 1024,
+                    100_000_000,
+                    65_536,
+                    64,
+                ),
+            )?;
+            bytes = bytes
+                .checked_add(object.bytes.capacity() as u64)
+                .and_then(|n| n.checked_add(reference.materialization_resident_bytes_estimate))
+                .ok_or_else(|| {
+                    AnalysisBridgeError::Invalid("retained program storage overflow".into())
+                })?;
+        }
+        Ok(bytes)
+    }
     pub fn write_to(
         &self,
         store: &mut impl runmat_execution_artifact::cache::CacheExport,

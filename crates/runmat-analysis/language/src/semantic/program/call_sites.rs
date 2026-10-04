@@ -56,6 +56,9 @@ fn statements(
             | CheckedFeaStatementKind::ModelDefinition {
                 statements: body, ..
             }
+            | CheckedFeaStatementKind::AssessmentDefinition {
+                statements: body, ..
+            }
             | CheckedFeaStatementKind::Block {
                 statements: body, ..
             }

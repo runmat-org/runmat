@@ -14,7 +14,7 @@ use super::study_result_manifest::StudyResultManifest;
 use publication_options::publication_steps;
 
 use super::structural_study::{
-    analysis_complete_structural_study_intent_op, PreparedStructuralStudyIntent,
+    prepare_structural_study_intent_completion, PreparedStructuralStudyIntent,
 };
 use super::{
     execution_operation, AnalysisStudyCompletionIdentity, AnalysisStudyRunData,
@@ -31,6 +31,47 @@ pub fn publish_structural_study_result(
     context: OperationContext,
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let publication_context = context.clone();
+    let study_id = result.compiled().study_id.clone();
+    prepare_structural_study_publication(result, context, publication_identity)?
+        .publish_without_function_execution()
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &publication_context,
+                |message| typed_publication_error(&publication_context, &study_id, message),
+            )
+        })
+}
+
+pub fn prepare_structural_study_publication(
+    result: &StructuralStudyResult,
+    context: OperationContext,
+    publication_identity: AnalysisStudyCompletionIdentity,
+) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
+    let mut preparation =
+        crate::analysis::study_publication::preparation::PublicationPreparation::capture(
+            result.definition_digest().map_err(|message| {
+                typed_publication_error(&context, &result.compiled().study_id, message)
+            })?,
+            result,
+        )
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &context,
+                |message| typed_publication_error(&context, &result.compiled().study_id, message),
+            )
+        })?;
+    preparation
+        .admit_structural_sources(result.numerical())
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &context,
+                |message| typed_publication_error(&context, &result.compiled().study_id, message),
+            )
+        })?;
     let compiled = result.compiled();
     let study_definition_digest = result
         .definition_digest()
@@ -72,7 +113,7 @@ pub fn publish_structural_study_result(
     intent.intent_digest = intent
         .semantic_digest()
         .map_err(|message| typed_publication_error(&intent.context, &intent.study_id, message))?;
-    let mut published = analysis_complete_structural_study_intent_op(
+    let published = prepare_structural_study_intent_completion(
         intent,
         crate::meshing::MeshingExecutionOutput {
             artifact: result.mesh().clone(),
@@ -81,9 +122,12 @@ pub fn publish_structural_study_result(
         },
         result.numerical().clone(),
         publication_identity,
+        preparation,
     )?;
-    let published_context =
-        OperationContext::new(published.trace_id.clone(), published.request_id.clone());
+    let published_context = OperationContext::new(
+        published.published.trace_id.clone(),
+        published.published.request_id.clone(),
+    );
     let invalid =
         |message| typed_publication_error(&published_context, &compiled.study_id, message);
     let result_manifest = StudyResultManifest::new(
@@ -92,19 +136,37 @@ pub fn publish_structural_study_result(
             .workloads()
             .canonical_digest()
             .map_err(|error| invalid(error.to_string()))?,
-        result.workloads().clone(),
+        result.workloads(),
         result.mesh(),
         result.meshing_evidence(),
-        StructuralStudyNumericalEvidence::from_result(result.numerical(), study_definition_digest)
-            .map_err(invalid)?,
-        published.data.clone(),
+        StructuralStudyNumericalEvidence::from_result(
+            result.numerical(),
+            study_definition_digest,
+            &published.staging,
+        )
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &published_context,
+                invalid,
+            )
+        })?,
+        &published,
     )
-    .map_err(invalid)?;
-    let manifest_path = result_manifest.persist().map_err(|message| {
-        typed_publication_error(&published_context, &compiled.study_id, message)
+    .map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(
+            error,
+            &published_context,
+            invalid,
+        )
     })?;
-    published.data.result_manifest_artifact_path = Some(manifest_path);
-    Ok(published)
+    crate::analysis::PreparedStudyPublication::new(published, result_manifest).map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(
+            error,
+            &published_context,
+            invalid,
+        )
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -230,17 +292,18 @@ impl StructuralStudyNumericalEvidence {
     fn from_result(
         result: &super::StructuralStudyNumericalResult,
         study_digest: Digest,
-    ) -> Result<Self, String> {
+        staging: &crate::analysis::storage::AnalysisPublicationBuilder,
+    ) -> Result<Self, crate::analysis::storage::AnalysisPublicationError> {
         Ok(match result {
             super::StructuralStudyNumericalResult::ThermalPrestress {
                 thermal,
                 thermal_source,
                 structural,
             } => Self::ThermalPrestress {
-                object_artifact_paths: thermal_source.persist(thermal, study_digest)?,
+                object_artifact_paths: thermal_source.persist(thermal, study_digest, staging)?,
                 root: thermal.root.clone(),
                 catalog: thermal.catalog.clone(),
-                structural: Box::new(Self::from_result(structural, study_digest)?),
+                structural: Box::new(Self::from_result(structural, study_digest, staging)?),
             },
             super::StructuralStudyNumericalResult::LinearSequence(result) => Self::LinearSequence {
                 frozen_project_digest: result.frozen_project_digest,

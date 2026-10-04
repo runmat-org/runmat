@@ -13,6 +13,7 @@ mod magnetic_planning;
 mod magnetic_product;
 mod maxwell_planning;
 mod maxwell_product;
+mod nonlinear_product;
 mod planning;
 mod product;
 mod thermal_planning;
@@ -60,6 +61,10 @@ pub use maxwell_planning::{
 pub use maxwell_product::{
     build_maxwell_study_product, plan_maxwell_study_product, MaxwellStudyProduct,
     MaxwellStudyProductError, MaxwellStudyProductInput,
+};
+pub use nonlinear_product::{
+    build_nonlinear_solid_study_product, plan_nonlinear_solid_study_product,
+    NonlinearSolidStudyPlanningError, NonlinearSolidStudyProduct, NonlinearSolidStudyProductInput,
 };
 pub use planning::{
     plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,

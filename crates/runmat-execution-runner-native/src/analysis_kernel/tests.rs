@@ -105,7 +105,7 @@ fn test_host_for_input_references(
     .unwrap()
 }
 
-fn structural_displacement_observation() -> runmat_analysis_core::ObservationRequest {
+pub(super) fn structural_displacement_observation() -> runmat_analysis_core::ObservationRequest {
     runmat_analysis_core::ObservationRequest::Field(runmat_analysis_core::ObservationSpec {
         observation_id: runmat_analysis_core::ObservationId("whole_displacement".into()),
         quantity: runmat_analysis_core::ObservationQuantity::Displacement,

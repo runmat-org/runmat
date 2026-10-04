@@ -2,6 +2,7 @@
 
 mod accuracy_evaluation;
 mod accuracy_source_context;
+pub mod assessment_program;
 pub use accuracy_source_context::validate_accuracy_source_context;
 mod accuracy_resource;
 mod buckling_object_access;
@@ -19,6 +20,22 @@ mod fluid_source_admission;
 mod fluid_steady_plan;
 mod fluid_steady_result;
 mod fluid_steady_task;
+mod nonlinear_block;
+mod nonlinear_study;
+mod study_closure;
+pub use nonlinear_block::{
+    import_nonlinear_solid_block, prepare_nonlinear_solid_block_task,
+    rederive_nonlinear_solid_block_resource_plan, require_nonlinear_solid_source_decode_budget,
+    ImportedNonlinearSolidBlock, NonlinearSolidBlockPreparation, PreparedNonlinearSolidBlockTask,
+};
+pub use nonlinear_study::{
+    import_nonlinear_solid_study_completion, import_nonlinear_solid_study_root,
+    prepare_nonlinear_solid_study_root, CompletedNonlinearSolidStudy,
+    NonlinearSolidStudyCoordinator, NonlinearSolidStudyPhase, NonlinearSolidStudyPreparation,
+    NonlinearSolidStudyResultClosure, NonlinearSolidStudyResultPhase,
+    OriginalNonlinearSolidBlockProjection, PreparedNonlinearSolidStudyRoot,
+    DEFAULT_NONLINEAR_SOLID_ACCEPTED_BLOCK_LIMIT,
+};
 mod frequency_field_recovery;
 mod frequency_object_access;
 mod frequency_sample_publication;
@@ -34,6 +51,7 @@ mod input_plan;
 mod materialized_signal;
 mod modal_object_access;
 mod modal_task;
+pub mod named_callable;
 mod object;
 mod observation_assembly;
 mod observation_evaluation;
@@ -114,13 +132,13 @@ mod electrical_static_result;
 mod electrical_static_task;
 mod electrical_study;
 mod fluid_study;
+mod magnetic_study;
+mod maxwell_study;
 pub use fluid_study::{
     import_fluid_study_completion, import_fluid_study_root, prepare_fluid_study_root,
     CompletedFluidStudy, FluidStudyCoordinator, FluidStudyPhase, FluidStudyPreparation,
     FluidStudyResultClosure, FluidStudyResultPhase, PreparedFluidStudyRoot,
 };
-mod magnetic_study;
-mod maxwell_study;
 mod sampled_study_observations;
 mod steady_study;
 pub use magnetic_study::{
@@ -274,7 +292,7 @@ pub use callable::{
     AdmittedGeneratorInvocation, AdmittedNumericalGenerator, AdmittedSignalGenerator,
     NumericalGeneratorKind,
 };
-pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
+pub use error::{AnalysisBridgeError, AnalysisBridgeResult, CoordinatorRetentionLimit};
 pub use field_recovery::{
     decode_recovered_field_artifact, import_structural_recovered_fields,
     prepare_structural_field_recovery, ImportedRecoveredFields, PreparedStructuralFieldRecovery,
@@ -472,7 +490,13 @@ pub use state_publication::{
     import_semantic_state, import_semantic_state_completion, prepare_semantic_state_publication,
     ImportedSemanticState, PreparedSemanticStatePublication, SemanticStatePublicationPreparation,
 };
+mod nonlinear_state_publication;
 mod state_publication_resource;
+pub use nonlinear_state_publication::{
+    build_prepared_nonlinear_state_publication_resource_plan, decode_nonlinear_state_publication,
+    nonlinear_state_host_input, prepare_nonlinear_solid_state_publication,
+    require_nonlinear_state_decode_budget, NonlinearSolidStatePublicationPreparation,
+};
 pub use state_publication_resource::build_prepared_state_publication_resource_plan;
 pub use state_transition::bind_upstream_state_transition;
 pub use structural::{
@@ -576,3 +600,12 @@ pub use workload::{
 
 #[cfg(test)]
 mod tests;
+
+mod nonlinear_field_recovery;
+pub use nonlinear_field_recovery::{
+    build_nonlinear_recovery_metadata_resource_plan,
+    build_prepared_nonlinear_recovery_resource_plan, decode_nonlinear_recovery_source,
+    import_nonlinear_recovered_fields, prepare_nonlinear_field_recovery,
+    require_nonlinear_recovery_decode_budget, NonlinearFieldRecoveryPreparation,
+    PreparedNonlinearFieldRecovery,
+};

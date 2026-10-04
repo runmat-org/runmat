@@ -24,9 +24,27 @@ pub(crate) fn admit_named_signal_generator_from_executable(
     executable: &ExecutableUnitEnvelope,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    let function = verified_named_function(executable, &revision, &callable)?;
+    let identity = &executable.manifest.identity;
+    super::admit_named_signal_generator(
+        signal,
+        revision,
+        callable,
+        identity.source_digest,
+        &function,
+        available_capabilities,
+    )
+}
+
+/// Recover the function contract from the authenticated executable component.
+pub(crate) fn verified_named_function(
+    executable: &ExecutableUnitEnvelope,
+    revision: &ProgramRevision,
+    callable: &BundleCallable,
+) -> AnalysisBridgeResult<runmat_mir::analysis::FunctionAnalysis> {
     executable.validate()?;
     let identity = &executable.manifest.identity;
-    if identity.program != revision
+    if &identity.program != revision
         || identity.root_package != callable.owner_identity
         || identity.entrypoint_kind != ExecutableEntrypointKind::Function
     {
@@ -86,12 +104,5 @@ pub(crate) fn admit_named_signal_generator_from_executable(
             "executable manifest omits callable capabilities",
         ));
     }
-    super::admit_named_signal_generator(
-        signal,
-        revision,
-        callable,
-        identity.source_digest,
-        function,
-        available_capabilities,
-    )
+    Ok(function.clone())
 }

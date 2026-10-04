@@ -13,6 +13,10 @@ runmat-geometry-core = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+schemars = { version = "0.8", optional = true }
+
+[features]
+tool-schema = ["dep:schemars"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

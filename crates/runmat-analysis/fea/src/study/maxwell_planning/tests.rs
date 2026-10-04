@@ -63,6 +63,7 @@ pub(in crate::study) fn compiled(
         study_id: "maxwell".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
+        assessments: Vec::new(),
         outputs: vec![],
         model,
         properties,

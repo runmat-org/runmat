@@ -9,7 +9,7 @@ use runmat_execution::{
 };
 use std::sync::Arc;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ElectricalStudyCompletion {
     pub compiled: runmat_analysis_fea::study::CompiledAnalysisStudy,
     pub workload: ElectricalStaticWorkload,
@@ -53,13 +53,16 @@ impl ElectricalStudyObjectSource {
         &self,
         completed: &ElectricalStudyCompletion,
         definition: Digest,
-    ) -> Result<Vec<String>, String> {
+        staging: &crate::analysis::storage::AnalysisPublicationBuilder,
+    ) -> Result<Vec<String>, crate::analysis::storage::AnalysisPublicationError> {
+        staging.require_source_objects(&completed.catalog.objects)?;
         self.authenticate(completed)?;
         super::super::study_result_manifest::persist_catalog_objects(
             self,
             &completed.catalog,
             definition,
             "electrical-object",
+            staging,
         )
     }
 }

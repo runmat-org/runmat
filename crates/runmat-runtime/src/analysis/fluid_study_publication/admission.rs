@@ -2,10 +2,6 @@
 use super::*;
 use runmat_analysis_fea::results::field::RecoveredFieldArtifact;
 
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
-
 pub(super) fn validate(
     completed: &FluidStudyCompletion,
     source: &FluidStudyObjectSource,
@@ -140,3 +136,7 @@ fn validate_options(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

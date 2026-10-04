@@ -19,6 +19,19 @@ pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    fn workspace_access(
+        &self,
+        root: &Path,
+        writable: bool,
+        maximum_resident_bytes: u64,
+    ) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
+        Ok(Box::new(crate::workspace_access::NativeAccess::open(
+            root.to_path_buf(),
+            writable,
+            None,
+            maximum_resident_bytes,
+        )?))
+    }
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut opts = fs::OpenOptions::new();
         opts.read(flags.read);
@@ -188,6 +201,14 @@ pub(crate) fn atomic_create_new_native(
     path: &Path,
     bytes: &[u8],
 ) -> io::Result<AtomicCreateResult> {
+    atomic_create_new_native_bounded(path, bytes, None)
+}
+
+pub(crate) fn atomic_create_new_native_bounded(
+    path: &Path,
+    bytes: &[u8],
+    maximum_existing_bytes: Option<u64>,
+) -> io::Result<AtomicCreateResult> {
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -262,7 +283,11 @@ pub(crate) fn atomic_create_new_native(
                     "atomic publication target is not a regular file",
                 ));
             }
-            Ok(AtomicCreateResult::Existing(fs::read(path)?))
+            let existing = match maximum_existing_bytes {
+                Some(maximum) => crate::workspace_access::file::read(path, maximum)?,
+                None => fs::read(path)?,
+            };
+            Ok(AtomicCreateResult::Existing(existing))
         })(),
         Err(error) => Err(error),
     };

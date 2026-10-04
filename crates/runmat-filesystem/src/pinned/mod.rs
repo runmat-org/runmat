@@ -1,8 +1,8 @@
 //! Execution-scoped filesystem authority. The manifest fixes all input names
 //! and versions; subsequent shared edits cannot change a running computation.
-mod provider;
 mod mounts;
 mod output;
+mod provider;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 pub use provider::PinnedFsProvider;

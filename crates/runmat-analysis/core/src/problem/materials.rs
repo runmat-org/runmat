@@ -119,11 +119,13 @@ pub struct MaterialElectricalModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MaterialPlasticModel {
-    pub yield_strain: f64,
-    pub hardening_modulus_ratio: f64,
-    pub saturation_exponent: f64,
+#[serde(tag = "law", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MaterialPlasticModel {
+    J2IsotropicLinearHardening {
+        yield_stress_pa: f64,
+        /// Yield-stress increase per unit equivalent plastic strain, not a uniaxial tangent.
+        isotropic_hardening_modulus_pa: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

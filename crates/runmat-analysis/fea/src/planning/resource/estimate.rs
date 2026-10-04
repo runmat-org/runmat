@@ -7,6 +7,7 @@ mod magnetic_recovery;
 pub(super) mod magnetic_static;
 pub(super) mod maxwell_harmonic;
 mod maxwell_recovery;
+mod nonlinear_recovery;
 mod result_publication;
 mod state_publication;
 use common::validate_common;
@@ -95,6 +96,10 @@ pub fn build_resource_plan(
             maxwell_harmonic::build_maxwell_harmonic_plan(input.clone(), demand)
         }
         (
+            FeaResourcePhase::NonlinearFieldRecovery(request),
+            FeaResourceDemand::NonlinearFieldRecovery(demand),
+        ) if *request == demand.request => nonlinear_recovery::build(input.clone(), demand),
+        (
             FeaResourcePhase::MagneticFieldRecovery(request),
             FeaResourceDemand::MagneticFieldRecovery(demand),
         ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
@@ -137,6 +142,51 @@ pub fn build_resource_plan(
             if *workload == demand.workload =>
         {
             thermal::build_thermal_plan(input.clone(), demand)
+        }
+        (
+            FeaResourcePhase::StructuralNonlinearRecovery,
+            FeaResourceDemand::StructuralNonlinearRecovery(demand),
+        ) => {
+            if demand.integration_identity == Digest::sha256([])
+                || demand.point_count.0 == 0
+                || demand.retained_output_increments.0 == 0
+                || demand.physical_evaluation_limit.0 != 2
+                || demand.additional_persistent_bytes.0 == 0
+            {
+                return Err(ResourcePlanningError::Invalid(
+                    "nonlinear recovery physical/storage authority is incomplete".into(),
+                ));
+            }
+            operator::build_operator_resource_plan_with_persistent_storage(
+                input.clone(),
+                &demand.operator,
+                None,
+                demand.additional_persistent_bytes,
+            )
+        }
+        (
+            FeaResourcePhase::StructuralNonlinearPipeline,
+            FeaResourceDemand::StructuralNonlinearPipeline(demand),
+        ) => {
+            if demand.integration_identity == Digest::sha256([])
+                || demand.point_count.0 == 0
+                || demand.maximum_accepted_increments.0 == 0
+                || demand.maximum_retained_output_increments.0 == 0
+                || demand.maximum_retained_output_increments > demand.maximum_accepted_increments
+                || demand.tangent_evaluation_limit.0 == 0
+                || demand.linear_solve_limit.0 == 0
+                || demand.additional_persistent_bytes.0 == 0
+            {
+                return Err(ResourcePlanningError::Invalid(
+                    "nonlinear point/work/storage authority is incomplete".into(),
+                ));
+            }
+            operator::build_operator_resource_plan_with_persistent_storage(
+                input.clone(),
+                &demand.operator,
+                demand.block_transport.as_ref().map(|block| &block.inputs),
+                demand.additional_persistent_bytes,
+            )
         }
         (
             FeaResourcePhase::StructuralLinearPipeline,

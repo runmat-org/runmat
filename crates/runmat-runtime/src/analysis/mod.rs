@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
@@ -53,6 +53,8 @@ use policy::{
 };
 
 mod artifact_root;
+pub mod assessment;
+mod nonlinear_result;
 pub use artifact_root::{
     AdmittedFrequencySamplePublication, AnalysisArtifactRoot, FrequencySampleArtifactRootInventory,
     FrequencySampleArtifactRoots, FrequencySamplePublicationAccess, ObservationHistoryArtifactRoot,
@@ -74,18 +76,24 @@ mod linear_static_result;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
+mod prepared_study_publication;
 pub mod render_tiles;
 mod response_study_result;
 mod result_policy;
 mod solver_mesh_artifact;
 mod source;
 pub mod storage;
+mod structural_owned_completion;
 mod structural_study;
+pub use structural_owned_completion::analysis_complete_structural_study_op;
 mod study_completion_identity;
 mod study_contract;
 mod study_execution;
 mod study_placement;
 mod study_publication;
+pub use prepared_study_publication::{
+    assessment_evidence_identity, AssessmentExecutionReceipt, PreparedStudyPublication,
+};
 mod study_result;
 mod study_result_manifest;
 mod study_sweep;
@@ -104,10 +112,6 @@ use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
 use linear_static_execution::analysis_run_linear_static_with_executor;
 use result_policy::{classify_run_status, evaluate_production_publication};
-#[cfg(test)]
-use structural_study::persist_immutable_study_evidence;
-#[cfg(test)]
-use structural_study::run_evidence_stage;
 pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
@@ -119,6 +123,8 @@ use structural_study::{
     study_evidence_root, CompletedStudyStep, CompletedStudyStepRun, PreparedStudySequence,
     PreparedStudyStep,
 };
+#[cfg(test)]
+use structural_study::{persist_immutable_study_evidence, run_evidence_stage};
 pub use study_completion_identity::AnalysisStudyCompletionIdentity;
 pub use study_contract::analysis_study_content_digest;
 use study_contract::{
@@ -141,11 +147,9 @@ pub use study_sweep::{
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct FeaRuntimeConfig {
-    pub artifact_root: Option<PathBuf>,
-    pub study_artifact_root: Option<PathBuf>,
-}
+mod configuration;
+use configuration::current_fea_runtime_config;
+pub use configuration::{configure_fea_runtime, default_fea_artifact_root, FeaRuntimeConfig};
 
 /// Host adapter for the path-free structural-static numerical workload. Implementations choose
 /// execution placement but may not persist results or apply runtime publication policy.
@@ -169,7 +173,7 @@ pub struct PreparedStructuralLinearRun {
     context: OperationContext,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyStepNumericalResult {
     pub step_id: ProcedureStepId,
     pub solver_result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
@@ -177,14 +181,14 @@ pub struct StructuralStudyStepNumericalResult {
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudySequenceNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub steps: Vec<StructuralStudyStepNumericalResult>,
     pub states: Vec<runmat_analysis_fea::execution::CanonicalSemanticState>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyTransientNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub step_id: ProcedureStepId,
@@ -192,7 +196,7 @@ pub struct StructuralStudyTransientNumericalResult {
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralTransientNumericalReceipt,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyModalNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub step_id: ProcedureStepId,
@@ -200,7 +204,7 @@ pub struct StructuralStudyModalNumericalResult {
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralModalNumericalReceipt,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyModalTransientNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub modal_step_id: ProcedureStepId,
@@ -213,7 +217,7 @@ pub struct StructuralStudyModalTransientNumericalResult {
         runmat_analysis_fea::execution::StructuralTransientNumericalReceipt,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyBucklingNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
@@ -228,7 +232,7 @@ pub struct StructuralStudyBucklingNumericalResult {
         runmat_analysis_fea::execution::StructuralBucklingNumericalReceipt,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StructuralStudyPrestressedModalNumericalResult {
     pub frozen_project_digest: Option<runmat_execution::Digest>,
     pub preload_step_id: ProcedureStepId,
@@ -246,7 +250,8 @@ mod study_numerical_result;
 pub use study_numerical_result::StructuralStudyNumericalResult;
 
 pub use frequency_result::{
-    StructuralFrequencyArtifactRootIndex, StructuralStudyFrequencyNumericalResult,
+    StructuralFrequencyArtifactRootIndex, StructuralFrequencyFinalizedHistoryArtifactRoots,
+    StructuralFrequencyHistoryArtifactRoot, StructuralStudyFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyNumericalResult,
     StructuralStudyPrestressedFrequencyReductionResult,
     StructuralStudyPrestressedModalFrequencyReductionResult,
@@ -260,30 +265,6 @@ impl PreparedStructuralLinearRun {
     pub fn solver_mesh(&self) -> Option<&SolverMeshArtifact> {
         self.solver_mesh.as_ref()
     }
-}
-
-fn fea_runtime_config() -> &'static RwLock<FeaRuntimeConfig> {
-    static CONFIG: OnceLock<RwLock<FeaRuntimeConfig>> = OnceLock::new();
-    CONFIG.get_or_init(|| RwLock::new(FeaRuntimeConfig::default()))
-}
-
-fn current_fea_runtime_config() -> FeaRuntimeConfig {
-    fea_runtime_config()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
-}
-
-pub fn default_fea_artifact_root() -> PathBuf {
-    PathBuf::from(".artifacts")
-}
-
-pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
-    let mut guard = fea_runtime_config()
-        .write()
-        .map_err(|_| "FEA runtime config lock poisoned".to_string())?;
-    *guard = config;
-    Ok(())
 }
 
 thread_local! {
@@ -345,15 +326,15 @@ pub use contracts::{
     analysis_procedure_ids, AcousticFrequencyResultsData, AnalysisAcousticRunOptions,
     AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult, AnalysisDocumentKind,
-    AnalysisDocumentRunResult, AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
-    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
-    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
-    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
-    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
-    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
-    AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
-    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisDocumentRunResult, AnalysisExecutionCapability, AnalysisExecutionPlan,
+    AnalysisExecutionStep, AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload,
+    AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
+    AnalysisFieldPageValues, AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions,
+    AnalysisFieldSelection, AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFsiRunOptions, AnalysisImmutableValueSpec, AnalysisModalRunOptions,
+    AnalysisModelSourceEvidence, AnalysisModelSourceFileEvidence, AnalysisModelSourceKind,
+    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions,
+    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
@@ -369,17 +350,16 @@ pub use contracts::{
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions, FallbackEvent,
     FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
-    PreconditionerMode, ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate,
-    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
-    StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
-    StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
-    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
-    ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
-    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
-    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
-    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
+    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
+    QualityReason, QualityReasonCode, RunProvenance, RunStatus, StructuralFrequencyResultsData,
+    StructuralRandomResponseResultsData, StructuralResponseSpectrumResultsData, ThermalResultsData,
+    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
+    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND,
+    ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
+    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
+    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
@@ -402,12 +382,14 @@ pub use runmat_analysis_language::{
 pub use source::{
     check_fea_path, check_fea_path_in_root, check_fea_source_in_root, check_fea_sources_in_root,
     logical_source_path, physical_source_path, prepare_fea_path_in_root,
-    prepare_fea_sources_in_root, source_digest, CheckedFeaSource, FeaCheckStatus,
-    FeaDeclaredMaterial, FeaExecutionBinding, FeaExecutionTarget, FeaModelMemberKind,
+    prepare_fea_sources_in_root, source_digest, CheckedFeaSource, FeaBrowseOutcome, FeaBrowsePage,
+    FeaBrowseRequest, FeaCheckStatus, FeaDeclaredMaterial, FeaExecutionBinding, FeaExecutionTarget,
+    FeaModelMemberKind, FeaQueryCursor, FeaQueryDetail, FeaQueryError, FeaQueryFilter,
     FeaRootSelectionError, FeaRootSelector, FeaSemanticProgram, FeaSourceCheckResult,
     FeaSourceIdentity, FeaSourceIndex, FeaSourceIndexEntry, FeaSourceSnapshotBuilder,
-    FeaSourceSnapshotRequests, FilesystemFeaHost, PreparedFeaSource, PreparedFeaSourceSnapshot,
-    ProjectFeaHost, ResolvedFeaRoot,
+    FeaSourceSnapshotRequests, FeaStudyMemberKind, FeaWorkspaceCandidate, FeaWorkspaceEdit,
+    FeaWorkspaceError, FeaWorkspaceFile, FeaWorkspaceSnapshot, FilesystemFeaHost,
+    PreparedFeaSource, PreparedFeaSourceSnapshot, ProjectFeaHost, ResolvedFeaRoot,
 };
 
 const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";
@@ -469,59 +451,13 @@ fn reject_moment_loads_for_run_family(
     Ok(())
 }
 
-fn persist_fea_run_result_with_progress(
-    operation: &str,
-    op_version: &str,
-    artifact_error_code: &'static str,
-    context: &OperationContext,
-    result: &AnalysisRunResult,
-) -> Result<(), OperationErrorEnvelope> {
-    runmat_analysis_fea::emit_fea_progress_phase(
-        operation,
-        FeaProgressPhase::ArtifactPersistence,
-        FeaProgressStatus::Started,
-        "persisting FEA run artifact",
-        None,
-        None,
-    );
-    match storage::persist_run_result(result) {
-        Ok(_record) => {
-            runmat_analysis_fea::emit_fea_progress_phase(
-                operation,
-                FeaProgressPhase::ArtifactPersistence,
-                FeaProgressStatus::Completed,
-                "FEA run artifact persisted",
-                None,
-                None,
-            );
-            Ok(())
-        }
-        Err(err) => {
-            let message = format!("failed to persist FEA run artifact: {err}");
-            runmat_analysis_fea::emit_fea_progress_phase(
-                operation,
-                FeaProgressPhase::ArtifactPersistence,
-                FeaProgressStatus::Failed,
-                &message,
-                None,
-                None,
-            );
-            Err(operation_error(
-                operation,
-                op_version,
-                context,
-                OperationErrorSpec {
-                    error_code: artifact_error_code,
-                    error_type: OperationErrorType::Internal,
-                    retryable: true,
-                    severity: OperationErrorSeverity::Error,
-                },
-                message,
-                BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
-            ))
-        }
-    }
-}
+mod standalone_publication;
+pub use standalone_publication::{
+    analysis_run_acoustic_with_options_op, analysis_run_cht_with_options_op,
+    analysis_run_fsi_with_options_op, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_transient_with_options_op,
+};
+use standalone_publication::{persist_fea_run_result_with_progress, publish_standalone_run};
 
 pub fn analysis_validate_study_op(
     spec: &AnalysisStudySpec,
@@ -1397,370 +1333,6 @@ pub fn analysis_prepare_structural_study_op(
     })
 }
 
-pub fn analysis_complete_structural_study_op(
-    mut prepared: PreparedStructuralStudy,
-    outcome: StructuralStudyExecutionOutcome,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let result = match outcome {
-        Ok(StructuralStudyNumericalResult::ThermalPrestress { .. }) => {
-            return Err(structural_study_completion_failure(
-                &prepared,
-                "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                OperationErrorType::Contract,
-                OperationErrorSeverity::Fatal,
-                "thermal prestress requires typed compiled-study publication",
-            ))
-        }
-        Ok(StructuralStudyNumericalResult::LinearSequence(result)) => result,
-        Ok(StructuralStudyNumericalResult::StructuralTransient(_)) => {
-            return Err(structural_study_completion_failure(
-                &prepared,
-                "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                OperationErrorType::Contract,
-                OperationErrorSeverity::Fatal,
-                "linear structural-study completion received a direct-transient result",
-            ))
-        }
-        Ok(StructuralStudyNumericalResult::StructuralModal(result)) => {
-            let workload = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralModal {
-                    workload,
-                } => workload.as_ref().clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "structural modal result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_modal_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workload,
-                *result,
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralModalTransient(result)) => {
-            let workloads = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
-                    workloads,
-                } => workloads.clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "modal-transient result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_modal_transient_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workloads,
-                *result,
-                storage::next_run_id(),
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result)) => {
-            let workloads = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralModalResponseSpectrum {
-                    workloads,
-                } => workloads.clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "modal response-spectrum result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_response_spectrum_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workloads,
-                *result,
-                storage::next_run_id(),
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralRandomResponse(result)) => {
-            let workloads = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralRandomResponse {
-                    workloads,
-                } => workloads.clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "random-response result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_random_response_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workloads,
-                *result,
-                storage::next_run_id(),
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralBuckling(result)) => {
-            let workloads = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralBuckling {
-                    workloads,
-                } => workloads.clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "structural buckling result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_buckling_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workloads,
-                *result,
-                storage::next_run_id(),
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralPrestressedModal(result)) => {
-            let workloads = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralPrestressedModal {
-                    workloads,
-                } => workloads.clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "prestressed-modal result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_prestressed_modal_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workloads,
-                *result,
-                storage::next_run_id(),
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralPrestressedFrequency(result)) => {
-            let modal_run_id = matches!(
-                &result.reduction,
-                StructuralStudyPrestressedFrequencyReductionResult::ModalReduced(_)
-            )
-            .then(storage::next_run_id);
-            let workloads = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
-                    workloads,
-                } => workloads.clone(),
-                _ => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "prestressed-frequency result differs from the prepared study kind",
-                    ));
-                }
-            };
-            return structural_study::complete_prestressed_frequency_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workloads,
-                *result,
-                storage::next_run_id(),
-                modal_run_id,
-                storage::next_run_id(),
-            );
-        }
-        Ok(StructuralStudyNumericalResult::StructuralFrequency(result)) => {
-            let workload = match &prepared.execution {
-                structural_study::PreparedStructuralStudyExecution::StructuralFrequency {
-                    workload,
-                } => workload.as_ref().clone(),
-                structural_study::PreparedStructuralStudyExecution::LinearSequence { .. } => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "linear structural-study completion received a structural-frequency result",
-                    ));
-                }
-                structural_study::PreparedStructuralStudyExecution::StructuralModal { .. }
-                | structural_study::PreparedStructuralStudyExecution::StructuralModalTransient {
-                    ..
-                }
-                | structural_study::PreparedStructuralStudyExecution::StructuralModalResponseSpectrum {
-                    ..
-                }
-                | structural_study::PreparedStructuralStudyExecution::StructuralRandomResponse {
-                    ..
-                }
-                | structural_study::PreparedStructuralStudyExecution::StructuralBuckling {
-                    ..
-                }
-                | structural_study::PreparedStructuralStudyExecution::StructuralPrestressedModal {
-                    ..
-                }
-                | structural_study::PreparedStructuralStudyExecution::StructuralPrestressedFrequency {
-                    ..
-                } => {
-                    return Err(structural_study_completion_failure(
-                        &prepared,
-                        "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-                        OperationErrorType::Contract,
-                        OperationErrorSeverity::Fatal,
-                        "modal structural-study completion received a structural-frequency result",
-                    ));
-                }
-            };
-            return structural_study::complete_frequency_study(
-                study_completion_from_prepared(prepared.study),
-                prepared.solver_mesh,
-                workload,
-                *result,
-                storage::next_run_id(),
-            );
-        }
-        Err(StructuralStudyExecutionFailure::Failed(message)) => {
-            return Err(structural_study_completion_failure(
-                &prepared,
-                "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_FAILED",
-                OperationErrorType::Backend,
-                OperationErrorSeverity::Error,
-                message,
-            ));
-        }
-        Err(StructuralStudyExecutionFailure::Cancelled) => {
-            return Err(structural_study_completion_failure(
-                &prepared,
-                "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_CANCELLED",
-                OperationErrorType::Cancelled,
-                OperationErrorSeverity::Error,
-                "portable structural study execution was cancelled",
-            ));
-        }
-        Err(StructuralStudyExecutionFailure::Indeterminate(message)) => {
-            return Err(structural_study_completion_failure(
-                &prepared,
-                "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_INDETERMINATE",
-                OperationErrorType::Internal,
-                OperationErrorSeverity::Fatal,
-                message,
-            ));
-        }
-    };
-    let structural_study::PreparedStructuralStudyExecution::LinearSequence { linears } =
-        &mut prepared.execution
-    else {
-        return Err(structural_study_completion_failure(
-            &prepared,
-            "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
-            OperationErrorType::Contract,
-            OperationErrorSeverity::Fatal,
-            "structural-frequency study completion received a linear sequence result",
-        ));
-    };
-    let mut completed = Vec::with_capacity(result.steps.len());
-    for step in result.steps {
-        let linear = linears.remove(&step.step_id).ok_or_else(|| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_OPERATION,
-                ANALYSIS_RUN_STUDY_OP_VERSION,
-                &prepared.study.context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
-                    error_type: OperationErrorType::Contract,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Fatal,
-                },
-                "sequence execution returned an absent or duplicate procedure step",
-                BTreeMap::from([("step_id".to_string(), step.step_id.as_str().to_string())]),
-            )
-        })?;
-        let resolved_solver_options =
-            AnalysisSolverOptions::StructuralLinear(linear.options.clone());
-        step.numerical_receipt
-            .validate_against(step.solver_result_identity, &step.result)
-            .map_err(|error| study_sequence_contract_error(&prepared.study.context, error))?;
-        let run = analysis_admit_linear_static_run_with_id(linear, step.result.run, None)?;
-        completed.push(CompletedStudyStep {
-            step_id: step.step_id,
-            solver_result_identity: step.solver_result_identity,
-            run: CompletedStudyStepRun::Standard(Box::new(run)),
-            resolved_solver_options,
-        });
-    }
-    if !linears.is_empty() {
-        return Err(operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &prepared.study.context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Fatal,
-            },
-            "sequence execution omitted one or more prepared procedure steps",
-            BTreeMap::new(),
-        ));
-    }
-    complete_study_run(
-        study_completion_from_prepared(prepared.study),
-        completed,
-        result.states,
-        result.frozen_project_digest,
-    )
-}
-
-fn structural_study_completion_failure(
-    prepared: &PreparedStructuralStudy,
-    error_code: &'static str,
-    error_type: OperationErrorType,
-    severity: OperationErrorSeverity,
-    message: impl Into<String>,
-) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &prepared.study.context,
-        OperationErrorSpec {
-            error_code,
-            error_type,
-            retryable: error_type == OperationErrorType::Internal,
-            severity,
-        },
-        message,
-        BTreeMap::from([(
-            "analysis_model_id".to_string(),
-            prepared.study.model.model_id.0.clone(),
-        )]),
-    )
-}
-
 fn analysis_run_study_with_structural_executor(
     spec: &AnalysisStudySpec,
     context: OperationContext,
@@ -1838,7 +1410,8 @@ fn analysis_run_study_with_structural_executor(
         completed,
         states,
         None,
-    )
+    )?
+    .publish_legacy()
 }
 
 fn semantic_state_payload(
@@ -2370,7 +1943,7 @@ pub fn analysis_run_acoustic_op(
     )
 }
 
-pub fn analysis_run_modal_with_options_op(
+fn execute_modal_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -2561,6 +2134,7 @@ fn analysis_admit_modal_run_with_id(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: assigned_run_id
             .map(str::to_string)
             .unwrap_or_else(storage::next_run_id),
@@ -2599,14 +2173,6 @@ fn analysis_admit_modal_run_with_id(
             fallback_events,
         },
     };
-
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Modal.name(),
-        AnalysisOperation::Modal.version(),
-        "RM.FEA.RUN_MODAL.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::Modal.name(),
@@ -2672,6 +2238,7 @@ fn analysis_admit_buckling_run_with_id(
         fallback_events: Vec::new(),
     };
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: assigned_run_id.to_string(),
         run,
         render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
@@ -2696,13 +2263,7 @@ fn analysis_admit_buckling_run_with_id(
         production_publication_reasons,
         provenance,
     };
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Buckling.name(),
-        AnalysisOperation::Buckling.version(),
-        "RM.FEA.RUN_BUCKLING.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
+
     Ok(OperationEnvelope::new(
         AnalysisOperation::Buckling.name(),
         AnalysisOperation::Buckling.version(),
@@ -2711,7 +2272,7 @@ fn analysis_admit_buckling_run_with_id(
     ))
 }
 
-pub fn analysis_run_acoustic_with_options_op(
+fn execute_acoustic_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -2978,6 +2539,7 @@ pub fn analysis_run_acoustic_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: storage::next_run_id(),
         run,
         render_topology,
@@ -3008,14 +2570,6 @@ pub fn analysis_run_acoustic_with_options_op(
             fallback_events,
         },
     };
-
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Acoustic.name(),
-        AnalysisOperation::Acoustic.version(),
-        "RM.FEA.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::Acoustic.name(),
@@ -3103,7 +2657,7 @@ pub fn analysis_run_cht_op(
     )
 }
 
-pub fn analysis_run_cht_with_options_op(
+fn execute_cht_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -3495,6 +3049,7 @@ pub fn analysis_run_cht_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: storage::next_run_id(),
         run,
         render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
@@ -3536,14 +3091,6 @@ pub fn analysis_run_cht_with_options_op(
         },
     };
 
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Cht.name(),
-        AnalysisOperation::Cht.version(),
-        "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
-
     Ok(OperationEnvelope::new(
         AnalysisOperation::Cht.name(),
         AnalysisOperation::Cht.version(),
@@ -3566,7 +3113,7 @@ pub fn analysis_run_fsi_op(
     )
 }
 
-pub fn analysis_run_fsi_with_options_op(
+fn execute_fsi_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -3903,6 +3450,7 @@ pub fn analysis_run_fsi_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: storage::next_run_id(),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
@@ -3933,14 +3481,6 @@ pub fn analysis_run_fsi_with_options_op(
             fallback_events,
         },
     };
-
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Fsi.name(),
-        AnalysisOperation::Fsi.version(),
-        "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::Fsi.name(),
@@ -4052,7 +3592,7 @@ fn validate_thermal_run_model(
     Ok(())
 }
 
-pub fn analysis_run_transient_with_options_op(
+fn execute_transient_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -4333,6 +3873,7 @@ fn analysis_admit_transient_run_with_id(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: assigned_run_id
             .map(str::to_owned)
             .unwrap_or_else(storage::next_run_id),
@@ -4398,14 +3939,6 @@ fn analysis_admit_transient_run_with_id(
         },
     };
 
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Transient.name(),
-        AnalysisOperation::Transient.version(),
-        "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
-        context,
-        &result,
-    )?;
-
     Ok(OperationEnvelope::new(
         AnalysisOperation::Transient.name(),
         AnalysisOperation::Transient.version(),
@@ -4428,7 +3961,7 @@ pub fn analysis_run_nonlinear_op(
     )
 }
 
-pub fn analysis_run_nonlinear_with_options_op(
+fn execute_nonlinear_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -4514,7 +4047,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
         ));
     }
-    if options.increment_norm_tolerance <= 0.0 || !options.increment_norm_tolerance.is_finite() {
+    if options.linear_tolerance <= 0.0 || !options.linear_tolerance.is_finite() {
         return Err(operation_error(
             AnalysisOperation::Nonlinear.name(),
             AnalysisOperation::Nonlinear.version(),
@@ -4525,15 +4058,14 @@ pub fn analysis_run_nonlinear_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_nonlinear options require finite positive increment_norm_tolerance",
+            "fea.run_nonlinear options require finite positive linear_tolerance",
             BTreeMap::from([(
-                "increment_norm_tolerance".to_string(),
-                options.increment_norm_tolerance.to_string(),
+                "linear_tolerance".to_string(),
+                options.linear_tolerance.to_string(),
             )]),
         ));
     }
-    if options.residual_convergence_factor < 1.0 || !options.residual_convergence_factor.is_finite()
-    {
+    if options.minimum_load_increment <= 0.0 || !options.minimum_load_increment.is_finite() {
         return Err(operation_error(
             AnalysisOperation::Nonlinear.name(),
             AnalysisOperation::Nonlinear.version(),
@@ -4544,10 +4076,10 @@ pub fn analysis_run_nonlinear_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_nonlinear options require residual_convergence_factor >= 1.0",
+            "fea.run_nonlinear options require finite positive minimum_load_increment",
             BTreeMap::from([(
-                "residual_convergence_factor".to_string(),
-                options.residual_convergence_factor.to_string(),
+                "minimum_load_increment".to_string(),
+                options.minimum_load_increment.to_string(),
             )]),
         ));
     }
@@ -4572,7 +4104,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             )]),
         ));
     }
-    if options.tangent_refresh_interval == 0 {
+    if options.max_accepted_increments == 0 {
         return Err(operation_error(
             AnalysisOperation::Nonlinear.name(),
             AnalysisOperation::Nonlinear.version(),
@@ -4583,34 +4115,14 @@ pub fn analysis_run_nonlinear_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_nonlinear options require tangent_refresh_interval greater than zero",
+            "fea.run_nonlinear options require max_accepted_increments greater than zero",
             BTreeMap::from([(
-                "tangent_refresh_interval".to_string(),
-                options.tangent_refresh_interval.to_string(),
+                "max_accepted_increments".to_string(),
+                options.max_accepted_increments.to_string(),
             )]),
         ));
     }
 
-    let plasticity_options = model_plasticity_constitutive_options(model);
-    if let Some(plasticity_options) = plasticity_options.as_ref() {
-        if let Err((detail, metadata)) =
-            validate_plasticity_constitutive_options(plasticity_options)
-        {
-            return Err(operation_error(
-                AnalysisOperation::Nonlinear.name(),
-                AnalysisOperation::Nonlinear.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
     let contact_options =
         model_contact_interface_options(model, options.contact_enforcement.as_ref());
     if options.contact_enforcement.is_some() && contact_options.is_none() {
@@ -4662,20 +4174,20 @@ pub fn analysis_run_nonlinear_with_options_op(
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
             tolerance: options.tolerance,
-            residual_convergence_factor: options.residual_convergence_factor,
-            increment_norm_tolerance: options.increment_norm_tolerance,
+            linear_tolerance: options.linear_tolerance,
+            max_load_cutbacks: options.max_load_cutbacks,
+            minimum_load_increment: options.minimum_load_increment,
+            max_accepted_increments: options.max_accepted_increments,
             line_search: options.line_search,
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
-            tangent_refresh_interval: options.tangent_refresh_interval,
             solver_mesh: solver_mesh.clone(),
-            plasticity_context: to_fea_plasticity_constitutive_context(plasticity_options),
             contact_context: to_fea_contact_interface_context(contact_options),
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Nonlinear, model, &context, err))?;
 
-    let run = nonlinear_run.run;
+    let (run, nonlinear_run) = nonlinear_result::data(nonlinear_run);
     let mut fallback_events = Vec::new();
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
@@ -4695,21 +4207,13 @@ pub fn analysis_run_nonlinear_with_options_op(
         .copied()
         .reduce(f64::max)
         .unwrap_or(0.0);
-    let max_nonlinear_increment_norm = nonlinear_run
-        .increment_norms
-        .iter()
-        .copied()
-        .reduce(f64::max)
-        .unwrap_or(0.0);
     let result_quality = if nonlinear_run.load_factors.is_empty()
         || nonlinear_run.displacement_snapshots.is_empty()
         || nonlinear_run.residual_norms.iter().any(|r| !r.is_finite())
         || nonlinear_run.increment_norms.iter().any(|v| !v.is_finite())
     {
         QualityGate::Fail
-    } else if max_nonlinear_residual > options.tolerance * options.residual_convergence_factor * 2.0
-        || max_nonlinear_increment_norm > options.increment_norm_tolerance * 4.0
-    {
+    } else if max_nonlinear_residual > options.tolerance {
         QualityGate::Warn
     } else {
         QualityGate::Pass
@@ -4796,9 +4300,8 @@ pub fn analysis_run_nonlinear_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::NonlinearResidualExceeded,
             detail: format!(
-                "nonlinear residual/increment norm exceeds thresholds residual={} increment_norm={}",
-                options.tolerance * options.residual_convergence_factor * 2.0,
-                options.increment_norm_tolerance * 4.0
+                "nonlinear equilibrium residual exceeds tolerance {}",
+                options.tolerance
             ),
         });
     }
@@ -4930,6 +4433,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     let selected_preconditioner = run.preconditioner;
 
     let result = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: storage::next_run_id(),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
@@ -4937,47 +4441,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         buckling_results: None,
         thermal_results: None,
         transient_results: None,
-        nonlinear_results: Some(NonlinearResultsData {
-            nonlinear_payload_version: "nonlinear_results/v1".to_string(),
-            load_factors: nonlinear_run.load_factors,
-            displacement_snapshots: nonlinear_run.displacement_snapshots,
-            rotation_snapshots: nonlinear_run.rotation_snapshots,
-            von_mises_snapshots: nonlinear_run.von_mises_snapshots,
-            plastic_strain_snapshots: nonlinear_run.plastic_strain_snapshots,
-            equivalent_plastic_strain_snapshots: nonlinear_run.equivalent_plastic_strain_snapshots,
-            contact_pressure_snapshots: nonlinear_run.contact_pressure_snapshots,
-            contact_gap_snapshots: nonlinear_run.contact_gap_snapshots,
-            load_factor_snapshots: nonlinear_run.load_factor_snapshots,
-            residual_norm_snapshots: nonlinear_run.residual_norm_snapshots,
-            thermo_mechanical_temperature_snapshots: nonlinear_run
-                .thermo_mechanical_temperature_snapshots,
-            thermo_mechanical_thermal_strain_snapshots: nonlinear_run
-                .thermo_mechanical_thermal_strain_snapshots,
-            thermo_mechanical_thermal_stress_snapshots: nonlinear_run
-                .thermo_mechanical_thermal_stress_snapshots,
-            thermo_mechanical_displacement_snapshots: nonlinear_run
-                .thermo_mechanical_displacement_snapshots,
-            thermo_mechanical_von_mises_snapshots: nonlinear_run
-                .thermo_mechanical_von_mises_snapshots,
-            thermo_mechanical_coupling_residual_snapshots: nonlinear_run
-                .thermo_mechanical_coupling_residual_snapshots,
-            electro_thermal_temperature_snapshots: nonlinear_run
-                .electro_thermal_temperature_snapshots,
-            electro_thermal_thermal_residual_snapshots: nonlinear_run
-                .electro_thermal_thermal_residual_snapshots,
-            residual_norms: nonlinear_run.residual_norms,
-            increment_norms: nonlinear_run.increment_norms,
-            iteration_counts: nonlinear_run.iteration_counts,
-            failed_increments: nonlinear_run.failed_increments,
-            line_search_backtracks: nonlinear_run.line_search_backtracks,
-            max_line_search_backtracks_per_increment: nonlinear_run
-                .max_line_search_backtracks_per_increment,
-            tangent_rebuild_count: nonlinear_run.tangent_rebuild_count,
-            iteration_spike_count: nonlinear_run.iteration_spike_count,
-            convergence_stall_count: nonlinear_run.convergence_stall_count,
-            backtrack_burst_count: nonlinear_run.backtrack_burst_count,
-            method: NonlinearMethod::IncrementalNewtonRaphson,
-        }),
+        nonlinear_results: Some(nonlinear_run),
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -5000,14 +4464,6 @@ pub fn analysis_run_nonlinear_with_options_op(
             fallback_events,
         },
     };
-
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::Nonlinear.name(),
-        AnalysisOperation::Nonlinear.version(),
-        "RM.FEA.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
-        &context,
-        &result,
-    )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::Nonlinear.name(),
@@ -5429,21 +4885,6 @@ fn render_regions_from_triangle_indices(
         .collect()
 }
 
-fn model_plasticity_constitutive_options(
-    model: &AnalysisModel,
-) -> Option<PlasticityConstitutiveOptions> {
-    let plastic = model
-        .materials
-        .iter()
-        .find_map(|material| material.plastic.as_ref())?;
-    Some(PlasticityConstitutiveOptions {
-        enabled: true,
-        yield_strain: plastic.yield_strain,
-        hardening_modulus_ratio: plastic.hardening_modulus_ratio,
-        saturation_exponent: plastic.saturation_exponent,
-    })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ResolvedContactOptions {
     penalty_stiffness_scale: f64,
@@ -5479,19 +4920,6 @@ fn model_contact_interface_options(
         .next()
 }
 
-fn to_fea_plasticity_constitutive_context(
-    options: Option<PlasticityConstitutiveOptions>,
-) -> Option<runmat_analysis_fea::FeaPlasticityConstitutiveContext> {
-    options.map(
-        |plasticity| runmat_analysis_fea::FeaPlasticityConstitutiveContext {
-            enabled: plasticity.enabled,
-            yield_strain: plasticity.yield_strain,
-            hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
-            saturation_exponent: plasticity.saturation_exponent,
-        },
-    )
-}
-
 fn to_fea_contact_interface_context(
     options: Option<ResolvedContactOptions>,
 ) -> Option<runmat_analysis_fea::FeaContactInterfaceContext> {
@@ -5501,41 +4929,6 @@ fn to_fea_contact_interface_context(
         max_penetration_ratio: contact.max_penetration_ratio,
         friction_coefficient: contact.friction_coefficient,
     })
-}
-
-fn validate_plasticity_constitutive_options(
-    options: &PlasticityConstitutiveOptions,
-) -> Result<(), (String, BTreeMap<String, String>)> {
-    if !options.enabled {
-        return Ok(());
-    }
-    if !options.yield_strain.is_finite() || options.yield_strain <= 0.0 {
-        return Err((
-            "plasticity constitutive model requires finite positive yield_strain".to_string(),
-            BTreeMap::from([("yield_strain".to_string(), options.yield_strain.to_string())]),
-        ));
-    }
-    if !options.hardening_modulus_ratio.is_finite() || options.hardening_modulus_ratio < 0.0 {
-        return Err((
-            "plasticity constitutive model requires finite non-negative hardening_modulus_ratio"
-                .to_string(),
-            BTreeMap::from([(
-                "hardening_modulus_ratio".to_string(),
-                options.hardening_modulus_ratio.to_string(),
-            )]),
-        ));
-    }
-    if !options.saturation_exponent.is_finite() || options.saturation_exponent < 0.0 {
-        return Err((
-            "plasticity constitutive model requires finite non-negative saturation_exponent"
-                .to_string(),
-            BTreeMap::from([(
-                "saturation_exponent".to_string(),
-                options.saturation_exponent.to_string(),
-            )]),
-        ));
-    }
-    Ok(())
 }
 
 fn validate_contact_interface_options(

@@ -5,6 +5,7 @@ mod electrical;
 pub(crate) mod fluid;
 mod magnetic;
 mod maxwell;
+mod nonlinear;
 mod structural;
 use runmat_analysis_fea::{
     execution::{
@@ -37,6 +38,9 @@ pub fn validate_accuracy_source_context(
     }
     if let AccuracySourceReceipt::FluidSteady(receipt) = receipt {
         return fluid::validate(request, receipt, observations, inputs);
+    }
+    if let AccuracySourceReceipt::NonlinearSolid(receipt) = receipt {
+        return nonlinear::validate(request, receipt, observations, inputs);
     }
     if let AccuracySourceReceipt::AcousticHarmonic(receipt) = receipt {
         return acoustic::validate(request, receipt, observations, inputs);

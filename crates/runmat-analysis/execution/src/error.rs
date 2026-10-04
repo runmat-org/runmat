@@ -1,7 +1,24 @@
 pub type AnalysisBridgeResult<T> = Result<T, AnalysisBridgeError>;
 
+/// Components of a rejected coordinator reservation, in bytes. The original
+/// resource cause remains available without interpreting the diagnostic text.
+#[derive(Debug, thiserror::Error)]
+#[error("{cause}; decoded={decoded}, encoded={encoded}, coordinator={coordinator}, transport={transport}, caller={caller}, import_workspace={import_workspace}")]
+pub struct CoordinatorRetentionLimit {
+    #[source]
+    pub cause: runmat_analysis_fea::planning::resource::ResourcePlanningError,
+    pub decoded: u64,
+    pub encoded: u64,
+    pub coordinator: u64,
+    pub transport: u64,
+    pub caller: u64,
+    pub import_workspace: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisBridgeError {
+    #[error(transparent)]
+    RetentionCapacity(#[from] CoordinatorRetentionLimit),
     #[error("invalid analysis execution bridge contract: {0}")]
     Invalid(String),
     #[error("analysis execution bridge identity mismatch: {0}")]

@@ -26,6 +26,28 @@ pub struct PublishedObjectCatalog {
 }
 
 impl PublishedObjectCatalog {
+    /// Multiple semantic roles may share the same immutable object. Identical
+    /// references are retained once; conflicting descriptions of one ID fail.
+    pub fn new_with_shared_objects(
+        roots: Vec<ValueRef>,
+        objects: Vec<ValueRef>,
+    ) -> Result<Self, ContractError> {
+        fn unique(mut references: Vec<ValueRef>) -> Result<Vec<ValueRef>, ContractError> {
+            references.sort_by_key(|reference| reference.id);
+            for pair in references.windows(2) {
+                if pair[0].id == pair[1].id && pair[0] != pair[1] {
+                    return Err(ContractError::invalid(
+                        "published object catalog",
+                        "shared object identity has conflicting references",
+                    ));
+                }
+            }
+            references.dedup();
+            Ok(references)
+        }
+        Self::new(unique(roots)?, unique(objects)?)
+    }
+
     pub fn new(
         mut roots: Vec<ValueRef>,
         mut objects: Vec<ValueRef>,
@@ -225,6 +247,25 @@ mod tests {
         assert!(PublishedObjectCatalog::new(
             vec![root.clone()],
             vec![root, reference("foreign", "second")],
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn shared_catalog_deduplicates_exact_references_and_rejects_aliases() {
+        let object = reference("shared", "study:shared");
+        let catalog = PublishedObjectCatalog::new_with_shared_objects(
+            vec![object.clone(), object.clone()],
+            vec![object.clone(), object.clone()],
+        )
+        .unwrap();
+        assert_eq!(catalog.roots, vec![object.clone()]);
+        assert_eq!(catalog.objects, vec![object.clone()]);
+        let mut substituted = object.clone();
+        substituted.encoded_length += 1;
+        assert!(PublishedObjectCatalog::new_with_shared_objects(
+            vec![object.clone()],
+            vec![object, substituted],
         )
         .is_err());
     }

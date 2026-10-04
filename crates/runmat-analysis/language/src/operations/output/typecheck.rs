@@ -197,6 +197,10 @@ fn series_result_type(
 ) -> Result<FeaType, &'static str> {
     let value = match sample {
         FeaType::Field(field) => field.value.as_ref(),
+        // A spatial extremum carries a scalar value and its governing entity.
+        // Reducing its history compares those values; the resulting extremum
+        // carries the governing sample as well as the spatial attribution.
+        FeaType::AttributedExtremum(value) => value.as_ref(),
         value => value,
     };
     if !numeric_shape(value) {

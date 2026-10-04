@@ -6,7 +6,8 @@ pub(in crate::analysis) fn complete_modal_study(
     mut authored_workload: runmat_analysis_fea::execution::StructuralModalWorkload,
     numerical: StructuralStudyModalNumericalResult,
     assigned_run_id: String,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let [step] = prepared.steps.as_slice() else {
         return Err(modal_completion_error(
             &prepared,
@@ -74,7 +75,7 @@ pub(in crate::analysis) fn complete_modal_study(
     )?;
     prepared.steps[0].authored_execution.solver_options =
         AnalysisSolverOptions::StructuralModes(options.clone());
-    complete_study_run(
+    complete_study_run_prepared(
         prepared,
         vec![CompletedStudyStep {
             step_id: numerical.step_id,
@@ -84,6 +85,7 @@ pub(in crate::analysis) fn complete_modal_study(
         }],
         states,
         numerical.frozen_project_digest,
+        preparation,
     )
 }
 
@@ -160,7 +162,8 @@ pub(in crate::analysis) fn complete_modal_transient_study(
     numerical: StructuralStudyModalTransientNumericalResult,
     modal_run_id: String,
     transient_run_id: String,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let [modal_step, transient_step] = prepared.steps.as_slice() else {
         return Err(modal_completion_error(
             &prepared,
@@ -381,7 +384,7 @@ pub(in crate::analysis) fn complete_modal_transient_study(
         AnalysisSolverOptions::StructuralModes(modal_options.clone());
     prepared.steps[1].authored_execution.solver_options =
         AnalysisSolverOptions::StructuralTransient(transient_options.clone());
-    complete_study_run(
+    complete_study_run_prepared(
         prepared,
         vec![
             CompletedStudyStep {
@@ -401,6 +404,7 @@ pub(in crate::analysis) fn complete_modal_transient_study(
         ],
         states,
         numerical.frozen_project_digest,
+        preparation,
     )
 }
 
@@ -421,79 +425,6 @@ fn modal_completion_error(
         },
         message,
         BTreeMap::from([("study_id".to_string(), prepared.study_id.clone())]),
-    )
-}
-
-pub(super) fn complete_structural_modal(
-    intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
-    persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
-    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
-    authored_workload: runmat_analysis_fea::execution::StructuralModalWorkload,
-    numerical: StructuralStudyModalNumericalResult,
-    completion_identity: AnalysisStudyCompletionIdentity,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let [step] = intent.steps.as_slice() else {
-        return Err(intent_completion_error(
-            &intent,
-            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
-            OperationErrorType::Contract,
-            OperationErrorSeverity::Fatal,
-            "structural modal completion requires exactly one authored procedure step",
-        ));
-    };
-    let assigned_run_id = completion_identity.local_run_id(
-        runmat_analysis_core::PhysicsFamily::Structural,
-        intent.authored_study_digest,
-        &step.procedure_step.step_id,
-    );
-    complete_modal_study(
-        prepared_completion(intent, resolved_model, persisted_mesh),
-        solver_mesh,
-        authored_workload,
-        numerical,
-        assigned_run_id,
-    )
-}
-
-pub(super) fn complete_structural_modal_transient(
-    intent: PreparedStructuralStudyIntent,
-    resolved_model: runmat_analysis_core::AnalysisModel,
-    persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
-    solver_mesh: runmat_meshing_core::SolverMeshArtifact,
-    authored_workloads: BTreeMap<
-        runmat_analysis_core::ProcedureStepId,
-        runmat_analysis_fea::execution::StructuralStepWorkload,
-    >,
-    numerical: StructuralStudyModalTransientNumericalResult,
-    completion_identity: AnalysisStudyCompletionIdentity,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let [modal_step, transient_step] = intent.steps.as_slice() else {
-        return Err(intent_completion_error(
-            &intent,
-            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
-            OperationErrorType::Contract,
-            OperationErrorSeverity::Fatal,
-            "modal-transient completion requires exactly two authored procedure steps",
-        ));
-    };
-    let modal_run_id = completion_identity.local_run_id(
-        runmat_analysis_core::PhysicsFamily::Structural,
-        intent.authored_study_digest,
-        &modal_step.procedure_step.step_id,
-    );
-    let transient_run_id = completion_identity.local_run_id(
-        runmat_analysis_core::PhysicsFamily::Structural,
-        intent.authored_study_digest,
-        &transient_step.procedure_step.step_id,
-    );
-    complete_modal_transient_study(
-        prepared_completion(intent, resolved_model, persisted_mesh),
-        solver_mesh,
-        authored_workloads,
-        numerical,
-        modal_run_id,
-        transient_run_id,
     )
 }
 

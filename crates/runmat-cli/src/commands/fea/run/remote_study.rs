@@ -26,6 +26,12 @@ pub(super) async fn execute_study_remotely(
     .await?;
     let prepared_root = require_remote_root(placeholder.root)?;
     let saved_expectation = prepared_root.result_expectation();
+    let assessment_functions = runmat_execution_runner_native::freeze_fea_assessment_functions(
+        &source.session_source,
+        &saved_expectation.study.assessments,
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
     let study_id = placeholder.realized.study_id.clone();
     let revision = placeholder.revision.clone();
     let mut builder =
@@ -70,6 +76,7 @@ pub(super) async fn execute_study_remotely(
             output_intent: SavedOutputIntent::FeaStudy {
                 study_id,
                 expectation: Box::new(saved_expectation),
+                assessment_functions,
             },
         },
     )

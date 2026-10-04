@@ -13,6 +13,8 @@ mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
+mod workspace_native;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sandbox;
@@ -32,6 +34,9 @@ pub use wasm::PlaceholderFsProvider;
 
 pub mod data_contract;
 pub mod pinned;
+pub mod workspace;
+pub mod workspace_access;
+pub mod execution;
 
 use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
@@ -275,7 +280,12 @@ pub enum PublicationDurability {
 
 /// Result of publishing one complete byte sequence at a previously absent path.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", content = "result", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    content = "result",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum AtomicCreateResult {
     Published { durability: PublicationDurability },
     Existing(Vec<u8>),
@@ -368,6 +378,18 @@ impl DirEntry {
         }
     }
 
+    /// Requested storage of this response entry, including owned buffer capacities.
+    /// Allocator rounding and OS iterator internals are excluded.
+    pub fn resident_bytes(&self) -> Option<u64> {
+        (std::mem::size_of::<Self>() as u64)
+            .checked_add(self.path.capacity() as u64)?
+            .checked_add(self.file_name.capacity() as u64)
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.path
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -387,6 +409,51 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Coherent access through this provider's existing publication/recovery authority.
+    fn workspace_access(&self, _root: &Path, _writable: bool, _maximum_resident_bytes: u64) -> io::Result<Box<dyn workspace_access::WorkspaceAccess>> {
+        Err(io::Error::new(ErrorKind::Unsupported, "provider coherent workspace access is unsupported"))
+    }
+    /// Capture one coherent project inventory, including immutable file versions.
+    async fn capture_workspace(
+        &self,
+        _request: workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<workspace::WorkspaceSnapshot> {
+        Err(io::Error::new(ErrorKind::Unsupported, "coherent workspace capture is unsupported"))
+    }
+
+    /// Recover the result of an exact publication request without replaying edits.
+    /// This supports lost acknowledgements and rename/delete retries after restart.
+    async fn lookup_workspace_publication(&self, _request: &workspace::WorkspacePublicationRequest) -> io::Result<Option<workspace::WorkspacePublicationOutcome>> {
+        Err(io::Error::new(ErrorKind::Unsupported, "workspace publication receipts are unsupported"))
+    }
+
+    /// Publish against exactly the captured revision. Successful retries return
+    /// the same durable receipt even if later edits have changed the project.
+    async fn publish_workspace(
+        &self,
+        _request: workspace::WorkspacePublicationRequest,
+    ) -> io::Result<workspace::WorkspacePublicationOutcome> {
+        Err(io::Error::new(ErrorKind::Unsupported, "conditional workspace publication is unsupported"))
+    }
+    /// Arbitrate execution ownership inside this provider's existing project
+    /// scope. The authority supplies time and stores the transition atomically.
+    /// A remote client must never emulate this with reads or a local clock.
+    async fn transition_execution(
+        &self,
+        _work: &execution::ExecutionWorkId,
+        _command: execution::ExecutionLeaseCommand,
+    ) -> io::Result<execution::ExecutionLeaseOutcome> {
+        Err(io::Error::new(ErrorKind::Unsupported, "provider execution authority is unsupported"))
+    }
+    /// Validate ownership at the publication commit boundary under the same
+    /// provider lock as the files and receipt. A separate lease check is unsafe.
+    async fn publish_workspace_fenced(
+        &self,
+        _request: workspace::WorkspacePublicationRequest,
+        _lease: &execution::ExecutionLease,
+    ) -> io::Result<execution::FencedWorkspacePublicationOutcome> {
+        Err(io::Error::new(ErrorKind::Unsupported, "fenced workspace publication is unsupported"))
+    }
     fn current_dir_override(&self) -> Option<PathBuf> {
         None
     }
@@ -398,17 +465,37 @@ pub trait FsProvider: Send + Sync + 'static {
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
     /// Read an immutable version through the provider's normal authorization.
     /// Never fall back to a live head when the version is unavailable.
-    async fn read_version(&self, _path: &Path, _version: &str, _size: u64, _snapshot: &str) -> io::Result<Vec<u8>> {
-        Err(io::Error::new(ErrorKind::Unsupported, "immutable version reads are unsupported by this provider"))
+    async fn read_version(
+        &self,
+        _path: &Path,
+        _version: &str,
+        _size: u64,
+        _snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "immutable version reads are unsupported by this provider",
+        ))
     }
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
     /// Atomically create (None) or replace the exact previously published version.
     /// Implementations must never emulate this with a read followed by a write.
-    async fn publish_output(&self, _path: &Path, _data: &[u8], _expected: Option<&str>) -> io::Result<String> {
-        Err(io::Error::new(ErrorKind::Unsupported, "conditional output publication is unsupported"))
+    async fn publish_output(
+        &self,
+        _path: &Path,
+        _data: &[u8],
+        _expected: Option<&str>,
+    ) -> io::Result<String> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional output publication is unsupported",
+        ))
     }
     async fn remove_output(&self, _path: &Path, _expected: &str) -> io::Result<()> {
-        Err(io::Error::new(ErrorKind::Unsupported, "conditional output removal is unsupported"))
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional output removal is unsupported",
+        ))
     }
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;

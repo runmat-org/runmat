@@ -13,15 +13,36 @@ use super::RunMatSession;
 /// execution-profile catalog, or entry path after source checking succeeds.
 #[derive(Debug)]
 pub struct CheckedFeaSessionSource {
-    checked: runmat_runtime::analysis::CheckedFeaSource,
-    physical_path: PathBuf,
-    frozen_project: Option<runmat_package::FrozenProject>,
-    project_manifest: Option<runmat_config::project::ProjectManifest>,
-    program_environment: runmat_execution::ProgramEnvironment,
-    compatibility_mode: crate::CompatMode,
+    pub(super) checked: runmat_runtime::analysis::CheckedFeaSource,
+    pub(super) physical_path: PathBuf,
+    pub(super) frozen_project: Option<runmat_package::FrozenProject>,
+    pub(super) project_manifest: Option<runmat_config::project::ProjectManifest>,
+    pub(super) program_environment: runmat_execution::ProgramEnvironment,
+    pub(super) compatibility_mode: crate::CompatMode,
+    pub(super) captured: Option<std::sync::Arc<std::collections::BTreeMap<PathBuf, Vec<u8>>>>,
 }
 
 impl CheckedFeaSessionSource {
+    /// The complete immutable view used for candidate checking, when present.
+    /// Materialization must not fall back to live files if a capture lacks a path.
+    pub fn captured_sources(&self) -> Option<&std::collections::BTreeMap<PathBuf, Vec<u8>>> {
+        self.captured.as_deref()
+    }
+
+    pub async fn read_source(&self, path: &Path) -> Result<Vec<u8>, String> {
+        match self.captured_sources() {
+            Some(files) => files.get(path).cloned().ok_or_else(|| {
+                format!(
+                    "source is absent from the checked capture: {}",
+                    path.display()
+                )
+            }),
+            None => runmat_filesystem::read_async(path)
+                .await
+                .map_err(|error| error.to_string()),
+        }
+    }
+
     pub const fn checked(&self) -> &runmat_runtime::analysis::CheckedFeaSource {
         &self.checked
     }
@@ -64,10 +85,11 @@ impl RunMatSession {
         &mut self,
         requested_path: &Path,
     ) -> Result<FeaSourceCheckResult, String> {
-        Ok(self
-            .load_and_check_fea_source_path(requested_path)
-            .await?
-            .check_result())
+        let source =
+            std::sync::Arc::new(self.load_and_check_fea_source_path(requested_path).await?);
+        let result = source.check_result();
+        self.retain_checked_fea_source(&result, source);
+        Ok(result)
     }
 
     /// Load and check a `.fea` source while retaining its exact native execution context.
@@ -133,6 +155,7 @@ impl RunMatSession {
         }
         Ok(CheckedFeaSessionSource {
             checked: prepared.check(functions, profiles)?,
+            captured: None,
             physical_path,
             frozen_project: project,
             project_manifest,
@@ -141,11 +164,22 @@ impl RunMatSession {
         })
     }
 
-    async fn compile_fea_function_facts(
+    pub(super) async fn compile_fea_function_facts(
         &mut self,
         project: &runmat_package::FrozenProject,
         requester_path: &Path,
         requests: Vec<FunctionRequest>,
+    ) -> Result<Vec<FunctionFacts>, String> {
+        self.compile_fea_function_facts_from_view(project, requester_path, requests, None)
+            .await
+    }
+
+    pub(super) async fn compile_fea_function_facts_from_view(
+        &mut self,
+        project: &runmat_package::FrozenProject,
+        requester_path: &Path,
+        requests: Vec<FunctionRequest>,
+        captured: Option<&std::collections::BTreeMap<PathBuf, Vec<u8>>>,
     ) -> Result<Vec<FunctionFacts>, String> {
         if requests.is_empty() {
             return Ok(Vec::new());
@@ -176,7 +210,15 @@ impl RunMatSession {
                     definition.qualified_name
                 )
             })?;
-            let source = read_source(&source_path, "imported function").await?;
+            let source = match captured {
+                Some(captured) => captured.get(&source_path).cloned().ok_or_else(|| {
+                    format!(
+                        "imported function is absent from the captured candidate: {}",
+                        source_path.display()
+                    )
+                })?,
+                None => read_source(&source_path, "imported function").await?,
+            };
             let source_digest = runmat_execution::Digest::sha256(&source);
             if source_digest.bytes() != source_id.content_digest.bytes() {
                 return Err(format!(
@@ -190,17 +232,28 @@ impl RunMatSession {
                     source_path.display()
                 )
             })?;
-            let interface = self
-                .compile_executable_unit(
-                    crate::ExecutableSource::frozen(
-                        source_id.package_instance.to_string(),
-                        source_id.relative_path.as_str(),
-                        source_path.to_string_lossy(),
-                        source_text,
-                    ),
-                    Some(revision.clone()),
-                )
-                .await
+            let executable_source = crate::ExecutableSource::frozen(
+                source_id.package_instance.to_string(),
+                source_id.relative_path.as_str(),
+                source_path.to_string_lossy(),
+                source_text,
+            );
+            let compiled = match captured {
+                Some(captured) => {
+                    self.compile_executable_unit_from_snapshot(
+                        executable_source,
+                        revision.clone(),
+                        &runmat_package::FrozenProjectHandoff::new(project.clone()),
+                        captured,
+                    )
+                    .await
+                }
+                None => {
+                    self.compile_executable_unit(executable_source, Some(revision.clone()))
+                        .await
+                }
+            };
+            let interface = compiled
                 .map_err(|error| {
                     format!(
                         "cannot compile imported function `{}`: {error}",
@@ -280,7 +333,7 @@ async fn project_manifest(
         .map_err(|error| format!("cannot load FEA project manifest: {error}"))
 }
 
-fn execution_profiles(
+pub(super) fn execution_profiles(
     manifest: Option<&runmat_config::project::ProjectManifest>,
 ) -> Result<Vec<runmat_runtime::analysis::ExecutionProfileFacts>, String> {
     let Some(manifest) = manifest else {

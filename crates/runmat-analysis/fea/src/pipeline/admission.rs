@@ -69,22 +69,23 @@ pub(super) fn require_structural_step(
             "prescribed structural motion is admitted as a homogeneous support for modal extraction and as physical kinematics for transient response, not {procedure:?}"
         )));
     }
-    if procedure != AnalysisProcedure::Static
-        && model.constraints.iter().any(|constraint| {
-            constraint
-                .structural()
-                .is_some_and(|constraint| match &constraint.kind {
-                    StructuralConstraintKind::Fixed { .. } => false,
-                    StructuralConstraintKind::Prescribed(_) => {
-                        constraint.frame != runmat_analysis_core::CoordinateFrame::Global
-                    }
-                    StructuralConstraintKind::PrescribedMotion(_) => false,
-                    _ => true,
-                })
-        })
-    {
+    if !matches!(
+        procedure,
+        AnalysisProcedure::Static | AnalysisProcedure::Nonlinear
+    ) && model.constraints.iter().any(|constraint| {
+        constraint
+            .structural()
+            .is_some_and(|constraint| match &constraint.kind {
+                StructuralConstraintKind::Fixed { .. } => false,
+                StructuralConstraintKind::Prescribed(_) => {
+                    constraint.frame != runmat_analysis_core::CoordinateFrame::Global
+                }
+                StructuralConstraintKind::PrescribedMotion(_) => false,
+                _ => true,
+            })
+    }) {
         return Err(FeaRunError::InvalidModel(format!(
-            "structural affine constraints are not yet admitted for {procedure:?}; modal, transient, and nonlinear operators require procedure-specific stiffness, mass, damping, tangent, and effective-load reduction"
+            "structural affine constraints are not yet admitted for {procedure:?}; modal and transient operators require procedure-specific stiffness, mass, damping, and effective-load reduction"
         )));
     }
     Ok(())

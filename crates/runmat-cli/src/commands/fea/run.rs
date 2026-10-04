@@ -176,6 +176,17 @@ async fn execute_sweep_remotely(
     )
     .await?;
     let saved_expectation = placeholder.root.result_expectation();
+    let mut assessment_functions = Vec::with_capacity(saved_expectation.studies.len());
+    for study in &saved_expectation.studies {
+        assessment_functions.push(
+            runmat_execution_runner_native::freeze_fea_assessment_functions(
+                &source.session_source,
+                &study.study.assessments,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?,
+        );
+    }
     let sweep_id = sweep.sweep.sweep_id.clone();
     let case_ids = cases
         .iter()
@@ -226,6 +237,7 @@ async fn execute_sweep_remotely(
                 sweep_id,
                 case_ids,
                 expectation: Box::new(saved_expectation),
+                assessment_functions,
             },
         },
     )

@@ -10,6 +10,17 @@ use runmat_runtime::analysis::{
 };
 use runmat_runtime::operations::OperationContext;
 
+struct CountedThermalObjects {
+    objects: DownloadedThermalObjects,
+    reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl CacheImport for CountedThermalObjects {
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        CacheImport::read_verified(&self.objects, digest)
+    }
+}
+
 fn standalone_preparation(
     order: ElementOrder,
     transient: bool,
@@ -170,6 +181,32 @@ fn check(order: ElementOrder, transient: bool) {
             AnalysisStudyCompletionIdentity::new(&allocation).unwrap(),
         )
     };
+    // An impossible declared source workspace rejects before producer authentication reads.
+    // Keep every original numerical control and execute the authentic retry below unchanged.
+    let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = ThermalStudyObjectSource::new(RetainedThermalSource {
+        inventory_limits: source.inventory_limits,
+        completed: source.completed.clone(),
+        store: CountedThermalObjects {
+            objects: downloaded.clone(),
+            reads: reads.clone(),
+        },
+        objects: BTreeMap::new(),
+    });
+    let mut oversized = completed.clone();
+    oversized.catalog.objects[0].encoded_length = u64::MAX;
+    let rejected = publish(&oversized, &counted, &mesh, &options, definition).unwrap_err();
+    assert_eq!(
+        rejected.error_type,
+        runmat_runtime::operations::OperationErrorType::Capacity
+    );
+    assert_eq!(
+        rejected.error_code,
+        "RM.FEA.RUN_STUDY.PUBLICATION_RESOURCE_LIMIT"
+    );
+    assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(pool.tasks.len(), task_count);
+
     // All negative calls precede publication. The authentic retained closure is immutable;
     // none is allowed to substitute caller metadata or run additional numerical tasks.
     assert!(publish(

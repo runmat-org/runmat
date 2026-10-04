@@ -35,6 +35,9 @@ use crate::{
 
 use super::*;
 
+#[path = "tests/final_frequency.rs"]
+mod final_frequency;
+
 pub(super) fn scalar_definition() -> RecoveredFieldDefinition {
     RecoveredFieldDefinition::new(
         "temperature.recovered",
@@ -1419,6 +1422,78 @@ fn series_extrema_and_envelope_retain_samples_entities_and_exact_ties() {
     substituted.evidence.contributions[0].values[0] += 1.0;
     assert!(substituted.validate_for(&plan, &history).is_err());
     assert!(substituted.validate_source(&plan, &history).is_err());
+}
+
+#[test]
+fn series_peak_of_spatial_maxima_preserves_the_changing_governing_node() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut request = spec("moving-peak", ObservationTarget::WholeModel);
+    request.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0, 2.0]);
+    request.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Maximum,
+        series: SeriesReduction::Maximum,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    request.storage.retention = RetentionPolicy::Canonical;
+    let mut step = ProcedureStep::thermal_transient("moving-peak-step");
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 2.0,
+        interval_count: 2,
+    };
+    step.observations = vec![ObservationRequest::History(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("moving-peak".into());
+    let mut builder = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    for (time, values) in [
+        (0.0, vec![1.0, 0.0, 0.0, 0.0]),
+        (1.0, vec![0.0, 3.0, 0.0, 0.0]),
+        (2.0, vec![0.0, 0.0, 2.0, 0.0]),
+    ] {
+        let sample = RecoveredFieldSample::TimeSeconds(time);
+        let fields = catalog_at_sample(&projection, &definition, sample, vec![4], values);
+        let result =
+            evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample)
+                .unwrap();
+        builder.push(sample, result).unwrap();
+    }
+    let history = builder.finish().unwrap();
+    assert_ne!(
+        history.samples()[0].result.entities,
+        history.samples()[1].result.entities
+    );
+    let result = reduce_observation_history(
+        &plan,
+        &history,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(2).unwrap()),
+    )
+    .unwrap();
+    let SeriesReductionPayload::Values { field, extrema } = &result.payload else {
+        panic!("expected scalar peak")
+    };
+    assert_eq!(field.as_host_f64().unwrap(), &[3.0]);
+    assert_eq!(extrema.len(), 1);
+    assert_eq!(
+        extrema[0].source.coordinate,
+        RecoveredFieldSample::TimeSeconds(1.0)
+    );
+    assert_eq!(
+        extrema[0].entity.as_ref(),
+        history.samples()[1].result.entities.first()
+    );
+    result.validate_source(&plan, &history).unwrap();
+    assert_eq!(
+        SeriesReductionResult::from_canonical_bytes(&result.canonical_bytes().unwrap()).unwrap(),
+        result
+    );
 }
 
 #[test]

@@ -3,11 +3,13 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::GeneratorProvenance;
 use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
 use runmat_execution::resource::{Capability, ResourceRequest};
+use runmat_execution::task::RetryPolicy;
 use runmat_execution::value::{InlineValue, ValuePayload, ValueRefKind};
 use runmat_execution::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
-    ExecutableComponentRevisions, ExecutableIdentity, ExecutableUnitManifest, ProgramEnvironment,
-    ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
+    ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
+    ExecutableUnitManifest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision,
+    EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_execution_artifact::{ArtifactAccess, BundleCallable, ProgramExecutionObject};
 use runmat_types::{

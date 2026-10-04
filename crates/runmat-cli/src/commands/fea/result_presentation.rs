@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use runmat_runtime::analysis::AnalysisStudyRunData;
 use serde::Serialize;
 
 use crate::presentation;
@@ -8,6 +9,8 @@ pub(super) use local::{completed_summary, print_completed_fea_result};
 
 #[derive(Serialize)]
 pub(super) struct LocalRunSummary {
+    #[serde(flatten)]
+    assessment_summary: AssessmentSummary,
     root_id: String,
     procedure: &'static str,
     study_definition_digest: String,
@@ -19,12 +22,30 @@ pub(super) struct LocalRunSummary {
     result_manifest_artifact_path: String,
 }
 
+#[derive(Serialize)]
+struct AssessmentSummary {
+    run_status: runmat_runtime::analysis::RunStatus,
+    numerically_acceptable: bool,
+    assessments: Vec<runmat_runtime::analysis::assessment::PublishedStudyAssessment>,
+}
+
+impl From<&AnalysisStudyRunData> for AssessmentSummary {
+    fn from(publication: &AnalysisStudyRunData) -> Self {
+        Self {
+            run_status: publication.run_status,
+            numerically_acceptable: publication.numerically_acceptable,
+            assessments: publication.assessments.clone(),
+        }
+    }
+}
+
 pub(super) fn local_summary(
     root_id: impl Into<String>,
     completed: &runmat_runtime::analysis::StructuralStudyResult,
     publication: &runmat_runtime::analysis::AnalysisStudyRunData,
 ) -> Result<LocalRunSummary> {
     Ok(LocalRunSummary {
+        assessment_summary: publication.into(),
         root_id: root_id.into(),
         procedure: numerical_kind(completed.numerical()),
         study_definition_digest: completed
@@ -94,6 +115,18 @@ fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result
         summary.elements,
         summary.boundary_faces
     );
+    for assessment in &summary.assessment_summary.assessments {
+        println!(
+            "  {}: {:?}",
+            assessment.definition.assessment_id, assessment.result.status
+        );
+        if let Some(issue) = &assessment.result.issue {
+            println!("    evidence: {issue:?}");
+        }
+        if let Some(diagnostic) = &assessment.function_execution_diagnostic {
+            println!("    execution: {diagnostic}");
+        }
+    }
     Ok(())
 }
 

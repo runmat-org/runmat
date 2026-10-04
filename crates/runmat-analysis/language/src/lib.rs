@@ -9,6 +9,7 @@ pub mod compiler;
 pub mod diagnostic;
 pub mod module_graph;
 pub mod operations;
+pub mod reference;
 pub mod semantic;
 pub mod source;
 

@@ -573,23 +573,6 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
             value,
             "plastic material model",
         )?)
-    } else if fields.contains_key("yield_strain")
-        || fields.contains_key("hardening_modulus_ratio")
-        || fields.contains_key("saturation_exponent")
-    {
-        Some(MaterialPlasticModel {
-            yield_strain: remove_required_f64(&mut fields, MATERIAL_NAME, "yield_strain")?,
-            hardening_modulus_ratio: remove_required_f64(
-                &mut fields,
-                MATERIAL_NAME,
-                "hardening_modulus_ratio",
-            )?,
-            saturation_exponent: remove_required_f64(
-                &mut fields,
-                MATERIAL_NAME,
-                "saturation_exponent",
-            )?,
-        })
     } else {
         None
     };

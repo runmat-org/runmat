@@ -3,6 +3,7 @@
 //! The trusted root digest is supplied by the caller, not learned from the publication.
 //! Encoding and import are bounded, but gather metadata and mesh; this is not a peak-memory
 //! qualification or a replacement for scheduler attestation of response/accounting pairs.
+use crate::study_closure::{check_inventory, read, unique};
 use std::collections::BTreeMap;
 
 use runmat_analysis_fea::{
@@ -275,63 +276,6 @@ fn descendant_catalog(
         unique(roots)?,
         unique(objects)?,
     )?)
-}
-
-fn unique(references: Vec<ValueRef>) -> AnalysisBridgeResult<Vec<ValueRef>> {
-    let mut by_id = BTreeMap::new();
-    for reference in references {
-        if let Some(previous) = by_id.insert(reference.id, reference.clone()) {
-            if previous != reference {
-                return Err(invalid("fluid closure reference identity conflict"));
-            }
-        }
-    }
-    Ok(by_id.into_values().collect())
-}
-
-fn check_inventory(
-    references: &[ValueRef],
-    access: &ArtifactAccess,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<()> {
-    if references.len() > limits.max_objects {
-        return Err(invalid("fluid closure object limit exceeded"));
-    }
-    let mut total = 0_u64;
-    for reference in references {
-        access.validate_reference(
-            reference,
-            ValueRefKind::ResultObject,
-            &reference.media_type,
-            &reference.value_schema,
-        )?;
-        total = total
-            .checked_add(reference.encoded_length)
-            .ok_or_else(|| invalid("fluid closure byte count overflow"))?;
-        if reference.encoded_length > limits.max_object_bytes || total > limits.max_total_bytes {
-            return Err(invalid("fluid closure byte limit exceeded"));
-        }
-    }
-    Ok(())
-}
-
-fn read(
-    source: &impl CacheImport,
-    reference: &ValueRef,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<Vec<u8>> {
-    if reference.encoded_length > limits.max_object_bytes {
-        return Err(invalid("fluid object byte limit exceeded"));
-    }
-    let bytes = source
-        .read_verified(reference.logical_digest)?
-        .ok_or_else(|| invalid("fluid closure child is missing"))?;
-    if bytes.len() as u64 != reference.encoded_length
-        || Digest::sha256(&bytes) != reference.logical_digest
-    {
-        return Err(invalid("fluid closure child bytes differ from reference"));
-    }
-    Ok(bytes)
 }
 
 fn invalid(message: &str) -> AnalysisBridgeError {

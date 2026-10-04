@@ -42,7 +42,7 @@ impl AnalysisProjection {
             add(
                 &mut total,
                 serialized_materialization_resident_bytes_estimate(
-                    &element.region_id,
+                    &(&element.region_id, &element.provenance),
                     PROFILE_LIMITS,
                 )
                 .map_err(resource)?,
@@ -98,6 +98,10 @@ impl AnalysisProjection {
         for element in &topology.volume_elements {
             let count = element.node_ids.len();
             add(&mut total, vector::<usize>(count)?)?;
+            add(
+                &mut total,
+                vector::<runmat_meshing_core::PersistentEntityId>(element.provenance.len())?,
+            )?;
             largest_element = largest_element.max(count);
             let count = u64::try_from(count).map_err(resource)?;
             add(
@@ -187,7 +191,7 @@ impl Serialize for ElementRegions<'_> {
                 .topology
                 .volume_elements
                 .iter()
-                .map(|element| &element.region_id),
+                .map(|element| (&element.region_id, &element.provenance)),
         )
     }
 }

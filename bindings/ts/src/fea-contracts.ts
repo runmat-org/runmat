@@ -1,5 +1,7 @@
 export * from "./generated/fea-analysis-contracts.js";
 export * from "./generated/fea-semantic-contracts.js";
+export * from "./generated/fea-workspace-contracts.js";
+export * from "./generated/fea-assessment-guards.js";
 
 export const FEA_RUN_KIND = "fea-study" as const;
 export const FEA_RUN_CELL_ID = "__fea__" as const;

@@ -7,6 +7,8 @@ use super::{AnalysisExecutionError, AnalysisExecutionResult, SweepDefinition};
 
 mod contract;
 #[cfg(test)]
+mod frequency_publication_tests;
+#[cfg(test)]
 mod magnetic_tests;
 
 pub use contract::*;
@@ -569,10 +571,18 @@ impl PublicationIdentity {
 }
 
 fn derive_digest<T: Serialize>(domain: &'static str, input: &T) -> AnalysisExecutionResult<Digest> {
+    derive_digest_with_limits(domain, input, IDENTITY_LIMITS)
+}
+
+fn derive_digest_with_limits<T: Serialize>(
+    domain: &'static str,
+    input: &T,
+    limits: CanonicalLimits,
+) -> AnalysisExecutionResult<Digest> {
     Ok(Digest::sha256(encode_contract(
         IDENTITY_PREFIX,
         domain,
         input,
-        IDENTITY_LIMITS,
+        limits,
     )?))
 }

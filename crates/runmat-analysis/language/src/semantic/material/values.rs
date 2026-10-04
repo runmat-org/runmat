@@ -27,6 +27,27 @@ pub fn string_assignment(statements: &[CheckedFeaStatement], name: &str) -> Opti
     }
 }
 
+pub fn require_closed_law(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[CheckedFeaStatement],
+    supported: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<()> {
+    let Some(value) = assignment(statements, "law") else {
+        missing(declaration, "law", diagnostics);
+        return None;
+    };
+    if matches!(&value.kind, CheckedExpressionKind::String(law) if law == supported) {
+        return Some(());
+    }
+    diagnostics.push(diagnostic(
+        declaration,
+        value.span,
+        format!("material plastic law must be the explicit string `{supported}`"),
+    ));
+    None
+}
+
 pub fn optional_quantity(
     declaration: &CheckedFeaDeclaration,
     statements: &[CheckedFeaStatement],

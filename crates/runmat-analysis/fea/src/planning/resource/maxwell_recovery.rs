@@ -1,11 +1,7 @@
 //! Retained native copies: shared identity/catalog/partition materialization.
 use super::*;
 use crate::execution::{maxwell_native_field_definitions, FieldRecoveryRequest};
-use crate::results::field::{
-    RecoveredField, RecoveredFieldArtifactManifest, RecoveredFieldPartition, RecoveredFieldSample,
-    RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
-};
-use runmat_canonical_codec::SerializedCanonicalProfile;
+use crate::results::field::RECOVERED_FIELD_PARTITION_ENTITY_COUNT;
 #[cfg(test)]
 mod tests;
 
@@ -37,52 +33,7 @@ pub fn maxwell_field_recovery_shape(
 ) -> Result<(Vec<u64>, ByteCount), ResourcePlanningError> {
     let invalid = |error: &dyn std::fmt::Display| ResourcePlanningError::Invalid(error.to_string());
     let definitions = maxwell_native_field_definitions(request).map_err(|e| invalid(&e))?;
-    let counts = request
-        .plan
-        .requirements
-        .iter()
-        .map(|r| {
-            usize::try_from(r.cost.output_entity_count)
-                .map_err(|_| ResourcePlanningError::Overflow("maxwell native entities"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let catalog =
-        RecoveredFieldArtifactManifest::profile_final_shape(request, &definitions, &counts)
-            .map_err(|e| invalid(&e))?;
-    let mut partitions = vec![catalog.encoded_bytes_upper_bound];
-    let mut workspace = catalog.materialization_resident_bytes_estimate;
-    let add_profile = |total: &mut u64,
-                       profile: SerializedCanonicalProfile|
-     -> Result<(), ResourcePlanningError> {
-        *total = total
-            .checked_add(profile.materialization_resident_bytes_estimate)
-            .and_then(|n| n.checked_add(profile.encoded_bytes_upper_bound))
-            .ok_or(ResourcePlanningError::Overflow(
-                "maxwell recovery workspace",
-            ))?;
-        Ok(())
-    };
-    for (definition, count) in definitions.iter().zip(counts) {
-        add_profile(
-            &mut workspace,
-            RecoveredField::identity_profile_shape(definition, RecoveredFieldSample::Final, count)
-                .map_err(|e| invalid(&e))?,
-        )?;
-        let mut remaining = count;
-        while remaining > 0 {
-            let count = remaining.min(RECOVERED_FIELD_PARTITION_ENTITY_COUNT);
-            let profile = RecoveredFieldPartition::profile_shape(
-                definition,
-                RecoveredFieldSample::Final,
-                count,
-            )
-            .map_err(|e| invalid(&e))?;
-            partitions.push(profile.encoded_bytes_upper_bound);
-            add_profile(&mut workspace, profile)?;
-            remaining -= count;
-        }
-    }
-    Ok((partitions, ByteCount(workspace)))
+    super::recovered_field_shape::shape(request, definitions)
 }
 
 pub fn build_maxwell_field_recovery_resource_plan(

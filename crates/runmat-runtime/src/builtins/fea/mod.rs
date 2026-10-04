@@ -9,14 +9,13 @@ use runmat_analysis_core::{
     FluidConstraintKind, FluidStructureInterfaceModel, FluidStructureKinematics, Frequency,
     FrictionCoefficient, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
     MagneticConstraintKind, MagneticVectorPotential, MassDensity, MaterialAcousticModel,
-    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, MechanicalDampingModel, PairedConstraint, PairingPolicy,
-    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
-    PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
-    RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
-    StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
-    StructuralTranslationDof, Temperature, TemperatureDifference, ThermalConstraint,
-    ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
+    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    MechanicalDampingModel, PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
+    PhaseShiftedPeriodicConstraint, PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs,
+    PrescribedValue, Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue,
+    SolutionSpace, SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    StructuralRotationDof, StructuralTranslationDof, Temperature, TemperatureDifference,
+    ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
     ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
 use runmat_builtins::{
@@ -4516,6 +4515,7 @@ mod tests {
         let identity = test_run_identity(runmat_analysis_core::AnalysisProcedure::Static);
         let run_id = crate::analysis::storage::next_run_id();
         let run = crate::analysis::AnalysisRunResult {
+            observation_scalars: Vec::new(),
             run_id: run_id.clone(),
             run: runmat_analysis_fea::FeaRunResult {
                 accelerator_evidence: Vec::new(),
@@ -4609,6 +4609,7 @@ mod tests {
         let identity =
             test_run_identity(runmat_analysis_core::AnalysisProcedure::TransientResponse);
         let run = crate::analysis::AnalysisRunResult {
+            observation_scalars: Vec::new(),
             run_id: run_id.clone(),
             run: runmat_analysis_fea::FeaRunResult {
                 accelerator_evidence: Vec::new(),

@@ -28,6 +28,9 @@ pub(super) fn validate_prepared_execution(
         PreparedFeaStudyRoot::Maxwell(root) => {
             metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
         }
+        PreparedFeaStudyRoot::Nonlinear(root) => {
+            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+        }
         PreparedFeaStudyRoot::Fluid(root) => {
             metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
         }

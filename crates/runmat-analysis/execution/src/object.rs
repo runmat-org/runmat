@@ -17,12 +17,14 @@ use runmat_execution_artifact::{ArtifactAccess, LogicalObject, ObjectDescriptor,
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
 mod conversion;
+mod retained_storage;
 mod validation;
 use conversion::logical_object;
 pub(crate) use conversion::prepare_chunked_analysis_objects;
 pub use conversion::{
     projected_chunked_output_resource_facts, projected_transport_output_resource_facts,
 };
+pub(crate) use retained_storage::logical_objects_storage;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedAnalysisObjects {

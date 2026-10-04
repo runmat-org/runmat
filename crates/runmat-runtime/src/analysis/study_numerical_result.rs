@@ -1,9 +1,10 @@
 //! Typed whole-study numerical results, including retained solved thermal producers.
 use super::*;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum StructuralStudyNumericalResult {
     ThermalPrestress {
         thermal: Box<crate::analysis::ThermalStudyCompletion>,
+        #[serde(skip_serializing)]
         thermal_source: ThermalStudyObjectSource,
         structural: Box<StructuralStudyNumericalResult>,
     },

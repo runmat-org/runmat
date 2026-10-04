@@ -1,11 +1,15 @@
 use super::*;
 mod fluid;
+mod nonlinear;
 mod magnetic;
 mod maxwell;
 
 pub(super) fn execute_field_recovery(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    if invocation.inputs.iter().any(|i| i.manifest.kind == AnalysisNumericalObjectKind::NonlinearSolidWorkload) {
+        return nonlinear::execute(invocation);
+    }
     if invocation
         .inputs
         .iter()

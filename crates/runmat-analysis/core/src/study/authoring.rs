@@ -82,6 +82,8 @@ pub struct AuthoredStudy {
     pub formulation_requirement: crate::FormulationRequirement,
     pub inputs: Vec<AuthoredInputDefinition>,
     pub outputs: Vec<AuthoredOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assessments: Vec<crate::AuthoredAssessment>,
     pub sequence: AnalysisSequence,
 }
 
@@ -185,6 +187,12 @@ impl AuthoredStudy {
             .map_err(|error| AuthoredStudyError::InvalidSequence(error.to_string()))?;
         validate_authored_outputs(&self.outputs, &self.sequence.steps)
             .map_err(|error| AuthoredStudyError::InvalidOutput(error.to_string()))?;
+        crate::validate_assessments(
+            &self.assessments,
+            &crate::authored_output_types(&self.outputs, &self.sequence.steps)
+                .map_err(|e| AuthoredStudyError::InvalidOutput(e.to_string()))?,
+        )
+        .map_err(AuthoredStudyError::InvalidOutput)?;
         lower_authored_observations(&self.outputs, &self.sequence.steps)
             .map_err(|error| AuthoredStudyError::InvalidOutput(error.to_string()))?;
         for output in &self.outputs {

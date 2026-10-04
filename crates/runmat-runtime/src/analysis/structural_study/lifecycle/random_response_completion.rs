@@ -12,7 +12,8 @@ pub(super) fn complete_structural_random_response(
     >,
     numerical: crate::analysis::StructuralStudyRandomResponseNumericalResult,
     completion_identity: AnalysisStudyCompletionIdentity,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let [modal_step, response_step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
             &intent,
@@ -39,6 +40,7 @@ pub(super) fn complete_structural_random_response(
         numerical,
         modal_run_id,
         response_run_id,
+        preparation,
     )
 }
 
@@ -52,7 +54,8 @@ pub(in crate::analysis) fn complete_random_response_study(
     numerical: crate::analysis::StructuralStudyRandomResponseNumericalResult,
     modal_run_id: String,
     response_run_id: String,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let [modal_step, response_step] = prepared.steps.as_slice() else {
         return Err(completion_error(
             &prepared,
@@ -367,7 +370,7 @@ pub(in crate::analysis) fn complete_random_response_study(
         AnalysisSolverOptions::StructuralRandomResponse(response_options.clone());
     let mut states = expected_basis_states;
     states.push(numerical.statistics_state);
-    complete_study_run(
+    complete_study_run_prepared(
         prepared,
         vec![
             CompletedStudyStep {
@@ -387,6 +390,7 @@ pub(in crate::analysis) fn complete_random_response_study(
         ],
         states,
         numerical.frozen_project_digest,
+        preparation,
     )
 }
 

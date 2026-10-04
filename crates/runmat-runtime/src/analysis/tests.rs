@@ -26,37 +26,30 @@ use runmat_analysis_fea::{
     fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
     fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
     fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
-    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
     fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_pressure_field_id,
     fea_fsi_fluid_velocity_field_id, fea_fsi_interface_displacement_field_id,
     fea_fsi_interface_pressure_field_id, fea_fsi_interface_residual_field_id,
     fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
-    fea_modal_mode_shape_field_id, fea_nonlinear_contact_gap_field_id,
-    fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
-    fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
-    fea_nonlinear_residual_norm_field_id, fea_nonlinear_rotation_field_id,
-    fea_nonlinear_von_mises_field_id, fea_thermal_energy_storage_rate_field_id,
-    fea_thermal_heat_flux_field_id, fea_thermal_temperature_gradient_field_id,
-    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
-    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
-    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
-    fea_transient_angular_velocity_field_id, fea_transient_damping_dissipation_field_id,
-    fea_transient_energy_balance_residual_field_id, fea_transient_external_work_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_reaction_force_field_id,
-    fea_transient_relative_energy_balance_error_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_strain_field_id,
-    fea_transient_stress_field_id, fea_transient_support_work_field_id,
-    fea_transient_velocity_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
-    SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_modal_mode_shape_field_id, fea_nonlinear_contact_pressure_field_id,
+    fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
+    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
+    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
+    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
+    fea_transient_damping_dissipation_field_id, fea_transient_energy_balance_residual_field_id,
+    fea_transient_external_work_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_reaction_force_field_id, fea_transient_relative_energy_balance_error_field_id,
+    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
+    fea_transient_strain_energy_density_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_strain_field_id, fea_transient_stress_field_id,
+    fea_transient_support_work_field_id, fea_transient_velocity_field_id, ComputeBackend,
+    FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -82,10 +75,12 @@ use runmat_meshing_core::{
 
 use super::*;
 
+mod nonlinear_physical;
 mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;
 mod topology_identity;
+mod transient_assessments;
 
 fn test_linear_workload_identity(
     workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
@@ -243,7 +238,7 @@ fn sample_cfd_constraints(
     ]
 }
 
-fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(super) fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
     storage::artifact_store_test_guard()
 }
 
@@ -258,7 +253,7 @@ fn test_electrical_material() -> MaterialElectricalModel {
     }
 }
 
-fn sample_model() -> AnalysisModel {
+pub(super) fn sample_model() -> AnalysisModel {
     let mut model = AnalysisModel {
         model_id: AnalysisModelId("beam_model".to_string()),
         geometry_id: "geo:beam".to_string(),
@@ -364,7 +359,7 @@ fn sample_model() -> AnalysisModel {
     model
 }
 
-fn sample_solid_model() -> AnalysisModel {
+pub(super) fn sample_solid_model() -> AnalysisModel {
     let mut model = sample_model();
     model.model_id = AnalysisModelId("solid_model".to_string());
     model.geometry_id = "geo:closed_cube".to_string();
@@ -857,16 +852,12 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: TestElectroTh
     });
 }
 
-fn set_model_plasticity(model: &mut AnalysisModel, plasticity: PlasticityConstitutiveOptions) {
-    if !plasticity.enabled {
-        return;
-    }
+fn set_model_plasticity(
+    model: &mut AnalysisModel,
+    plasticity: runmat_analysis_core::MaterialPlasticModel,
+) {
     for material in &mut model.materials {
-        material.plastic = Some(runmat_analysis_core::MaterialPlasticModel {
-            yield_strain: plasticity.yield_strain,
-            hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
-            saturation_exponent: plasticity.saturation_exponent,
-        });
+        material.plastic = Some(plasticity.clone());
     }
 }
 
@@ -3630,102 +3621,43 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
 }
 
 #[test]
-fn analysis_results_compare_reports_typed_deltas() {
+fn analysis_results_compare_reports_typed_deltas_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-
     let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-    let baseline = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions {
-            max_newton_iters: 1,
-            line_search: false,
-            ..AnalysisNonlinearRunOptions::balanced()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("baseline nonlinear run should succeed");
-    let candidate = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions::solid_recommended(),
-        OperationContext::new(None, None),
-    )
-    .expect("candidate nonlinear run should succeed");
-
-    let compare = analysis_results_compare_op(
-        AnalysisResultsCompareQuery {
-            baseline_run_id: baseline.data.run_id.clone(),
-            candidate_run_id: candidate.data.run_id.clone(),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("compare operation should succeed");
-
-    assert_eq!(compare.operation, "fea.results_compare");
-    assert_eq!(compare.op_version, "fea.results_compare/v1");
-    assert!(compare.data.failed_increment_delta.is_some());
-    assert!(compare.data.max_iteration_delta.is_some());
-    assert!(compare.data.solve_ms_delta.is_some());
-
-    storage::reset_artifact_store_for_tests();
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_trends_summarizes_recent_nonlinear_runs() {
+fn analysis_trends_summarizes_recent_nonlinear_runs_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-
     let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-    for _ in 0..4 {
-        let _ = analysis_run_nonlinear_with_options_op(
-            &model,
-            ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
-            Default::default(),
-            OperationContext::new(None, None),
-        )
-        .expect("nonlinear run should persist for trends");
-    }
-
-    let trends = analysis_trends_op(
-        AnalysisTrendsQuery { window_size: 3 },
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("trends should succeed");
-
-    assert_eq!(trends.operation, "fea.trends");
-    assert_eq!(trends.op_version, "fea.trends/v1");
-    let nonlinear = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.identity.procedure() == AnalysisProcedure::Nonlinear)
-        .expect("nonlinear trend summary should exist");
-    assert_eq!(nonlinear.sample_count, 3);
-    assert!(nonlinear.median_solve_ms.is_some());
-    assert!(nonlinear.p95_solve_ms.is_some());
-    assert!(nonlinear.failed_increment_rate.is_some());
-    assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
-    assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
-    assert!(nonlinear.thermo_spread_breach_rate.is_none());
-    assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
-    assert!(nonlinear.electro_thermal_coupling_enabled_rate.is_none());
-    assert!(nonlinear.electro_transient_warn_rate.is_none());
-    assert!(nonlinear.electro_nonlinear_warn_rate.is_none());
-    assert!(nonlinear.plastic_nonlinear_warn_rate.is_none());
-    assert!(nonlinear.contact_nonlinear_warn_rate.is_none());
-
-    storage::reset_artifact_store_for_tests();
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -4018,107 +3950,27 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
 }
 
 #[test]
-fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
+fn analysis_results_summary_surfaces_thermo_nonlinear_metrics_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::coupled(
-        "nonlinear_thermo_mechanical",
+        "unsupported_coupled",
         CoupledPhysicsFamily::Thermomechanical,
         AnalysisProcedure::Nonlinear,
     )];
-    set_model_thermo_coupling(
-        &mut model,
-        TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: Vec::new(),
-        },
-    );
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions::solid_recommended(),
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should succeed");
-
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
     assert_eq!(
-        run.data.run.identity.family(),
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
     );
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
-    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_temperature_factor
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_effective_modulus_scale
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_constitutive_material_spread_ratio
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .thermo_assignment_heterogeneity_index
-        .is_some());
-    assert!(results.data.summary.thermo_nonlinear_severity.is_some());
-    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, None);
-    assert!(results
-        .data
-        .summary
-        .electro_thermal_coupling_fingerprint
-        .is_none());
-    assert!(results.data.summary.electro_joule_heating_scale.is_none());
-    assert!(results
-        .data
-        .summary
-        .electro_conductivity_spread_ratio
-        .is_none());
-    assert!(results.data.summary.electro_nonlinear_severity.is_none());
-    assert!(results.data.summary.electro_transient_severity.is_none());
-    assert!(results.data.summary.plastic_nonlinear_severity.is_none());
-    assert!(results.data.summary.contact_nonlinear_severity.is_none());
-    let nonlinear = run
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear results should be present");
-    assert!(nonlinear.electro_thermal_temperature_snapshots.is_empty());
-    assert!(nonlinear
-        .electro_thermal_thermal_residual_snapshots
-        .is_empty());
-    for field_id in [
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
-        fea_electro_thermal_temperature_field_id(0),
-        fea_electro_thermal_thermal_residual_field_id(0),
-        FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD.to_string(),
-        FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY.to_string(),
-    ] {
-        assert!(run.data.run.field(&field_id).is_none());
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
-    }
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -4237,7 +4089,7 @@ impl Drop for EnvVarRestoreGuard {
     }
 }
 
-struct FeaRuntimeConfigRestoreGuard {
+pub(super) struct FeaRuntimeConfigRestoreGuard {
     previous: FeaRuntimeConfig,
 }
 
@@ -4247,7 +4099,7 @@ impl Drop for FeaRuntimeConfigRestoreGuard {
     }
 }
 
-fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
+pub(super) fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
     let previous = current_fea_runtime_config();
     configure_fea_runtime(FeaRuntimeConfig {
         study_artifact_root: Some(root.to_path_buf()),
@@ -4262,6 +4114,7 @@ fn scoped_fea_artifact_roots(root: &Path) -> FeaRuntimeConfigRestoreGuard {
     configure_fea_runtime(FeaRuntimeConfig {
         artifact_root: Some(root.to_path_buf()),
         study_artifact_root: Some(root.join("studies")),
+        ..Default::default()
     })
     .expect("configure FEA artifact roots");
     FeaRuntimeConfigRestoreGuard { previous }
@@ -5940,446 +5793,170 @@ fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
 }
 
 #[test]
-fn analysis_run_nonlinear_returns_native_nonlinear_result() {
+fn analysis_run_nonlinear_returns_native_nonlinear_result_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-    let envelope = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions {
-            increment_count: 16,
-            ..AnalysisNonlinearRunOptions::balanced()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should succeed");
-
-    assert_eq!(envelope.operation, "fea.run_nonlinear");
-    assert_eq!(envelope.op_version, "fea.run_nonlinear/v1");
-    let nonlinear = envelope
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear payload should exist");
-    assert_eq!(nonlinear.method, NonlinearMethod::IncrementalNewtonRaphson);
-    assert_eq!(nonlinear.load_factors.len(), 16);
-    assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
     assert_eq!(
-        nonlinear.residual_norms.len(),
-        nonlinear.increment_norms.len()
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
     );
-    assert_eq!(
-        nonlinear.residual_norms.len(),
-        nonlinear.iteration_counts.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.von_mises_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.plastic_strain_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.equivalent_plastic_strain_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.contact_pressure_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.contact_gap_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.load_factor_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.residual_norm_snapshots.len()
-    );
-    assert_eq!(
-        nonlinear.von_mises_snapshots[0].field_id,
-        fea_nonlinear_von_mises_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.plastic_strain_snapshots[0].field_id,
-        fea_nonlinear_plastic_strain_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.equivalent_plastic_strain_snapshots[0].field_id,
-        fea_nonlinear_equivalent_plastic_strain_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.contact_pressure_snapshots[0].field_id,
-        fea_nonlinear_contact_pressure_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.contact_gap_snapshots[0].field_id,
-        fea_nonlinear_contact_gap_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.load_factor_snapshots[0].field_id,
-        fea_nonlinear_load_factor_field_id(0)
-    );
-    assert_eq!(
-        nonlinear.residual_norm_snapshots[0].field_id,
-        fea_nonlinear_residual_norm_field_id(0)
-    );
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("nonlinear descriptor should be present")
-    };
-    for field_id in [
-        fea_nonlinear_von_mises_field_id(0),
-        fea_nonlinear_equivalent_plastic_strain_field_id(0),
-        fea_nonlinear_contact_pressure_field_id(0),
-        fea_nonlinear_contact_gap_field_id(0),
-        fea_nonlinear_load_factor_field_id(0),
-        fea_nonlinear_residual_norm_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let plastic_strain_descriptor = descriptor(&fea_nonlinear_plastic_strain_field_id(0));
-    assert_eq!(plastic_strain_descriptor.kind, AnalysisFieldKind::Tensor);
-    assert_eq!(plastic_strain_descriptor.component_count, Some(6));
-    assert!(nonlinear.tangent_rebuild_count > 0);
-    assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
-    assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_run_nonlinear_exposes_beam_rotation_snapshots() {
+fn analysis_run_nonlinear_exposes_beam_rotation_snapshots_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
     );
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "beam_moment_nonlinear".to_string(),
-    )];
-
-    let envelope = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions {
-            increment_count: 8,
-            ..AnalysisNonlinearRunOptions::balanced()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("beam nonlinear run should succeed");
-    let nonlinear = envelope
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear payload should exist");
-
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
     assert_eq!(
-        nonlinear.load_factors.len(),
-        nonlinear.rotation_snapshots.len()
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
     );
-    assert_eq!(
-        nonlinear.rotation_snapshots[0].field_id,
-        fea_nonlinear_rotation_field_id(0)
-    );
-    assert_eq!(nonlinear.rotation_snapshots[0].shape, vec![2, 3]);
-
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear beam results should be queryable");
-    let descriptor = results
-        .data
-        .field_descriptors
-        .iter()
-        .find(|descriptor| descriptor.field_id == fea_nonlinear_rotation_field_id(0))
-        .expect("nonlinear rotation descriptor should be present");
-    assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(descriptor.component_count, Some(3));
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
+fn nonlinear_strict_iteration_controls_do_not_admit_an_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-
-    let envelope = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Strict,
             max_newton_iters: 1,
-            line_search: false,
             ..AnalysisNonlinearRunOptions::balanced()
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should produce envelope");
-
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.numerically_acceptable);
-    assert!(envelope
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn nonlinear_quality_policy_diverges_for_increment_failures() {
+fn nonlinear_quality_policy_cannot_override_formulation_admission() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-
-    let run_with_policy = |quality_policy| {
-        analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    for quality_policy in [
+        QualityPolicy::Strict,
+        QualityPolicy::Balanced,
+        QualityPolicy::Exploratory,
+    ] {
+        let error = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
             FormulationRequirement::Experimental,
             AnalysisNonlinearRunOptions {
                 quality_policy,
-                max_newton_iters: 1,
-                line_search: false,
-                max_line_search_backtracks: 0,
                 ..AnalysisNonlinearRunOptions::balanced()
             },
             OperationContext::new(None, None),
         )
-        .expect("nonlinear run should return envelope")
-    };
-
-    let exploratory = run_with_policy(QualityPolicy::Exploratory);
-    let balanced = run_with_policy(QualityPolicy::Balanced);
-    let strict = run_with_policy(QualityPolicy::Strict);
-
-    assert!(exploratory.data.numerically_acceptable);
-    assert_eq!(exploratory.data.run_status, RunStatus::Completed);
-    assert!(balanced
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
-    assert!(!balanced.data.numerically_acceptable);
-    assert_eq!(balanced.data.run_status, RunStatus::Degraded);
-
-    assert!(strict
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
-    assert!(!strict.data.numerically_acceptable);
-    assert_eq!(strict.data.run_status, RunStatus::Degraded);
-}
-
-#[test]
-fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
-    let _guard = analysis_test_guard();
-    let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("nonlinear-high-thermo-severity");
-    let mut model = sample_solid_model();
-    model.sequence.steps = vec![ProcedureStep::coupled(
-        "nonlinear_thermo_mechanical",
-        CoupledPhysicsFamily::Thermomechanical,
-        AnalysisProcedure::Nonlinear,
-    )];
-    for material in &mut model.materials {
-        material
-            .thermal
-            .as_mut()
-            .expect("thermal fixture material")
-            .expansion_coefficient_per_k = 1.0e-3;
+        .expect_err(
+            "an unsupported envelope must not publish nonlinear snapshots or quality metrics",
+        );
+        assert_eq!(
+            error.error_code,
+            "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+        );
+        assert!(!error.retryable);
     }
-    set_model_thermo_coupling(
-        &mut model,
-        TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.0e-3,
-            region_temperature_deltas: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_nonlinear_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.numerically_acceptable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress));
-    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn nonlinear_balanced_does_not_report_thermo_stress_below_severity_threshold() {
+fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high_rejects_unsupported_envelope(
+) {
     let _guard = analysis_test_guard();
-    let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("nonlinear-low-thermo-severity");
     let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::coupled(
-        "nonlinear_thermo_mechanical",
+        "unsupported_coupled",
         CoupledPhysicsFamily::Thermomechanical,
         AnalysisProcedure::Nonlinear,
     )];
-    set_model_thermo_coupling(
-        &mut model,
-        TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: Vec::new(),
-        },
-    );
-
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        AnalysisNonlinearRunOptions {
-            quality_policy: QualityPolicy::Balanced,
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..AnalysisNonlinearRunOptions::solid_recommended()
-        },
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.quality_reasons.iter().any(|reason| {
-        reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress
-            || reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
-            || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
-    }));
-    let _ = fs::remove_dir_all(&mesh_root);
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
-fn analysis_results_query_can_exclude_nonlinear_payload() {
+fn nonlinear_balanced_does_not_report_thermo_stress_below_severity_threshold_rejects_unsupported_envelope(
+) {
+    let _guard = analysis_test_guard();
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "unsupported_coupled",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
+    )];
+    let error = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisNonlinearRunOptions::balanced(),
+        OperationContext::new(None, None),
+    )
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED"
+    );
+    assert!(!error.retryable);
+}
+
+#[test]
+fn analysis_results_query_can_exclude_nonlinear_payload_rejects_unsupported_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
-    )];
-    let run = analysis_run_nonlinear_with_options_op(
+    model.sequence.steps = vec![ProcedureStep::structural_nonlinear("unsupported_nonlinear")];
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should succeed");
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery {
-            include_fields: Vec::new(),
-            include_field_values: true,
-
-            include_diagnostics: true,
-            diagnostic_codes: Vec::new(),
-            include_modal_results: true,
-            include_buckling_results: true,
-            mode_indices: Vec::new(),
-            include_transient_results: true,
-            transient_snapshot_indices: Vec::new(),
-            include_nonlinear_results: false,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    assert!(results.data.nonlinear_results.is_none());
-    assert!(results.data.summary.increment_count > 0);
-    assert!(results.data.summary.failed_increment_count.is_some());
-    assert!(results.data.summary.max_nonlinear_residual_norm.is_some());
-    assert!(results.data.summary.max_nonlinear_increment_norm.is_some());
-    assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
-    assert!(results.data.summary.final_increment_converged.is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_line_search_backtracks
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_max_backtracks_per_increment
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_tangent_rebuild_count
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_iteration_spike_count
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_convergence_stall_count
-        .is_some());
-    assert!(results
-        .data
-        .summary
-        .nonlinear_backtrack_burst_count
-        .is_some());
-    let field_ids = results
-        .data
-        .field_descriptors
-        .iter()
-        .map(|descriptor| descriptor.field_id.as_str())
-        .collect::<Vec<_>>();
-    assert!(field_ids.contains(&fea_nonlinear_von_mises_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_plastic_strain_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_equivalent_plastic_strain_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_contact_pressure_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_nonlinear_contact_gap_field_id(0).as_str()));
+    .expect_err("an unsupported envelope must not publish nonlinear snapshots or quality metrics");
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID"
+    );
+    assert!(!error.retryable);
 }
 
 #[test]
@@ -7253,7 +6830,7 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
+fn analysis_run_nonlinear_rejects_invalid_plastic_material() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
@@ -7261,11 +6838,9 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
     )];
     set_model_plasticity(
         &mut model,
-        PlasticityConstitutiveOptions {
-            enabled: true,
-            yield_strain: -1.0,
-            hardening_modulus_ratio: 0.1,
-            saturation_exponent: 1.0,
+        runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening {
+            yield_stress_pa: -1.0,
+            isotropic_hardening_modulus_pa: 1e9,
         },
     );
 
@@ -7276,9 +6851,9 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
         AnalysisNonlinearRunOptions::default(),
         OperationContext::new(None, None),
     )
-    .expect_err("nonlinear run should reject invalid plasticity options");
+    .expect_err("nonlinear run should reject invalid authored plastic material");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(err.error_type, OperationErrorType::Validation);
 }
 
 #[test]
@@ -7294,7 +6869,30 @@ fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
 }
 
 #[test]
-fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
+fn nonlinear_policy_wire_contract_rejects_removed_proxy_controls() {
+    let options = AnalysisNonlinearRunOptions::default();
+    let encoded = serde_json::to_value(&options).unwrap();
+    assert_eq!(encoded["linear_tolerance"], 1e-10);
+    assert_eq!(encoded["max_load_cutbacks"], 8);
+    assert_eq!(encoded["minimum_load_increment"], 1e-8);
+    assert_eq!(encoded["max_accepted_increments"], 4096);
+    assert_eq!(
+        serde_json::from_value::<AnalysisNonlinearRunOptions>(encoded.clone()).unwrap(),
+        options
+    );
+    for removed in [
+        "residual_convergence_factor",
+        "increment_norm_tolerance",
+        "tangent_refresh_interval",
+    ] {
+        let mut invalid = encoded.clone();
+        invalid[removed] = serde_json::json!(1);
+        assert!(serde_json::from_value::<AnalysisNonlinearRunOptions>(invalid).is_err());
+    }
+}
+
+#[test]
+fn nonlinear_plasticity_rejects_noncanonical_synthetic_model() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
@@ -7302,15 +6900,13 @@ fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
     )];
     set_model_plasticity(
         &mut model,
-        PlasticityConstitutiveOptions {
-            enabled: true,
-            yield_strain: 2.0e-4,
-            hardening_modulus_ratio: 0.2,
-            saturation_exponent: 4.0,
+        runmat_analysis_core::MaterialPlasticModel::J2IsotropicLinearHardening {
+            yield_stress_pa: 250e6,
+            isotropic_hardening_modulus_pa: 1e9,
         },
     );
 
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
@@ -7320,25 +6916,12 @@ fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.numerically_acceptable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::PlasticityNonlinearStress));
-    assert!(run
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_PLASTIC_NONLINEAR"));
+    .expect_err("physical J2 must not run through a synthetic model");
+    assert!(!error.retryable);
 }
 
 #[test]
-fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
+fn nonlinear_contact_is_rejected_outside_the_j2_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
@@ -7346,7 +6929,7 @@ fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
     )];
     set_model_contact(&mut model, 0.9);
 
-    let run = analysis_run_nonlinear_with_options_op(
+    let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
@@ -7360,21 +6943,8 @@ fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
         },
         OperationContext::new(None, None),
     )
-    .expect("nonlinear run should return envelope");
-
-    assert!(!run.data.numerically_acceptable);
-    assert_eq!(run.data.run_status, RunStatus::Degraded);
-    assert!(run
-        .data
-        .quality_reasons
-        .iter()
-        .any(|reason| reason.code == QualityReasonCode::ContactNonlinearStress));
-    assert!(run
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CONTACT_NONLINEAR"));
+    .expect_err("contact requires a separately qualified physical formulation");
+    assert!(!error.retryable);
 }
 
 #[test]

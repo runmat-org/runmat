@@ -1457,60 +1457,90 @@ fn transient_direct_prescription_refinement_is_scale_consistent() {
 
 #[test]
 fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
-    let (mut model, mesh) = model_and_mesh();
-    model.excitations.clear();
-    model.constraints = vec![
-        prescribed_constraint(
-            "anchor",
-            1,
-            &[
-                StructuralTranslationDof::Ux,
-                StructuralTranslationDof::Uy,
-                StructuralTranslationDof::Uz,
-            ],
-        ),
-        prescribed_constraint(
-            "guide_two",
-            2,
-            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
-        ),
-        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
-        equation_constraint("relative_x", 2, 3, 0.001),
-    ];
-    let summary = assemble_structural_system(
-        &model,
-        &static_excitations(&model),
-        Some(mesh),
-        StructuralFormulationRequirement::PhysicalDiscretization,
-    )
-    .unwrap();
-    let constraints = summary.constraint_matrix.clone().unwrap();
-    let result = solve_nonlinear_system(
-        &summary,
-        NonlinearSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            increment_count: 2,
-            max_newton_iters: 1,
-            ..NonlinearSolveOptions::default()
-        },
-        ComputeBackend::Cpu,
-    );
-
-    assert_eq!(result.displacement_snapshots.len(), 2);
-    for state in &result.displacement_snapshots {
-        for row in 0..constraints.row_count() {
-            let start = constraints.row_offsets[row];
-            let end = constraints.row_offsets[row + 1];
-            let value = constraints.column_indices[start..end]
-                .iter()
-                .zip(&constraints.coefficients[start..end])
-                .map(|(column, coefficient)| coefficient * state[*column])
-                .sum::<f64>();
-            assert!(
-                (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
-                "row {row} expected={} actual={value}",
-                constraints.right_hand_side[row]
-            );
+    for lifting in [0.0, 0.001] {
+        let (mut model, mesh) = model_and_mesh();
+        model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+            "affine_nonlinear",
+            vec![runmat_analysis_core::ProcedureStep::structural_nonlinear(
+                "nonlinear",
+            )],
+        );
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "physical_force".into(),
+                region_id: "root".into(),
+                kind: FixtureExcitationKind::Force([1.0, 0.0, 0.0]),
+            }],
+        );
+        model.constraints = vec![
+            prescribed_constraint(
+                "anchor",
+                1,
+                &[
+                    StructuralTranslationDof::Ux,
+                    StructuralTranslationDof::Uy,
+                    StructuralTranslationDof::Uz,
+                ],
+            ),
+            prescribed_constraint(
+                "guide_two",
+                2,
+                &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+            ),
+            prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+            equation_constraint("relative_x", 2, 3, lifting),
+        ];
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            Some(mesh.clone()),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        let constraints = summary.constraint_matrix.clone().unwrap();
+        let result = solve_nonlinear_system(
+            &model,
+            &summary,
+            &NonlinearSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                increment_count: 2,
+                max_newton_iters: 8,
+                solver_mesh: Some(mesh),
+                ..NonlinearSolveOptions::default()
+            },
+            ComputeBackend::Cpu,
+        );
+        if lifting != 0.0 {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("nonzero initial lifting"));
+            continue;
+        }
+        let result = result.expect("homogeneous affine constraints admit actual solid equilibrium");
+        assert_eq!(result.displacement_snapshots.len(), 2);
+        assert!(result
+            .displacement_snapshots
+            .last()
+            .unwrap()
+            .iter()
+            .any(|value| value.abs() > 0.0));
+        for state in &result.displacement_snapshots {
+            for row in 0..constraints.row_count() {
+                let start = constraints.row_offsets[row];
+                let end = constraints.row_offsets[row + 1];
+                let value = constraints.column_indices[start..end]
+                    .iter()
+                    .zip(&constraints.coefficients[start..end])
+                    .map(|(column, coefficient)| coefficient * state[*column])
+                    .sum::<f64>();
+                assert!(
+                    (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
+                    "row {row} expected={} actual={value}",
+                    constraints.right_hand_side[row]
+                );
+            }
         }
     }
 }

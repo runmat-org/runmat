@@ -59,6 +59,7 @@ pub(super) fn admit_statistical_persistence(
         fallback_events: Vec::new(),
     };
     let run = AnalysisRunResult {
+        observation_scalars: Vec::new(),
         run_id: request.run_id.to_string(),
         run: runmat_analysis_fea::FeaRunResult {
             identity: request.identity.clone(),

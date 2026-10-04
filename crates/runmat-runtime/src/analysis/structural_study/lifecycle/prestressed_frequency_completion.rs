@@ -11,7 +11,8 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
     preload_run_id: String,
     modal_run_id: Option<String>,
     frequency_run_id: String,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let (preload_step, modal_step, frequency_step) = match (
         &numerical.reduction,
         prepared.steps.as_slice(),
@@ -338,11 +339,12 @@ pub(in crate::analysis) fn complete_prestressed_frequency_study(
         run: CompletedStudyStepRun::StructuralFrequency(Box::new(frequency_run)),
         resolved_solver_options: AnalysisSolverOptions::StructuralFrequency(frequency_options),
     });
-    complete_study_run(
+    complete_study_run_prepared(
         prepared,
         completed_steps,
         states,
         numerical.frozen_project_digest,
+        preparation,
     )
 }
 
@@ -357,7 +359,8 @@ pub(super) fn complete_structural_prestressed_frequency(
     >,
     numerical: crate::analysis::StructuralStudyPrestressedFrequencyNumericalResult,
     completion_identity: AnalysisStudyCompletionIdentity,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
+) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let (preload_step, modal_step, frequency_step) = match (
         &numerical.reduction,
         intent.steps.as_slice(),
@@ -428,5 +431,6 @@ pub(super) fn complete_structural_prestressed_frequency(
         preload_run_id,
         modal_run_id,
         frequency_run_id,
+        preparation,
     )
 }

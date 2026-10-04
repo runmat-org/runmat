@@ -39,6 +39,7 @@ fn structural_study_compilation_requires_capable_solid_material_before_planning(
         study_id: "structural".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         model: thermal_only.clone(),
         properties: generic,
@@ -107,6 +108,7 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
         study_id: "thermal".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         model,
         properties: generic,
@@ -166,6 +168,7 @@ fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
         study_id: "thermomechanical".into(),
         formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         properties: crate::properties::compile_property_map(&no_thermal, Some(&mesh))
             .expect("generic ownership remains valid"),
@@ -198,6 +201,7 @@ fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
 
 fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> RealizedStudy {
     RealizedStudy {
+        assessments: Vec::new(),
         module_path: "project/main.fea".into(),
         study_id: "static".into(),
         geometry: RealizedGeometryInstance {

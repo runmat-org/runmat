@@ -96,7 +96,16 @@ impl FeaRunResult {
             }
             (false, None) => {}
         }
-        match (is_structural_static, &self.structural_constraint_result) {
+        let has_structural_constraint_state = is_structural_static
+            || self
+                .identity
+                .realization()
+                .temporals
+                .contains(&TemporalImplementation::StructuralQuasistaticNewtonEquilibrium);
+        match (
+            has_structural_constraint_state,
+            &self.structural_constraint_result,
+        ) {
             (true, Some(result)) => result.validate().map_err(|_| {
                 SolverFormulationCompatibilityError::InvalidStructuralConstraintResult
             })?,

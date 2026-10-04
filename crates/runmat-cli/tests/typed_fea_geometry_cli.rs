@@ -11,6 +11,9 @@ use tempfile::TempDir;
 #[path = "typed_fea_geometry_cli/acoustic.rs"]
 mod acoustic;
 
+#[path = "typed_fea_geometry_cli/assessments.rs"]
+mod assessments;
+
 #[path = "typed_fea_geometry_cli/electrical.rs"]
 mod electrical;
 #[path = "typed_fea_geometry_cli/harmonic.rs"]

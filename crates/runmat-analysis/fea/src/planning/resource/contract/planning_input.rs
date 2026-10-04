@@ -16,8 +16,15 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::FluidSteadySolve(demand) => demand.projection.topology_digest,
             FeaResourceDemand::MagneticFieldRecovery(demand) => demand.topology_digest,
+            FeaResourceDemand::NonlinearFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::SemanticStatePublication(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.operator.topology_digest,
+            FeaResourceDemand::StructuralNonlinearRecovery(demand) => {
+                demand.operator.topology_digest
+            }
+            FeaResourceDemand::StructuralNonlinearPipeline(demand) => {
+                demand.operator.topology_digest
+            }
             FeaResourceDemand::StructuralModalExtraction(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralBuckling(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralFrequencyEntry(demand)
@@ -59,6 +66,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidFieldRecovery(_) => None,
             FeaResourceDemand::FluidSteadySolve(_) => None,
             FeaResourceDemand::MagneticFieldRecovery(_) => None,
+            FeaResourceDemand::NonlinearFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
@@ -68,6 +76,12 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::MaxwellHarmonic(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => {
+                Some(&demand.operator.observations)
+            }
+            FeaResourceDemand::StructuralNonlinearRecovery(demand) => {
+                Some(&demand.operator.observations)
+            }
+            FeaResourceDemand::StructuralNonlinearPipeline(demand) => {
                 Some(&demand.operator.observations)
             }
             FeaResourceDemand::StructuralModalExtraction(demand) => {
@@ -112,6 +126,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::FluidSteadySolve(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::MagneticFieldRecovery(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::NonlinearFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ResultPublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ThermalSolve(_) => &PartitioningPolicy::Monolithic,
@@ -121,6 +136,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::MaxwellHarmonic(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::SemanticStatePublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.operator.partitioning,
+            FeaResourceDemand::StructuralNonlinearRecovery(demand) => &demand.operator.partitioning,
+            FeaResourceDemand::StructuralNonlinearPipeline(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralBuckling(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
@@ -168,6 +185,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidFieldRecovery(_) => None,
             FeaResourceDemand::FluidSteadySolve(_) => None,
             FeaResourceDemand::MagneticFieldRecovery(_) => None,
+            FeaResourceDemand::NonlinearFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
@@ -177,6 +195,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::MaxwellHarmonic(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralNonlinearRecovery(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralNonlinearPipeline(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
@@ -209,6 +229,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidFieldRecovery(_) => None,
             FeaResourceDemand::FluidSteadySolve(_) => None,
             FeaResourceDemand::MagneticFieldRecovery(_) => None,
+            FeaResourceDemand::NonlinearFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
@@ -218,6 +239,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::MaxwellHarmonic(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&mut demand.operator),
+            FeaResourceDemand::StructuralNonlinearRecovery(demand) => Some(&mut demand.operator),
+            FeaResourceDemand::StructuralNonlinearPipeline(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {

@@ -36,7 +36,11 @@ pub(crate) fn authenticate_source_objects(
     kind: AnalysisNumericalObjectKind,
 ) -> AnalysisBridgeResult<()> {
     objects.manifest.validate()?;
-    let namespace = if kind == AnalysisNumericalObjectKind::SolverResult {
+    let namespace = if matches!(
+        kind,
+        AnalysisNumericalObjectKind::SolverResult
+            | AnalysisNumericalObjectKind::NonlinearSolidBlockArtifact
+    ) {
         ObjectNamespace::ResultValue
     } else {
         ObjectNamespace::InputValue

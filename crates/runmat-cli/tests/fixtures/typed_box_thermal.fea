@@ -30,6 +30,7 @@ material conductor {
 }
 model temperature {
     thermal { reference_temperature = 300 K }
+    thermal { reference_temperature = 300 K }
     assign material.conductor to geometry.part.region.body
     constraint equilibrium {
         thermal.temperature {

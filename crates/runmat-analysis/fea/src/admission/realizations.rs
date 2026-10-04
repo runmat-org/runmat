@@ -203,33 +203,16 @@ fn coupled_realizations(
             temporal,
             CouplingImplementation::PartitionedConjugateProjection,
         ),
-        CoupledPhysicsFamily::FluidStructureInteraction => domain_topology_branches()
-            .into_iter()
-            .map(|branch| ExactFormulationRealization {
-                components: vec![
-                    fluid_component(&branch),
-                    ExactFormulationComponent {
-                        spatial_operator: SpatialOperatorImplementation::Structural(
-                            StructuralOperatorImplementation::SyntheticDiagonalChain,
-                        ),
-                        constitutive:
-                            ConstitutiveImplementation::ReducedScalarStructuralNonlinearity,
-                        recovery: RecoveryImplementation::Unavailable,
-                        topologies: vec![TopologyImplementation::DofAdjacency],
-                        sources: vec![SourceImplementation::OrdinalDistribution],
-                    },
-                ],
-                temporals: vec![temporal],
-                coupling: CouplingImplementation::PartitionedFluidStructureRelaxation,
-                boundary_transfers: vec![
-                    BoundaryTransferImplementation::HeuristicInterfaceTransfer,
-                ],
-            })
-            .collect(),
+        // The former synthetic scalar branch is not a genuine structural constitutive solve.
+        // Do not assign the new J2 identity to that unrelated reduced coupling implementation.
+        CoupledPhysicsFamily::FluidStructureInteraction => Vec::new(),
     }
 }
 
 fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
+    if procedure == AnalysisProcedure::Nonlinear {
+        return Vec::new();
+    }
     let branches = [
         (
             StructuralOperatorImplementation::Tet4LinearElasticity,

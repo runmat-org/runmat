@@ -80,6 +80,49 @@ pub(super) async fn execute(
             let selected = resolve_root(&checked, &root)?;
             super::run::execute(file, checked, selected, execution, cli, config, json).await
         }
+        FeaCommand::Reassess {
+            file,
+            study,
+            original_definition,
+            result_manifest,
+            json,
+        } => {
+            let file = resolve_script_input(file)?;
+            let checked = super::source::check_source(&file, cli, config).await?;
+            require_valid(&checked, json)?;
+            let selected = resolve_root(&checked, &FeaRootArgs { study, sweep: None })?;
+            let ResolvedFeaRoot::Study(study) = selected else {
+                anyhow::bail!("reassessment requires one study; select it with --study");
+            };
+            let result = runmat_execution_runner_native::reassess_saved_fea_locally(
+                &checked.session_source,
+                original_definition,
+                &result_manifest,
+                &study.study,
+                runmat_runtime::analysis::assessment::AssessmentEvaluationLimits::default(),
+                64 * 1024 * 1024,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for assessment in &result.assessments {
+                    println!(
+                        "{}: {:?}",
+                        assessment.definition.assessment_id, assessment.result.status
+                    );
+                    if let Some(issue) = assessment.result.issue {
+                        println!("  evidence: {issue:?}");
+                    }
+                    if let Some(diagnostic) = &assessment.function_execution_diagnostic {
+                        println!("  execution: {diagnostic}");
+                    }
+                }
+                println!("Reassessment evidence: {}", result.evidence_artifact_path);
+            }
+            Ok(())
+        }
     }
 }
 

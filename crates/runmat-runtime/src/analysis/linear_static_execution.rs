@@ -11,12 +11,33 @@ use crate::operations::{
 };
 
 use super::{
-    analysis_complete_linear_static_run_op, analysis_prepare_linear_static_run_op,
-    install_fea_solver_context, map_fea_run_error, AnalysisOperation, AnalysisRunOptions,
-    AnalysisRunResult, StructuralLinearExecutor,
+    analysis_admit_linear_static_run_with_id, analysis_prepare_linear_static_run_op,
+    install_fea_solver_context, map_fea_run_error, publish_standalone_run, AnalysisOperation,
+    AnalysisRunOptions, AnalysisRunResult, StructuralLinearExecutor,
 };
 
 pub(super) fn analysis_run_linear_static_with_executor(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
+    options: AnalysisRunOptions,
+    context: OperationContext,
+    executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    publish_standalone_run(
+        execute_linear_static_with_executor(
+            model,
+            backend,
+            formulation_requirement,
+            options,
+            context,
+            executor,
+        )?,
+        "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
+    )
+}
+
+pub(super) fn execute_linear_static_with_executor(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
@@ -97,5 +118,5 @@ pub(super) fn analysis_run_linear_static_with_executor(
             )
         })?
     };
-    analysis_complete_linear_static_run_op(prepared, run)
+    analysis_admit_linear_static_run_with_id(prepared, run, None)
 }

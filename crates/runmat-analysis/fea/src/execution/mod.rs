@@ -254,11 +254,12 @@ pub use solve::{
 };
 pub use state::{
     fluid_state_publication_profiles, fluid_state_publication_requests,
-    fluid_state_publication_workspace_bytes, AcousticPhasorConvention, BoundThermalStateTransfer,
+    fluid_state_publication_workspace_bytes, nonlinear_solid_state_publication_requests,
+    semantic_state_retained_storage_bytes, AcousticPhasorConvention, BoundThermalStateTransfer,
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
-    CanonicalFluidStatePayload, CanonicalMaxwellStatePayload, CanonicalSemanticState,
-    CanonicalSemanticStateInput, CanonicalSemanticStatePayload, CanonicalStateTransition,
-    CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
+    CanonicalFluidStatePayload, CanonicalMaxwellStatePayload, CanonicalNonlinearSolidStatePayload,
+    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+    CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
     SemanticStatePublicationRequest, SemanticStatePublicationSource, StatePublicationProfileEntry,
     StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
 };
@@ -306,3 +307,13 @@ pub use transient_workload::{StructuralTransientSolverPlan, StructuralTransientW
 
 #[cfg(test)]
 mod tests;
+
+mod nonlinear_solid;
+pub use nonlinear_solid::{
+    nonlinear_native_field_definitions, NonlinearSolidBlockArtifact, NonlinearSolidBlockReference,
+    NonlinearSolidBlockRequest, NonlinearSolidWorkload,
+};
+pub use nonlinear_solid::{
+    NonlinearSolidNumericalReceipt, NonlinearSolidNumericalReceiptArtifact,
+    NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES,
+};

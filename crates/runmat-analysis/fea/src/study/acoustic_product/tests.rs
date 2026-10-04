@@ -295,6 +295,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
         formulation_requirement: FormulationRequirement::Experimental,
         included_models: Vec::new(),
         study_inputs: Vec::new(),
+        assessments: Vec::new(),
         outputs: Vec::new(),
         sequence: runmat_analysis_core::AnalysisSequence::from_steps("harmonic", vec![step]),
     };
