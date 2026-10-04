@@ -7,7 +7,7 @@ pub fn read_dataset(
     controls: SelectionControls,
 ) -> BuiltinResult<Value> {
     let path = lease.path();
-    let file = open_file_read(builtin, &path)?;
+    let file = open_file_read(builtin, path)?;
     let ds = file.dataset(&dataset_path).map_err(|err| {
         io_error(
             builtin,
@@ -29,7 +29,7 @@ pub fn write_dataset(
 ) -> BuiltinResult<()> {
     let path = lease.path();
     let data = WritableData::from_value(builtin, data)?;
-    let file = File::append(&path).map_err(|err| {
+    let file = File::append(path).map_err(|err| {
         io_error(
             builtin,
             format!("{builtin}: unable to open {}", path.display()),
@@ -243,7 +243,7 @@ pub fn write_attribute(
 ) -> BuiltinResult<()> {
     let path = lease.path();
     let data = WritableData::from_value(builtin, data)?;
-    let file = File::append(&path).map_err(|err| {
+    let file = File::append(path).map_err(|err| {
         io_error(
             builtin,
             format!("{builtin}: unable to open {}", path.display()),
@@ -271,7 +271,7 @@ pub fn info(
     location: String,
 ) -> BuiltinResult<Value> {
     let path = lease.path();
-    let file = open_file_read(builtin, &path)?;
+    let file = open_file_read(builtin, path)?;
     let info = if location == "/" {
         let group = file.group("/").map_err(|err| {
             io_error(
@@ -302,7 +302,7 @@ pub fn disp(
     controls: H5DispControls,
 ) -> BuiltinResult<String> {
     let path = lease.path();
-    let file = open_file_read(builtin, &path)?;
+    let file = open_file_read(builtin, path)?;
     let mut out = String::new();
     let location = controls.location;
     let mode = controls.mode;

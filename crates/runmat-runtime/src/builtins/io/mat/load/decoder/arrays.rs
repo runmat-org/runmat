@@ -412,7 +412,7 @@ fn ensure_numeric_count(element: &TaggedData, expected: usize) -> BuiltinResult<
         MI_INT64 | MI_UINT64 | MI_DOUBLE => 8,
         _ => return Err(load_error("load: unsupported numeric MAT payload type")),
     };
-    if element.data.len() % width != 0 || element.data.len() / width != expected {
+    if !element.data.len().is_multiple_of(width) || element.data.len() / width != expected {
         return Err(load_error(
             "load: numeric payload length does not match declared array shape",
         ));
