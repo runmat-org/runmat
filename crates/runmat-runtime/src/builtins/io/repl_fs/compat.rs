@@ -1,7 +1,7 @@
 //! Compatibility filesystem, path, process, preference, and environment helpers.
 
 use std::path::{Path, PathBuf};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(windows)]
 use std::process::Command;
 
 use runmat_builtins::{
@@ -76,23 +76,6 @@ const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Result value.",
 }];
-const OUTPUT_STATUS_MESSAGE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "status",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "0 on success, nonzero on failure.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Command output or diagnostic text.",
-    },
-];
-
 macro_rules! simple_descriptor {
     ($sig:ident, $desc:ident, $label:expr, $inputs:expr, $outputs:expr, $mode:expr) => {
         const $sig: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -109,52 +92,6 @@ macro_rules! simple_descriptor {
     };
 }
 
-const SYSTEM_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "command",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Operating-system command to execute.",
-}];
-const SYSTEM_INPUTS_ECHO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "command",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Operating-system command to execute.",
-    },
-    BuiltinParamDescriptor {
-        name: "echo",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("'-echo'"),
-        description: "The literal '-echo', which also writes command output to the console.",
-    },
-];
-const SYSTEM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "[status, output] = system(command)",
-        inputs: &SYSTEM_INPUTS_COMMAND,
-        outputs: &OUTPUT_STATUS_MESSAGE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[status, output] = system(command, '-echo')",
-        inputs: &SYSTEM_INPUTS_ECHO,
-        outputs: &OUTPUT_STATUS_MESSAGE,
-    },
-];
-pub const SYSTEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SYSTEM_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
-};
 simple_descriptor!(
     USERPATH_SIGNATURES,
     USERPATH_DESCRIPTOR,
@@ -282,26 +219,42 @@ fn value_contains_resident(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "system",
-    category = "io/repl_fs",
-    summary = "Execute an operating-system command.",
-    keywords = "system,command,shell,process",
-    accel = "cpu",
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::system_type),
-    descriptor(crate::builtins::io::repl_fs::compat::SYSTEM_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::SYSTEM_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn system_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let requested = output_count::current_output_count();
+    if requested.is_some_and(|count| count > 2) {
+        return Err(compat_error(
+            "system",
+            "system: at most two outputs are supported",
+        ));
+    }
     if args.is_empty() || args.len() > 2 {
         return Err(compat_error(
             "system",
             "system: expected command and optional echo flag",
         ));
     }
-    let command = scalar_text(&args[0], "system", "command")?;
+    let command = crate::builtins::common::validation::value_text_scalar_string(&args[0])
+        .ok_or_else(|| {
+            compat_error(
+                "system",
+                "system: command must be a string scalar or character vector",
+            )
+        })?;
     let echo = if let Some(option) = args.get(1) {
-        let option = scalar_text(option, "system", "option")?;
+        let option = crate::builtins::common::validation::value_text_scalar_string(option)
+            .ok_or_else(|| {
+                compat_error(
+                    "system",
+                    "system: option must be a string scalar or character vector",
+                )
+            })?;
         if !option.eq_ignore_ascii_case("-echo") {
             return Err(compat_error(
                 "system",
@@ -312,8 +265,7 @@ async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         false
     };
-    let result = run_system_command(&command)?;
-    let requested = output_count::current_output_count();
+    let result = system::run(runtime.as_ref(), &command).await?;
     if (echo || requested == Some(0)) && !result.1.is_empty() {
         crate::console::record_console_line(crate::console::ConsoleStream::Stdout, &result.1);
     }
@@ -322,27 +274,6 @@ async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(output_count::output_list_with_padding(count, outputs));
     }
     Ok(Value::Num(result.0 as f64))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn run_system_command(command: &str) -> BuiltinResult<(i32, String)> {
-    #[cfg(windows)]
-    let output = Command::new("cmd").args(["/C", command]).output();
-    #[cfg(not(windows))]
-    let output = Command::new("sh").args(["-c", command]).output();
-    let output = output.map_err(|err| compat_error("system", format!("system: {err}")))?;
-    let status = output.status.code().unwrap_or(1);
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    Ok((status, text))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn run_system_command(_command: &str) -> BuiltinResult<(i32, String)> {
-    Ok((
-        1,
-        "system: process execution is unavailable in WebAssembly".to_string(),
-    ))
 }
 
 fn truthy(value: &Value) -> bool {
@@ -678,6 +609,8 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 mod captured_fs_path;
+#[path = "compat/system.rs"]
+mod system;
 use captured_fs_path::CapturedFsPath;
 mod memmapfile;
 use memmapfile::{numeric_usize, MemmapFormat, MemmapOption};
@@ -1758,14 +1691,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn system_two_outputs_returns_status_and_text() {
+    #[tokio::test]
+    async fn system_two_outputs_returns_status_and_text() {
         #[cfg(windows)]
         let command = "echo hello";
         #[cfg(not(windows))]
         let command = "printf hello";
         let _guard = crate::output_count::push_output_count(Some(2));
-        let value = run(system_builtin(vec![Value::String(command.to_string())])).unwrap();
+        let value = system_builtin(None, vec![Value::String(command.to_string())])
+            .await
+            .unwrap();
         let Value::OutputList(values) = value else {
             panic!("expected output list");
         };
@@ -1779,21 +1714,36 @@ mod tests {
 
     #[test]
     fn system_rejects_integer_commands_before_process_access() {
-        let error = run(system_builtin(vec![Value::Int(
-            runmat_value::IntValue::U64(u64::MAX),
-        )]))
+        let error = run(system_builtin(
+            None,
+            vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))],
+        ))
         .expect_err("integer command must reject");
         assert!(error.message().contains("command must be"));
     }
 
     #[test]
     fn system_rejects_integer_echo_options_before_process_access() {
-        let error = run(system_builtin(vec![
-            Value::String("printf should-not-run".to_string()),
-            Value::Int(runmat_value::IntValue::U8(1)),
-        ]))
+        let error = run(system_builtin(
+            None,
+            vec![
+                Value::String("printf should-not-run".to_string()),
+                Value::Int(runmat_value::IntValue::U8(1)),
+            ],
+        ))
         .expect_err("integer option must reject");
         assert!(error.message().contains("option must be"));
+    }
+
+    #[test]
+    fn system_rejects_excess_outputs_before_process_access() {
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let error = run(system_builtin(
+            None,
+            vec![Value::String("printf should-not-run".to_string())],
+        ))
+        .expect_err("unsupported output count must reject");
+        assert!(error.message().contains("at most two outputs"));
     }
 
     #[test]
