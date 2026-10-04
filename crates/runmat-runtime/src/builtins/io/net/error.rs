@@ -1,6 +1,6 @@
 //! Preserve transport and provider causes behind the public network diagnostics.
 
-use crate::{build_runtime_error, RuntimeError, RuntimeErrorSourceBound};
+use crate::{build_runtime_error, GpuGatherRetry, RuntimeError, RuntimeErrorSourceBound};
 use runmat_builtins::BuiltinErrorDescriptor;
 
 pub(super) fn with_source(
@@ -14,6 +14,7 @@ pub(super) fn with_source(
     let detail = detail.strip_prefix(&prefix).unwrap_or(detail);
     let mut builder = build_runtime_error(format!("{}: {detail}", error.message))
         .with_builtin(builtin)
+        .with_gpu_gather_retry(GpuGatherRetry::Never)
         .with_source(source);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
@@ -40,6 +41,7 @@ mod tests {
             runmat_builtins::TCPCLIENT_ERROR_CONNECT_FAILED.identifier
         );
         assert!(error.message().contains("unable to connect"));
+        assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
         assert_eq!(
             Error::source(&error)
                 .and_then(|source| source.downcast_ref::<io::Error>())
