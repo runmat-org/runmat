@@ -189,9 +189,9 @@ impl<'a> TextScanner<'a> {
             if self.skip_comment(cooperation).await? {
                 continue;
             }
-            if let Some(delimiter) = self.match_delimiter() {
-                self.pos += delimiter.len();
-                checkpoint_scanned(&mut work, delimiter.len(), cooperation).await?;
+            if let Some(length) = self.match_delimiter().map(str::len) {
+                self.pos += length;
+                checkpoint_scanned(&mut work, length, cooperation).await?;
                 continue;
             }
             let Some(ch) = self.current_char() else {

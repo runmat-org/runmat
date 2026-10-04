@@ -15,3 +15,10 @@ pub(super) fn contract(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 pub(super) fn operation(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
+
+pub(super) fn io(message: impl Into<String>, cause: std::io::Error) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_source(cause)
+        .build()
+}

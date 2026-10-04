@@ -19,7 +19,8 @@ pub(super) async fn execute(input: Input) -> BuiltinResult<Vec<Record>> {
         Input::Name(name) => from_text(&fs, &name).await?,
         Input::FolderPattern { folder, pattern } => folder_pattern(&fs, &folder, &pattern).await?,
     };
-    fs.check().map_err(super::error::operation)?;
+    fs.check()
+        .map_err(|error| super::error::io(format!("dir: {error}"), error))?;
     records.sort_by(|left, right| compare_names(&left.name, &right.name));
     Ok(records)
 }
@@ -33,9 +34,10 @@ struct DirFilesystem {
 impl DirFilesystem {
     fn capture() -> BuiltinResult<Self> {
         let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|error| {
-            super::error::operation(format!(
-                "dir: unable to determine current directory ({error})"
-            ))
+            super::error::io(
+                format!("dir: unable to determine current directory ({error})"),
+                error,
+            )
         })?;
         let lease = vfs::capture_resource_lease(provider.clone());
         Ok(Self {
@@ -168,17 +170,19 @@ async fn path(fs: &DirFilesystem, path: &Path, display: &str) -> BuiltinResult<V
             Ok(vec![Record::from_metadata(folder, name, &metadata)])
         }
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(super::error::operation(format!(
-            "dir: unable to access '{display}' ({error})"
-        ))),
+        Err(error) => Err(super::error::io(
+            format!("dir: unable to access '{display}' ({error})"),
+            error,
+        )),
     }
 }
 
 async fn pattern(fs: &DirFilesystem, pattern: &Path, display: &str) -> BuiltinResult<Vec<Record>> {
     let entries = fs.matching(pattern).await.map_err(|error| {
-        super::error::operation(format!(
-            "dir: unable to enumerate matches for '{display}' ({error})"
-        ))
+        super::error::io(
+            format!("dir: unable to enumerate matches for '{display}' ({error})"),
+            error,
+        )
     })?;
     let mut records = Vec::with_capacity(entries.len());
     for entry in entries {
@@ -205,7 +209,10 @@ async fn directory(
         records.push(Record::special("..", &absolute, metadata.as_ref()));
     }
     let entries = fs.directory(folder).await.map_err(|error| {
-        super::error::operation(format!("dir: unable to access '{absolute}' ({error})"))
+        super::error::io(
+            format!("dir: unable to access '{absolute}' ({error})"),
+            error,
+        )
     })?;
     records.extend(entries.into_iter().map(|entry| {
         let name = crate::builtins::common::fs::enumeration::filename(&entry.path)
