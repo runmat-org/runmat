@@ -5,13 +5,7 @@ use super::*;
 
 #[runtime_builtin(
     name = "data.create",
-    category = "io/data",
-    summary = "Create a typed dataset at a .data path.",
-    keywords = "data,dataset,create,persistence",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
-    descriptor(crate::builtins::io::data::DATA_CREATE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::data::DATA_CREATE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value> {
@@ -53,12 +47,7 @@ async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "data.open",
-    category = "io/data",
-    summary = "Open a dataset handle from a .data path.",
-    keywords = "data,dataset,open,persistence",
-    type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
-    descriptor(crate::builtins::io::data::DATA_OPEN_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
@@ -73,12 +62,7 @@ async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "data.exists",
-    category = "io/data",
-    summary = "Check if dataset exists.",
-    keywords = "data,dataset,exists",
-    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
-    descriptor(crate::builtins::io::data::DATA_EXISTS_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
@@ -95,13 +79,7 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "data.delete",
-    category = "io/data",
-    summary = "Delete a dataset path.",
-    keywords = "data,dataset,delete",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
-    descriptor(crate::builtins::io::data::DATA_DELETE_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
@@ -123,13 +101,7 @@ async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "data.copy",
-    category = "io/data",
-    summary = "Copy dataset to new path.",
-    keywords = "data,dataset,copy",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
-    descriptor(crate::builtins::io::data::DATA_COPY_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
@@ -147,13 +119,7 @@ async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Va
 
 #[runtime_builtin(
     name = "data.move",
-    category = "io/data",
-    summary = "Move dataset to new path.",
-    keywords = "data,dataset,move",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
-    descriptor(crate::builtins::io::data::DATA_MOVE_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
@@ -174,13 +140,7 @@ async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Va
 
 #[runtime_builtin(
     name = "data.import",
-    category = "io/data",
-    summary = "Import an existing dataset file path.",
-    keywords = "data,dataset,import",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
-    descriptor(crate::builtins::io::data::DATA_IMPORT_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_import_builtin(
@@ -210,13 +170,7 @@ async fn data_import_builtin(
 
 #[runtime_builtin(
     name = "data.export",
-    category = "io/data",
-    summary = "Export dataset to target path.",
-    keywords = "data,dataset,export",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
-    descriptor(crate::builtins::io::data::DATA_EXPORT_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_export_builtin(
@@ -244,12 +198,7 @@ async fn data_export_builtin(
 
 #[runtime_builtin(
     name = "data.list",
-    category = "io/data",
-    summary = "List dataset paths under a prefix.",
-    keywords = "data,dataset,list",
-    type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
-    descriptor(crate::builtins::io::data::DATA_LIST_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
@@ -291,12 +240,7 @@ async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "data.inspect",
-    category = "io/data",
-    summary = "Inspect dataset metadata and schema fields.",
-    keywords = "data,dataset,inspect,schema",
-    type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
-    descriptor(crate::builtins::io::data::DATA_INSPECT_DESCRIPTOR),
-    integer_audit(crate::builtins::io::data::DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {

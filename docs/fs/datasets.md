@@ -181,6 +181,8 @@ Path-level operations manage whole datasets.
 
 These namespace functions use exactly the positional signatures shown above; they do not reserve trailing name-value arguments. Their path and format arguments are textual rather than numeric, while copying, moving, importing, and exporting a dataset preserves its stored integer payload bytes and declared dtype. Dataset lifecycle work is filesystem-provider I/O and does not dispatch through an acceleration provider.
 
+Each path-level call captures the active filesystem provider and working directory once before its first filesystem operation. Relative source and destination paths in the same call therefore resolve against the same directory, even if ambient configuration changes while the operation is suspended. A returned `Dataset` object records its public path, ID, and version; it is not a persistent filesystem-provider handle, so later `Dataset.*` calls use their own current filesystem authority. `data.exists` checks for accessible manifest metadata without parsing the manifest; use `data.open` to validate it.
+
 ## Common Methods
 
 | Method | Use |

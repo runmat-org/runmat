@@ -16,6 +16,8 @@ use runmat_builtins::{
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor,
 };
+#[cfg(test)]
+use runmat_builtins::{DATA_CREATE_DESCRIPTOR, DATA_CREATE_INTEGER_CAPABILITIES};
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar, ObjectInstance, StructValue, Tensor, Value};
@@ -160,104 +162,6 @@ const OUT_TENSOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Numeric tensor result.",
-}];
-
-const IN_PATH_SCHEMA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "path",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dataset path (.data).",
-    },
-    BuiltinParamDescriptor {
-        name: "schema",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dataset schema struct.",
-    },
-];
-
-const IN_PATH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "path",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Dataset path (.data).",
-}];
-
-const IN_FROM_TO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "fromPath",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Source dataset path.",
-    },
-    BuiltinParamDescriptor {
-        name: "toPath",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Destination dataset path.",
-    },
-];
-
-const IN_PATH_FORMAT_SOURCE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "path",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dataset path (.data).",
-    },
-    BuiltinParamDescriptor {
-        name: "format",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Format token (currently 'data').",
-    },
-    BuiltinParamDescriptor {
-        name: "sourcePath",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Source dataset path.",
-    },
-];
-
-const IN_PATH_FORMAT_TARGET: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "path",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dataset path (.data).",
-    },
-    BuiltinParamDescriptor {
-        name: "format",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Format token (currently 'data').",
-    },
-    BuiltinParamDescriptor {
-        name: "targetPath",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target dataset path.",
-    },
-];
-
-const IN_PREFIX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "prefix",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Filesystem prefix to scan for datasets.",
 }];
 
 const IN_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -670,113 +574,6 @@ macro_rules! one_sig_descriptor {
         };
     };
 }
-
-one_sig_descriptor!(
-    DATA_CREATE_DESCRIPTOR,
-    DATA_CREATE_SIGS,
-    "ds = data.create(path, schema)",
-    &IN_PATH_SCHEMA,
-    &OUT_DATASET
-);
-one_sig_descriptor!(
-    DATA_OPEN_DESCRIPTOR,
-    DATA_OPEN_SIGS,
-    "ds = data.open(path)",
-    &IN_PATH,
-    &OUT_DATASET
-);
-one_sig_descriptor!(
-    DATA_EXISTS_DESCRIPTOR,
-    DATA_EXISTS_SIGS,
-    "tf = data.exists(path)",
-    &IN_PATH,
-    &OUT_BOOL
-);
-one_sig_descriptor!(
-    DATA_DELETE_DESCRIPTOR,
-    DATA_DELETE_SIGS,
-    "tf = data.delete(path)",
-    &IN_PATH,
-    &OUT_BOOL
-);
-one_sig_descriptor!(
-    DATA_COPY_DESCRIPTOR,
-    DATA_COPY_SIGS,
-    "tf = data.copy(fromPath, toPath)",
-    &IN_FROM_TO,
-    &OUT_BOOL
-);
-one_sig_descriptor!(
-    DATA_MOVE_DESCRIPTOR,
-    DATA_MOVE_SIGS,
-    "tf = data.move(fromPath, toPath)",
-    &IN_FROM_TO,
-    &OUT_BOOL
-);
-one_sig_descriptor!(
-    DATA_IMPORT_DESCRIPTOR,
-    DATA_IMPORT_SIGS,
-    "ds = data.import(path, format, sourcePath)",
-    &IN_PATH_FORMAT_SOURCE,
-    &OUT_DATASET
-);
-one_sig_descriptor!(
-    DATA_EXPORT_DESCRIPTOR,
-    DATA_EXPORT_SIGS,
-    "tf = data.export(path, format, targetPath)",
-    &IN_PATH_FORMAT_TARGET,
-    &OUT_BOOL
-);
-one_sig_descriptor!(
-    DATA_LIST_DESCRIPTOR,
-    DATA_LIST_SIGS,
-    "C = data.list(prefix)",
-    &IN_PREFIX,
-    &OUT_CELL
-);
-one_sig_descriptor!(
-    DATA_INSPECT_DESCRIPTOR,
-    DATA_INSPECT_SIGS,
-    "S = data.inspect(path)",
-    &IN_PATH,
-    &OUT_STRUCT
-);
-
-const DATA_CREATE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "schema.arrays.*.shape",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Array shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values, within nonnegative platform and checked total-element bounds.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "schema.arrays.*.chunk",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Optional chunk shapes accept scalar or vector dimensions in every integer class, or exactly integral floating values; dimensions must be positive, platform-bounded, and rank-matched to the array shape.",
-    },
-];
-
-pub const DATA_CREATE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ds = data.create(path, struct_with_integer_shape_and_chunk)",
-        inputs: &DATA_CREATE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Schema dimensions are parsed directly from authoritative typed storage; the host/filesystem constructor allocates zero-filled storage in each array's declared dtype and returns a Dataset object.",
-    }];
-
-const DATA_NAMESPACE_LIFECYCLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "Dataset copy, delete, existence, export, import, inspection, listing, move, and open operations accept only textual paths/formats and return objects, logicals, strings, or host metadata; opaque movement of stored integer payload bytes is owned by the DataArray persistence contract rather than an integer call form.",
-    };
 
 one_sig_descriptor!(
     DATASET_PATH_DESCRIPTOR,

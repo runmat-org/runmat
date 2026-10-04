@@ -1707,7 +1707,7 @@ fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
 }
 
 pub fn dataset_object(path: &str, manifest: &DataManifest) -> Value {
-    let mut obj = ObjectInstance::new("Dataset".to_string());
+    let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.display_name().to_string());
     obj.properties
         .insert("__data_path".to_string(), Value::String(path.to_string()));
     obj.properties.insert(
