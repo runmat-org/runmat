@@ -4,10 +4,12 @@ use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement}
 mod contract;
 mod documentation;
 mod inference;
+mod options;
 #[cfg(test)]
 mod tests;
 
 pub use contract::*;
+pub use options::*;
 
 pub const FILEWRITE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

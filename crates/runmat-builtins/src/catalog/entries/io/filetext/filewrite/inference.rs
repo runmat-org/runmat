@@ -1,3 +1,4 @@
+use super::{FilewriteEncoding, FilewriteMode, FilewriteOptionName};
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::*;
 
@@ -43,7 +44,83 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    validate_options(request, &mut result.diagnostics);
     result
+}
+
+fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) {
+    let tail = request.arguments.len().saturating_sub(2);
+    if tail == 0 {
+        return;
+    }
+    let first_literal = request.literals.literal_string_at(2);
+    let first_name = first_literal
+        .as_deref()
+        .and_then(FilewriteOptionName::from_label);
+    let positional = match first_literal.as_deref() {
+        Some(_) => first_name.is_none(),
+        None => tail % 2 == 1,
+    };
+    if positional {
+        if first_literal
+            .as_deref()
+            .is_some_and(|label| FilewriteEncoding::from_label(label).is_none())
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FILEWRITE-ENCODING",
+                "unsupported positional encoding",
+                2,
+            ));
+        }
+    }
+    let start = if positional { 3 } else { 2 };
+    if (request.arguments.len() - start) % 2 != 0 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-FILEWRITE-OPTION-ARITY",
+            "filewrite options require name/value pairs",
+            start,
+        ));
+        return;
+    }
+    let mut seen_encoding = positional;
+    let mut seen_write_mode = false;
+    for index in (start..request.arguments.len()).step_by(2) {
+        let Some(name_literal) = request.literals.literal_string_at(index) else {
+            continue;
+        };
+        let Some(name) = FilewriteOptionName::from_label(&name_literal) else {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FILEWRITE-OPTION-NAME",
+                "supported option names are Encoding and WriteMode",
+                index,
+            ));
+            continue;
+        };
+        let duplicate = match name {
+            FilewriteOptionName::Encoding => std::mem::replace(&mut seen_encoding, true),
+            FilewriteOptionName::WriteMode => std::mem::replace(&mut seen_write_mode, true),
+        };
+        if duplicate {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FILEWRITE-DUPLICATE-OPTION",
+                "duplicate filewrite option",
+                index,
+            ));
+        }
+        if let Some(value) = request.literals.literal_string_at(index + 1) {
+            let valid = match name {
+                FilewriteOptionName::Encoding => FilewriteEncoding::from_label(&value).is_some(),
+                FilewriteOptionName::WriteMode => FilewriteMode::from_label(&value).is_some(),
+            };
+            if !valid {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FILEWRITE-OPTION-VALUE",
+                    "unsupported filewrite option value",
+                    index + 1,
+                ));
+            }
+        }
+    }
 }
 
 fn invalid_text(value: &ValueFact) -> bool {

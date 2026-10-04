@@ -78,3 +78,58 @@ fn character_row_path_and_dynamic_data_remain_admitted() {
     );
     assert!(inferred.diagnostics.is_empty());
 }
+
+fn option_request(literals: Vec<LiteralValue>) -> CallRequest {
+    CallRequest {
+        arguments: vec![ValueFact::scalar(ValueKindFact::String); literals.len()],
+        literals: LiteralContext::new(literals),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    }
+}
+
+#[test]
+fn known_invalid_option_grammar_is_diagnosed_without_rejecting_dynamic_forms() {
+    let prefix = [LiteralValue::Unknown, LiteralValue::Unknown];
+    for suffix in [
+        vec![LiteralValue::String("Encoding".into())],
+        vec![
+            LiteralValue::String("bogus".into()),
+            LiteralValue::String("ascii".into()),
+        ],
+        vec![
+            LiteralValue::String("Encoding".into()),
+            LiteralValue::String("wrong".into()),
+        ],
+        vec![
+            LiteralValue::String("Encoding".into()),
+            LiteralValue::String("ascii".into()),
+            LiteralValue::String("Encoding".into()),
+            LiteralValue::String("raw".into()),
+        ],
+    ] {
+        let mut literals = prefix.to_vec();
+        literals.extend(suffix);
+        assert!(
+            !inference::infer(&option_request(literals), &FILEWRITE_CATALOG_ENTRY)
+                .diagnostics
+                .is_empty()
+        );
+    }
+    for suffix in [
+        vec![LiteralValue::Unknown],
+        vec![LiteralValue::Unknown, LiteralValue::Unknown],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+        ],
+    ] {
+        let mut literals = prefix.to_vec();
+        literals.extend(suffix);
+        assert!(
+            inference::infer(&option_request(literals), &FILEWRITE_CATALOG_ENTRY)
+                .diagnostics
+                .is_empty()
+        );
+    }
+}

@@ -1,7 +1,7 @@
 use super::options::FileEncoding;
 use super::{
-    filewrite_error_with_detail, map_control_flow_with_context, FILEWRITE_ERROR_ENCODE,
-    FILEWRITE_ERROR_INTERNAL, FILEWRITE_ERROR_INVALID_DATA,
+    filewrite_error_with_detail, FILEWRITE_ERROR_ENCODE, FILEWRITE_ERROR_INTERNAL,
+    FILEWRITE_ERROR_INVALID_DATA,
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::BuiltinResult;
@@ -26,13 +26,11 @@ fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
         Value::String(s) => Ok(Payload::Text(s.chars().collect())),
         Value::StringArray(sa) => Ok(Payload::Text(string_array_to_text(sa))),
         Value::Num(n) => {
-            let byte = float_to_byte(*n)
-                .map_err(|err| map_control_flow_with_context(err, "filewrite: numeric value"))?;
+            let byte = float_to_byte(*n)?;
             Ok(Payload::Bytes(vec![byte]))
         }
         Value::Int(i) => {
-            let byte = int_value_to_byte(i)
-                .map_err(|err| map_control_flow_with_context(err, "filewrite: integer value"))?;
+            let byte = int_value_to_byte(i)?;
             Ok(Payload::Bytes(vec![byte]))
         }
         Value::Bool(flag) => Ok(Payload::Bytes(vec![if *flag { 1 } else { 0 }])),

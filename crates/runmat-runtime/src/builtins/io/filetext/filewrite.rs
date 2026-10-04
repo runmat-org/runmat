@@ -1,7 +1,6 @@
 //! RunMat-native `filewrite` builtin.
 
 use std::io::Write;
-use std::path::Path;
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, FILEWRITE_ERROR_ENCODE, FILEWRITE_ERROR_INTERNAL,
@@ -63,23 +62,15 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {context}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = FILEWRITE_ERROR_INTERNAL.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
 mod options;
 mod payload;
+mod target;
 
 use options::{parse_options, resolve_path, WriteMode};
 use payload::prepare_payload;
 #[cfg(test)]
 use payload::tensor_to_bytes;
+use target::OutputTarget;
 
 #[runtime_builtin(
     name = "filewrite",
@@ -100,11 +91,12 @@ async fn filewrite_builtin(
     let options = parse_options(&rest)?;
     let resolved = resolve_path(&path)?;
     preflight_data_kind(&data)?;
+    let target = OutputTarget::capture(resolved)?;
     let data = gather_if_needed_async(&data)
         .await
         .map_err(map_control_flow)?;
     let payload = prepare_payload(&data, options.encoding)?;
-    let written = write_bytes(&resolved, &payload, options.write_mode).await?;
+    let written = write_bytes(&target, &payload, options.write_mode).await?;
     Ok(Value::Num(written as f64))
 }
 
@@ -130,7 +122,11 @@ fn preflight_data_kind(data: &Value) -> BuiltinResult<()> {
     }
 }
 
-async fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<usize> {
+async fn write_bytes(
+    target: &OutputTarget,
+    payload: &[u8],
+    mode: WriteMode,
+) -> BuiltinResult<usize> {
     let mut options = OpenOptions::new();
     options.create(true);
     match mode {
@@ -142,12 +138,12 @@ async fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinRes
         }
     }
 
-    let mut file = options.open_async(path).await.map_err(|err| {
+    let mut file = target.open(&options).await.map_err(|err| {
         filewrite_error_with_source(
             format!(
                 "{}: unable to open '{}': {}",
                 FILEWRITE_ERROR_IO.message,
-                path.display(),
+                target.path().display(),
                 err
             ),
             &FILEWRITE_ERROR_IO,
@@ -160,7 +156,7 @@ async fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinRes
             format!(
                 "{}: unable to write to '{}': {}",
                 FILEWRITE_ERROR_IO.message,
-                path.display(),
+                target.path().display(),
                 err
             ),
             &FILEWRITE_ERROR_IO,
@@ -173,7 +169,7 @@ async fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinRes
             format!(
                 "{}: unable to flush '{}': {}",
                 FILEWRITE_ERROR_IO.message,
-                path.display(),
+                target.path().display(),
                 err
             ),
             &FILEWRITE_ERROR_IO,

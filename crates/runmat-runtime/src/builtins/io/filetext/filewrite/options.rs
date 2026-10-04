@@ -2,48 +2,11 @@ use super::{
     filewrite_error_with_detail, FILEWRITE_ERROR_INVALID_INPUT, FILEWRITE_ERROR_INVALID_OPTION,
 };
 use crate::BuiltinResult;
+use runmat_builtins::FilewriteOptionName;
 use runmat_value::Value;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FileEncoding {
-    Auto,
-    Utf8,
-    Ascii,
-    Latin1,
-    Raw,
-}
-
-impl FileEncoding {
-    fn from_label(label: &str) -> Option<Self> {
-        match label.trim().to_ascii_lowercase().as_str() {
-            "auto" | "default" | "system" | "native" => Some(FileEncoding::Auto),
-            "utf-8" | "utf8" | "utf_8" | "unicode" => Some(FileEncoding::Utf8),
-            "ascii" | "us-ascii" | "us_ascii" | "usascii" => Some(FileEncoding::Ascii),
-            "latin1" | "latin-1" | "latin_1" | "iso-8859-1" | "iso8859-1" | "iso88591" => {
-                Some(FileEncoding::Latin1)
-            }
-            "raw" | "bytes" | "byte" | "binary" => Some(FileEncoding::Raw),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum WriteMode {
-    Overwrite,
-    Append,
-}
-
-impl WriteMode {
-    fn from_label(label: &str) -> Option<Self> {
-        match label.trim().to_ascii_lowercase().as_str() {
-            "overwrite" | "replace" | "truncate" => Some(WriteMode::Overwrite),
-            "append" | "add" => Some(WriteMode::Append),
-            _ => None,
-        }
-    }
-}
+pub(super) use runmat_builtins::{FilewriteEncoding as FileEncoding, FilewriteMode as WriteMode};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FilewriteOptions {
@@ -94,7 +57,7 @@ pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
     while idx < args.len() {
         let key = keyword_name(&args[idx])?;
         let value = &args[idx + 1];
-        if key.eq_ignore_ascii_case("encoding") {
+        if FilewriteOptionName::from_label(&key) == Some(FilewriteOptionName::Encoding) {
             if encoding_specified {
                 return Err(filewrite_error_with_detail(
                     &FILEWRITE_ERROR_INVALID_OPTION,
@@ -103,7 +66,7 @@ pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
             }
             options.encoding = encoding_from_value(value)?;
             encoding_specified = true;
-        } else if key.eq_ignore_ascii_case("writemode") {
+        } else if FilewriteOptionName::from_label(&key) == Some(FilewriteOptionName::WriteMode) {
             if write_mode_specified {
                 return Err(filewrite_error_with_detail(
                     &FILEWRITE_ERROR_INVALID_OPTION,
@@ -126,7 +89,7 @@ pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
 
 fn is_keyword(value: &Value) -> BuiltinResult<bool> {
     let text = keyword_name(value)?;
-    Ok(text.eq_ignore_ascii_case("encoding") || text.eq_ignore_ascii_case("writemode"))
+    Ok(FilewriteOptionName::from_label(&text).is_some())
 }
 
 fn keyword_name(value: &Value) -> BuiltinResult<String> {

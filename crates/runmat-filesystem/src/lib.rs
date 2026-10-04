@@ -139,8 +139,18 @@ impl OpenOptions {
     }
 
     pub async fn open_async(&self, path: impl AsRef<Path>) -> io::Result<File> {
-        let resolved = resolve_path(path.as_ref());
         let provider = current_provider();
+        self.open_async_on(provider.as_ref(), path).await
+    }
+
+    /// Open using the invocation's captured filesystem authority. The caller
+    /// may pass an absolute path captured with that authority before suspension.
+    pub async fn open_async_on(
+        &self,
+        provider: &dyn FsProvider,
+        path: impl AsRef<Path>,
+    ) -> io::Result<File> {
+        let resolved = resolve_path(path.as_ref());
         provider
             .open_async(&resolved, &self.flags)
             .await

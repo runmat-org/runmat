@@ -114,3 +114,131 @@ fn invalid_host_path_options_and_nested_data_precede_resident_download() {
     assert_eq!(allocation.probe.retirements(), 0);
     assert!(!target.exists());
 }
+
+#[test]
+fn invalid_scalar_bytes_preserve_the_invalid_data_envelope() {
+    let target = unique_path("filewrite_invalid_scalar");
+    for invalid in [
+        Value::Num(256.0),
+        Value::Int(runmat_value::IntValue::I64(-1)),
+    ] {
+        let error = run_filewrite(
+            Value::from(target.to_string_lossy().to_string()),
+            invalid,
+            Vec::new(),
+        )
+        .expect_err("invalid scalar byte");
+        assert_eq!(error.identifier(), FILEWRITE_ERROR_INVALID_DATA.identifier);
+        assert!(!target.exists());
+    }
+}
+
+struct PausedByteDownload {
+    owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    released: std::sync::atomic::AtomicBool,
+    downloads: std::sync::atomic::AtomicUsize,
+}
+
+impl runmat_accelerate_api::AccelProvider for PausedByteDownload {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "filewrite owner-capture fixture".into()
+    }
+
+    fn upload(
+        &self,
+        _: &runmat_accelerate_api::HostTensorView<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        anyhow::bail!("unexpected upload")
+    }
+
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unexpected double download") })
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        use std::sync::atomic::Ordering;
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            futures::future::poll_fn(|_| {
+                if self.released.load(Ordering::SeqCst) {
+                    std::task::Poll::Ready(())
+                } else {
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            Ok(runmat_accelerate_api::HostNumericTensorOwned {
+                data: runmat_accelerate_api::HostNumericDataOwned::U8(vec![42]),
+                shape: vec![1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+        })
+    }
+}
+
+#[test]
+fn pending_download_keeps_captured_filesystem_owner_and_cwd() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let _fs_lock = runmat_filesystem::provider_override_lock();
+    let selected = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/selected",
+    ));
+    let replacement = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/replacement",
+    ));
+    let _selected_guard = runmat_filesystem::replace_provider(selected.clone());
+    runmat_filesystem::set_current_dir("/selected").expect("selected cwd");
+    let provider = Box::leak(Box::new(PausedByteDownload {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+        released: AtomicBool::new(false),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _gpu_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident byte");
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let mut pending = Box::pin(filewrite_builtin(
+        Value::from("owner.bin"),
+        Value::GpuTensor(resident.handle.clone()),
+        Vec::new(),
+    ));
+    assert!(matches!(
+        futures::poll!(pending.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    let _replacement_guard = runmat_filesystem::replace_provider(replacement.clone());
+    runmat_filesystem::set_current_dir("/replacement").expect("replacement cwd");
+    provider.released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        futures::executor::block_on(pending).expect("write on selected owner"),
+        Value::Num(1.0)
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        selected.read_project_path("/selected/owner.bin").unwrap(),
+        vec![42]
+    );
+    assert!(replacement
+        .read_project_path("/replacement/owner.bin")
+        .is_err());
+    assert_eq!(resident.probe.retirements(), 0);
+}
