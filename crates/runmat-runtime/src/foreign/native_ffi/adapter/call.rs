@@ -31,6 +31,12 @@ impl NativeFfiAdapter {
                 call_arguments.len()
             )));
         }
+        let declared_outputs = prototype.public_output_count();
+        if requested_outputs > declared_outputs {
+            return Err(invalid_call(format!(
+                "native call provides {declared_outputs} outputs, but {requested_outputs} were requested"
+            )));
+        }
 
         let mut pointer_entries = Vec::new();
         let mut callback_entries = Vec::new();

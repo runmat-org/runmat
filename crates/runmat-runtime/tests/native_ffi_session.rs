@@ -200,20 +200,45 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         .expect("load prepared interface"),
         Value::String("restored_fixture".into())
     );
+    let add_arguments = vec![
+        Value::String("restored_fixture".into()),
+        Value::String("fixture_add".into()),
+        Value::Int(IntValue::I32(20)),
+        Value::Int(IntValue::I32(22)),
+    ];
+    let error = invoke_outputs(&context, "call", add_arguments.clone(), 2)
+        .expect_err("signature declares only one public output");
+    assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));
     assert_eq!(
         invoke(
             &context,
             "call",
             vec![
                 Value::String("restored_fixture".into()),
-                Value::String("fixture_add".into()),
-                Value::Int(IntValue::I32(20)),
-                Value::Int(IntValue::I32(22)),
+                Value::String("fixture_invocation_count".into()),
             ],
             1,
         )
         .unwrap(),
+        Value::Int(IntValue::I32(0)),
+        "impossible output request must not invoke the C function"
+    );
+    assert_eq!(
+        invoke(&context, "call", add_arguments, 1).unwrap(),
         Value::Int(IntValue::I32(42))
+    );
+    assert_eq!(
+        invoke(
+            &context,
+            "call",
+            vec![
+                Value::String("restored_fixture".into()),
+                Value::String("fixture_invocation_count".into()),
+            ],
+            1,
+        )
+        .unwrap(),
+        Value::Int(IntValue::I32(1))
     );
     assert_eq!(
         invoke(

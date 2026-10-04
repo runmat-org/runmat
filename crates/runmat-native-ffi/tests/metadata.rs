@@ -96,6 +96,29 @@ fn outputs_must_be_pointer_typed() {
 }
 
 #[test]
+fn prepared_signature_owns_public_output_count() {
+    let mut model = metadata();
+    let mut symbol = model.libraries[0].symbols.remove(0);
+    assert_eq!(symbol.public_output_count(), 2); // scalar return and one in/out pointer
+    symbol.return_type = NativeType::Void;
+    assert_eq!(symbol.public_output_count(), 1);
+    symbol.parameters[0].direction = ParameterDirection::Input;
+    assert_eq!(symbol.public_output_count(), 0);
+    symbol.return_type = NativeType::Pointer {
+        pointee: Box::new(NativeType::Scalar {
+            scalar: NativeScalar::I32,
+        }),
+        mutability: runmat_native_ffi::PointerMutability::Mutable,
+    };
+    symbol.return_nullable = true;
+    assert_eq!(
+        symbol.public_output_count(),
+        1,
+        "nullable pointer remains a typed value"
+    );
+}
+
+#[test]
 fn pointer_returns_cannot_claim_ownership_without_a_release_contract() {
     let mut invalid = normalize_metadata(metadata());
     let symbol = &mut invalid.libraries[0].symbols[0];

@@ -44,3 +44,21 @@ pub struct SymbolPrototype {
 fn c_calling_convention() -> CallingConvention {
     CallingConvention::C
 }
+
+impl SymbolPrototype {
+    /// Number of public values declared by the prepared C signature. A nullable
+    /// pointer return is still one typed result, even when its address is null.
+    pub fn public_output_count(&self) -> usize {
+        usize::from(!matches!(self.return_type, NativeType::Void))
+            + self
+                .parameters
+                .iter()
+                .filter(|parameter| {
+                    matches!(
+                        parameter.direction,
+                        ParameterDirection::Output | ParameterDirection::InputOutput
+                    )
+                })
+                .count()
+    }
+}

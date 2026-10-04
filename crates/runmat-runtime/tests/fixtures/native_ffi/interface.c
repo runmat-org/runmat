@@ -2,7 +2,14 @@
 
 #include <stdlib.h>
 
+static int32_t fixture_add_invocations = 0;
+
+int32_t fixture_invocation_count(void) {
+    return fixture_add_invocations;
+}
+
 int32_t fixture_add(int32_t left, int32_t right) {
+    fixture_add_invocations += 1;
     return left + right;
 }
 
