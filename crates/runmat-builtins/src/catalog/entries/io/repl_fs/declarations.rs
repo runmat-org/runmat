@@ -59,3 +59,17 @@ mod uigetfile;
 mod uiputfile;
 #[path = "filesystem/mod.rs"]
 mod filesystem;
+#[path = "preferences/mod.rs"]
+mod preferences;
+#[path = "memmapfile/mod.rs"]
+mod memmapfile;
+#[path = "fileattrib/mod.rs"]
+mod fileattrib;
+#[path = "rehash/mod.rs"]
+mod rehash;
+#[path = "system/mod.rs"]
+mod system;
+#[path = "userpath/mod.rs"]
+mod userpath;
+#[path = "restoredefaultpath/mod.rs"]
+mod restoredefaultpath;
