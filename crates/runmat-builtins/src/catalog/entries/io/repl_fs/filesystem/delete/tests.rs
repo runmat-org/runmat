@@ -13,6 +13,12 @@ fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallReques
 }
 
 #[test]
+fn declaration_satisfies_catalog_invariants() {
+    let errors = crate::validate_builtin_catalog(&[&DELETE_CATALOG_ENTRY]);
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
 fn file_route_uses_only_filesystem_capability() {
     let result = inference::infer(
         &request(

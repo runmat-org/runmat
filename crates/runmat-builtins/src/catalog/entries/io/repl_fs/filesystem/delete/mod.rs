@@ -59,8 +59,8 @@ pub const DELETE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         environment_effect: None,
         effects: EFFECTS,
         capabilities: &[
-            CapabilityRequirement::Filesystem,
             CapabilityRequirement::HostRuntime,
+            CapabilityRequirement::Filesystem,
             CapabilityRequirement::ParallelRuntime,
         ],
     },
