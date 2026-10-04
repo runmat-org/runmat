@@ -45,6 +45,21 @@ fn process_error(source: ProcessInvocationError) -> crate::RuntimeError {
             .with_builtin("system")
             .with_source(source)
             .build(),
+        ProcessInvocationError::ForeignExecutableOwner
+        | ProcessInvocationError::WrongExecutableGrant
+        | ProcessInvocationError::NoExecutableRevocation => {
+            build_runtime_error(format!("system: {source}"))
+                .with_identifier("RunMat:system:UnsupportedFilesystem")
+                .with_builtin("system")
+                .build()
+        }
+        ProcessInvocationError::StaleExecutable(source) => build_runtime_error(format!(
+            "system: local executable authority revoked: {source}"
+        ))
+        .with_identifier("RunMat:system:StaleFilesystem")
+        .with_builtin("system")
+        .with_source(source)
+        .build(),
         ProcessInvocationError::Execution(source) => source.into_runtime_error(),
     }
 }
@@ -90,7 +105,7 @@ pub(super) async fn run(
             child.arguments = vec!["-c".into(), command.into()];
         }
         child.environment_policy = EnvironmentPolicy::Inherit;
-        let output = process_invocation::output_complete(runtime, child, None)
+        let output = process_invocation::output_complete(runtime, child, None, None)
             .await
             .map_err(process_error)?;
         let code = output

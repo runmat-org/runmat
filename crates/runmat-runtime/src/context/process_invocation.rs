@@ -4,7 +4,7 @@
 use std::io;
 
 use futures::future::{select, Either};
-use runmat_filesystem::{NativePathIntent, NativeProcessRevocation};
+use runmat_filesystem::{CapturedNativePath, NativePathIntent, NativeProcessRevocation};
 use runmat_process_host::{CompleteProcessOutput, HostCommand, ProcessHostError};
 
 use super::{
@@ -25,6 +25,14 @@ pub(crate) enum ProcessInvocationError {
     NoRevocation,
     #[error("process directory authority revoked: {0}")]
     StaleDirectory(#[source] io::Error),
+    #[error("local executable belongs to another native path owner")]
+    ForeignExecutableOwner,
+    #[error("local executable grant does not match the selected command")]
+    WrongExecutableGrant,
+    #[error("selected local executable has no revocation observation")]
+    NoExecutableRevocation,
+    #[error("local executable authority revoked: {0}")]
+    StaleExecutable(#[source] io::Error),
     #[error("{0}")]
     Capability(#[source] RuntimeCapabilityError),
     #[error("{0}")]
@@ -37,6 +45,7 @@ pub(crate) async fn output_complete(
     runtime: Option<&RuntimeContext>,
     mut command: HostCommand,
     input: Option<Vec<u8>>,
+    executable_authority: Option<&CapturedNativePath>,
 ) -> Result<CompleteProcessOutput, ProcessInvocationError> {
     // Both output pipes are unbounded until the host supplies an enforceable
     // physical producer. A finite quota cannot admit this route by estimate.
@@ -56,6 +65,24 @@ pub(crate) async fn output_complete(
     cwd.check_current()
         .map_err(ProcessInvocationError::StaleDirectory)?;
     command.working_directory = Some(cwd.path().to_path_buf());
+    if let Some(executable) = executable_authority {
+        if !std::sync::Arc::ptr_eq(cwd.provider(), executable.provider()) {
+            return Err(ProcessInvocationError::ForeignExecutableOwner);
+        }
+        if executable.path() != command.executable.as_path() {
+            return Err(ProcessInvocationError::WrongExecutableGrant);
+        }
+        executable
+            .check_current()
+            .map_err(ProcessInvocationError::StaleExecutable)?;
+    }
+    let executable_revocation = executable_authority.map(CapturedNativePath::process_revocation);
+    if matches!(
+        executable_revocation,
+        Some(NativeProcessRevocation::Unavailable)
+    ) {
+        return Err(ProcessInvocationError::NoExecutableRevocation);
+    }
     // Keep the prior system admission order: the selected filesystem route
     // is resolved before an absent process port is reported.
     let runtime = runtime.ok_or_else(missing_service)?;
@@ -69,17 +96,38 @@ pub(crate) async fn output_complete(
             Some(input) => process.output_complete_with_input(command, input),
             None => process.output_complete(command),
         };
-        match revocation {
-            NativeProcessRevocation::Stable => request.await.map_err(ProcessInvocationError::Host),
-            NativeProcessRevocation::Watch(watch) => match select(watch, request).await {
-                Either::Right((result, _watch)) => result.map_err(ProcessInvocationError::Host),
-                Either::Left(((), _request)) => {
-                    Err(ProcessInvocationError::StaleDirectory(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "process directory authority revoked",
-                    )))
+        let observed_executable = async {
+            match executable_revocation {
+                None | Some(NativeProcessRevocation::Stable) => {
+                    request.await.map_err(ProcessInvocationError::Host)
                 }
-            },
+                Some(NativeProcessRevocation::Watch(watch)) => match select(watch, request).await {
+                    Either::Right((result, _watch)) => result.map_err(ProcessInvocationError::Host),
+                    Either::Left(((), _request)) => {
+                        Err(ProcessInvocationError::StaleExecutable(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "local executable authority revoked",
+                        )))
+                    }
+                },
+                Some(NativeProcessRevocation::Unavailable) => {
+                    unreachable!("rejected before effect")
+                }
+            }
+        };
+        match revocation {
+            NativeProcessRevocation::Stable => observed_executable.await,
+            NativeProcessRevocation::Watch(watch) => {
+                match select(watch, Box::pin(observed_executable)).await {
+                    Either::Right((result, _watch)) => result,
+                    Either::Left(((), _request)) => {
+                        Err(ProcessInvocationError::StaleDirectory(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "process directory authority revoked",
+                        )))
+                    }
+                }
+            }
             NativeProcessRevocation::Unavailable => unreachable!("rejected before effect"),
         }
     };
@@ -90,6 +138,11 @@ pub(crate) async fn output_complete(
         .map_err(ProcessInvocationError::Execution)??;
     cwd.check_current()
         .map_err(ProcessInvocationError::StaleDirectory)?;
+    if let Some(executable) = executable_authority {
+        executable
+            .check_current()
+            .map_err(ProcessInvocationError::StaleExecutable)?;
+    }
     Ok(output)
 }
 

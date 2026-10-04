@@ -361,6 +361,7 @@ async fn sendmail_builtin(
         sendmail_process::run(
             context.as_ref(),
             command.executable.clone(),
+            command.authority.as_ref(),
             &recipients,
             message,
         )

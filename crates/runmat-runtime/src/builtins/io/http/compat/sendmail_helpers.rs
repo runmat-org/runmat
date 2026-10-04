@@ -168,7 +168,7 @@ pub(super) fn format_mail_message(recipients: &[String], subject: &str, body: &s
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) struct SelectedSendmailCommand {
     pub executable: PathBuf,
-    _authority: Option<runmat_filesystem::CapturedNativePath>,
+    pub authority: Option<runmat_filesystem::CapturedNativePath>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -181,7 +181,7 @@ pub(super) fn selected_sendmail_command() -> BuiltinResult<Option<SelectedSendma
     {
         return Ok(Some(SelectedSendmailCommand {
             executable,
-            _authority: None,
+            authority: None,
         }));
     }
     default_sendmail_command()
@@ -203,9 +203,6 @@ fn default_sendmail_command() -> BuiltinResult<Option<SelectedSendmailCommand>> 
     let Some(authority) = authority else {
         return Ok(None);
     };
-    if std::fs::metadata(authority.path()).is_err() {
-        return Ok(None);
-    }
     authority.check_current().map_err(|source| {
         sendmail_error_with_source(
             SendmailFailure::Command,
@@ -213,9 +210,28 @@ fn default_sendmail_command() -> BuiltinResult<Option<SelectedSendmailCommand>> 
             source,
         )
     })?;
+    let metadata = std::fs::metadata(authority.path());
+    authority.check_current().map_err(|source| {
+        sendmail_error_with_source(
+            SendmailFailure::Command,
+            format!("sendmail: local command authority revoked: {source}"),
+            source,
+        )
+    })?;
+    match metadata {
+        Ok(_) => {}
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(sendmail_error_with_source(
+                SendmailFailure::Command,
+                format!("sendmail: cannot inspect local command: {source}"),
+                source,
+            ));
+        }
+    }
     Ok(Some(SelectedSendmailCommand {
         executable: authority.path().to_path_buf(),
-        _authority: Some(authority),
+        authority: Some(authority),
     }))
 }
 

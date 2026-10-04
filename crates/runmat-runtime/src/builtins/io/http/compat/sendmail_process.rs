@@ -12,15 +12,21 @@ use crate::context::RuntimeContext;
 pub(super) async fn run(
     runtime: Option<&RuntimeContext>,
     executable: PathBuf,
+    executable_authority: Option<&runmat_filesystem::CapturedNativePath>,
     recipients: &[String],
     message: String,
 ) -> BuiltinResult<()> {
     let mut command = HostCommand::new(executable.clone());
     command.arguments = vec!["-t".into(), "-oi".into()];
     command.environment_policy = EnvironmentPolicy::Inherit;
-    let output = process_invocation::output_complete(runtime, command, Some(message.into_bytes()))
-        .await
-        .map_err(mail_process_error)?;
+    let output = process_invocation::output_complete(
+        runtime,
+        command,
+        Some(message.into_bytes()),
+        executable_authority,
+    )
+    .await
+    .map_err(mail_process_error)?;
     if output.exit.success {
         return Ok(());
     }
@@ -60,6 +66,16 @@ fn mail_process_error(source: ProcessInvocationError) -> crate::RuntimeError {
         ProcessInvocationError::NoNativeDirectory | ProcessInvocationError::NoRevocation => {
             sendmail_error(SendmailFailure::Command, format!("sendmail: {source}"))
         }
+        ProcessInvocationError::ForeignExecutableOwner
+        | ProcessInvocationError::WrongExecutableGrant
+        | ProcessInvocationError::NoExecutableRevocation => {
+            sendmail_error(SendmailFailure::Command, format!("sendmail: {source}"))
+        }
+        ProcessInvocationError::StaleExecutable(source) => sendmail_error_with_source(
+            SendmailFailure::Command,
+            format!("sendmail: local executable authority revoked: {source}"),
+            source,
+        ),
     }
 }
 
@@ -135,6 +151,7 @@ mod tests {
         futures::executor::block_on(run(
             Some(&runtime),
             PathBuf::from("/usr/sbin/sendmail"),
+            None,
             &["a@example.test".into()],
             "mail body".into(),
         ))
@@ -145,6 +162,7 @@ mod tests {
         let error = futures::executor::block_on(run(
             Some(&runtime),
             PathBuf::from("/usr/sbin/sendmail"),
+            None,
             &["a@example.test".into()],
             "mail body".into(),
         ))
@@ -164,6 +182,7 @@ mod tests {
         drop(run(
             Some(&runtime),
             PathBuf::from("/usr/sbin/sendmail"),
+            None,
             &[],
             "mail body".into(),
         ));
@@ -173,6 +192,7 @@ mod tests {
         let error = futures::executor::block_on(run(
             Some(&missing),
             PathBuf::from("/usr/sbin/sendmail"),
+            None,
             &[],
             "mail body".into(),
         ))

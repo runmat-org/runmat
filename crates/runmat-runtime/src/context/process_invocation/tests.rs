@@ -64,6 +64,7 @@ fn finite_budget_rejects_both_output_forms_before_process_call() {
             Some(&runtime),
             HostCommand::new("/bin/sh"),
             input,
+            None,
         ))
         .expect_err("unbounded output is inadmissible under finite quota");
         assert!(matches!(error, ProcessInvocationError::ResourceEvidence));
@@ -90,6 +91,7 @@ fn already_cancelled_invocation_never_polls_owned_process() {
         Some(&runtime),
         HostCommand::new("/bin/sh"),
         Some(vec![1, 2, 3]),
+        None,
     ))
     .expect_err("pre-cancelled invocation must not start the process");
     assert!(matches!(
