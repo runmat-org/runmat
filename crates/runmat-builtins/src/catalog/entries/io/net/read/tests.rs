@@ -1,0 +1,86 @@
+use super::*;
+use runmat_types::*;
+
+fn unknown_client() -> ValueFact {
+    ValueFact::unknown(DynamicReason::RuntimeValue)
+}
+
+fn numeric_count() -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }))
+}
+
+#[test]
+fn default_and_literal_datatype_keep_exact_host_output_class_and_count_shape() {
+    let default = CallRequest {
+        arguments: vec![unknown_client()],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&default, &READ_CATALOG_ENTRY);
+    assert!(inferred.diagnostics.is_empty());
+    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Host);
+    assert_eq!(
+        inferred.outputs[0].numeric().map(|numeric| numeric.class),
+        Some(NumericClass::UInt8)
+    );
+    let single = CallRequest {
+        arguments: vec![
+            unknown_client(),
+            numeric_count(),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(3.0),
+            LiteralValue::String("SINGLE".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&single, &READ_CATALOG_ENTRY);
+    assert!(inferred.diagnostics.is_empty());
+    assert_eq!(
+        inferred.outputs[0].numeric().map(|numeric| numeric.class),
+        Some(NumericClass::Single)
+    );
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
+        }
+    );
+}
+
+#[test]
+fn unknown_datatype_stays_dynamic_and_known_invalid_controls_diagnose() {
+    let dynamic = CallRequest {
+        arguments: vec![
+            unknown_client(),
+            numeric_count(),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&dynamic, &READ_CATALOG_ENTRY);
+    assert!(inferred.diagnostics.is_empty());
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Host);
+    let invalid = CallRequest {
+        arguments: vec![
+            ValueFact::scalar(ValueKindFact::String),
+            numeric_count(),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(0.0),
+            LiteralValue::String("uint128".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&invalid, &READ_CATALOG_ENTRY);
+    assert_eq!(inferred.diagnostics.len(), 3);
+}

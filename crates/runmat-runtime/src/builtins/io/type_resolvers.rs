@@ -24,11 +24,6 @@ pub fn close_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn read_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::tensor()])
-}
-
 pub fn tcpclient_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -67,12 +62,6 @@ mod tests {
         Type::Struct { known_fields: None }
     );
     assert_resolver!(close_type_resolver, close_type, &[], Type::Num);
-    assert_resolver!(
-        read_type_resolver,
-        read_type,
-        &[],
-        Type::Union(vec![Type::String, Type::tensor()])
-    );
     assert_resolver!(
         tcpclient_type_resolver,
         tcpclient_type,
