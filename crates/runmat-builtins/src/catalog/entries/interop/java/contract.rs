@@ -111,19 +111,23 @@ pub(super) const CLASSPATH_EFFECTS: &[EffectKind] = &[
     EffectKind::MaySuspend,
     EffectKind::MayThrow,
 ];
+pub(super) struct JavaEntryBehavior {
+    pub effects: &'static [EffectKind],
+    pub capabilities: &'static [CapabilityRequirement],
+    pub purity: BuiltinPurity,
+    pub async_behavior: BuiltinAsyncBehavior,
+    pub placement: BuiltinPlacementContract,
+    pub link: BuiltinLinkContract,
+    pub suppress_auto_output: bool,
+}
+
 pub(super) const fn entry(
     provenance: BuiltinCatalogProvenance,
     name: &'static str,
     documentation: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
     infer: fn(&runmat_types::CallRequest, &BuiltinCatalogEntry) -> runmat_types::CallInference,
-    effects: &'static [EffectKind],
-    capabilities: &'static [CapabilityRequirement],
-    purity: BuiltinPurity,
-    async_behavior: BuiltinAsyncBehavior,
-    placement: BuiltinPlacementContract,
-    link: BuiltinLinkContract,
-    suppress_auto_output: bool,
+    behavior: JavaEntryBehavior,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
         provenance,
@@ -135,20 +139,20 @@ pub(super) const fn entry(
             maturity: BuiltinContractMaturity::Incomplete,
             inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(infer)),
             compatibility: BuiltinCompatibility::Matlab,
-            async_behavior,
-            purity,
+            async_behavior: behavior.async_behavior,
+            purity: behavior.purity,
             semantic_kind: BuiltinSemanticKind::General,
             workspace_effect: None,
             environment_effect: None,
-            effects,
-            capabilities,
+            effects: behavior.effects,
+            capabilities: behavior.capabilities,
         },
-        placement,
-        link,
+        placement: behavior.placement,
+        link: behavior.link,
         bindings: &REQUIRED_DEFAULT_BINDING,
         extensions: &[],
         integer_capabilities: &[],
         integer_audit: Some(&JAVA_INTEGER_AUDIT),
-        suppress_auto_output,
+        suppress_auto_output: behavior.suppress_auto_output,
     }
 }

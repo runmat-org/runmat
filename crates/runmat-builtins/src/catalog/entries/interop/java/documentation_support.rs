@@ -59,34 +59,38 @@ pub(super) const fn example(
     }
 }
 
+pub(super) struct JavaDocumentationContent {
+    pub summary: &'static str,
+    pub description: &'static str,
+    pub keywords: &'static [&'static str],
+    pub related: &'static [&'static str],
+    pub sections: &'static [BuiltinDocumentationSection],
+    pub examples: &'static [BuiltinExample],
+    pub faqs: &'static [BuiltinDocumentationFaq],
+    pub verification: &'static [BuiltinEvidenceReference],
+}
+
 pub(super) const fn documentation(
     name: &'static str,
-    summary: &'static str,
-    description: &'static str,
-    keywords: &'static [&'static str],
-    related: &'static [&'static str],
-    sections: &'static [BuiltinDocumentationSection],
-    examples: &'static [BuiltinExample],
-    faqs: &'static [BuiltinDocumentationFaq],
-    verification: &'static [BuiltinEvidenceReference],
+    content: JavaDocumentationContent,
 ) -> BuiltinDocumentation {
     BuiltinDocumentation {
         authority: BuiltinDocumentationAuthority::Catalog,
         title: Some(name),
         slug: Some(name),
-        summary,
-        description,
-        keywords,
-        related,
-        sections,
-        examples,
+        summary: content.summary,
+        description: content.description,
+        keywords: content.keywords,
+        related: content.related,
+        sections: content.sections,
+        examples: content.examples,
         example_exemption: None,
-        faqs,
+        faqs: content.faqs,
         links: &[JAVA_LINK],
         media: &[],
         evidence: BuiltinDocumentationEvidence {
             implementation: IMPLEMENTATION,
-            verification,
+            verification: content.verification,
             notes: &[],
         },
         introduced: None,
