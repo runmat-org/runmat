@@ -167,16 +167,17 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 class: MatClass::Char,
                 dims: ca.shape.clone(),
                 data: MatData::Char {
-                    data: char_array_to_utf16(&ca),
+                    data: char_array_to_utf16_cooperative(&ca, &mut cooperation).await?,
                 },
             }),
-            Value::String(s) => Ok(MatArray {
-                class: MatClass::Char,
-                dims: vec![1, s.chars().count()],
-                data: MatData::Char {
-                    data: s.encode_utf16().collect(),
-                },
-            }),
+            Value::String(s) => {
+                let data = text_to_utf16_cooperative(&s, &mut cooperation).await?;
+                Ok(MatArray {
+                    class: MatClass::Char,
+                    dims: vec![1, data.len()],
+                    data: MatData::Char { data },
+                })
+            }
             Value::StringArray(sa) => {
                 if sa.data.len() == 1 {
                     return convert_value_with_cooperation(
@@ -187,13 +188,11 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 }
                 let mut elements = Vec::with_capacity(sa.data.len());
                 for text in &sa.data {
-                    completed(&mut cooperation, text.len()).await?;
+                    let data = text_to_utf16_cooperative(text, &mut cooperation).await?;
                     elements.push(MatArray {
                         class: MatClass::Char,
-                        dims: vec![1, text.chars().count()],
-                        data: MatData::Char {
-                            data: text.encode_utf16().collect(),
-                        },
+                        dims: vec![1, data.len()],
+                        data: MatData::Char { data },
                     });
                 }
                 Ok(MatArray {
@@ -204,9 +203,9 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
             }
             Value::Cell(cell) => {
                 let mut elements = Vec::with_capacity(cell.data.len());
-                for element in cell.to_column_major() {
+                for element in cell.iter_column_major() {
                     completed(&mut cooperation, 1).await?;
-                    let gathered = gather_if_needed_async(&element).await?;
+                    let gathered = gather_if_needed_async(element).await?;
                     completed(&mut cooperation, 0).await?;
                     elements.push(
                         convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
@@ -295,11 +294,92 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
     })
 }
 
-fn char_array_to_utf16(ca: &CharArray) -> Vec<u16> {
-    ca.to_column_major()
-        .into_iter()
-        .map(|value| value as u16)
-        .collect()
+const TEXT_WORK_CHUNK: usize = 4096;
+
+async fn text_to_utf16_cooperative(
+    text: &str,
+    cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
+) -> BuiltinResult<Vec<u16>> {
+    let mut data = Vec::new();
+    let mut work = 0usize;
+    for unit in text.encode_utf16() {
+        if data.capacity() == data.len() {
+            data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
+                save_error_with(
+                    &SAVE_ERROR_IO,
+                    format!("save: UTF-16 data cannot be allocated: {error}"),
+                )
+            })?;
+        }
+        data.push(unit);
+        work += 1;
+        if work == TEXT_WORK_CHUNK {
+            completed(cooperation, work).await?;
+            work = 0;
+        }
+    }
+    completed(cooperation, work).await?;
+    Ok(data)
+}
+
+async fn char_array_to_utf16_cooperative(
+    chars: &CharArray,
+    cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
+) -> BuiltinResult<Vec<u16>> {
+    let mut data = Vec::new();
+    let mut work = 0usize;
+    let page_len = chars.rows.checked_mul(chars.cols).ok_or_else(|| {
+        save_error_with(
+            &SAVE_ERROR_IO,
+            "save: MAT character shape exceeds platform limits",
+        )
+    })?;
+    let pages = if page_len == 0 {
+        0
+    } else if chars.shape.len() <= 2 {
+        1
+    } else if chars.shape[2..].contains(&0) {
+        0
+    } else {
+        chars.shape[2..]
+            .iter()
+            .try_fold(1usize, |product, &size| product.checked_mul(size))
+            .ok_or_else(|| {
+                save_error_with(
+                    &SAVE_ERROR_IO,
+                    "save: MAT character shape exceeds platform limits",
+                )
+            })?
+    };
+    if page_len.checked_mul(pages) != Some(chars.data.len()) {
+        return Err(save_error_with(
+            &SAVE_ERROR_IO,
+            "save: MAT character payload does not match its shape",
+        ));
+    }
+    for page in 0..pages {
+        let page_offset = page * page_len;
+        for col in 0..chars.cols {
+            for row in 0..chars.rows {
+                if data.capacity() == data.len() {
+                    data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
+                        save_error_with(
+                            &SAVE_ERROR_IO,
+                            format!("save: MAT characters cannot be allocated: {error}"),
+                        )
+                    })?;
+                }
+                data.push(chars.data[page_offset + row * chars.cols + col] as u16);
+                work += 1;
+                if work == TEXT_WORK_CHUNK {
+                    completed(cooperation, work).await?;
+                    work = 0;
+                }
+            }
+        }
+    }
+    completed(cooperation, work).await?;
+    Ok(data)
 }
 
 fn int_value_mat_class(value: &IntValue) -> MatClass {
@@ -381,6 +461,17 @@ mod tests {
     use std::num::NonZeroU64;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn utf16_char_geometry_matches_emitted_code_units() {
+        let array = block_on(convert_value(Value::String("A😀".into()))).expect("encode text");
+        assert_eq!(array.dims, vec![1, 3]);
+        let MatData::Char { data } = array.data else {
+            panic!("text must become MAT char data");
+        };
+        assert_eq!(data, vec![0x0041, 0xd83d, 0xde00]);
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
