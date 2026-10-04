@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use runmat_value::{CharArray, StructValue, Value};
+use runmat_value::{StructValue, Value};
+
+use crate::builtins::common::validation::value_text_scalar_string;
 
 type PreferenceGroups = BTreeMap<String, BTreeMap<String, Value>>;
 
@@ -138,18 +140,15 @@ pub(crate) fn session_pref_text(group: &str, preference: &str) -> Option<String>
 }
 
 fn pref_value_to_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => {
-            let mut text: String = array.data.iter().take(array.cols).collect();
-            while text.ends_with(' ') {
-                text.pop();
-            }
-            Some(text)
+    let mut text = value_text_scalar_string(value)?;
+    if matches!(value, Value::CharArray(_)) {
+        // Retain the existing character-row padding behavior for HTTP and
+        // sendmail consumers without accepting an N-D character page.
+        while text.ends_with(' ') {
+            text.pop();
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
     }
+    Some(text)
 }
 
 fn as_struct(values: &BTreeMap<String, Value>) -> StructValue {
@@ -163,6 +162,7 @@ fn as_struct(values: &BTreeMap<String, Value>) -> StructValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_value::{CharArray, StringArray};
 
     #[test]
     fn missing_later_name_does_not_install_an_earlier_default() {
@@ -199,5 +199,32 @@ mod tests {
         set_many(group.into(), Vec::new());
         assert!(!has_group(group));
         assert_eq!(read_many(group, &[], None).expect("empty read"), Vec::new());
+    }
+
+    #[test]
+    fn consumer_text_uses_canonical_scalar_geometry_not_first_page() {
+        let group = "runmatPreferenceTextGeometry";
+        let paged = Value::CharArray(
+            CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).expect("two pages"),
+        );
+        let scalar = Value::CharArray(CharArray::new_row("mail.example  "));
+        let strings = Value::StringArray(
+            StringArray::new(vec!["left".into(), "right".into()], vec![1, 1, 2])
+                .expect("two strings"),
+        );
+        set_many(
+            group.into(),
+            vec![
+                ("paged".into(), paged),
+                ("scalar".into(), scalar),
+                ("strings".into(), strings),
+            ],
+        );
+        assert_eq!(session_pref_text(group, "paged"), None);
+        assert_eq!(session_pref_text(group, "strings"), None);
+        assert_eq!(
+            session_pref_text(group, "scalar"),
+            Some("mail.example".into())
+        );
     }
 }
