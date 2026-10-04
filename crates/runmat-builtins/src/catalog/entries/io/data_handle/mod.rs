@@ -16,6 +16,7 @@ macro_rules! receiver_descriptor {
 }
 
 mod contract;
+mod data_array;
 mod descriptor;
 mod documentation;
 mod inference;
@@ -23,6 +24,10 @@ mod integer;
 mod dataset;
 
 pub use super::data_family::{DATA_ARRAY_CLASS, DATA_TRANSACTION_CLASS};
+pub use data_array::*;
 pub use dataset::*;
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = dataset::ENTRIES;
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(data_array::ENTRIES.iter().copied());
+    values.extend(dataset::ENTRIES.iter().copied());
+}

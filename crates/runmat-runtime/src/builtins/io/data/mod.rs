@@ -4313,6 +4313,29 @@ mod tests {
         let dtype = call_builtin("DataArray.dtype", std::slice::from_ref(&array))
             .expect("array metadata retains selected provider");
         assert_eq!(dtype, Value::String("uint64".into()));
+        assert_eq!(
+            call_builtin("DataArray.name", std::slice::from_ref(&array))
+                .expect("sealed array name"),
+            Value::String("sample".into())
+        );
+        assert_eq!(
+            call_builtin("DataArray.codec", std::slice::from_ref(&array))
+                .expect("pinned codec metadata"),
+            Value::String("zstd".into())
+        );
+        assert_eq!(
+            call_builtin("DataArray.rank", std::slice::from_ref(&array))
+                .expect("pinned rank metadata"),
+            Value::Num(2.0)
+        );
+        for method in ["DataArray.shape", "DataArray.chunk_shape"] {
+            let Value::Tensor(shape) =
+                call_builtin(method, std::slice::from_ref(&array)).expect("pinned shape metadata")
+            else {
+                panic!("{method} must return a tensor");
+            };
+            assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
+        }
         let values = call_builtin("DataArray.read", std::slice::from_ref(&array))
             .expect("array payload retains selected provider");
         let Value::Tensor(values) = values else {
@@ -4341,6 +4364,41 @@ mod tests {
         assert_eq!(
             written.integer_storage(),
             Some(&runmat_value::IntegerStorage::U64(vec![42]))
+        );
+        call_builtin(
+            "DataArray.fill",
+            &[array.clone(), Value::Int(IntValue::U64(9))],
+        )
+        .expect("fill stays on original provider");
+        let Value::Tensor(filled) = call_builtin("DataArray.read", std::slice::from_ref(&array))
+            .expect("read after pinned fill")
+        else {
+            panic!("DataArray.read must return a tensor");
+        };
+        assert_eq!(
+            filled.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![9]))
+        );
+        call_builtin(
+            "DataArray.resize",
+            &[
+                array.clone(),
+                Value::Tensor(
+                    Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![1, 2]), vec![1, 2])
+                        .expect("resize shape"),
+                ),
+            ],
+        )
+        .expect("resize stays on original provider");
+        let Value::Tensor(resized) =
+            call_builtin("DataArray.read", &[array]).expect("read after pinned resize")
+        else {
+            panic!("DataArray.read must return a tensor");
+        };
+        assert_eq!(resized.shape, vec![1, 2]);
+        assert_eq!(
+            resized.integer_storage(),
+            Some(&runmat_value::IntegerStorage::U64(vec![0, 0]))
         );
         let tx = call_builtin("Dataset.begin", std::slice::from_ref(&result))
             .expect("transaction inherits selected provider");

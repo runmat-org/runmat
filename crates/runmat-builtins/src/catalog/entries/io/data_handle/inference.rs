@@ -22,6 +22,20 @@ pub(super) enum DatasetForm {
     Refresh,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ArrayForm {
+    Name,
+    DType,
+    Shape,
+    Rank,
+    ChunkShape,
+    Codec,
+    Read,
+    Write,
+    Resize,
+    Fill,
+}
+
 fn text() -> ValueFact {
     ValueFact::scalar(ValueKindFact::String)
 }
@@ -188,6 +202,134 @@ pub(super) fn dataset_infer(
         DatasetForm::GetAttr => ValueFact::unknown(DynamicReason::RuntimeValue),
         DatasetForm::Begin => transaction(),
         DatasetForm::Refresh => dataset(),
+    };
+    let mut contract = CallContract::fixed(vec![output]);
+    contract.effects = entry.contract.effect_set();
+    contract.capabilities = entry.contract.capability_set();
+    let mut inferred = infer_call(&contract, request);
+    inferred.diagnostics.extend(diagnostics);
+    inferred
+}
+
+pub(super) fn array_infer(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    form: ArrayForm,
+) -> CallInference {
+    let mut diagnostics = Vec::new();
+    let count = request.arguments.len();
+    let (minimum, maximum) = match form {
+        ArrayForm::Read => (1, 2),
+        ArrayForm::Write => (2, 3),
+        ArrayForm::Resize | ArrayForm::Fill => (2, usize::MAX),
+        _ => (1, 1),
+    };
+    if count < minimum || count > maximum {
+        diagnostics.push(argument_error(
+            "RM-DATA-ARRAY-ARITY",
+            "DataArray method received an unsupported argument count",
+            0,
+        ));
+    }
+    if let Some(receiver) = request.arguments.first() {
+        let admissible = match &receiver.kind {
+            ValueKindFact::Unknown => true,
+            ValueKindFact::Object(object) => {
+                object.handle_semantics != Some(false)
+                    && object
+                        .runtime_class
+                        .as_ref()
+                        .is_none_or(|class| class.is(super::super::data_family::DATA_ARRAY_CLASS))
+            }
+            _ => false,
+        };
+        if !admissible {
+            diagnostics.push(argument_error(
+                "RM-DATA-ARRAY-RECEIVER",
+                "DataArray method requires a managed DataArray receiver",
+                0,
+            ));
+        }
+    }
+    let slice_index = match form {
+        ArrayForm::Read if count >= 2 => Some(1),
+        ArrayForm::Write if count >= 3 => Some(1),
+        _ => None,
+    };
+    if let Some(index) = slice_index {
+        if request.arguments.get(index).is_some_and(|fact| {
+            !matches!(
+                fact.kind,
+                ValueKindFact::Unknown | ValueKindFact::Cell(_) | ValueKindFact::String
+            )
+        }) {
+            diagnostics.push(argument_error(
+                "RM-DATA-ARRAY-SLICE",
+                "DataArray slice must be a cell specification or ':' text",
+                index,
+            ));
+        }
+    }
+    if matches!(form, ArrayForm::Resize)
+        && request.arguments.get(1).is_some_and(|fact| {
+            !matches!(
+                fact.kind,
+                ValueKindFact::Unknown
+                    | ValueKindFact::Numeric(NumericFact {
+                        domain: NumericDomain::Real,
+                        ..
+                    })
+            )
+        })
+    {
+        diagnostics.push(argument_error(
+            "RM-DATA-ARRAY-SHAPE",
+            "DataArray.resize requires real numeric shape dimensions",
+            1,
+        ));
+    }
+    let value_index = match form {
+        ArrayForm::Write if count >= 3 => Some(2),
+        ArrayForm::Write | ArrayForm::Fill => Some(1),
+        _ => None,
+    };
+    if let Some(index) = value_index {
+        if request.arguments.get(index).is_some_and(|fact| {
+            !matches!(
+                fact.kind,
+                ValueKindFact::Unknown | ValueKindFact::Numeric(_)
+            )
+        }) {
+            diagnostics.push(argument_error(
+                "RM-DATA-ARRAY-VALUE",
+                "DataArray payload must be numeric",
+                index,
+            ));
+        }
+    }
+    let output = match form {
+        ArrayForm::Name | ArrayForm::DType | ArrayForm::Codec => text(),
+        ArrayForm::Shape | ArrayForm::ChunkShape => ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::from(vec![Some(1), None]),
+            StorageFact::Dense,
+        ),
+        ArrayForm::Rank => ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+        ArrayForm::Read => {
+            let mut fact = ValueFact::unknown(DynamicReason::RuntimeValue);
+            fact.residency = ResidencyFact::Host;
+            fact.storage = StorageFact::Dense;
+            fact
+        }
+        ArrayForm::Write | ArrayForm::Resize | ArrayForm::Fill => {
+            ValueFact::scalar(ValueKindFact::Logical)
+        }
     };
     let mut contract = CallContract::fixed(vec![output]);
     contract.effects = entry.contract.effect_set();

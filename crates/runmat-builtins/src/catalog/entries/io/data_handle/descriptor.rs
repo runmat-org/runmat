@@ -65,6 +65,30 @@ pub(super) const LABEL: BuiltinParamDescriptor = param(
     BuiltinParamArity::Required,
     "Snapshot label.",
 );
+pub(super) const SLICE_OPTIONAL: BuiltinParamDescriptor = param(
+    "sliceSpec",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Optional,
+    "Optional cell slice specification or ':' text.",
+);
+pub(super) const SLICE_REQUIRED: BuiltinParamDescriptor = param(
+    "sliceSpec",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Cell slice specification or ':' text.",
+);
+pub(super) const VALUES: BuiltinParamDescriptor = param(
+    "values",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "Numeric values to persist.",
+);
+pub(super) const NEW_SHAPE: BuiltinParamDescriptor = param(
+    "newShape",
+    BuiltinParamType::Any,
+    BuiltinParamArity::Required,
+    "New checked numeric dimension vector.",
+);
 pub(super) const OPTIONS: BuiltinParamDescriptor = param(
     "options",
     BuiltinParamType::Any,
@@ -125,6 +149,12 @@ pub(super) const OUT_STRUCT: BuiltinParamDescriptor = param(
     BuiltinParamType::Any,
     BuiltinParamArity::Required,
     "Attribute structure.",
+);
+pub(super) const OUT_TENSOR: BuiltinParamDescriptor = param(
+    "X",
+    BuiltinParamType::NumericArray,
+    BuiltinParamArity::Required,
+    "Numeric tensor result.",
 );
 
 pub(super) const DATA_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
