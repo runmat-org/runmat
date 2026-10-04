@@ -9,6 +9,7 @@ fn diary_sink_survives_repeated_runs_without_redirecting_after_provider_swap() {
         "/first",
     ));
     let first_guard = runmat_filesystem::replace_provider(first.clone());
+    runmat_filesystem::set_current_dir("/first").expect("first fixture directory");
     let mut session = RunMatSession::with_options(false, false).expect("session");
     execute_text_request(&mut session, "diary session.log; disp('first');").expect("first run");
 
@@ -16,6 +17,7 @@ fn diary_sink_survives_repeated_runs_without_redirecting_after_provider_swap() {
         "/second",
     ));
     let second_guard = runmat_filesystem::replace_provider(second.clone());
+    runmat_filesystem::set_current_dir("/second").expect("second fixture directory");
     execute_text_request(&mut session, "disp('second'); diary off;").expect("second run");
 
     let original = block_on(first.read(Path::new("/first/session.log"))).expect("original log");
@@ -34,6 +36,7 @@ fn two_sessions_keep_distinct_open_sinks_across_interleaved_runs() {
         "/first",
     ));
     let first_guard = runmat_filesystem::replace_provider(first.clone());
+    runmat_filesystem::set_current_dir("/first").expect("first fixture directory");
     let mut first_session = RunMatSession::with_options(false, false).expect("first session");
     let mut second_session = RunMatSession::with_options(false, false).expect("second session");
     execute_text_request(&mut first_session, "diary first.log; disp('A1');")
@@ -43,6 +46,7 @@ fn two_sessions_keep_distinct_open_sinks_across_interleaved_runs() {
         "/second",
     ));
     let second_guard = runmat_filesystem::replace_provider(second.clone());
+    runmat_filesystem::set_current_dir("/second").expect("second fixture directory");
     execute_text_request(&mut second_session, "diary second.log; disp('B1');")
         .expect("second session run");
     execute_text_request(&mut first_session, "disp('A2'); diary off;")

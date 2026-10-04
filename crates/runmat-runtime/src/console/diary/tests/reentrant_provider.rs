@@ -152,6 +152,7 @@ fn file_write_reentry_returns_would_block_without_borrow_panic() {
     let _ = take_diary_error();
     let provider = Arc::new(ReentrantProvider::new(Callback::ConsoleLine));
     let _owner = fs::replace_provider(provider);
+    fs::set_current_dir("/").expect("fixture directory");
     set_diary_filename_checked("original.log").expect("enable");
     record_diary_command("outer");
     assert!(!diary_enabled());
@@ -168,6 +169,7 @@ fn old_handle_failure_cannot_disable_reentrant_replacement_owner() {
     let _ = take_diary_error();
     let provider = Arc::new(ReentrantProvider::new(Callback::ReplaceOwnerAndFail));
     let _owner = fs::replace_provider(provider.clone());
+    fs::set_current_dir("/").expect("fixture directory");
     set_diary_filename_checked("original.log").expect("enable");
     record_diary_command("failed outer");
     assert!(diary_enabled());

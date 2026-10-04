@@ -23,11 +23,13 @@ fn active_diary_keeps_original_provider_and_directory_across_ambient_swap() {
     set_diary_enabled(false);
     let first = Arc::new(fs::MemoryFsProvider::with_current_dir("/first"));
     let first_guard = fs::replace_provider(first.clone());
+    fs::set_current_dir("/first").expect("first fixture directory");
     set_diary_filename_checked("session.log").expect("enable diary");
     record_diary_command("first command");
 
     let second = Arc::new(fs::MemoryFsProvider::with_current_dir("/second"));
     let second_guard = fs::replace_provider(second.clone());
+    fs::set_current_dir("/second").expect("second fixture directory");
     write_diary_entry(&ConsoleEntry {
         stream: ConsoleStream::Stdout,
         text: "second output\n".to_string(),
@@ -53,12 +55,14 @@ fn off_then_on_captures_a_new_owner_and_appends_without_replaying_old_sink() {
     set_diary_enabled(false);
     let first = Arc::new(fs::MemoryFsProvider::with_current_dir("/first"));
     let first_guard = fs::replace_provider(first.clone());
+    fs::set_current_dir("/first").expect("first fixture directory");
     set_diary_filename_checked("session.log").expect("first enable");
     record_diary_command("one");
     set_diary_enabled(false);
 
     let second = Arc::new(fs::MemoryFsProvider::with_current_dir("/second"));
     let second_guard = fs::replace_provider(second.clone());
+    fs::set_current_dir("/second").expect("second fixture directory");
     set_diary_enabled_checked(true).expect("second enable");
     record_diary_command("two");
     set_diary_enabled(false);
