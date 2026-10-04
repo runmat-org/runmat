@@ -157,13 +157,7 @@ async fn plan_for(
     assignment: bool,
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
     let shape = crate::indexing::value::shape(base).ok_or_else(invalid_base)?;
-    let selectors =
-        crate::indexing::selectors::build_component_selectors(values, &shape, assignment).await?;
-    if assignment {
-        crate::indexing::plan::build_assignment_plan(&selectors, values.len(), &shape)
-    } else {
-        crate::indexing::plan::build_index_plan(&selectors, values.len(), &shape)
-    }
+    crate::object::indexing::plan_for_components(&shape, values, assignment).await
 }
 
 fn index_values(
