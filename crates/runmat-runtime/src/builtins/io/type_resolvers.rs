@@ -60,15 +60,6 @@ pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     ])
 }
 
-pub fn xlswrite_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![
-        Type::Bool,
-        Type::OutputList(vec![Type::Bool]),
-        Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None }]),
-    ])
-}
-
 pub fn data_unknown_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -126,15 +117,5 @@ mod tests {
         readmatrix_type,
         &[],
         Type::Union(vec![Type::tensor(), Type::logical()])
-    );
-    assert_resolver!(
-        xlswrite_type_resolver,
-        xlswrite_type,
-        &[],
-        Type::Union(vec![
-            Type::Bool,
-            Type::OutputList(vec![Type::Bool]),
-            Type::OutputList(vec![Type::Bool, Type::Struct { known_fields: None },]),
-        ])
     );
 }
