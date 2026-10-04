@@ -6,6 +6,11 @@ use runmat_accelerate_api::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn poll_once<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> std::task::Poll<F::Output> {
+    let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
+    std::future::Future::poll(future, &mut context)
+}
+
 struct PendingDataProvider {
     owner: TestAllocationOwner,
     downloads: AtomicUsize,
@@ -62,7 +67,7 @@ fn known_read_only_target_fails_before_pending_data_download() {
         Value::GpuTensor(resident.handle.clone()),
     ];
     let mut call = Box::pin(evaluate(&args));
-    let error = match futures::poll!(call.as_mut()) {
+    let error = match poll_once(call.as_mut()) {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("read-only target must fail before data download: {other:?}"),
     };
@@ -105,7 +110,7 @@ fn read_only_target_precedes_pending_resident_format_download() {
         Value::Num(7.0),
     ];
     let mut call = Box::pin(evaluate(&args));
-    let error = match futures::poll!(call.as_mut()) {
+    let error = match poll_once(call.as_mut()) {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("known invalid target must precede format download: {other:?}"),
     };
@@ -148,7 +153,7 @@ fn later_stream_label_data_cannot_override_known_target_before_resident_format()
         Value::from("stderr"),
     ];
     let mut call = Box::pin(evaluate(&args));
-    let error = match futures::poll!(call.as_mut()) {
+    let error = match poll_once(call.as_mut()) {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("later data cannot defer known target error: {other:?}"),
     };
@@ -182,7 +187,7 @@ fn known_invalid_character_matrix_format_precedes_resident_data() {
         Value::GpuTensor(resident.handle.clone()),
     ];
     let mut call = Box::pin(evaluate(&args));
-    let error = match futures::poll!(call.as_mut()) {
+    let error = match poll_once(call.as_mut()) {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("invalid format geometry must precede data download: {other:?}"),
     };
@@ -214,7 +219,7 @@ fn unambiguous_invalid_fid_never_falls_back_to_stdout_or_downloads_data() {
             Value::GpuTensor(resident.handle.clone()),
         ];
         let mut call = Box::pin(evaluate(&args));
-        let error = match futures::poll!(call.as_mut()) {
+        let error = match poll_once(call.as_mut()) {
             std::task::Poll::Ready(Err(error)) => error,
             other => panic!("invalid fid must precede resident data: {other:?}"),
         };
@@ -243,7 +248,7 @@ fn known_malformed_format_fails_before_pending_data_download() {
         .expect("resident value");
     let args = [Value::from("%q"), Value::GpuTensor(resident.handle.clone())];
     let mut call = Box::pin(evaluate(&args));
-    let error = match futures::poll!(call.as_mut()) {
+    let error = match poll_once(call.as_mut()) {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("bad format must fail before data download: {other:?}"),
     };
@@ -270,7 +275,7 @@ fn later_resident_format_gate_precedes_any_download() {
         Value::GpuTensor(resident.handle.clone()),
     ];
     let mut call = Box::pin(evaluate(&args));
-    let error = match futures::poll!(call.as_mut()) {
+    let error = match poll_once(call.as_mut()) {
         std::task::Poll::Ready(Err(error)) => error,
         other => panic!("later format gate must fail before download: {other:?}"),
     };
