@@ -30,7 +30,7 @@ pub use self::repl_fs::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     archive::extend_entries(values);
-    values.extend(console::ENTRIES.iter().copied());
+    console::extend_entries(values);
     filetext::extend_entries(values);
     repl_fs::extend_entries(values);
     http::extend_entries(values);
