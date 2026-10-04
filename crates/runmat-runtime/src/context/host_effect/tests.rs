@@ -213,6 +213,8 @@ fn archive_identity_retains_the_original_tuple_encoding() {
 
 #[path = "tests/audio.rs"]
 mod audio;
+#[path = "tests/stage.rs"]
+mod stage;
 
 #[test]
 fn finite_missing_or_unknown_bound_rejects_before_selection() {

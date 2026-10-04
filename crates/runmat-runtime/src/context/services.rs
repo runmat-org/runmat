@@ -273,6 +273,17 @@ pub trait RuntimeHostEffectResourceService {
         request: &super::host_effect::HostEffectRequest<'_>,
         runtime: &super::RuntimeContext,
     ) -> Option<super::host_effect::HostEffectResourceAdmission>;
+
+    /// Optional bounded pre-scan authority. This reserves a certified peak
+    /// before opening a source whose exact result geometry is learned from
+    /// its header; it does not create a second placement probe or feedback.
+    fn stage_admission(
+        &self,
+        _request: &super::host_effect::HostEffectRequest<'_>,
+        _runtime: &super::RuntimeContext,
+    ) -> Option<super::host_effect::HostEffectStageAdmission> {
+        None
+    }
 }
 
 /// Session-owned execution-placement authority. The runtime exposes only

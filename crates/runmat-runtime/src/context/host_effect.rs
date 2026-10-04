@@ -15,6 +15,11 @@ use runmat_time::{duration_ns_saturating, Instant};
 use std::sync::Arc;
 
 mod workload;
+mod stage;
+pub use stage::{
+    admit_host_effect_stage, select_host_effect_after_stage, HostEffectStageAdmission,
+    HostEffectStageEvidence, HostEffectStagePermit, HostEffectStageReservation,
+};
 pub use workload::{
     AudioDecodeOutput, AudioFrameRange, HostEffectOutput, HostEffectSource, HostEffectWorkload,
 };
@@ -79,6 +84,17 @@ pub fn select_host_effect(
     runtime: Option<&RuntimeContext>,
     request: HostEffectRequest<'_>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
+    select_host_effect_inner(runtime, request, None)
+}
+
+fn select_host_effect_inner(
+    runtime: Option<&RuntimeContext>,
+    request: HostEffectRequest<'_>,
+    stage: Option<HostEffectStagePermit>,
+) -> BuiltinResult<Option<HostEffectReceipt>> {
+    if let Some(stage) = stage.as_ref() {
+        stage.validate_request(&request)?;
+    }
     let Some(runtime) = runtime else {
         return Ok(None);
     };
@@ -112,6 +128,9 @@ pub fn select_host_effect(
         return Err(stale_resource());
     }
     let evidence = admission.evidence;
+    if let Some(stage) = stage.as_ref() {
+        stage.validate_final_evidence(evidence)?;
+    }
     let Some(revision) = service.whole_work_host_service_revision(
         runtime.program_revision().cloned(),
         evidence.authority_revision,
@@ -132,6 +151,9 @@ pub fn select_host_effect(
                 .with_identifier("RunMat:Placement:InvalidRevision")
                 .build(),
         );
+    }
+    if let Some(stage) = stage.as_ref() {
+        stage.validate_revision(&revision)?;
     }
     let output = request.workload.output();
     let retained_bytes = match output {
@@ -213,8 +235,11 @@ pub fn select_host_effect(
     Ok(Some(HostEffectReceipt {
         runtime: runtime.clone(),
         selected,
-        started: Instant::now(),
+        started: stage
+            .as_ref()
+            .map_or_else(Instant::now, |stage| stage.started),
         resource_liveness_lease: admission.liveness_lease,
+        _stage: stage,
     }))
 }
 
@@ -239,6 +264,7 @@ pub struct HostEffectReceipt {
     selected: RuntimeWholeWorkSelection,
     started: Instant,
     resource_liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
+    _stage: Option<HostEffectStagePermit>,
 }
 
 impl HostEffectReceipt {
