@@ -115,7 +115,6 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     })
 }
 
-
 #[runtime_builtin(
     name = "fprintf",
     binding_variant = "default",
