@@ -191,7 +191,11 @@ pub(super) fn infer(
             arity(request, 1, None, &mut diagnostics);
             if matches!(form, JavaForm::AddPath)
                 && request.arguments.len() == 1
-                && request.literals.literal_string_at(0) == Some("-end")
+                && request
+                    .literals
+                    .literal_string_at(0)
+                    .and_then(super::JavaInsertionPosition::from_public_terminal)
+                    .is_some()
             {
                 diagnostics.push(argument_error(
                     "RM-JAVA-PATH",
@@ -223,21 +227,16 @@ pub(super) fn infer(
                         0,
                     ));
                 }
-                if request.literals.literal_string_at(0).is_some_and(|option| {
-                    matches!(
-                        option.to_ascii_lowercase().as_str(),
-                        "-dynamic" | "-static" | "-all"
-                    )
-                }) {
-                    vec![classpath()]
-                } else if request.literals.literal_string_at(0).is_some_and(|option| {
-                    matches!(option.to_ascii_lowercase().as_str(), "-v0" | "-v1")
-                }) {
-                    Vec::new()
-                } else if request.literals.literal_string_at(0).is_some() {
-                    Vec::new()
-                } else {
-                    vec![ValueFact::unknown(DynamicReason::ForeignBoundary)]
+                match request
+                    .literals
+                    .literal_string_at(0)
+                    .map(super::JavaClasspathControl::parse_public)
+                {
+                    Some(super::JavaClasspathControl::Query(_)) => vec![classpath()],
+                    Some(
+                        super::JavaClasspathControl::Verbosity | super::JavaClasspathControl::Path,
+                    ) => Vec::new(),
+                    None => vec![ValueFact::unknown(DynamicReason::ForeignBoundary)],
                 }
             } else if request.arguments.is_empty() {
                 vec![classpath()]

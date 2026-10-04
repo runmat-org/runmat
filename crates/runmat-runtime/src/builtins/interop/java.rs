@@ -128,14 +128,17 @@ async fn java_add_path_builtin(
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let mut entries = text_entries(arguments, "javaaddpath")?;
-    let at_end = entries.last().is_some_and(|entry| entry == "-end");
-    if at_end {
+    let position = entries
+        .last()
+        .and_then(|entry| runmat_builtins::JavaInsertionPosition::from_public_terminal(entry))
+        .unwrap_or(runmat_builtins::JavaInsertionPosition::Begin);
+    if position == runmat_builtins::JavaInsertionPosition::End {
         entries.pop();
     }
     if entries.is_empty() {
         return Err(invalid_call("javaaddpath requires a classpath entry"));
     }
-    if !at_end {
+    if position == runmat_builtins::JavaInsertionPosition::Begin {
         entries.reverse();
     }
     for entry in entries {
@@ -144,7 +147,7 @@ async fn java_add_path_builtin(
             JavaOperation::AddClasspath,
             vec![
                 Value::String(entry),
-                Value::String(if at_end { "end" } else { "begin" }.into()),
+                Value::String(position.wire_name().into()),
             ],
         )
         .await?;
@@ -187,7 +190,11 @@ async fn java_class_path_builtin(
         return invoke_java(
             context,
             JavaOperation::Classpath,
-            vec![Value::String("dynamic".into())],
+            vec![Value::String(
+                runmat_builtins::JavaClasspathQuery::Dynamic
+                    .wire_name()
+                    .into(),
+            )],
         )
         .await;
     }
@@ -195,20 +202,19 @@ async fn java_class_path_builtin(
         if let Some(option) =
             crate::builtins::common::validation::value_text_scalar_string(&arguments[0])
         {
-            let layer = match option.to_ascii_lowercase().as_str() {
-                "-dynamic" => Some("dynamic"),
-                "-static" => Some("static"),
-                "-all" => Some("all"),
-                "-v0" | "-v1" => return Ok(Value::OutputList(Vec::new())),
-                _ => None,
-            };
-            if let Some(layer) = layer {
-                return invoke_java(
-                    context,
-                    JavaOperation::Classpath,
-                    vec![Value::String(layer.into())],
-                )
-                .await;
+            match runmat_builtins::JavaClasspathControl::parse_public(&option) {
+                runmat_builtins::JavaClasspathControl::Query(layer) => {
+                    return invoke_java(
+                        context,
+                        JavaOperation::Classpath,
+                        vec![Value::String(layer.wire_name().into())],
+                    )
+                    .await;
+                }
+                runmat_builtins::JavaClasspathControl::Verbosity => {
+                    return Ok(Value::OutputList(Vec::new()));
+                }
+                runmat_builtins::JavaClasspathControl::Path => {}
             }
         }
     }

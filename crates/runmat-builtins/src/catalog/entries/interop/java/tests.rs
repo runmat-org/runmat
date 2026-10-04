@@ -159,3 +159,38 @@ fn feature_literals_use_the_same_typed_identity_as_runtime() {
     assert_eq!(JavaFeature::parse("sWiNg"), Some(JavaFeature::Swing));
     assert_eq!(JavaFeature::parse("unknown"), None);
 }
+
+#[test]
+fn classpath_public_and_wire_controls_have_distinct_typed_boundaries() {
+    assert_eq!(
+        JavaClasspathControl::parse_public("-StAtIc"),
+        JavaClasspathControl::Query(JavaClasspathQuery::Static)
+    );
+    assert_eq!(
+        JavaClasspathControl::parse_public("-v1"),
+        JavaClasspathControl::Verbosity
+    );
+    assert_eq!(
+        JavaClasspathControl::parse_public("plugin.jar"),
+        JavaClasspathControl::Path
+    );
+    assert_eq!(
+        JavaClasspathQuery::parse_wire("static"),
+        Some(JavaClasspathQuery::Static)
+    );
+    assert_eq!(
+        JavaClasspathQuery::parse_wire("bootstrap"),
+        Some(JavaClasspathQuery::Static)
+    );
+    assert_eq!(JavaClasspathQuery::parse_wire("-static"), None);
+    assert_eq!(
+        JavaInsertionPosition::from_public_terminal("-end"),
+        Some(JavaInsertionPosition::End)
+    );
+    assert_eq!(JavaInsertionPosition::from_public_terminal("-END"), None);
+    assert_eq!(
+        JavaInsertionPosition::parse_wire("end"),
+        Some(JavaInsertionPosition::End)
+    );
+    assert_eq!(JavaInsertionPosition::parse_wire("-end"), None);
+}

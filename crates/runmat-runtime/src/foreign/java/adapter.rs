@@ -390,15 +390,14 @@ impl JavaAdapter {
                     .next()
                     .map(|value| string_argument(Some(value), "Java classpath position"))
                     .transpose()?;
-                let at_end = match position.as_deref() {
-                    None | Some("begin") => false,
-                    Some("end") => true,
-                    Some(_) => {
-                        return Err(invalid_conversion(
-                            "Java classpath position must be 'begin' or 'end'",
-                        ))
-                    }
+                let position = match position.as_deref() {
+                    None => runmat_builtins::JavaInsertionPosition::Begin,
+                    Some(name) => runmat_builtins::JavaInsertionPosition::parse_wire(name)
+                        .ok_or_else(|| {
+                            invalid_conversion("Java classpath position must be 'begin' or 'end'")
+                        })?,
                 };
+                let at_end = position == runmat_builtins::JavaInsertionPosition::End;
                 self.with_session(|session| session.add_dynamic_classpath_at(entry, at_end))?;
                 return Ok(runmat_value::ValueSequence::empty());
             }
@@ -572,16 +571,21 @@ impl JavaAdapter {
             .into_iter()
             .next()
             .map(|value| string_argument(Some(value), "Java classpath layer"))
-            .transpose()?
-            .unwrap_or_else(|| "all".into())
-            .to_ascii_lowercase();
+            .transpose()?;
+        let layer = layer
+            .as_deref()
+            .map(runmat_builtins::JavaClasspathQuery::parse_wire)
+            .unwrap_or(Some(runmat_builtins::JavaClasspathQuery::All))
+            .ok_or_else(|| {
+                invalid_conversion("Java classpath layer must be 'all', 'static', or 'dynamic'")
+            })?;
         let snapshot = self
             .session
             .borrow()
             .as_ref()
             .map(|session| session.classpath())
             .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
-        let paths = classpath_paths(&snapshot, &layer)?;
+        let paths = classpath_paths(&snapshot, layer);
         let length = paths.len();
         CellArray::new(
             paths
@@ -802,27 +806,22 @@ fn value_from_java_parts(
 
 fn classpath_paths<'a>(
     snapshot: &'a ClasspathSnapshot,
-    layer: &str,
-) -> Result<Vec<&'a std::path::PathBuf>, RuntimeError> {
-    Ok(match layer {
-        "all" => snapshot
+    layer: runmat_builtins::JavaClasspathQuery,
+) -> Vec<&'a std::path::PathBuf> {
+    match layer {
+        runmat_builtins::JavaClasspathQuery::All => snapshot
             .bootstrap
             .iter()
             .chain(snapshot.project.iter())
             .chain(snapshot.dynamic.iter())
             .collect(),
-        "static" | "bootstrap" => snapshot
+        runmat_builtins::JavaClasspathQuery::Static => snapshot
             .bootstrap
             .iter()
             .chain(snapshot.project.iter())
             .collect(),
-        "dynamic" => snapshot.dynamic.iter().collect(),
-        _ => {
-            return Err(invalid_conversion(
-                "Java classpath layer must be 'all', 'static', or 'dynamic'",
-            ))
-        }
-    })
+        runmat_builtins::JavaClasspathQuery::Dynamic => snapshot.dynamic.iter().collect(),
+    }
 }
 
 impl ForeignAdapter for JavaAdapter {

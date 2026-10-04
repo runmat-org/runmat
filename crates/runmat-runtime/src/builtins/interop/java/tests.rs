@@ -176,6 +176,38 @@ mod native {
             Value::String(text.into())
         );
     }
+
+    #[test]
+    fn classpath_query_and_append_keep_typed_control_until_wire_dispatch() {
+        let (runtime, recorder) = context();
+        let query = futures::executor::block_on(java_class_path_builtin(
+            Some(runtime.clone()),
+            vec![Value::String("-StAtIc".into())],
+        ))
+        .unwrap();
+        assert_eq!(query, Value::String("returned".into()));
+        let quiet = futures::executor::block_on(java_class_path_builtin(
+            Some(runtime.clone()),
+            vec![Value::String("-v1".into())],
+        ))
+        .unwrap();
+        assert_eq!(quiet, Value::OutputList(Vec::new()));
+        let appended = futures::executor::block_on(java_add_path_builtin(
+            Some(runtime),
+            vec![
+                Value::String("plugin.jar".into()),
+                Value::String("-end".into()),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(appended, Value::OutputList(Vec::new()));
+        let calls = recorder.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].symbol, "classpath");
+        assert_eq!(calls[0].arguments, vec![Value::String("static".into())]);
+        assert_eq!(calls[1].symbol, "add_classpath");
+        assert_eq!(calls[1].arguments[1], Value::String("end".into()));
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
