@@ -494,6 +494,12 @@ impl RunMatSession {
         let _admission = self.admit_execution(None);
         let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();
+        if let Err(error) = self.ensure_user_path_hydrated().await {
+            return crate::abi::ExecutionResponse {
+                source_context: unresolved_source_context(&source_input),
+                result: Err(error),
+            };
+        }
         let source_resolution = match source_input_text(request.source).await {
             Ok(resolved) => resolved,
             Err(err) => {

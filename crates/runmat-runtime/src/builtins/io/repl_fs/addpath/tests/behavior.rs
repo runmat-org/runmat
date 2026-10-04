@@ -97,3 +97,39 @@ fn trailing_singleton_character_folder_is_admitted() {
         vec![canonical(directory.path())]
     );
 }
+
+#[test]
+fn moving_the_user_entry_keeps_its_origin_for_later_setting_changes() {
+    use crate::builtins::common::path_state::{PathOrigin, ResolvedUserPath, SearchPath};
+    use std::{rc::Rc, sync::Arc};
+
+    let _guard = PathGuard::new();
+    let directory = tempdir().expect("user directory");
+    let user = canonical(directory.path());
+    let search = Arc::new(SearchPath::new(String::new()));
+    search.install_captured_factory(
+        ResolvedUserPath {
+            presentation: user.clone(),
+            search_segment: Some(user.clone()),
+        },
+        1,
+        "environment",
+        None,
+    );
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_search_path(search.clone());
+    let _active = crate::context::RuntimeContextGuard::enter(runtime);
+    super::run(vec![
+        Value::String(user.clone()),
+        Value::String("-end".into()),
+    ])
+    .expect("move user entry");
+    assert_eq!(
+        search.snapshot().last().expect("moved entry").origin,
+        PathOrigin::User
+    );
+    search.replace_user_if_newer(2, Some("new-user".into()));
+    assert!(search.snapshot().iter().all(|entry| entry.path != user));
+}

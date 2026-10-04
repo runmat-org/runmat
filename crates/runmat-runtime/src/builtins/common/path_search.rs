@@ -12,7 +12,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::fs::expand_user_path;
-use super::path_state::current_path_segments;
+use super::path_state::{current_path_segments, source_authority_current};
 
 /// File extensions that identify compiled MEX binaries.
 pub use runmat_mex::MEX_EXTENSIONS;
@@ -110,6 +110,11 @@ pub const KNOWN_FILE_EXTENSIONS: &[&str] = &[
 /// entries from `RUNMAT_PATH` and `MATLABPATH`. Duplicates are removed while
 /// preserving the first occurrence.
 pub fn search_directories(error_prefix: &str) -> Result<Vec<PathBuf>, String> {
+    if !source_authority_current() {
+        return Err(format!(
+            "{error_prefix}: application user-path authority requires rehydration"
+        ));
+    }
     let mut dirs = Vec::new();
     let mut seen = HashSet::new();
 

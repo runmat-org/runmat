@@ -424,6 +424,7 @@ impl RunMatSession {
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
         let _admission = self.admit_execution(control.cancellation());
+        self.ensure_user_path_hydrated().await?;
         self.configure_runtime_context();
         let runtime = self
             .runtime_context

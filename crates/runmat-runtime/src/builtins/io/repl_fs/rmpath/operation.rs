@@ -2,12 +2,12 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
-use crate::builtins::common::path_state::current_path_segments;
+use crate::builtins::common::path_state::{current_path_entries, PathEntry};
 use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use runmat_filesystem as vfs;
 
-pub(super) async fn plan(directories: Vec<String>) -> crate::BuiltinResult<String> {
-    let mut segments = current_path_segments();
+pub(super) async fn plan(directories: Vec<String>) -> crate::BuiltinResult<Vec<PathEntry>> {
+    let mut segments = current_path_entries();
     let mut seen = HashSet::new();
     for raw in directories {
         let key = super::super::path_list::identity(&raw);
@@ -15,10 +15,10 @@ pub(super) async fn plan(directories: Vec<String>) -> crate::BuiltinResult<Strin
             remove(&mut segments, &raw).await?;
         }
     }
-    Ok(super::super::path_list::join(&segments))
+    Ok(segments)
 }
 
-async fn remove(segments: &mut Vec<String>, raw: &str) -> crate::BuiltinResult<()> {
+async fn remove(segments: &mut Vec<PathEntry>, raw: &str) -> crate::BuiltinResult<()> {
     if retain_other_entries(segments, raw) {
         return Ok(());
     }
@@ -42,10 +42,10 @@ async fn remove(segments: &mut Vec<String>, raw: &str) -> crate::BuiltinResult<(
     }
 }
 
-fn retain_other_entries(segments: &mut Vec<String>, requested: &str) -> bool {
+fn retain_other_entries(segments: &mut Vec<PathEntry>, requested: &str) -> bool {
     let requested = super::super::path_list::identity(requested);
     let before = segments.len();
-    segments.retain(|entry| super::super::path_list::identity(entry) != requested);
+    segments.retain(|entry| super::super::path_list::identity(&entry.path) != requested);
     segments.len() != before
 }
 

@@ -22,11 +22,12 @@ impl RunMatSession {
         let _ = enable_jit;
 
         let cancellation = cancellation::SessionCancellation::default();
-        let search_path = Arc::new(
-            runmat_runtime::builtins::common::path_state::SearchPath::new(
-                runmat_runtime::builtins::common::path_state::current_path_string(),
-            ),
-        );
+        let startup_user_path_authority =
+            runmat_runtime::builtins::common::path_state::CapturedUserPathAuthority::capture()?;
+        let startup_environment_path =
+            runmat_runtime::builtins::common::path_state::environment_path_string();
+        let search_path =
+            Arc::new(runmat_runtime::builtins::common::path_state::SearchPath::new(String::new()));
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
@@ -41,6 +42,34 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let runtime_services =
             runtime_services.with_process(super::process_host::default_process_service());
+        #[cfg(not(target_arch = "wasm32"))]
+        let runtime_services = if let Some(directory) =
+            runmat_config::runtime::ApplicationSettingsDirectory::discover()
+        {
+            let driver = super::host_driver::host_driver()?;
+            let settings = std::rc::Rc::new(runmat_runtime::context::NativePreferenceService::new(
+                directory.settings_file(),
+                driver.handle().clone(),
+            )?);
+            runtime_services
+                .with_preferences(settings.clone())
+                .with_user_path(settings)
+        } else {
+            // The first async hydration returns CapabilityUnavailable before
+            // source resolution; no session-memory fallback can hide storage.
+            runtime_services
+        };
+        #[cfg(target_arch = "wasm32")]
+        let runtime_services = {
+            // IndexedDB is origin-scoped and the explicit browser host can
+            // replace this namespace with an application-specific one.
+            let settings = std::rc::Rc::new(
+                runmat_runtime::context::BrowserPreferenceService::anonymous_origin_local(),
+            );
+            runtime_services
+                .with_preferences(settings.clone())
+                .with_user_path(settings)
+        };
         #[cfg(not(target_arch = "wasm32"))]
         let (
             runtime_services,
@@ -84,6 +113,9 @@ impl RunMatSession {
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
             dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            startup_user_path_authority,
+            startup_environment_path,
+            user_path_hydrated: false,
             #[cfg(not(target_arch = "wasm32"))]
             mex_runtime,
             #[cfg(not(target_arch = "wasm32"))]

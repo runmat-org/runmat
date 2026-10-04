@@ -5,31 +5,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, RehashMode, MEMMAPFILE_CLASS,
-    MEMMAPFILE_DESCRIPTOR, MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerBackendRule,
+    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, RehashMode, MEMMAPFILE_CLASS, MEMMAPFILE_DESCRIPTOR,
+    MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
     MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ObjectInstance, StructValue, Value};
 
-use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
-use crate::builtins::common::path_state::set_path_string;
+use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "input",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input argument.",
-}];
 const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "input1",
@@ -92,27 +83,6 @@ macro_rules! simple_descriptor {
     };
 }
 
-simple_descriptor!(
-    USERPATH_SIGNATURES,
-    USERPATH_DESCRIPTOR,
-    "path = userpath(option)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-pub const USERPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "userpath accepts no input or one host text path/command; integer and resident numeric values reject before provider or search-path access.",
-};
-simple_descriptor!(
-    RESTOREDEFAULTPATH_SIGNATURES,
-    RESTOREDEFAULTPATH_DESCRIPTOR,
-    "path = restoredefaultpath()",
-    &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
 simple_descriptor!(
     WINQUERYREG_SIGNATURES,
     WINQUERYREG_DESCRIPTOR,
@@ -453,70 +423,28 @@ async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "userpath",
-    category = "io/repl_fs",
-    summary = "Query or set the user path.",
-    keywords = "userpath,path,user,home",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::repl_fs::compat::USERPATH_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::USERPATH_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn userpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|value| {
-        crate::builtins::common::validation::value_has_native_integer_class(value)
-            || matches!(value, Value::GpuTensor(_))
-    }) {
-        return Err(compat_error(
-            "userpath",
-            "userpath: path or command must be host text",
-        ));
-    }
-    let args = gather_args("userpath", &args).await?;
-    match args.len() {
-        0 => Ok(char_value(&default_userpath())),
-        1 => {
-            let command = scalar_text(&args[0], "userpath", "command")?;
-            match command.to_ascii_lowercase().as_str() {
-                "reset" => Ok(char_value(&default_userpath())),
-                "clear" => Ok(char_value("")),
-                path => Ok(char_value(path)),
-            }
-        }
-        _ => Err(compat_error(
-            "userpath",
-            "userpath: too many input arguments",
-        )),
-    }
-}
-
-fn default_userpath() -> String {
-    home_directory()
-        .map(|home| home.join("Documents").join("MATLAB"))
-        .map(|path| path_to_string(&path))
-        .unwrap_or_default()
+async fn userpath_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    user_path::run(runtime, args).await
 }
 
 #[runtime_builtin(
     name = "restoredefaultpath",
-    category = "io/repl_fs",
-    summary = "Restore the RunMat search path to its default value.",
-    keywords = "restoredefaultpath,path,default",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::repl_fs::compat::RESTOREDEFAULTPATH_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if !args.is_empty() {
-        return Err(compat_error(
-            "restoredefaultpath",
-            "restoredefaultpath: too many input arguments",
-        ));
-    }
-    let root = path_to_string(&super::installation_path::root());
-    set_path_string(&root);
-    Ok(char_value(&root))
+async fn restoredefaultpath_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    user_path::restore(runtime, args)
 }
 
 #[runtime_builtin(
@@ -622,6 +550,8 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 mod captured_fs_path;
+#[path = "compat/user_path.rs"]
+mod user_path;
 #[path = "compat/system.rs"]
 mod system;
 use captured_fs_path::CapturedFsPath;
@@ -782,8 +712,9 @@ mod tests {
     };
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{
-        FILEATTRIB_INTEGER_AUDIT, GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION,
-        GETPREF_INTEGER_CAPABILITIES, MEMMAPFILE_INTEGER_CAPABILITIES,
+        BuiltinIntegerAuditKind, FILEATTRIB_INTEGER_AUDIT, GETPREF_DESCRIPTOR,
+        GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
+        MEMMAPFILE_INTEGER_CAPABILITIES, USERPATH_INTEGER_AUDIT,
     };
     use runmat_filesystem::FsProvider;
     use runmat_value::{IntegerStorage, Tensor};

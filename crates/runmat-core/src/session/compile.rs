@@ -762,6 +762,7 @@ impl RunMatSession {
         source: crate::ExecutableSource,
         program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        self.ensure_user_path_hydrated().await?;
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
         {
