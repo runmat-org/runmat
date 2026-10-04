@@ -94,9 +94,10 @@ fn fread_wgpu_like_uploads_gpu() {
     file.write_all(&2.25f64.to_le_bytes()).expect("write");
     drop(file);
 
-    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+    runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    );
+    )
+    .expect("wgpu provider");
 
     let open = run_fopen(&[
         Value::from(path.to_string_lossy().to_string()),
