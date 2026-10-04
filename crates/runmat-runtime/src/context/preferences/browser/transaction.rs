@@ -6,6 +6,7 @@ use super::{browser_error, BrowserPreferenceError};
 use crate::context::preferences::document::{
     apply_mutation, missing_default_indices, DocumentMutation,
 };
+use crate::context::preferences::input_roots::PreferenceInputRoots;
 use crate::context::UserPathSnapshot;
 use crate::execution::value_codec::encode_durable_value;
 use futures::channel::oneshot;
@@ -31,6 +32,7 @@ pub(super) enum BrowserMutation {
         group: String,
         names: Vec<String>,
         defaults: Vec<Value>,
+        _roots: PreferenceInputRoots,
     },
 }
 
@@ -119,6 +121,7 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 group,
                 names,
                 defaults,
+                _roots,
             } => {
                 let mut encoded = vec![None; names.len()];
                 for index in missing_default_indices(&document, &group, &names) {

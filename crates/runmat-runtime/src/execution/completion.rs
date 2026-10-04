@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use runmat_gc::{ExplicitRoot, GcHandle, Trace, Tracer};
-use runmat_value::ValueSequence;
+use runmat_gc::{ExplicitRoot, GcError, GcHandle, Trace, Tracer};
+use runmat_value::{Value, ValueSequence};
 
 use super::ExecutionServiceError;
 
@@ -11,29 +11,57 @@ use super::ExecutionServiceError;
 #[derive(Clone, Debug)]
 pub struct RootedValueSequence {
     value: ValueSequence,
-    _roots: Rc<Vec<ExplicitRoot>>,
+    _roots: RootedValueHandles,
 }
 
 impl RootedValueSequence {
     pub fn new(value: ValueSequence) -> Result<Self, ExecutionServiceError> {
-        let mut collector = HandleCollector::default();
-        value.trace(&mut collector);
-        let mut roots = Vec::with_capacity(collector.handles.len());
-        for handle in collector.handles {
-            roots.push(runmat_gc::gc_root(handle).map_err(|error| {
-                ExecutionServiceError::Infrastructure(format!(
-                    "could not root completed future output: {error}"
-                ))
-            })?);
-        }
+        let roots = RootedValueHandles::for_traced(&value).map_err(|error| {
+            ExecutionServiceError::Infrastructure(format!(
+                "could not root completed future output: {error}"
+            ))
+        })?;
         Ok(Self {
             value,
-            _roots: Rc::new(roots),
+            _roots: roots,
         })
     }
 
     pub fn value(&self) -> &ValueSequence {
         &self.value
+    }
+}
+
+/// Managed handles reachable from owned Values while an asynchronous owner
+/// retains them. This roots identities, not cloned payloads or device buffers.
+#[derive(Clone, Debug)]
+pub(crate) struct RootedValueHandles {
+    _roots: Rc<Vec<ExplicitRoot>>,
+}
+
+impl RootedValueHandles {
+    pub(crate) fn for_values<'a>(values: impl Iterator<Item = &'a Value>) -> Result<Self, GcError> {
+        let mut collector = HandleCollector::default();
+        for value in values {
+            value.trace(&mut collector);
+        }
+        Self::from_handles(collector)
+    }
+
+    fn for_traced(value: &impl Trace) -> Result<Self, GcError> {
+        let mut collector = HandleCollector::default();
+        value.trace(&mut collector);
+        Self::from_handles(collector)
+    }
+
+    fn from_handles(collector: HandleCollector) -> Result<Self, GcError> {
+        let mut roots = Vec::with_capacity(collector.handles.len());
+        for handle in collector.handles {
+            roots.push(runmat_gc::gc_root(handle)?);
+        }
+        Ok(Self {
+            _roots: Rc::new(roots),
+        })
     }
 }
 

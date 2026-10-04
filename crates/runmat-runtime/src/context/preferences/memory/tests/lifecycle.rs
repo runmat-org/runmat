@@ -7,6 +7,7 @@ use runmat_execution::{
     CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
     PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
+use runmat_value::HandleRef;
 use runmat_value::ValueSequence;
 use std::cell::Cell;
 use std::future::Future;
@@ -119,6 +120,36 @@ impl RuntimeExecutionServices for StagedTurnService {
 fn poll_once<F: Future + ?Sized>(future: Pin<&mut F>) -> Poll<F::Output> {
     let waker = futures::task::noop_waker();
     future.poll(&mut Context::from_waker(&waker))
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn pending_default_future_roots_caller_handle_until_drop() {
+    runmat_gc::gc_test_context(|| {
+        let service = IsolatedMemoryPreferenceService::new();
+        let document = block_on(service.document.lock());
+        let initial = runmat_gc::gc_allocate_rooted(Value::String("pending".into())).unwrap();
+        let handle = initial.handle();
+        let default = Value::HandleObject(HandleRef {
+            class_name: "PendingPreference".into(),
+            target: handle,
+            valid: true,
+        });
+        let mut future = service.read_or_create_many(
+            runtime(),
+            "app".into(),
+            vec!["name".into()],
+            Some(vec![default]),
+        );
+        initial.unroot().unwrap();
+        assert!(poll_once(future.as_mut()).is_pending());
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        drop(future);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        drop(document);
+    });
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -237,7 +237,12 @@ impl RuntimePreferenceService for NativePreferenceService {
         defaults: Option<Vec<Value>>,
     ) -> RuntimeServiceFuture<Result<Vec<Value>, PreferenceServiceError>> {
         let service = self.clone();
+        let roots = defaults
+            .as_ref()
+            .map(|defaults| super::input_roots::PreferenceInputRoots::for_values(defaults))
+            .transpose();
         Box::pin(async move {
+            let _roots = roots?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             if defaults
@@ -279,7 +284,9 @@ impl RuntimePreferenceService for NativePreferenceService {
         entries: Vec<(String, Value)>,
     ) -> RuntimeServiceFuture<Result<(), PreferenceServiceError>> {
         let service = self.clone();
+        let roots = super::input_roots::PreferenceInputRoots::for_entries(&entries);
         Box::pin(async move {
+            let _roots = roots?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             let mut encoded = Vec::with_capacity(entries.len());

@@ -250,6 +250,59 @@ async fn dropped_authorized_writer_keeps_one_terminal_owner_and_closes_connectio
 }
 
 #[wasm_bindgen_test(async)]
+async fn dropped_pending_default_reader_keeps_gc_input_root_until_terminal_observation() {
+    let service = unique_service();
+    service
+        .set_many(
+            runtime(),
+            "app".into(),
+            vec![("existing".into(), Value::Num(1.0))],
+        )
+        .await
+        .unwrap();
+    let initial = runmat_gc::gc_allocate_rooted(Value::String("managed default".into())).unwrap();
+    let handle = initial.handle();
+    let defaults = vec![Value::HandleObject(runmat_value::HandleRef {
+        class_name: "PreferenceDefault".into(),
+        target: handle,
+        valid: true,
+    })];
+    let roots = super::super::input_roots::PreferenceInputRoots::for_values(&defaults).unwrap();
+    initial.unroot().unwrap();
+    let database = connection::open(&service.namespace).await.unwrap();
+    let gate = service.gate.clone().lock_owned().await;
+    let mut pending = Box::pin(transaction::mutate(
+        database,
+        transaction::BrowserMutation::ReadOrCreate {
+            group: "app".into(),
+            names: vec!["existing".into()],
+            defaults,
+            _roots: roots,
+        },
+        gate,
+    ));
+    assert!(matches!(
+        Future::poll(
+            pending.as_mut(),
+            &mut Context::from_waker(futures::task::noop_waker_ref())
+        ),
+        Poll::Pending
+    ));
+    drop(pending);
+    runmat_gc::gc_collect_major().unwrap();
+    assert_eq!(
+        runmat_gc::gc_clone_value(&handle).unwrap(),
+        Value::String("managed default".into()),
+        "the host observer owns defaults after caller abandonment"
+    );
+    let terminal_gate = service.gate.clone().lock_owned().await;
+    drop(terminal_gate);
+    runmat_gc::gc_collect_major().unwrap();
+    assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    delete_namespace(&service).await;
+}
+
+#[wasm_bindgen_test(async)]
 async fn late_missing_name_aborts_private_document_without_partial_publication() {
     let service = unique_service();
     let database = connection::open(&service.namespace).await.unwrap();

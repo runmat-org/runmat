@@ -171,12 +171,19 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         defaults: Option<Vec<Value>>,
     ) -> RuntimeServiceFuture<Result<Vec<Value>, PreferenceServiceError>> {
         let service = self.clone();
+        let rooted_defaults = defaults
+            .map(|values| {
+                super::input_roots::PreferenceInputRoots::for_values(&values)
+                    .map(|roots| (values, roots))
+            })
+            .transpose();
         Box::pin(async move {
+            let rooted_defaults = rooted_defaults?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
-            if defaults
+            if rooted_defaults
                 .as_ref()
-                .is_some_and(|defaults| defaults.len() != names.len())
+                .is_some_and(|(defaults, _)| defaults.len() != names.len())
             {
                 return Err(PreferenceServiceError::InvalidTransaction(
                     "default and preference-name cardinalities differ".into(),
@@ -185,7 +192,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
             if names.is_empty() {
                 return Ok(Vec::new());
             }
-            let Some(defaults) = defaults else {
+            let Some((defaults, roots)) = rooted_defaults else {
                 let document = service.read_document(&mut budget).await?;
                 let mut output = Vec::with_capacity(names.len());
                 for name in names {
@@ -209,6 +216,7 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                         group,
                         names,
                         defaults,
+                        _roots: roots,
                     },
                 )
                 .await?;
@@ -228,7 +236,9 @@ impl RuntimePreferenceService for BrowserPreferenceService {
         entries: Vec<(String, Value)>,
     ) -> RuntimeServiceFuture<Result<(), PreferenceServiceError>> {
         let service = self.clone();
+        let roots = super::input_roots::PreferenceInputRoots::for_entries(&entries);
         Box::pin(async move {
+            let _roots = roots?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             let mut encoded = Vec::with_capacity(entries.len());

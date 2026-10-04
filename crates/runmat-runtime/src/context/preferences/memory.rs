@@ -2,6 +2,7 @@
 //! This is not durable storage and is never installed as a session fallback.
 
 use super::document::{missing_default_indices, PreferenceDocument};
+use super::input_roots::PreferenceInputRoots;
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
 use crate::context::{RuntimeContext, RuntimeServiceFuture};
 use crate::context::{
@@ -134,7 +135,12 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
         defaults: Option<Vec<Value>>,
     ) -> RuntimeServiceFuture<Result<Vec<Value>, PreferenceServiceError>> {
         let document = self.document.clone();
+        let roots = defaults
+            .as_ref()
+            .map(|defaults| PreferenceInputRoots::for_values(defaults))
+            .transpose();
         Box::pin(async move {
+            let _roots = roots?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             if defaults
@@ -198,7 +204,9 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
         entries: Vec<(String, Value)>,
     ) -> RuntimeServiceFuture<Result<(), PreferenceServiceError>> {
         let document = self.document.clone();
+        let roots = PreferenceInputRoots::for_entries(&entries);
         Box::pin(async move {
+            let _roots = roots?;
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             let mut encoded = Vec::with_capacity(entries.len());

@@ -10,6 +10,8 @@ mod memory;
 pub use memory::IsolatedMemoryPreferenceService;
 #[path = "preferences/document.rs"]
 mod document;
+#[path = "preferences/input_roots.rs"]
+mod input_roots;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "preferences/native.rs"]
 mod native;
