@@ -20,15 +20,6 @@ pub(crate) fn struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }
 
-pub fn disp_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    tensor_type(args, ctx)
-}
-
-pub fn input_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Unknown
-}
-
 pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
@@ -148,9 +139,6 @@ mod tests {
             }
         };
     }
-
-    assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
-    assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
 
     assert_resolver!(
         load_type_resolver,
