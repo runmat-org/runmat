@@ -1,4 +1,4 @@
-use super::{ContainersMapStorage, DynamicPropertyDef};
+use super::{ContainersMapStorage, DynamicPropertyDef, MemmapReceiverState};
 use crate::{ForeignRef, Value};
 use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
@@ -20,6 +20,7 @@ enum NativeObjectPayload {
     ForeignHostControl(ForeignRef),
     DatasetAuthority(ForeignRef),
     MatFileAuthority(ForeignRef),
+    MemmapReceiver(MemmapReceiverState),
 }
 
 /// Whether a value object carries host- or session-owned native state.
@@ -31,6 +32,7 @@ pub enum ObjectPersistencePayloadKind {
     ForeignHostControl,
     DatasetAuthority,
     MatFileAuthority,
+    MemmapReceiver,
 }
 
 impl Trace for NativeObjectPayload {
@@ -40,6 +42,7 @@ impl Trace for NativeObjectPayload {
             Self::ForeignHostControl(_) => {}
             Self::DatasetAuthority(_) => {}
             Self::MatFileAuthority(_) => {}
+            Self::MemmapReceiver(_) => {}
         }
     }
 }
@@ -59,6 +62,9 @@ impl ObjectInstance {
             }
             Some(NativeObjectPayload::MatFileAuthority(_)) => {
                 ObjectPersistencePayloadKind::MatFileAuthority
+            }
+            Some(NativeObjectPayload::MemmapReceiver(_)) => {
+                ObjectPersistencePayloadKind::MemmapReceiver
             }
         }
     }
@@ -96,6 +102,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ContainersMap(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
         }
     }
@@ -111,6 +118,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ContainersMap(_))
             | Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
         }
     }
@@ -126,7 +134,27 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ContainersMap(_))
             | Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
+        }
+    }
+
+    pub fn with_memmap_receiver(mut self, receiver: MemmapReceiverState) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::MemmapReceiver(receiver)));
+        self
+    }
+
+    pub fn memmap_receiver(&self) -> Option<&MemmapReceiverState> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
+            _ => None,
+        }
+    }
+
+    pub fn memmap_receiver_mut(&mut self) -> Option<&mut MemmapReceiverState> {
+        match self.native_payload.as_deref_mut() {
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
+            _ => None,
         }
     }
 
@@ -136,6 +164,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
         }
     }
@@ -146,6 +175,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => None,
         }
     }
@@ -162,6 +192,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => {}
         }
     }

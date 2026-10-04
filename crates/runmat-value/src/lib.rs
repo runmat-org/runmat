@@ -34,7 +34,8 @@ pub use numeric::{
 pub use object::{
     ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
     ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef, HandleRef, Listener,
-    ObjectArray, ObjectInstance, ObjectPersistencePayloadKind,
+    MemmapElementType, MemmapFieldState, MemmapReceiverState, ObjectArray, ObjectInstance,
+    ObjectPersistencePayloadKind,
 };
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{
