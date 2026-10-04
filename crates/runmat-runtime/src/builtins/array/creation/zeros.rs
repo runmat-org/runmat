@@ -18,13 +18,13 @@ use runmat_value::{
 use std::sync::OnceLock;
 
 use crate::build_runtime_error;
+#[cfg(test)]
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
-#[cfg(test)]
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::{
     random_args::{
         extract_constructor_dimensions, normalize_constructor_shape,
