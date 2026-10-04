@@ -103,3 +103,27 @@ fn preexisting_cancellation_reads_no_header_bytes() {
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert_eq!(reader.position(), 0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn restoration_cancellation_drops_all_unpublished_entries() {
+    let source = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        || Box::pin(async { Err(ExecutionServiceError::Cancelled) }),
+    );
+    let entries = vec![
+        ("first".into(), Value::Num(1.0)),
+        ("second".into(), Value::Num(2.0)),
+    ];
+    let mut cooperation = MatDecodeCooperation::with_budget(budget);
+    let error = block_on(super::super::restore_loaded_entries(
+        entries,
+        None,
+        Some(&mut cooperation),
+    ))
+    .expect_err("restoration cannot publish partial entries");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(!source.token().is_cancelled());
+}

@@ -485,28 +485,53 @@ pub(crate) async fn read_mat_file_on_with_context(
     let mut reader = BufReader::new(file);
     let entries = decoder::read_mat_reader_cooperative(&mut reader, &mut cooperation).await?;
     check_source_current(source)?;
-    restore_loaded_entries(entries, Some(source)).await
+    restore_loaded_entries(entries, Some(source), Some(&mut cooperation)).await
 }
 
 pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
     let mut cursor = Cursor::new(bytes);
     let entries = read_mat_reader(&mut cursor)?;
-    futures::executor::block_on(restore_loaded_entries(entries, None))
+    futures::executor::block_on(restore_loaded_entries(entries, None, None))
 }
 
 async fn restore_loaded_entries(
     entries: Vec<(String, Value)>,
     source: Option<&MatFsPath>,
+    mut cooperation: Option<&mut decoder::MatDecodeCooperation<'_>>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    let mut restored = Vec::with_capacity(entries.len());
+    let mut restored = Vec::new();
+    restored.try_reserve_exact(entries.len()).map_err(|error| {
+        load_error_with_source(
+            &LOAD_ERROR_IO,
+            "load: restored values cannot be allocated",
+            error,
+        )
+    })?;
     for (name, value) in entries {
+        if let Some(cooperation) = cooperation.as_deref_mut() {
+            cooperation.completed(0).await?;
+        }
         if let Some(source) = source {
             check_source_current(source)?;
         }
-        restored.push((name, restore_value_from_mat_load(value).await?));
+        let value = match cooperation.as_deref_mut() {
+            Some(cooperation) => {
+                cooperation
+                    .await_io(restore_value_from_mat_load(value))
+                    .await??
+            }
+            None => restore_value_from_mat_load(value).await?,
+        };
+        restored.push((name, value));
         if let Some(source) = source {
             check_source_current(source)?;
         }
+        if let Some(cooperation) = cooperation.as_deref_mut() {
+            cooperation.completed(1).await?;
+        }
+    }
+    if let Some(cooperation) = cooperation.as_deref_mut() {
+        cooperation.completed(0).await?;
     }
     Ok(restored)
 }
