@@ -17,7 +17,11 @@ pub(super) fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-pub(super) async fn parse_options(args: &[Value]) -> BuiltinResult<WriteCellOptions> {
+pub(super) async fn parse_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    args: &[Value],
+) -> BuiltinResult<WriteCellOptions> {
     if args.is_empty() {
         return Ok(WriteCellOptions::default());
     }
@@ -28,14 +32,20 @@ pub(super) async fn parse_options(args: &[Value]) -> BuiltinResult<WriteCellOpti
     let mut options = WriteCellOptions::default();
     let mut index = 0usize;
     while index < args.len() {
-        let name_value = gather_if_needed_async(&args[index])
-            .await
+        let name_value = await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&args[index]))
+            .await?
             .map_err(map_control_flow)?;
+        cooperation.completed(0).await?;
         let name = string_scalar_from_value(&name_value, "option name")
             .map_err(|message| writecell_error_with(&WRITECELL_ERROR_OPTION, message))?;
-        let value = gather_if_needed_async(&args[index + 1])
-            .await
-            .map_err(map_control_flow)?;
+        let value = await_io(
+            runtime,
+            BUILTIN_NAME,
+            gather_if_needed_async(&args[index + 1]),
+        )
+        .await?
+        .map_err(map_control_flow)?;
+        cooperation.completed(0).await?;
         apply_option(&mut options, &name, &value)?;
         index += 2;
     }

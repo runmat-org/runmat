@@ -1,4 +1,8 @@
 use super::*;
+
+async fn writecell_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::writecell_builtin(None, data, rest).await
+}
 use calamine::{open_workbook_auto, Data, Reader};
 use futures::executor::block_on;
 use runmat_time::unix_timestamp_ms;

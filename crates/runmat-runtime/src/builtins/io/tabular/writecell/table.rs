@@ -37,7 +37,11 @@ impl CellTable {
         Ok(Self { rows, cols, data })
     }
 
-    pub(in crate::builtins::io::tabular) async fn from_value(value: Value) -> BuiltinResult<Self> {
+    pub(in crate::builtins::io::tabular) async fn from_value(
+        runtime: Option<&crate::context::RuntimeContext>,
+        cooperation: &mut TabularCooperation<'_>,
+        value: Value,
+    ) -> BuiltinResult<Self> {
         let cell = match value {
             Value::Cell(cell) => cell,
             other => {
@@ -55,9 +59,10 @@ impl CellTable {
                 let value = cell.get(row, col).map_err(|message| {
                     writecell_error_with(&WRITECELL_ERROR_DATA, format!("writecell: {message}"))
                 })?;
-                let gathered = gather_if_needed_async(&value)
-                    .await
+                let gathered = await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&value))
+                    .await?
                     .map_err(map_control_flow)?;
+                cooperation.completed(1).await?;
                 data.push(cell_value_from_value(gathered)?);
             }
         }

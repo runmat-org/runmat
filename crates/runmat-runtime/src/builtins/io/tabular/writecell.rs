@@ -18,6 +18,7 @@ use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+use super::cooperation::{await_io, TabularCooperation};
 use super::path::{TabularFsOwner, TabularFsPath};
 use super::write_owner;
 
@@ -71,10 +72,16 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "writecell",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::tabular::writecell"
 )]
-async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn writecell_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if rest.is_empty() {
         return Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG));
     }
@@ -124,17 +131,30 @@ async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResul
             source,
         )
     })?;
-    let options = parse_options(&rest[1..]).await?;
+    let options = parse_options(runtime.as_ref(), &mut cooperation, &rest[1..]).await?;
 
-    let gathered = gather_if_needed_async(&data)
-        .await
-        .map_err(map_control_flow)?;
-    let table = CellTable::from_value(gathered).await?;
+    let gathered = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        gather_if_needed_async(&data),
+    )
+    .await?
+    .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
+    let table = CellTable::from_value(runtime.as_ref(), &mut cooperation, gathered).await?;
 
     let bytes_written = match options.resolve_file_type(selected.path())? {
         OutputFileType::DelimitedText => write_delimited_cells(&selected, &table, &options).await?,
         OutputFileType::Spreadsheet => write_spreadsheet_cells(&selected, &table, &options).await?,
     };
+    cooperation.completed(0).await?;
+    selected.check().map_err(|source| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            "writecell: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
 
     match requested_outputs {
         Some(0) => Ok(Value::OutputList(Vec::new())),
