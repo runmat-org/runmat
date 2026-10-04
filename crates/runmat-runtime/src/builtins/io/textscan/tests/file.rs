@@ -41,6 +41,37 @@ fn file_fixture(name: &str, bytes: &[u8]) -> FileFixture {
         _lock: lock,
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn registered_snapshot_retains_exact_metadata_and_observes_close() {
+    let _guard = registry::test_guard();
+    registry::reset_for_tests();
+    let path = file_fixture("snapshot.txt", b"10\n");
+    let mut options = OpenOptions::new();
+    options.read(true);
+    let file = block_on(options.open_async(&path)).expect("open file");
+    let handle = Arc::new(StdMutex::new(Some(file)));
+    let fid = registry::register_file(RegisteredFile {
+        path: path.to_path_buf(),
+        permission: "r".to_string(),
+        access: registry::FileAccess::READ,
+        machinefmt: "native".to_string(),
+        encoding: "UTF-8".to_string(),
+        handle: handle.clone(),
+    });
+    let snapshot = registry::snapshot_file(fid).expect("registered snapshot");
+    assert_eq!(snapshot.info.id, fid);
+    assert_eq!(snapshot.info.path.as_deref(), Some(path.as_ref()));
+    assert_eq!(snapshot.info.access, registry::FileAccess::READ);
+    assert!(Arc::ptr_eq(&snapshot.handle, &handle));
+    block_on(registry::close_async(fid))
+        .expect("close")
+        .expect("closed entry");
+    assert!(registry::snapshot_file(fid).is_none());
+    assert!(snapshot.handle.lock().expect("retained slot").is_none());
+    registry::reset_for_tests();
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn textscan_repeated_file_read_preserves_next_record_position() {

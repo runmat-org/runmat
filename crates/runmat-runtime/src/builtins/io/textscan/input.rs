@@ -21,25 +21,20 @@ fn parse_registered_file(
     options: &TextscanOptions,
 ) -> BuiltinResult<ParsedTextscan> {
     validate_fid(fid)?;
-    let info = registry::info_for(fid).ok_or_else(|| {
+    let snapshot = registry::snapshot_file(fid).ok_or_else(|| {
         textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: invalid file identifier {fid}"),
         )
     })?;
-    if !info.access.read {
+    if !snapshot.info.access.read {
         return Err(textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: file identifier {fid} is not open for reading"),
         ));
     }
-    let handle = registry::shared_handle(fid).ok_or_else(|| {
-        textscan_error_with(
-            &TEXTSCAN_ERROR_FILE,
-            format!("textscan: invalid file identifier {fid}"),
-        )
-    })?;
-    let mut guard = handle
+    let mut guard = snapshot
+        .handle
         .lock()
         .map_err(|_| textscan_error_with(&TEXTSCAN_ERROR_FILE, "textscan: file handle poisoned"))?;
     let file = guard.as_mut().ok_or_else(|| {
@@ -63,15 +58,15 @@ fn parse_registered_file(
             err,
         )
     })?;
-    let encoding = if info.encoding.trim().is_empty() {
+    let encoding = if snapshot.info.encoding.trim().is_empty() {
         "UTF-8"
     } else {
-        info.encoding.as_str()
+        snapshot.info.encoding.as_str()
     };
     let decoded = DecodedFileText::decode(&bytes, encoding)?;
     let parsed = parse_textscan(&decoded.text, format_spec, repeat, options)?;
     let consumed_bytes = decoded.byte_offset_for_text_pos(parsed.consumed_text_pos)?;
-    let target = start.saturating_add(consumed_bytes as u64);
+    let target = checked_source_position(start, consumed_bytes)?;
     file.seek(SeekFrom::Start(target)).map_err(|err| {
         textscan_error_with_source(
             &TEXTSCAN_ERROR_FILE,
@@ -80,6 +75,18 @@ fn parse_registered_file(
         )
     })?;
     Ok(parsed)
+}
+
+fn checked_source_position(start: u64, consumed_bytes: usize) -> BuiltinResult<u64> {
+    u64::try_from(consumed_bytes)
+        .ok()
+        .and_then(|consumed| start.checked_add(consumed))
+        .ok_or_else(|| {
+            textscan_error_with(
+                &TEXTSCAN_ERROR_FILE,
+                "textscan: consumed source position exceeds the file offset range",
+            )
+        })
 }
 
 pub(super) fn validate_fid(fid: i32) -> BuiltinResult<()> {
@@ -233,4 +240,21 @@ fn byte_preserving_encoding_width(encoding: &str) -> BuiltinResult<Option<usize>
             "textscan: file-position preserving reads do not yet support encoding '{encoding}'"
         ),
     ))
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn source_position_is_exact_or_rejected_not_clamped() {
+        assert_eq!(checked_source_position(17, 3).expect("valid offset"), 20);
+        assert_eq!(
+            checked_source_position(u64::MAX, 0).expect("endpoint"),
+            u64::MAX
+        );
+        let error = checked_source_position(u64::MAX, 1).expect_err("overflow");
+        assert_eq!(error.identifier(), TEXTSCAN_ERROR_FILE.identifier);
+    }
 }

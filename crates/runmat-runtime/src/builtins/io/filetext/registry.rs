@@ -217,6 +217,22 @@ pub(crate) fn shared_handle(fid: i32) -> Option<SharedFileHandle> {
         .and_then(|entry| entry.file_handle())
 }
 
+/// Metadata and handle from one registered entry. The handle's slot remains
+/// authoritative for close state after the registry lock has been released.
+pub(crate) struct RegisteredFileSnapshot {
+    pub info: FileInfo,
+    pub handle: SharedFileHandle,
+}
+
+pub(crate) fn snapshot_file(fid: i32) -> Option<RegisteredFileSnapshot> {
+    let guard = REGISTRY.lock().expect("file registry poisoned");
+    let entry = guard.entries.get(&fid)?;
+    Some(RegisteredFileSnapshot {
+        info: entry.info(),
+        handle: entry.file_handle()?,
+    })
+}
+
 pub(crate) fn eof_encountered(fid: i32) -> Option<bool> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
     guard.entries.get(&fid).map(|entry| entry.eof_encountered)
