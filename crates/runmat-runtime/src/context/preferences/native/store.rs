@@ -14,8 +14,6 @@ pub(super) enum NativeStoreError {
     Document(#[from] PreferenceDocumentError),
     #[error("preference replacement committed but durability could not be confirmed: {0}")]
     Indeterminate(#[source] io::Error),
-    #[error("application user-path revision is exhausted")]
-    RevisionExhausted,
 }
 
 #[derive(Clone)]

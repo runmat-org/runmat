@@ -2,6 +2,7 @@
 //! file lock coordinates separate processes and independently created hosts.
 
 use super::document::PreferenceDocument;
+use super::document::{DocumentMutation as Mutation, DocumentMutationError};
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
 use crate::context::{
     RuntimeContext, RuntimeServiceFuture, RuntimeUserPathService, UserPathMutation,
@@ -19,7 +20,7 @@ mod store;
 use store::{NativeStore, NativeStoreError, NativeWrite};
 #[path = "native/transaction.rs"]
 mod transaction;
-use transaction::{worker, Mutation, TransactionError};
+use transaction::{worker, TransactionError};
 
 #[derive(Clone)]
 pub struct NativePreferenceService {
@@ -96,7 +97,7 @@ impl NativePreferenceService {
             values.push(decode_durable_value(payload)?);
             checkpoint(&mut budget, 1).await?;
         }
-        if prepared.commit_required {
+        if prepared.changed {
             checkpoint(&mut budget, 0).await?;
             authorized_tx.send(()).map_err(|_| {
                 operational(
@@ -360,8 +361,13 @@ fn cancelled(source: crate::execution::ExecutionServiceError) -> PreferenceServi
 fn transaction_error(source: TransactionError) -> PreferenceServiceError {
     match source {
         TransactionError::Store(source) => store_error(source),
-        TransactionError::Missing { group, name } => {
+        TransactionError::Mutation(DocumentMutationError::Missing { group, name }) => {
             PreferenceServiceError::Missing { group, name }
+        }
+        TransactionError::Mutation(DocumentMutationError::RevisionExhausted) => {
+            PreferenceServiceError::InvalidTransaction(
+                "application user-path revision is exhausted".into(),
+            )
         }
     }
 }
@@ -373,9 +379,6 @@ fn store_error(source: NativeStoreError) -> PreferenceServiceError {
         NativeStoreError::Indeterminate(source) => indeterminate(
             "preference replacement occurred but durability is unknown",
             source,
-        ),
-        NativeStoreError::RevisionExhausted => PreferenceServiceError::InvalidTransaction(
-            "application user-path revision is exhausted".into(),
         ),
     }
 }

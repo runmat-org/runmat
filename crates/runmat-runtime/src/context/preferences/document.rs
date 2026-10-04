@@ -7,6 +7,12 @@ use runmat_execution::value::ValuePayload;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[path = "document/mutation.rs"]
+mod mutation;
+pub(super) use mutation::{
+    apply as apply_mutation, DocumentMutation, DocumentMutationError, DocumentPrepared,
+};
+
 pub(super) const PREFERENCE_DOCUMENT_VERSION: u32 = 1;
 pub(super) type EncodedGroups = BTreeMap<String, BTreeMap<String, ValuePayload>>;
 
