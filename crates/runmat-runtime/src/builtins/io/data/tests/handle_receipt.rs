@@ -233,22 +233,24 @@ fn finite_uncertified_receiver_write_rejects_before_mutation() {
     schema
         .fields
         .insert("arrays".into(), Value::Struct(StructValue::new()));
-    let dataset = futures::executor::block_on(data_create_builtin(
-        None,
-        Value::String("owned.data".into()),
-        Value::Struct(schema),
-    ))
+    let dataset = call_builtin(
+        "data.create",
+        &[Value::String("owned.data".into()), Value::Struct(schema)],
+    )
     .expect("context-free embedding creates a process-local managed handle");
     let before = provider
         .read_project_path(root.join("owned.data/manifest.json"))
         .expect("manifest before selection");
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(RuntimeServicePorts::default().with_parallel(Rc::new(Finite)));
-    let error = futures::executor::block_on(dataset_set_attr_builtin(
-        Some(runtime),
-        dataset,
-        Value::String("owner".into()),
-        Value::String("changed".into()),
+    let error = futures::executor::block_on(crate::call_builtin_async_in_context(
+        &runtime,
+        "Dataset.set_attr",
+        &[
+            dataset,
+            Value::String("owner".into()),
+            Value::String("changed".into()),
+        ],
     ))
     .expect_err("finite receiver work needs certified whole-call resources");
     assert_eq!(
@@ -274,24 +276,32 @@ fn session_issued_dataset_survives_later_invocation_but_rejects_foreign_session(
     schema
         .fields
         .insert("arrays".into(), Value::Struct(StructValue::new()));
-    let dataset = futures::executor::block_on(data_create_builtin(
-        Some(runtime.clone()),
-        Value::String("session.data".into()),
-        Value::Struct(schema),
+    let dataset = futures::executor::block_on(crate::call_builtin_async_in_context(
+        &runtime,
+        "data.create",
+        &[Value::String("session.data".into()), Value::Struct(schema)],
     ))
     .expect("session-issued Dataset");
     let next_invocation = runtime
         .clone()
         .with_cancellation_token(runmat_execution::cancellation::CancellationSource::new().token());
     assert_eq!(
-        futures::executor::block_on(dataset_path_builtin(Some(next_invocation), dataset.clone(),))
-            .unwrap(),
+        futures::executor::block_on(crate::call_builtin_async_in_context(
+            &next_invocation,
+            "Dataset.path",
+            std::slice::from_ref(&dataset)
+        ))
+        .unwrap(),
         Value::String("session.data".into())
     );
     let foreign = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
-    let error = futures::executor::block_on(dataset_path_builtin(Some(foreign), dataset.clone()))
-        .expect_err("separate session must not receive a sealed owner");
+    let error = futures::executor::block_on(crate::call_builtin_async_in_context(
+        &foreign,
+        "Dataset.path",
+        std::slice::from_ref(&dataset),
+    ))
+    .expect_err("separate session must not receive a sealed owner");
     assert_eq!(error.identifier.as_deref(), Some("RUNMAT:Data:Error"));
     drop(runtime);
-    assert!(futures::executor::block_on(dataset_path_builtin(None, dataset)).is_err());
+    assert!(call_builtin("Dataset.path", &[dataset]).is_err());
 }

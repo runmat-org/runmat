@@ -1,6 +1,7 @@
 use super::*;
 use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
-use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use std::{cell::Cell, num::NonZeroU64, rc::Rc};
 
 #[test]

@@ -1111,8 +1111,8 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
         ],
     )
     .expect("array write retains selected provider");
-    let Value::Tensor(written) =
-        call_builtin("DataArray.read", &[array]).expect("read after pinned write")
+    let Value::Tensor(written) = call_builtin("DataArray.read", std::slice::from_ref(&array))
+        .expect("read after pinned write")
     else {
         panic!("DataArray.read must return a tensor");
     };
