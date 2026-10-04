@@ -1,6 +1,10 @@
 use super::*;
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
+use runmat_filesystem::FsProvider;
+
+#[path = "tests/write_owner.rs"]
+mod write_owner;
 
 fn fs_test_guard() -> (
     std::sync::MutexGuard<'static, ()>,
@@ -366,6 +370,127 @@ fn xmlwrite_serializes_dom_to_string_or_file() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert_eq!(text, "<root id=\"r1\">hello &amp; goodbye</root>");
     let _ = std::fs::remove_file(path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn encoded_xmlread_xmlwrite_xmlread_roundtrip_labels_utf8_bytes_truthfully() {
+    let _guard = fs_test_guard();
+    let directory = if cfg!(windows) { r"C:\xml" } else { "/xml" };
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        directory,
+    ));
+    let _installed = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let source = if cfg!(windows) {
+        r"C:\xml\source.xml"
+    } else {
+        "/xml/source.xml"
+    };
+    let output = if cfg!(windows) {
+        r"C:\xml\output.xml"
+    } else {
+        "/xml/output.xml"
+    };
+
+    let mut samples = Vec::new();
+    let little = "<?xml version='1.0' encoding='UTF-16LE'?><root>温度</root>";
+    let mut little_bytes = vec![0xFF, 0xFE];
+    for unit in little.encode_utf16() {
+        little_bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    samples.push((little_bytes, "温度"));
+    let big = "<?xml version='1.0' encoding='UTF-16BE'?><root>é</root>";
+    let mut big_bytes = vec![0xFE, 0xFF];
+    for unit in big.encode_utf16() {
+        big_bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    samples.push((big_bytes, "é"));
+    samples.push((
+        b"<?xml version='1.0' encoding='windows-1252'?><root>caf\xE9</root>".to_vec(),
+        "café",
+    ));
+
+    for (bytes, expected_text) in samples {
+        provider
+            .write_project_path(source, &bytes)
+            .expect("encoded source fixture");
+        let document =
+            run(xmlread_builtin(None, vec![Value::from(source)])).expect("decoded XML document");
+        let Value::Object(original) = &document else {
+            panic!("expected decoded XML document");
+        };
+        let Some(Value::String(original_text)) = original.properties.get("Text") else {
+            panic!("expected retained decoded source text");
+        };
+        assert!(original_text.contains(expected_text));
+        assert!(original_text.contains("encoding='"));
+        let count = run(xmlwrite_builtin(None, vec![Value::from(output), document]))
+            .expect("UTF-8 XML write");
+        let published = futures::executor::block_on(provider.read(std::path::Path::new(output)))
+            .expect("published output through captured provider");
+        assert_eq!(count, Value::Num(published.len() as f64));
+        let utf8 = std::str::from_utf8(&published).expect("UTF-8 bytes");
+        assert!(utf8.contains("encoding=\"UTF-8\""));
+        assert_eq!(
+            utf8.starts_with('\u{FEFF}'),
+            bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF])
+        );
+        assert!(!utf8.contains("encoding='UTF-16"));
+        assert!(!utf8.contains("encoding='windows-1252'"));
+        let copied =
+            run(xmlread_builtin(None, vec![Value::from(output)])).expect("round-trip XML document");
+        let Value::Object(object) = copied else {
+            panic!("expected XML document");
+        };
+        let Some(Value::Object(root)) = object.properties.get("DocumentElement") else {
+            panic!("expected round-trip root");
+        };
+        assert_eq!(
+            root.properties.get("TextContent"),
+            Some(&char_value(expected_text))
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn document_tree_mutation_wins_over_retained_source_text() {
+    let _guard = fs_test_guard();
+    let directory = if cfg!(windows) { r"C:\xml" } else { "/xml" };
+    let path = if cfg!(windows) {
+        r"C:\xml\mutation.xml"
+    } else {
+        "/xml/mutation.xml"
+    };
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        directory,
+    ));
+    let _installed = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    provider
+        .write_project_path(
+            path,
+            b"<?xml version='1.0' encoding='UTF-8'?><root>old</root>",
+        )
+        .expect("source fixture");
+    let Value::Object(mut document) =
+        run(xmlread_builtin(None, vec![Value::from(path)])).expect("document")
+    else {
+        panic!("expected document");
+    };
+    let Some(Value::Object(element)) = document.properties.get_mut("DocumentElement") else {
+        panic!("expected root element");
+    };
+    element
+        .properties
+        .insert("TextContent".into(), char_value("changed"));
+    let result = run(xmlwrite_builtin(None, vec![Value::Object(document)]))
+        .expect("tree-owned serialization");
+    assert_eq!(
+        result,
+        char_value("<?xml version=\"1.0\" encoding=\"UTF-8\"?><root>changed</root>")
+    );
 }
 
 #[test]

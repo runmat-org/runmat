@@ -249,5 +249,6 @@ mod declaration;
 mod encoding;
 #[path = "parser/reader.rs"]
 mod reader;
+pub(super) use declaration::{document_declaration_prefix, normalize_utf8_output};
 pub(super) use encoding::decode_document_bytes;
 pub(super) use events::parse_xml_document_with_context;

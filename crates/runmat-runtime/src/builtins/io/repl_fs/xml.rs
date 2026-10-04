@@ -41,7 +41,24 @@ fn xml_error_with_source(
 
 #[path = "xml/source.rs"]
 mod source;
-use source::XmlFsPath;
+use source::{XmlFsPath, XmlWriteOwner};
+
+enum CapturedXmlWriteTarget {
+    Exact(XmlFsPath),
+    AwaitingFilename(XmlWriteOwner),
+}
+
+impl CapturedXmlWriteTarget {
+    fn resolve(self, filename: &Value) -> BuiltinResult<XmlFsPath> {
+        match self {
+            Self::Exact(path) => Ok(path),
+            Self::AwaitingFilename(owner) => {
+                let path = value_to_path(filename, "xmlwrite", "filename")?;
+                Ok(owner.resolve(path))
+            }
+        }
+    }
+}
 
 fn xml_io_error(operation: XmlOperation, err: std::io::Error) -> RuntimeError {
     let name = operation.name();
@@ -279,11 +296,39 @@ async fn xmlwrite_builtin(
     let document = if args.len() == 2 { &args[1] } else { &args[0] };
     known_document_preflight(document)
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let target = if args.len() == 2 {
+        Some(match &args[0] {
+            Value::GpuTensor(_) => CapturedXmlWriteTarget::AwaitingFilename(
+                XmlWriteOwner::capture().map_err(|err| xml_io_error(operation, err))?,
+            ),
+            known => {
+                let path = value_to_path(known, "xmlwrite", "filename").map_err(|err| {
+                    xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
+                })?;
+                CapturedXmlWriteTarget::Exact(
+                    XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?,
+                )
+            }
+        })
+    } else {
+        None
+    };
     cooperation.completed(0).await?;
-    let args = gather_args("xmlwrite", &args).await?;
+    let args = cooperation
+        .await_io(gather_args("xmlwrite", &args))
+        .await??;
     match args.len() {
         1 => {
             let xml = serialize_xml_value(&args[0], &mut cooperation)
+                .await
+                .map_err(|err| {
+                    if cooperation.is_execution_error(&err) {
+                        err
+                    } else {
+                        xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
+                    }
+                })?;
+            let xml = normalize_utf8_output(xml, &mut cooperation)
                 .await
                 .map_err(|err| {
                     if cooperation.is_execution_error(&err) {
@@ -299,9 +344,6 @@ async fn xmlwrite_builtin(
             scalar_text(&args[0], "xmlwrite", "filename").map_err(|err| {
                 xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
             })?;
-            let path = value_to_path(&args[0], "xmlwrite", "filename").map_err(|err| {
-                xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
-            })?;
             let xml = serialize_xml_value(&args[1], &mut cooperation)
                 .await
                 .map_err(|err| {
@@ -311,9 +353,22 @@ async fn xmlwrite_builtin(
                         xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
                     }
                 })?;
+            let xml = normalize_utf8_output(xml, &mut cooperation)
+                .await
+                .map_err(|err| {
+                    if cooperation.is_execution_error(&err) {
+                        err
+                    } else {
+                        xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
+                    }
+                })?;
             cooperation.completed(xml.len()).await?;
-            let destination =
-                XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
+            let destination = target
+                .expect("two-argument XML write has a captured destination")
+                .resolve(&args[0])
+                .map_err(|err| {
+                    xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
+                })?;
             cooperation
                 .await_io(destination.write(xml.as_bytes()))
                 .await?
@@ -331,7 +386,8 @@ async fn xmlwrite_builtin(
 #[path = "xml/parser.rs"]
 mod parser;
 use parser::{
-    decode_document_bytes, parse_xml_document_with_context, xml_node_to_struct, ReadStructOptions,
+    decode_document_bytes, normalize_utf8_output, parse_xml_document_with_context,
+    xml_node_to_struct, ReadStructOptions,
 };
 
 #[path = "xml/serialize.rs"]

@@ -18,17 +18,31 @@ pub(super) async fn serialize_xml_value(
             Ok(text)
         }
         Value::Object(object) if object.class_name.is(XML_DOCUMENT_CLASS) => {
-            if let Some(Value::String(text)) = object.properties.get("Text") {
-                cooperation.completed(text.len()).await?;
-                return Ok(text.clone());
+            let element = object.properties.get("DocumentElement").ok_or_else(|| {
+                compat_error(
+                    "xmlwrite",
+                    "xmlwrite: document object has no serializable DocumentElement",
+                )
+            })?;
+            let prefix = match object.properties.get("Text") {
+                Some(Value::String(source)) => {
+                    super::parser::document_declaration_prefix(source, cooperation).await?
+                }
+                _ => None,
+            };
+            let tree = serialize_xml_value(element, cooperation).await?;
+            if let Some(mut prefix) = prefix {
+                prefix.try_reserve(tree.len()).map_err(|error| {
+                    build_runtime_error("xmlwrite: cannot reserve document serialization")
+                        .with_builtin("xmlwrite")
+                        .with_source(error)
+                        .build()
+                })?;
+                prefix.push_str(&tree);
+                Ok(prefix)
+            } else {
+                Ok(tree)
             }
-            if let Some(element) = object.properties.get("DocumentElement") {
-                return serialize_xml_value(element, cooperation).await;
-            }
-            Err(compat_error(
-                "xmlwrite",
-                "xmlwrite: document object has no serializable DocumentElement",
-            ))
         }
         Value::Object(object) if object.class_name.is(XML_ELEMENT_CLASS) => {
             serialize_xml_element_object(object, cooperation).await

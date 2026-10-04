@@ -11,6 +11,39 @@ pub(super) struct XmlFsPath {
     lease: Option<CapturedFsResourceLease>,
 }
 
+/// A filename that must be materialized can still retain the provider and
+/// working directory selected before that suspension.
+pub(super) struct XmlWriteOwner {
+    provider: Arc<dyn FsProvider>,
+    cwd: PathBuf,
+    lease: Option<CapturedFsResourceLease>,
+}
+
+impl XmlWriteOwner {
+    pub(super) fn capture() -> io::Result<Self> {
+        let (provider, cwd) = fs::current_provider_with_current_dir()?;
+        let lease = fs::capture_resource_lease(provider.clone());
+        Ok(Self {
+            provider,
+            cwd,
+            lease,
+        })
+    }
+
+    pub(super) fn resolve(self, path: PathBuf) -> XmlFsPath {
+        let path = if path.is_absolute() {
+            path
+        } else {
+            self.cwd.join(path)
+        };
+        XmlFsPath {
+            provider: self.provider,
+            path,
+            lease: self.lease,
+        }
+    }
+}
+
 impl XmlFsPath {
     pub(super) fn capture(path: PathBuf) -> io::Result<Self> {
         let (provider, path) = if path.is_absolute() {
