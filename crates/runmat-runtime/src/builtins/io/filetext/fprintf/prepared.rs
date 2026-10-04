@@ -32,6 +32,7 @@ pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall
         match plan {
             FormatPlan::Host { index, text } => break (index, text),
             FormatPlan::Resident { index } => {
+                validate_unambiguous_host_target(args, index)?;
                 let host = gather_value(&args[index]).await?;
                 let text = map_string_result(
                     coerce_to_format_string(&host),
@@ -59,6 +60,24 @@ pub(super) async fn prepare(args: &[Value]) -> BuiltinResult<PreparedFprintfCall
         format,
         data_args,
     })
+}
+
+fn validate_unambiguous_host_target(args: &[Value], format_index: usize) -> BuiltinResult<()> {
+    // A stream label encountered before a later actual format would outrank a
+    // numeric fid. Only inspect a host fid when that override is impossible.
+    if args.iter().any(|value| match_stream_label(value).is_some()) {
+        return Ok(());
+    }
+    for value in args.iter().take(format_index) {
+        if !is_fid_candidate(value) || matches!(value, Value::GpuTensor(_)) {
+            continue;
+        }
+        if let Ok(fid) = parse_fid(value) {
+            target_from_fid(fid)?;
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn next_format(args: &[Value], start: usize) -> BuiltinResult<Option<FormatPlan>> {

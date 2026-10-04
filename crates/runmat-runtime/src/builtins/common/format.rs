@@ -94,6 +94,38 @@ struct FormatSpec {
     conversion: FormatConversion,
 }
 
+/// Parsed grammar facts reusable by a sink before it materializes its values.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FormatSummary {
+    conversion: ConversionCount,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ConversionCount {
+    #[default]
+    Zero,
+    SoleStringWithoutStar,
+    OtherOrMultiple,
+}
+
+impl FormatSummary {
+    pub fn sole_string_conversion_without_star(self) -> bool {
+        self.conversion == ConversionCount::SoleStringWithoutStar
+    }
+
+    fn record(&mut self, spec: FormatSpec) {
+        self.conversion = match (self.conversion, spec.conversion) {
+            (ConversionCount::Zero, FormatConversion::String)
+                if !matches!(spec.width, Some(Count::FromArgument))
+                    && !matches!(spec.precision, Some(Count::FromArgument)) =>
+            {
+                ConversionCount::SoleStringWithoutStar
+            }
+            _ => ConversionCount::OtherOrMultiple,
+        };
+    }
+}
+
 /// Format a MATLAB-style format string with the provided arguments.
 ///
 /// This function consumes arguments in column-major order, supports field widths,
@@ -117,8 +149,9 @@ pub fn format_variadic_with_cursor(
 
 /// Validate only the format grammar, without consuming or materializing values.
 /// A sink can call this before reading a resident formatting argument.
-pub fn validate_format_syntax(fmt: &str) -> BuiltinResult<()> {
+pub fn validate_format_syntax(fmt: &str) -> BuiltinResult<FormatSummary> {
     let mut chars = fmt.chars().peekable();
+    let mut summary = FormatSummary::default();
     while let Some(ch) = chars.next() {
         if ch != '%' {
             continue;
@@ -126,10 +159,10 @@ pub fn validate_format_syntax(fmt: &str) -> BuiltinResult<()> {
         if chars.peek() == Some(&'%') {
             chars.next();
         } else {
-            parse_format_spec(&mut chars)?;
+            summary.record(parse_format_spec(&mut chars)?);
         }
     }
-    Ok(())
+    Ok(summary)
 }
 
 fn format_once(fmt: &str, cursor: &mut ArgCursor<'_>) -> BuiltinResult<FormatStepResult> {
@@ -1266,6 +1299,26 @@ mod tests {
             format_variadic("%.1E", &[Value::Num(12.0)]).unwrap(),
             "1.2E1"
         );
+    }
+
+    #[test]
+    fn sole_string_query_uses_parsed_specifiers_not_text_scanning() {
+        for format in ["%s", "[%10.2s]", "%% %hs"] {
+            assert!(
+                validate_format_syntax(format)
+                    .unwrap()
+                    .sole_string_conversion_without_star(),
+                "{format}"
+            );
+        }
+        for format in ["plain text", "%%", "%s %s", "%d%s", "%*s", "%.*s"] {
+            assert!(
+                !validate_format_syntax(format)
+                    .unwrap()
+                    .sole_string_conversion_without_star(),
+                "{format}"
+            );
+        }
     }
 
     #[test]

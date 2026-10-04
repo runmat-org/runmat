@@ -94,13 +94,13 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     let target = prepared.target;
     let format_string =
         decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
-    crate::builtins::common::format::validate_format_syntax(&format_string)
+    let format_summary = crate::builtins::common::format::validate_format_syntax(&format_string)
         .map_err(remap_format_error)?;
     let mut data_args = Vec::with_capacity(prepared.data_args.len());
     for value in prepared.data_args {
         data_args.push(gather_value(&value).await?);
     }
-    let data_args = coerce_single_integer_string_argument(&format_string, data_args)?;
+    let data_args = coerce_single_integer_string_argument(format_summary, data_args)?;
     let flattened_args = flatten_arguments(&data_args, "fprintf")
         .await
         .map_err(map_control_flow)?;

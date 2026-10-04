@@ -10,8 +10,7 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
     match value {
         Value::Tensor(t) => {
             let len = tensor::tensor_element_len(t);
-            let is_row = (t.shape.len() == 2 && t.shape[0] == 1 && len == t.shape[1])
-                || (t.shape.len() == 1 && len == t.shape[0]);
+            let is_row = numeric_format_row_width(&t.shape) == Some(len);
             if is_row {
                 let mut out = String::with_capacity(len);
                 for index in 0..len {
@@ -53,10 +52,27 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
     }
 }
 
+fn numeric_format_row_width(shape: &[usize]) -> Option<usize> {
+    match shape {
+        [columns] => Some(*columns),
+        [1, columns, tail @ ..] if tail.iter().all(|dimension| *dimension == 1) => Some(*columns),
+        _ => None,
+    }
+}
+
+fn char_format_row_shape(value: &runmat_value::CharArray) -> bool {
+    value.rows == 1
+        && value.data.len() == value.cols
+        && value
+            .shape
+            .get(2..)
+            .is_none_or(|tail| tail.iter().all(|dimension| *dimension == 1))
+}
+
 pub(super) fn is_fid_candidate(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.len() == 1)
-        || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().product::<usize>() == 1)
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().all(|extent| *extent == 1))
 }
 
 pub(super) fn is_format_value(value: &Value) -> bool {
@@ -67,8 +83,7 @@ pub(super) fn is_format_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle)
             if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
                 && !runmat_accelerate_api::handle_is_logical(handle)
-                && ((handle.shape().len() == 2 && handle.shape()[0] == 1 && handle.shape()[1] >= 2)
-                    || (handle.shape().len() == 1 && handle.shape()[0] >= 2)))
+                && numeric_format_row_width(handle.shape()).is_some_and(|width| width >= 2))
 }
 
 pub(super) fn preflight_fid(value: &Value) -> BuiltinResult<()> {
@@ -151,10 +166,10 @@ pub(super) fn preflight_format(value: &Value) -> BuiltinResult<()> {
 }
 
 pub(super) fn coerce_single_integer_string_argument(
-    format: &str,
+    format: crate::builtins::common::format::FormatSummary,
     mut args: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
-    if args.len() != 1 || !has_only_string_conversion(format) {
+    if args.len() != 1 || !format.sole_string_conversion_without_star() {
         return Ok(args);
     }
     let Some(value) = args.pop() else {
@@ -190,27 +205,6 @@ fn integer_codes_to_string(values: impl IntoIterator<Item = IntValue>) -> Builti
     Ok(output)
 }
 
-fn has_only_string_conversion(format: &str) -> bool {
-    let mut chars = format.chars().peekable();
-    let mut conversions = Vec::new();
-    while let Some(ch) = chars.next() {
-        if ch != '%' {
-            continue;
-        }
-        if chars.peek() == Some(&'%') {
-            chars.next();
-            continue;
-        }
-        for next in chars.by_ref() {
-            if next.is_ascii_alphabetic() {
-                conversions.push(next);
-                break;
-            }
-        }
-    }
-    conversions == ['s']
-}
-
 fn char_from_int_value(value: &IntValue) -> Option<char> {
     value
         .try_to_u64()
@@ -222,9 +216,12 @@ pub(super) fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, St
     match value {
         Value::String(s) => Ok(Some(Value::String(s.clone()))),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(Some(Value::String(sa.data[0].clone()))),
-        Value::CharArray(ca) => {
+        Value::CharArray(ca) if char_format_row_shape(ca) => {
             let s: String = ca.data.iter().collect();
             Ok(Some(Value::String(s)))
+        }
+        Value::CharArray(_) => {
+            Err("fprintf: formatSpec must be a character row vector or string scalar".to_string())
         }
         Value::Tensor(t) => {
             // Only accept numeric codepoint vectors of length >= 2 as formatSpec.

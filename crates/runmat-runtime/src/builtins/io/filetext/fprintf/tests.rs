@@ -8,7 +8,7 @@ use crate::RuntimeError;
 use runmat_accelerate_api::HostTensorView;
 use runmat_filesystem::File;
 use runmat_time::system_time_now;
-use runmat_value::{IntValue, IntegerStorage, Tensor};
+use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor};
 use std::io::Read;
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
@@ -134,10 +134,38 @@ fn fprintf_textual_stream_labels_have_an_independent_gate() {
 fn fprintf_integer_string_conversion_preserves_character_codes() {
     let tensor = Tensor::new_integer(IntegerStorage::U64(vec![65, 66, 67]), vec![1, 3])
         .expect("character codes");
-    let args = coerce_single_integer_string_argument("[%s]", vec![Value::Tensor(tensor)])
+    let format = crate::builtins::common::format::validate_format_syntax("[%s]").unwrap();
+    let args = coerce_single_integer_string_argument(format, vec![Value::Tensor(tensor)])
         .expect("integer string conversion");
     assert_eq!(args, vec![Value::String("ABC".to_string())]);
     assert_eq!(format_with_repetition("[%s]", &args).unwrap(), "[ABC]");
+}
+
+#[test]
+fn numeric_format_accepts_trailing_singletons_but_not_extra_pages() {
+    let valid = Value::Tensor(Tensor::new(vec![b'%' as f64, b'd' as f64], vec![1, 2, 1]).unwrap());
+    assert!(matches!(
+        coerce_to_format_string(&valid),
+        Ok(Some(Value::String(_)))
+    ));
+    let invalid = Value::Tensor(
+        Tensor::new(
+            vec![b'%' as f64, b'd' as f64, b'x' as f64, b'y' as f64],
+            vec![1, 2, 2],
+        )
+        .unwrap(),
+    );
+    assert!(coerce_to_format_string(&invalid).unwrap().is_none());
+    let char_row =
+        Value::CharArray(CharArray::new_with_shape(vec!['%', 'd'], vec![1, 2, 1]).unwrap());
+    assert!(matches!(
+        coerce_to_format_string(&char_row),
+        Ok(Some(Value::String(_)))
+    ));
+    let char_pages = Value::CharArray(
+        CharArray::new_with_shape(vec!['%', 'd', '%', 'd'], vec![1, 2, 2]).unwrap(),
+    );
+    assert!(coerce_to_format_string(&char_pages).is_err());
 }
 
 #[test]
