@@ -243,9 +243,8 @@ fn save_error_with(
 fn save_error_with_source(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
-    source: impl std::fmt::Display,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
-    let source = std::io::Error::new(std::io::ErrorKind::Other, source.to_string());
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_source(source);
