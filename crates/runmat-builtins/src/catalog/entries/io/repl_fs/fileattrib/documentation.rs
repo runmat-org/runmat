@@ -42,7 +42,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
         BuiltinDocumentationSection {
             heading: "Permission limitations",
             paragraphs: &[
-                "The current provider supplies file type and a read-only flag, but not user/group/other read or execute permissions. Fields that cannot be established are NaN; UserWrite reflects the provider read-only flag and is not a complete operating-system access check.",
+                "The current provider supplies file type and a read-only flag, but not user/group/other read or execute permissions or native hidden/archive/system attributes. Fields that cannot be established are NaN; UserWrite reflects the provider read-only flag and is not a complete operating-system access check.",
                 "Read-permission mutation (`+r`, `r`, `-r`) reports unsupported permission before any filesystem mutation. Wildcards, user selectors, recursive changes, archive/system mutation, and full MATLAB setter-output forms require a richer provider permission interface.",
             ],
         },

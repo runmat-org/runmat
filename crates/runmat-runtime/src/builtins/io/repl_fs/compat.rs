@@ -452,7 +452,7 @@ fn fileattrib_struct(path: &Path, meta: &vfs::FsMetadata) -> StructValue {
     st.insert("Name", char_value(&path_to_string(path)));
     st.insert("archive", Value::Num(f64::NAN));
     st.insert("system", Value::Num(f64::NAN));
-    st.insert("hidden", Value::Bool(is_hidden_path(path)));
+    st.insert("hidden", Value::Num(f64::NAN));
     st.insert("directory", Value::Bool(meta.is_dir()));
     st.insert("UserRead", Value::Num(f64::NAN));
     st.insert("UserWrite", Value::Bool(!meta.is_readonly()));
@@ -470,12 +470,6 @@ fn error_struct(message: &str) -> StructValue {
     let mut st = StructValue::new();
     st.insert("message", char_value(message));
     st
-}
-
-fn is_hidden_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with('.'))
 }
 
 #[runtime_builtin(
@@ -1894,6 +1888,7 @@ mod tests {
         for name in [
             "archive",
             "system",
+            "hidden",
             "UserRead",
             "UserExecute",
             "GroupRead",
