@@ -26,7 +26,6 @@ mod transaction_inference;
 mod transaction_integer;
 mod dataset;
 
-pub use super::data_family::{DATA_ARRAY_CLASS, DATA_TRANSACTION_CLASS};
 pub use data_array::*;
 pub use data_transaction::*;
 pub use dataset::*;
