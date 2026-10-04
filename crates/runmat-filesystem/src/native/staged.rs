@@ -130,13 +130,10 @@ mod tests {
         fs::create_dir(&occupied).expect("occupied directory");
         fs::write(occupied.join("payload"), b"user bytes").expect("sentinel");
 
-        assert_eq!(
-            begin_at(&destination, occupied.clone())
-                .err()
-                .expect("collision")
-                .kind(),
-            ErrorKind::AlreadyExists
-        );
+        let Err(error) = begin_at(&destination, occupied.clone()) else {
+            panic!("occupied directory must reject stage acquisition");
+        };
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists);
         assert_eq!(fs::read(occupied.join("payload")).unwrap(), b"user bytes");
         assert_eq!(fs::read(&destination).unwrap(), b"original");
     }
