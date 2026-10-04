@@ -166,7 +166,7 @@ pub(super) fn requested_output_sequence(
         .collect::<Vec<_>>();
     match requested_outputs {
         0 => Ok(runmat_value::ValueSequence::empty()),
-        1 => super::super::single_output_sequence(
+        1 => super::super::super::single_output_sequence(
             selected.pop().expect("validated native output count"),
         ),
         _ => runmat_value::ValueSequence::comma_separated(selected)
