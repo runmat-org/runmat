@@ -67,8 +67,8 @@ pub(super) async fn run(runtime: Option<RuntimeContext>, args: Vec<Value>) -> Bu
         .with_identifier("RunMat:userpath:Storage")
         .build());
     }
-    let cooperation = resolution_runtime.cpu_cooperation();
-    if let Err(source) = cooperation.completed(0).await {
+    let mut cooperation = resolution_runtime.cpu_cooperation();
+    if let Err(source) = cooperation.checkpoint(0).await {
         if changed {
             search.mark_user_authority_stale();
             return Err(committed_but_local_cancellation(snapshot.revision, source));

@@ -47,9 +47,9 @@ impl RunMatSession {
         authority.check_current().map_err(authority_error)?;
         let snapshot = service.read(runtime.clone()).await.map_err(service_error)?;
         authority.check_current().map_err(authority_error)?;
-        let cooperation = runtime.cpu_cooperation();
+        let mut cooperation = runtime.cpu_cooperation();
         cooperation
-            .completed(0)
+            .checkpoint(0)
             .await
             .map_err(|source| RunError::Runtime(source.into_runtime_error()))?;
         let user = cooperation
