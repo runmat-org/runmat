@@ -1,5 +1,6 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_builtins::BuiltinIntegerAuditKind;
 use runmat_value::{IntValue, Tensor};
 
 use crate::RuntimeError;
