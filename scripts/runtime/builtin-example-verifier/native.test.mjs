@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { nativeEngineArguments, parseNativeArtifactManifest } from "./native.mjs";
+import { nativeAccelerationConfig, nativeEngineArguments, parseNativeArtifactManifest } from "./native.mjs";
+
+test("WGPU examples require the declared backend without compatibility fallback", () => {
+    const config = nativeAccelerationConfig("Wgpu");
+    assert.match(config, /\[runtime\.accelerate\]\nenabled = true\nprovider = "wgpu"/u);
+    assert.match(config, /allow_inprocess_fallback = false/u);
+    assert.match(config, /wgpu_force_fallback_adapter = false/u);
+    assert.match(config, /\[runtime\.accelerate\.auto_offload\]\nenabled = false/u);
+});
+
+test("host examples keep acceleration disabled independently of their engine", () => {
+    for (const harness of ["Portable", "NativeFilesystem", "NativeInterop"]) {
+        const config = nativeAccelerationConfig(harness);
+        assert.match(config, /\[runtime\.accelerate\]\nenabled = false/u);
+        assert.match(config, /allow_inprocess_fallback = true/u);
+    }
+});
 
 test("native execution requirements select the actual engine", () => {
     assert.deepEqual(nativeEngineArguments("Default"), []);

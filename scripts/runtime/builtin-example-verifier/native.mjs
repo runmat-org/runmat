@@ -95,7 +95,7 @@ async function runCase(binary, root, testCase, timeoutMs) {
     const config = join(workspaceDirectory, "runmat.toml");
     writeFileSync(
         config,
-        `[runtime.language]\ncompat = "${testCase.compatibility.toLowerCase()}"\n\n[runtime.accelerate]\nenabled = false\n\n[runtime.telemetry]\nenabled = false\n\n${foreignConfig}`,
+        `[runtime.language]\ncompat = "${testCase.compatibility.toLowerCase()}"\n\n${nativeAccelerationConfig(testCase.harness)}\n[runtime.telemetry]\nenabled = false\n\n${foreignConfig}`,
         "utf8"
     );
     if (testCase.fixture && typeof testCase.fixture === "object" && "Loopback" in testCase.fixture) {
@@ -184,6 +184,13 @@ async function executeProgram(binary, caseDirectory, workspaceDirectory, artifac
         `native lane: ${stderrText.trim() || `process exited with status ${completed.status}`}`,
         outcome.errorIdentifier
     );
+}
+
+export function nativeAccelerationConfig(harness) {
+    // WGPU cases must not execute through the in-process compatibility
+    // provider. Disable automatic placement independently of explicit GPU use.
+    const wgpu = harness === "Wgpu";
+    return `[runtime.accelerate]\nenabled = ${wgpu}\nprovider = "wgpu"\nallow_inprocess_fallback = ${!wgpu}\nwgpu_force_fallback_adapter = false\n\n[runtime.accelerate.auto_offload]\nenabled = false\n\n`;
 }
 
 export function nativeEngineArguments(engine) {
