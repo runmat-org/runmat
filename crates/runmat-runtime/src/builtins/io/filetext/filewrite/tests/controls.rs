@@ -187,9 +187,34 @@ impl runmat_accelerate_api::AccelProvider for PausedByteDownload {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn pending_download_keeps_captured_filesystem_owner_and_cwd() {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    // Filesystem replacement is process-wide. Execute this witness in its own
+    // test process so unrelated parallel tests retain their filesystem owner.
+    const CHILD_MARKER: &str = "RUNMAT_FILEWRITE_OWNER_CAPTURE_TEST_CHILD";
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "builtins::io::filetext::filewrite::tests::controls::pending_download_keeps_captured_filesystem_owner_and_cwd",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(CHILD_MARKER, "1")
+            .output()
+            .expect("isolated filesystem owner witness");
+        assert!(
+            output.status.success(),
+            "owner witness failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+        return;
+    }
 
     let _fs_lock = runmat_filesystem::provider_override_lock();
     let selected = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
