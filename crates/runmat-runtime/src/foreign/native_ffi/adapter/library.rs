@@ -307,7 +307,8 @@ impl NativeFfiAdapter {
 /// is treated as named options only when every name is an admitted preparation
 /// option; unknown or odd trailers retain the positional interpretation.
 fn parse_load_trailer(arguments: &[Value]) -> Result<(Vec<PathBuf>, Vec<PathBuf>), RuntimeError> {
-    let options = &arguments[3..];
+    // The adapter admits a library and header without an explicit alias.
+    let options = arguments.get(3..).unwrap_or_default();
     let named = (!options.is_empty() && options.len().is_multiple_of(2))
         .then(|| {
             options
@@ -419,6 +420,14 @@ mod load_trailer_tests {
             Value::String("header".into()),
             Value::String("alias".into()),
         ]
+    }
+
+    #[test]
+    fn omitted_alias_has_no_load_trailer() {
+        let arguments = vec![Value::from("library"), Value::from("header")];
+        let (includes, headers) = parse_load_trailer(&arguments).unwrap();
+        assert!(includes.is_empty());
+        assert!(headers.is_empty());
     }
 
     #[test]
