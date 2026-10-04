@@ -21,6 +21,8 @@ use super::{
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
+mod solve;
+
 const FULL_ORDER_WORK_VECTORS: u64 = 128;
 const REDUCED_DENSE_WORK_MATRICES: u64 = 64;
 const BLOCK_OPERATOR_COPIES: u64 = 4;
@@ -227,15 +229,23 @@ pub fn build_structural_transient_block_resource_plan(
         )?,
         "transient block operator storage",
     )?;
-    let modal_dense_values = multiply(
-        multiply(
-            coordinate_dofs,
-            coordinate_dofs,
-            "transient modal matrix values",
-        )?,
-        REDUCED_DENSE_WORK_MATRICES,
-        "transient modal dense workspace",
-    )?;
+    let (modal_dense_values, proof_bytes) = match workload.solver {
+        StructuralTransientSolverPlan::Direct => {
+            (0, solve::proof_storage(&prepared.active_model, mesh)?)
+        }
+        StructuralTransientSolverPlan::ModalReduced { .. } => (
+            multiply(
+                multiply(
+                    coordinate_dofs,
+                    coordinate_dofs,
+                    "transient modal matrix values",
+                )?,
+                REDUCED_DENSE_WORK_MATRICES,
+                "transient modal dense workspace",
+            )?,
+            0,
+        ),
+    };
     let solve_values = add(
         multiply(
             physical_dofs,
@@ -273,10 +283,10 @@ pub fn build_structural_transient_block_resource_plan(
     operator.solve = SolveResourcePolicy::TransientBlock {
         physical_dimension: Count(physical_dofs),
         coordinate_dimension: Count(coordinate_dofs),
-        workspace_bytes_upper_bound: ByteCount(multiply(
-            solve_values,
-            8,
-            "transient solve workspace bytes",
+        workspace_bytes_upper_bound: ByteCount(add(
+            multiply(solve_values, 8, "transient solve workspace bytes")?,
+            proof_bytes,
+            "transient solve and coercivity construction",
         )?),
     };
     operator.phase_resources = PhaseResourcePolicy {

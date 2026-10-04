@@ -90,3 +90,34 @@ channels, curved normal support and reaction recovery. It changes ownership, not
 formulas, tolerances, constraint enforcement, accepted history or publication identity.
 The preceding isolated full numerical run finished with 1,663 passing and 14 failing tests; it predates this
 ownership refactor. Original rod and other scientific failures remain open.
+
+## Selected transient block workspace and original continuum limits
+
+Resource model revision 70 distinguishes direct sparse and reduced modal block
+algorithms. Direct Newmark blocks no longer reserve 64 dense matrices at the full
+physical dimension: that allocation belongs to the modal algorithm and is absent
+from the direct solver. Direct blocks instead reserve shared bounded sparse
+coercivity construction for both the full topology pattern and its homogeneous
+constraint reduction. These proofs execute sequentially, so the larger envelope
+is added to the existing vector workspace. Modal dense workspace is unchanged.
+The submitter and native worker rederive this same plan before physical block
+construction; authored memory ceilings are unchanged.
+
+A both-order, three-mesh witness constructs the actual initial-mass and Newmark
+operators and their process-local coercivity certificates. Every reported proof
+storage count fits the preassembly solve workspace. On the finest Tet10 case the
+workspace is 241,932,096 bytes and the certificate's logical storage count is
+8,773,248 bytes. These are requested and certificate-derived counts, not measured
+RSS, and do not qualify every scale or backend. The existing resource, preassembly,
+physical motion and native continuation suites remain mandatory.
+
+The original sine-rod initial-state discriminator samples exactly the original
+nodal displacement and derives acceleration from discrete equilibrium. Initial
+acceleration is byte-identical for two future time partitions. Discrete balance
+residuals are at most 5.8e-11, while the independent continuum acceleration fails
+the same discrete balance. Initial normalized acceleration errors on the original
+Tet4 meshes are 0.636/0.387/0.212 and on Tet10 are 0.311/0.116/0.050. This isolates a
+spatial initial-state discrepancy before time integration. It does not remove that
+sample, project an eigenmode, prescribe a different initial field, relax a history
+bound or replace any of the three original failing continuum gates. Full-history
+accuracy and independent temporal convergence remain open.
