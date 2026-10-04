@@ -1,9 +1,30 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    LOAD_IMPLEMENTATION as IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST,
+};
 use super::inference_support::{arity, infer_with, text_at};
-use super::{NATIVE_FFI_INTEGER_AUDIT, UNLOADLIBRARY_DESCRIPTOR};
 use crate::*;
 use runmat_types::*;
+
+pub const UNLOADLIBRARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "unloadlibrary(alias)",
+        inputs: &[scalar_text(
+            "alias",
+            "Scalar text, number, or logical loaded library alias.",
+        )],
+        outputs: &[],
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
+    kind: BuiltinIntegerAuditKind::NotApplicable,
+    canonical_builtin: None,
+    notes: "Scalar integer aliases are converted to text; no C ABI integer payload is accepted.",
+};
 
 pub const UNLOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,7 +58,7 @@ pub const UNLOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_audit: Some(&INTEGER_AUDIT),
     suppress_auto_output: true,
 };
 

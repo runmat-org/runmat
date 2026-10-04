@@ -157,3 +157,51 @@ fn retained_scalar_value_to_text_forms_are_not_false_errors() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-TEXT"));
 }
+
+#[test]
+fn identity_descriptors_match_fixed_output_facts_and_dynamic_call_abi() {
+    let cases = [
+        (&LOADLIBRARY_CATALOG_ENTRY, 2),
+        (&UNLOADLIBRARY_CATALOG_ENTRY, 0),
+        (&LIBISLOADED_CATALOG_ENTRY, 1),
+        (&LIBFUNCTIONS_CATALOG_ENTRY, 1),
+        (&LIBPOINTER_CATALOG_ENTRY, 1),
+        (&LIBSTRUCT_CATALOG_ENTRY, 1),
+        (&SETDATATYPE_CATALOG_ENTRY, 0),
+    ];
+    for (entry, maximum) in cases {
+        let descriptor_maximum = entry
+            .descriptor
+            .signatures
+            .iter()
+            .map(|signature| signature.outputs.len())
+            .max()
+            .unwrap_or(0);
+        assert_eq!(descriptor_maximum, maximum, "{}", entry.identity.name);
+        assert!(entry.descriptor.signatures.iter().all(|signature| signature
+            .outputs
+            .iter()
+            .all(|output| output.arity == BuiltinParamArity::Required)));
+    }
+    assert_eq!(
+        LOADLIBRARY_DESCRIPTOR.output_mode,
+        BuiltinOutputMode::ByRequestedOutputCount
+    );
+    for requested in [0, 1, 2] {
+        let result = infer_catalog_call(
+            &LOADLIBRARY_CATALOG_ENTRY,
+            &request(vec![text()], requested),
+        );
+        assert_eq!(result.outputs.len(), requested);
+    }
+    assert!(CALLLIB_DESCRIPTOR.signatures[0]
+        .outputs
+        .iter()
+        .any(|output| output.arity == BuiltinParamArity::Variadic));
+    assert_eq!(
+        infer_catalog_call(&CALLLIB_CATALOG_ENTRY, &request(vec![text(), text()], 4))
+            .outputs
+            .len(),
+        4
+    );
+}

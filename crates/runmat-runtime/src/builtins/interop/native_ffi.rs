@@ -1,10 +1,10 @@
 //! Shared-library interoperability builtins backed by the session foreign service.
 
-use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinParamArity};
 pub use runmat_builtins::{
     NativeLoadOption, CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR,
-    LIBPOINTER_DESCRIPTOR, LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT,
-    SETDATATYPE_DESCRIPTOR, UNLOADLIBRARY_DESCRIPTOR,
+    LIBPOINTER_DESCRIPTOR, LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, SETDATATYPE_DESCRIPTOR,
+    UNLOADLIBRARY_DESCRIPTOR,
 };
 use runmat_builtins::{
     NATIVE_FFI_ERROR_HOST_UNAVAILABLE as ERROR_HOST_UNAVAILABLE,
@@ -73,7 +73,7 @@ async fn loadlibrary_builtin(
     requested_outputs: Option<usize>,
     mut arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    validate_output_count("loadlibrary", requested_outputs, 2)?;
+    validate_output_count(&LOADLIBRARY_DESCRIPTOR, "loadlibrary", requested_outputs)?;
     if arguments.is_empty() {
         return Err(invalid_builtin_call("loadlibrary expects a library path"));
     }
@@ -183,6 +183,7 @@ async fn calllib_builtin(
     }
     text_argument(&arguments[0], "calllib library alias")?;
     text_argument(&arguments[1], "calllib function name")?;
+    validate_output_count(&CALLLIB_DESCRIPTOR, "calllib", requested_outputs)?;
     let requested = requested_outputs.unwrap_or(1);
     invoke_native(context, NativeFfiOperation::Call, arguments, requested).await
 }
@@ -199,7 +200,11 @@ async fn unloadlibrary_builtin(
     requested_outputs: Option<usize>,
     alias: Value,
 ) -> BuiltinResult<Value> {
-    validate_output_count("unloadlibrary", requested_outputs, 0)?;
+    validate_output_count(
+        &UNLOADLIBRARY_DESCRIPTOR,
+        "unloadlibrary",
+        requested_outputs,
+    )?;
     text_argument(&alias, "unloadlibrary alias")?;
     invoke_native(context, NativeFfiOperation::Unload, vec![alias], 1).await?;
     Ok(Value::OutputList(Vec::new()))
@@ -217,7 +222,7 @@ async fn libisloaded_builtin(
     requested_outputs: Option<usize>,
     alias: Value,
 ) -> BuiltinResult<Value> {
-    validate_output_count("libisloaded", requested_outputs, 1)?;
+    validate_output_count(&LIBISLOADED_DESCRIPTOR, "libisloaded", requested_outputs)?;
     text_argument(&alias, "libisloaded alias")?;
     invoke_native(context, NativeFfiOperation::IsLoaded, vec![alias], 1).await
 }
@@ -234,7 +239,7 @@ async fn libfunctions_builtin(
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    validate_output_count("libfunctions", requested_outputs, 1)?;
+    validate_output_count(&LIBFUNCTIONS_DESCRIPTOR, "libfunctions", requested_outputs)?;
     if !(1..=2).contains(&arguments.len()) {
         return Err(invalid_builtin_call(
             "libfunctions expects an alias and optional -full flag",
@@ -264,7 +269,7 @@ async fn libpointer_builtin(
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    validate_output_count("libpointer", requested_outputs, 1)?;
+    validate_output_count(&LIBPOINTER_DESCRIPTOR, "libpointer", requested_outputs)?;
     if arguments.len() > 2 {
         return Err(invalid_builtin_call(
             "libpointer expects an optional type and value",
@@ -288,7 +293,7 @@ async fn setdatatype_builtin(
     requested_outputs: Option<usize>,
     mut arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    validate_output_count("setdatatype", requested_outputs, 0)?;
+    validate_output_count(&SETDATATYPE_DESCRIPTOR, "setdatatype", requested_outputs)?;
     if arguments.len() < 3 {
         return Err(invalid_builtin_call(
             "setdatatype expects a pointer, type, and one or more dimensions",
@@ -317,7 +322,7 @@ async fn libstruct_builtin(
     requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    validate_output_count("libstruct", requested_outputs, 1)?;
+    validate_output_count(&LIBSTRUCT_DESCRIPTOR, "libstruct", requested_outputs)?;
     if !(1..=2).contains(&arguments.len()) {
         return Err(invalid_builtin_call(
             "libstruct expects a type and optional scalar structure",
@@ -336,11 +341,23 @@ async fn libstruct_builtin(
 }
 
 fn validate_output_count(
+    descriptor: &BuiltinDescriptor,
     builtin: &'static str,
     requested: Option<usize>,
-    maximum: usize,
 ) -> BuiltinResult<()> {
-    if requested.is_some_and(|count| count > maximum) {
+    let dynamic = descriptor.signatures.iter().any(|signature| {
+        signature
+            .outputs
+            .iter()
+            .any(|output| output.arity == BuiltinParamArity::Variadic)
+    });
+    let maximum = descriptor
+        .signatures
+        .iter()
+        .map(|signature| signature.outputs.len())
+        .max()
+        .unwrap_or(0);
+    if !dynamic && requested.is_some_and(|count| count > maximum) {
         return Err(native_error(
             &ERROR_INVALID,
             builtin,

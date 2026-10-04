@@ -1,9 +1,39 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    NATIVE_FIXTURE, NATIVE_HOST, POINTER_IMPLEMENTATION as IMPLEMENTATION,
+};
 use super::inference_support::{arity, infer_with, text_at};
-use super::{NATIVE_FFI_INTEGER_AUDIT, SETDATATYPE_DESCRIPTOR};
 use crate::*;
 use runmat_types::*;
+
+const POINTER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "pointer",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Opaque borrowed native pointer handle.",
+};
+const DIMENSIONS: BuiltinParamDescriptor = BuiltinParamDescriptor { name: "dimensions", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Variadic, default: None, description: "One or more positive, checked scalar integer values in exact integer or integral-double storage." };
+pub const SETDATATYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "setdatatype(pointer, type, dimensions...)",
+        inputs: &[
+            POINTER,
+            scalar_text(
+                "type",
+                "Scalar text, number, or logical normalized C pointer type.",
+            ),
+            DIMENSIONS,
+        ],
+        outputs: &[],
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "dimensions", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Current runtime accepts exact scalar integer dimensions and integral-double dimensions; both are checked positive and converted to usize." }];
+const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "setdatatype(pointer, type, integer_dimensions...)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Dimension conversion and extent multiplication are checked before publishing the borrowed pointer view; this statement returns no public output." }];
 
 pub const SETDATATYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,8 +67,8 @@ pub const SETDATATYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: FOREIGN_LINK,
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_capabilities: INTEGER_CAPABILITIES,
+    integer_audit: None,
     suppress_auto_output: true,
 };
 

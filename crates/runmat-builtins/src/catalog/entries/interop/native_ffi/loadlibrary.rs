@@ -1,9 +1,55 @@
 use super::contract::{NativeLoadOption, FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    LOAD_IMPLEMENTATION as IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST,
+};
 use super::inference_support::{arity, infer_with, string_cell_row, text_at};
-use super::{LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
+
+const LIBRARY: BuiltinParamDescriptor = scalar_text(
+    "library",
+    "Scalar text, number, or logical library path or name.",
+);
+const HEADER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "header",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("library path with .h extension"),
+    description: "Optional scalar text, number, or logical header path.",
+};
+const OPTION_NAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "optionName",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Alias, IncludePath, or AddHeader followed by a scalar text-coercible value.",
+};
+const NOTFOUND: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "notfound",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "One-row cell array of unprepared declarations.",
+};
+const WARNINGS: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "warnings",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Preparation warning string.",
+};
+pub const LOADLIBRARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "[notfound, warnings] = loadlibrary(library, [header], [name, value]...)",
+        inputs: &[LIBRARY, HEADER, OPTION_NAME],
+        outputs: &[NOTFOUND, WARNINGS],
+    }],
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Scalar integer arguments are converted to library/header/option text; they are not C ABI data." };
 
 pub const LOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -41,7 +87,7 @@ pub const LOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_audit: Some(&INTEGER_AUDIT),
     suppress_auto_output: true,
 };
 

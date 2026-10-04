@@ -47,13 +47,20 @@ pub(super) const NATIVE_FIXTURE: BuiltinExampleFixture =
         }),
     });
 
-pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
-    BuiltinDocumentationLink {
-        label: "Native FFI builtin dispatch",
-        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/interop/native_ffi.rs"),
-    },
-    BuiltinDocumentationLink {
-        label: "Native FFI session adapter",
-        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/foreign/native_ffi/adapter.rs"),
-    },
+const DISPATCH: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Native FFI public dispatch",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/interop/native_ffi.rs"),
+};
+pub(super) const LOAD_IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
+    DISPATCH,
+    BuiltinDocumentationLink { label: "Prepared library and header ownership", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/foreign/native_ffi/adapter/library.rs") },
+];
+pub(super) const CALL_IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
+    DISPATCH,
+    BuiltinDocumentationLink { label: "Prepared ABI invocation and output admission", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/foreign/native_ffi/adapter/call.rs") },
+];
+pub(super) const POINTER_IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
+    DISPATCH,
+    BuiltinDocumentationLink { label: "Owned native pointer storage", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/foreign/native_ffi/adapter/pointer_storage.rs") },
+    BuiltinDocumentationLink { label: "Borrowed native pointer view", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/foreign/native_ffi/adapter/pointer_view.rs") },
 ];

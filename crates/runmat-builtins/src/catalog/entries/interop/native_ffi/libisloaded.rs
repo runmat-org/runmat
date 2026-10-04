@@ -1,9 +1,32 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    LOAD_IMPLEMENTATION as IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST,
+};
 use super::inference_support::{arity, infer_with, text_at};
-use super::{LIBISLOADED_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
+
+pub const LIBISLOADED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "loaded = libisloaded(alias)",
+        inputs: &[scalar_text(
+            "alias",
+            "Scalar text, number, or logical library alias.",
+        )],
+        outputs: &[BuiltinParamDescriptor {
+            name: "loaded",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Scalar logical loaded-state result.",
+        }],
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Scalar integer aliases are converted to text and the result is logical; no C ABI integer payload is accepted." };
 
 pub const LIBISLOADED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,7 +60,7 @@ pub const LIBISLOADED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_audit: Some(&INTEGER_AUDIT),
     suppress_auto_output: false,
 };
 

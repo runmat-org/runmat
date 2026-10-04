@@ -1,9 +1,55 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    NATIVE_FIXTURE, NATIVE_HOST, POINTER_IMPLEMENTATION as IMPLEMENTATION,
+};
 use super::inference_support::{arity, infer_with, owned_pointer, text_at};
-use super::{LIBPOINTER_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
+
+const POINTER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "pointer",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Session-owned native pointer handle.",
+};
+const TYPE: BuiltinParamDescriptor = scalar_text(
+    "type",
+    "Scalar text, number, or logical normalized C pointer type.",
+);
+const VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Initializer validated against the declared C ABI element type and storage extent.",
+};
+pub const LIBPOINTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "pointer = libpointer()",
+            inputs: &[],
+            outputs: &[POINTER],
+        },
+        BuiltinSignatureDescriptor {
+            label: "pointer = libpointer(type)",
+            inputs: &[TYPE],
+            outputs: &[POINTER],
+        },
+        BuiltinSignatureDescriptor {
+            label: "pointer = libpointer(type, value)",
+            inputs: &[TYPE, VALUE],
+            outputs: &[POINTER],
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "value", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "An integer initializer is accepted only when the declared pointer pointee type and checked conversion admit it." }];
+const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "pointer = libpointer(integer_type, integer_value)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "The normalized pointer type selects exact native storage. Initializer conversion checks the declared width and range; the public result is a foreign handle, not an integer array." }];
 
 pub const LIBPOINTER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -35,8 +81,8 @@ pub const LIBPOINTER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: FOREIGN_LINK,
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_capabilities: INTEGER_CAPABILITIES,
+    integer_audit: None,
     suppress_auto_output: false,
 };
 

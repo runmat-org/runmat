@@ -1,9 +1,48 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    LOAD_IMPLEMENTATION as IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST,
+};
 use super::inference_support::{arity, infer_with, string_cell_row, text_at};
-use super::{LIBFUNCTIONS_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
+
+const ALIAS: BuiltinParamDescriptor = scalar_text(
+    "alias",
+    "Scalar text, number, or logical loaded library alias.",
+);
+const FULL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "option",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "The scalar text-coercible option -full.",
+};
+const NAMES: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "names",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "One-row cell array of declared symbol names or signatures.",
+};
+pub const LIBFUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "names = libfunctions(alias)",
+            inputs: &[ALIAS],
+            outputs: &[NAMES],
+        },
+        BuiltinSignatureDescriptor {
+            label: "signatures = libfunctions(alias, '-full')",
+            inputs: &[ALIAS, FULL],
+            outputs: &[NAMES],
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Scalar integer aliases/options are converted to text and the result contains strings; no C ABI integer payload is accepted." };
 
 pub const LIBFUNCTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,7 +76,7 @@ pub const LIBFUNCTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry 
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_audit: Some(&INTEGER_AUDIT),
     suppress_auto_output: false,
 };
 

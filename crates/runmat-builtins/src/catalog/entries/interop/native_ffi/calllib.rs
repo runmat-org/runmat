@@ -1,9 +1,43 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    CALL_IMPLEMENTATION as IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST,
+};
 use super::inference_support::{arity, infer_dynamic, text_at};
-use super::{CALLLIB_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
+
+const ARGUMENTS: BuiltinParamDescriptor = BuiltinParamDescriptor { name: "arguments", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Variadic, default: None, description: "Native ABI values interpreted by the prepared function signature, including exact integer arrays and foreign handles." };
+const OUTPUTS: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "outputs",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description:
+        "Return value and output parameters determined by the prepared function signature.",
+};
+pub const CALLLIB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "[outputs] = calllib(alias, function, arguments...)",
+        inputs: &[
+            scalar_text(
+                "alias",
+                "Scalar text, number, or logical loaded library alias.",
+            ),
+            scalar_text(
+                "function",
+                "Scalar text, number, or logical declared C symbol name.",
+            ),
+            ARGUMENTS,
+        ],
+        outputs: &[OUTPUTS],
+    }],
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "arguments", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Exact integer scalar and tensor storage is marshalled according to the prepared C parameter type; scalar double conversion is checked at the ABI boundary." }];
+const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "[outputs] = calllib(alias, function, integer_arguments...)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "The prepared function signature determines admissible integer classes, widths, ranges, return storage, and output parameters. A generic calllib invocation cannot promise a particular result class." }];
 
 pub const CALLLIB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -37,8 +71,8 @@ pub const CALLLIB_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: FOREIGN_LINK,
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_capabilities: INTEGER_CAPABILITIES,
+    integer_audit: None,
     suppress_auto_output: false,
 };
 

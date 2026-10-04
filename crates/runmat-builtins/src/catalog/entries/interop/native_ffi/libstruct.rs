@@ -1,9 +1,48 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
-use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
+use super::descriptor::{scalar_text, ERRORS};
+use super::documentation_support::{
+    NATIVE_FIXTURE, NATIVE_HOST, POINTER_IMPLEMENTATION as IMPLEMENTATION,
+};
 use super::inference_support::{arity, infer_with, owned_pointer, text_at};
-use super::{LIBSTRUCT_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
+
+const HANDLE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Session-owned native structure handle.",
+};
+const TYPE: BuiltinParamDescriptor = scalar_text(
+    "type",
+    "Scalar text, number, or logical qualified C structure type.",
+);
+const INITIALIZER: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "structure",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Scalar structure initializer checked against the prepared layout.",
+};
+pub const LIBSTRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[
+        BuiltinSignatureDescriptor {
+            label: "value = libstruct(type)",
+            inputs: &[TYPE],
+            outputs: &[HANDLE],
+        },
+        BuiltinSignatureDescriptor {
+            label: "value = libstruct(type, structure)",
+            inputs: &[TYPE, INITIALIZER],
+            outputs: &[HANDLE],
+        },
+    ],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: ERRORS,
+};
+const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "value = libstruct(type, structure_with_integer_fields)", inputs: &[], computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Only integer fields declared by the prepared structure layout are admitted. Field storage and checked conversion follow their ABI widths; the public result is a foreign handle. No generic integer field class follows from the type text alone." }];
 
 pub const LIBSTRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -35,8 +74,8 @@ pub const LIBSTRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     link: FOREIGN_LINK,
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &[],
-    integer_audit: Some(&NATIVE_FFI_INTEGER_AUDIT),
+    integer_capabilities: INTEGER_CAPABILITIES,
+    integer_audit: None,
     suppress_auto_output: false,
 };
 
