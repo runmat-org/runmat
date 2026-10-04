@@ -383,6 +383,14 @@ impl RunMatSession {
             std::rc::Rc::new(move |runtime, _request| {
                 let cache = Arc::clone(&refresh_cache);
                 Box::pin(async move {
+                    // This refresh is one invocation-owned cache mutation.
+                    // Yield/cancel before changing either revision or entries;
+                    // the two mutations then form one short synchronous step.
+                    runtime
+                        .cpu_cooperation()
+                        .checkpoint(1)
+                        .await
+                        .map_err(|source| source.into_runtime_error())?;
                     // RunMat has one live source cache, not a separate persisted
                     // matlabroot/toolbox cache. All four public requests refresh
                     // its lookup revision and compiled source entries; none

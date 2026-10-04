@@ -504,7 +504,17 @@ pub async fn try_refresh_dynamic_functions(
 ) -> Option<Result<(), RuntimeError>> {
     let context = crate::context::legacy::active()?;
     let refresher = context.state().call.borrow().dynamic_refresher.clone()?;
-    Some(refresher(context, request).await)
+    let mut cooperation = context.cpu_cooperation();
+    if let Err(source) = cooperation.checkpoint(0).await {
+        return Some(Err(source.into_runtime_error()));
+    }
+    Some(
+        cooperation
+            .await_cancellable(refresher(context, request))
+            .await
+            .map_err(|source| source.into_runtime_error())
+            .and_then(std::convert::identity),
+    )
 }
 
 fn source_functions_in_catalog(

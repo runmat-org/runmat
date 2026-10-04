@@ -9,8 +9,8 @@ use runmat_builtins::{
     BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
     BuiltinIntegerComputationDomain, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
-    BuiltinParamType, BuiltinSignatureDescriptor, MEMMAPFILE_CLASS, MEMMAPFILE_DESCRIPTOR,
-    MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+    BuiltinParamType, BuiltinSignatureDescriptor, RehashMode, MEMMAPFILE_CLASS,
+    MEMMAPFILE_DESCRIPTOR, MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
     MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
 };
 use runmat_filesystem as vfs;
@@ -412,20 +412,33 @@ async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let request = match args.as_slice() {
         [] => DynamicFunctionRefreshRequest::Default,
         [argument] => {
-            let mode = scalar_text(argument, "rehash", "mode")?;
-            match mode.to_ascii_lowercase().as_str() {
-                "path" => DynamicFunctionRefreshRequest::Path,
-                "toolbox" => DynamicFunctionRefreshRequest::Toolbox,
-                "toolboxcache" => DynamicFunctionRefreshRequest::ToolboxCache,
+            let mode = scalar_text(argument, "rehash", "mode").map_err(|source| {
+                build_runtime_error(source.message().to_owned())
+                    .with_builtin("rehash")
+                    .with_identifier("RunMat:rehash:InvalidMode")
+                    .with_source(source)
+                    .build()
+            })?;
+            match RehashMode::parse(&mode) {
+                Some(RehashMode::Path) => DynamicFunctionRefreshRequest::Path,
+                Some(RehashMode::Toolbox) => DynamicFunctionRefreshRequest::Toolbox,
+                Some(RehashMode::ToolboxCache) => DynamicFunctionRefreshRequest::ToolboxCache,
                 _ => {
-                    return Err(compat_error(
-                        "rehash",
+                    return Err(build_runtime_error(
                         "rehash: expected path, toolbox, or toolboxcache",
-                    ));
+                    )
+                    .with_builtin("rehash")
+                    .with_identifier("RunMat:rehash:InvalidMode")
+                    .build());
                 }
             }
         }
-        _ => return Err(compat_error("rehash", "rehash: too many input arguments")),
+        _ => {
+            return Err(build_runtime_error("rehash: too many input arguments")
+                .with_builtin("rehash")
+                .with_identifier("RunMat:rehash:InvalidCall")
+                .build());
+        }
     };
     crate::user_functions::try_refresh_dynamic_functions(request)
         .await
@@ -1975,10 +1988,19 @@ mod tests {
         let error = run(rehash_builtin(vec![char_value("not-a-mode")]))
             .expect_err("invalid mode must fail before cache callback");
         assert!(error.message().contains("expected path"));
+        assert_eq!(error.identifier(), "RunMat:rehash:InvalidMode");
         assert_eq!(observed.borrow().len(), 4);
         let error = run(rehash_builtin(vec![Value::Num(1.0)]))
             .expect_err("numeric mode must fail before cache callback");
         assert!(error.message().contains("mode must be"));
+        assert_eq!(error.identifier(), "RunMat:rehash:InvalidMode");
+        assert_eq!(observed.borrow().len(), 4);
+        let error = run(rehash_builtin(vec![
+            char_value("path"),
+            char_value("toolbox"),
+        ]))
+        .expect_err("extra mode must fail before cache callback");
+        assert_eq!(error.identifier(), "RunMat:rehash:InvalidCall");
         assert_eq!(observed.borrow().len(), 4);
         let _outputs = output_count::push_output_count(Some(2));
         let error = run(rehash_builtin(Vec::new()))
@@ -1997,5 +2019,72 @@ mod tests {
         let _active = context.enter();
         let error = run(rehash_builtin(Vec::new())).expect_err("no cache owner exists");
         assert_eq!(error.identifier(), "RunMat:rehash:Unavailable");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cancelled_rehash_rejects_before_refresh_callback() {
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let cancellation = CancellationSource::new();
+        cancellation.cancel(CancellationReason::User);
+        let calls = Rc::new(Cell::new(0));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_cancellation_token(cancellation.token());
+        let counted = Rc::clone(&calls);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
+            counted.set(counted.get() + 1);
+            Box::pin(async { Ok(()) })
+        })));
+        let _active = context.enter();
+        let error = run(rehash_builtin(Vec::new())).expect_err("cancelled refresh cannot mutate");
+        assert_eq!(error.identifier(), "RunMat:Cancelled");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn dropped_pending_rehash_drops_selected_refresh_without_publication() {
+        use std::cell::Cell;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::rc::Rc;
+        use std::task::{Context, Poll};
+
+        struct PendingRefresh(Rc<Cell<bool>>);
+        impl Future for PendingRefresh {
+            type Output = Result<(), RuntimeError>;
+            fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+                Poll::Pending
+            }
+        }
+        impl Drop for PendingRefresh {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let dropped = Rc::new(Cell::new(false));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let selected = Rc::clone(&dropped);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
+            Box::pin(PendingRefresh(Rc::clone(&selected)))
+        })));
+        let _active = context.enter();
+        let mut call = Box::pin(rehash_builtin(Vec::new()));
+        let waker = futures::task::noop_waker();
+        assert!(call
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
+        drop(call);
+        assert!(dropped.get());
     }
 }

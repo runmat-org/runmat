@@ -24,10 +24,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         if let Some(mode) = request.literals.literal_string_at(0) {
-            if !["path", "toolbox", "toolboxcache"]
-                .iter()
-                .any(|accepted| mode.eq_ignore_ascii_case(accepted))
-            {
+            if super::RehashMode::parse(&mode).is_none() {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-REHASH-UNKNOWN-MODE",
                     "rehash mode must be path, toolbox, or toolboxcache",
