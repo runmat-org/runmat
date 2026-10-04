@@ -17,6 +17,7 @@ pub(in crate::catalog::entries::io) fn infer(
         }
         IoReplFsInferenceRule::Directory(rule) => directory::infer(rule, request, entry),
         IoReplFsInferenceRule::Environment(rule) => super::environment::infer(rule, request, entry),
+        IoReplFsInferenceRule::Preference(rule) => super::preferences::infer(rule, request, entry),
         IoReplFsInferenceRule::File(rule) => file::infer(rule, request, entry),
         IoReplFsInferenceRule::Path(rule) => path::infer(rule, request, entry),
         IoReplFsInferenceRule::SourceInventory(rule) => {
