@@ -14,6 +14,20 @@ pub(super) fn delete_error_with(
     builder.build()
 }
 
+pub(super) fn delete_io_error(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    cause: std::io::Error,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(cause);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 pub(super) fn map_control_flow(err: RuntimeError) -> RuntimeError {
     let identifier = err.identifier().map(str::to_string);
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))

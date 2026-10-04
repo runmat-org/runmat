@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn delete_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(super::delete_builtin(args))
+    futures::executor::block_on(super::delete_builtin(None, args))
 }
 
 fn ident(error: &'static BuiltinErrorDescriptor) -> Option<&'static str> {
@@ -320,7 +320,8 @@ fn delete_errors_on_char_array_blank_row() {
 fn delete_errors_on_invalid_pattern() {
     let pattern = "{invalid*";
     let fs = DeleteFilesystem::capture().expect("filesystem");
-    let err = futures::executor::block_on(delete_target(&fs, pattern, false))
+    let mut cooperation = DeleteCooperation::new(None);
+    let err = futures::executor::block_on(delete_target(&fs, &mut cooperation, pattern, false))
         .expect_err("invalid pattern should error");
     assert_eq!(err.identifier(), ident(&DELETE_ERROR_INVALID_PATTERN));
 }
@@ -336,9 +337,16 @@ fn delete_errors_on_missing_file() {
     let missing = temp.path().join("missing.txt");
     let missing_str = missing.to_string_lossy().to_string();
     let fs = DeleteFilesystem::capture().expect("filesystem");
+    let mut cooperation = DeleteCooperation::new(None);
     let err =
-        futures::executor::block_on(delete_target(&fs, &missing_str, false)).expect_err("error");
+        futures::executor::block_on(delete_target(&fs, &mut cooperation, &missing_str, false))
+            .expect_err("error");
     assert_eq!(err.identifier(), ident(&DELETE_ERROR_FILE_NOT_FOUND));
+    assert!(err.source.as_deref().is_some_and(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    }));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -379,13 +387,60 @@ fn captured_virtual_provider_and_cwd_govern_wildcard_after_provider_swap() {
     });
     // The global provider has been restored. The retained operation must not
     // enumerate or remove from the newly active process filesystem.
-    futures::executor::block_on(delete_target(&captured, "log-*.txt", false))
-        .expect("delete the captured provider's two matching files");
+    let mut cooperation = DeleteCooperation::new(None);
+    futures::executor::block_on(delete_target(
+        &captured,
+        &mut cooperation,
+        "log-*.txt",
+        false,
+    ))
+    .expect("delete the captured provider's two matching files");
     assert!(memory.read_project_path("/workspace/log-01.txt").is_err());
     assert!(memory.read_project_path("/workspace/log-02.txt").is_err());
     assert_eq!(
         memory.read_project_path("/workspace/keep.bin").unwrap(),
         b"keep"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn cancelled_invocation_rejects_before_filesystem_mutation_with_typed_cause() {
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use runmat_filesystem::MemoryFsProvider;
+    use std::rc::Rc;
+
+    let _lock = REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let memory = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
+    memory
+        .write_project_path("/workspace/keep.txt", b"retained")
+        .expect("virtual file");
+    let cancellation = CancellationSource::new();
+    cancellation.cancel(CancellationReason::User);
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_cancellation_token(cancellation.token());
+    let error = runmat_filesystem::with_provider_override(memory.clone(), || {
+        futures::executor::block_on(super::delete_builtin(
+            Some(runtime),
+            vec![Value::String("keep.txt".into())],
+        ))
+        .expect_err("cancelled call")
+    });
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(error.source.as_deref().is_some_and(|cause| {
+        matches!(
+            cause.downcast_ref::<crate::execution::ExecutionServiceError>(),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        )
+    }));
+    assert_eq!(
+        memory.read_project_path("/workspace/keep.txt").unwrap(),
+        b"retained"
     );
 }
 

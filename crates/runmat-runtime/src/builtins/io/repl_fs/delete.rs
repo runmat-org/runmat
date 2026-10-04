@@ -25,9 +25,13 @@ use error::*;
 #[runtime_builtin(
     name = "delete",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
-async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn delete_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(delete_error_with(
             &DELETE_ERROR_INVALID_INPUT,
@@ -40,18 +44,23 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "delete: resident arguments are not supported",
         ));
     }
+    let mut cooperation = DeleteCooperation::new(context.as_ref());
     if let [Value::Pool(pool)] = args.as_slice() {
-        let context = crate::context::legacy::active().ok_or_else(|| {
-            delete_error_with(
-                &DELETE_ERROR_RUNTIME_CONTEXT,
-                DELETE_ERROR_RUNTIME_CONTEXT.message,
-            )
-        })?;
+        cooperation.completed(0).await?;
+        let context = context
+            .or_else(crate::context::legacy::active)
+            .ok_or_else(|| {
+                delete_error_with(
+                    &DELETE_ERROR_RUNTIME_CONTEXT,
+                    DELETE_ERROR_RUNTIME_CONTEXT.message,
+                )
+            })?;
         crate::parallel::pool::close(&context, pool)?;
+        cooperation.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
     let (operands, resolve_symbolic_links) = parse_delete_options(&args)?;
-    let gathered = gather_arguments(operands).await?;
+    let gathered = cooperation.await_io(gather_arguments(operands)).await??;
 
     if gathered.iter().all(is_handle_input) {
         if resolve_symbolic_links.is_some() {
@@ -60,7 +69,9 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 "delete: ResolveSymbolicLinks is only valid for filename inputs",
             ));
         }
-        return delete_handles(&gathered).await;
+        let result = cooperation.await_io(delete_handles(&gathered)).await??;
+        cooperation.completed(0).await?;
+        return Ok(result);
     }
 
     if gathered.iter().any(contains_handle_input) {
@@ -76,16 +87,28 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     if raw_targets.is_empty() {
+        cooperation.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
 
+    cooperation.completed(0).await?;
     let filesystem = DeleteFilesystem::capture()?;
     for raw in raw_targets {
-        delete_target(&filesystem, &raw, resolve_symbolic_links.unwrap_or(false)).await?;
+        delete_target(
+            &filesystem,
+            &mut cooperation,
+            &raw,
+            resolve_symbolic_links.unwrap_or(false),
+        )
+        .await?;
     }
-
+    cooperation.completed(0).await?;
     Ok(Value::Num(0.0))
 }
+
+#[path = "delete/cooperation.rs"]
+mod cooperation;
+use cooperation::DeleteCooperation;
 
 #[path = "delete/input.rs"]
 mod input;
