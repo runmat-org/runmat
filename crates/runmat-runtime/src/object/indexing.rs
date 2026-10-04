@@ -9,7 +9,7 @@ pub use standard_substruct::parse_standard_substruct;
 mod path;
 pub use path::{ObjectSubscript, ObjectSubscriptOrigin, ObjectSubscriptPath};
 mod plan;
-pub use plan::{plan_for_components, plan_for_shape};
+pub use plan::{plan_for_components, plan_for_fixed_assignment, plan_for_shape};
 
 pub const OBJECT_PROTOCOL_SUBSREF: StaticMethodName = crate::OBJECT_SUBSREF_METHOD;
 pub const OBJECT_PROTOCOL_SUBSASGN: StaticMethodName = crate::OBJECT_SUBSASGN_METHOD;
