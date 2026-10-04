@@ -44,7 +44,7 @@ pub struct RuntimeMethod {
     /// Declaration-time spelling resolved into `BoundRuntimeMethod::callable`
     /// during class registration. Execution never reinterprets this string.
     pub function_name: String,
-    pub implicit_class_argument: Option<String>,
+    pub implicit_class_argument: Option<ClassIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,22 +218,13 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
         standard::UINT32,
         standard::UINT64,
     ] {
-        let method = RuntimeMethod {
-            name: "zeros".into(),
-            is_static: true,
-            is_abstract: false,
-            is_sealed: false,
-            access: MemberAccess::Public,
-            function_name: "zeros".into(),
-            implicit_class_argument: Some(class_name.display_name().to_owned()),
-        };
         registry.insert(
             class_name.owned(),
             RuntimeClass {
                 name: class_name.owned(),
                 parent: None,
                 properties: HashMap::new(),
-                methods: HashMap::from([("zeros".into(), method)]),
+                methods: standard_runtime_methods(class_name),
             },
         );
     }
@@ -716,10 +707,22 @@ mod tests {
             assert!(method.is_static);
             assert_eq!(method.function_name, "zeros");
             assert_eq!(
-                method.implicit_class_argument.as_deref(),
+                method
+                    .implicit_class_argument
+                    .as_ref()
+                    .map(ClassIdentity::display_name),
                 Some(name.display_name())
             );
         }
+        let (gpu_zeros, owner) = lookup_method(
+            &standard::GPU_ARRAY.owned(),
+            &runmat_types::MethodName::from("zeros"),
+        )
+        .unwrap();
+        assert_eq!(owner, standard::GPU_ARRAY.owned());
+        assert!(gpu_zeros.is_static);
+        assert_eq!(gpu_zeros.function_name, "zeros");
+        assert_eq!(gpu_zeros.implicit_class_argument, Some(owner));
     }
 
     #[test]

@@ -57,6 +57,16 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
             is_abstract: false,
             properties: Vec::new(),
             methods: vec![
+                ExternalMethodDeclaration {
+                    name: StaticMethodName::new("zeros").owned(),
+                    attributes: MethodAttributes {
+                        access: MemberAccess::Public,
+                        ..MethodAttributes::default()
+                    },
+                    is_static: true,
+                    callable: CallableIdentity::Builtin(BuiltinId("zeros".into())),
+                    implicit_class_argument: Some(standard::GPU_ARRAY.owned()),
+                },
                 public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("arrayfun")),
                 public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("existsOnGPU")),
                 public_instance_method(standard::GPU_ARRAY, StaticMethodName::new("gather")),
@@ -101,7 +111,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
             },
             is_static: true,
             callable: CallableIdentity::Builtin(BuiltinId("zeros".into())),
-            implicit_class_argument: Some(primitive.display_name().to_owned()),
+            implicit_class_argument: Some(primitive.owned()),
         }];
         if [
             standard::INT8,
@@ -233,8 +243,20 @@ mod tests {
     #[test]
     fn gpu_array_methods_carry_complete_typed_declarations() {
         let declaration = standard_class_declaration(&standard::GPU_ARRAY.owned()).unwrap();
-        assert_eq!(declaration.methods.len(), 9);
+        assert_eq!(declaration.methods.len(), 10);
         for method in declaration.methods {
+            if method.is_static {
+                assert_eq!(method.name.0, "zeros");
+                assert_eq!(
+                    method.callable,
+                    CallableIdentity::Builtin(BuiltinId("zeros".into()))
+                );
+                assert_eq!(
+                    method.implicit_class_argument,
+                    Some(standard::GPU_ARRAY.owned())
+                );
+                continue;
+            }
             let CallableIdentity::ExternalName(callable) = method.callable else {
                 panic!("gpuArray method must carry a qualified callable identity");
             };

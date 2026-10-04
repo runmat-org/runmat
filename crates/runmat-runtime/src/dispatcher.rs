@@ -827,6 +827,13 @@ async fn try_call_registered_static_method(
     if !method.is_static || method.access != runmat_types::MemberAccess::Public {
         return Ok(None);
     }
+    let adapted = method.implicit_class_argument.as_ref().map(|class| {
+        let mut values = Vec::with_capacity(args.len() + 1);
+        values.extend_from_slice(args);
+        values.push(Value::String(class.display_name().to_owned()));
+        values
+    });
+    let args = adapted.as_deref().unwrap_or(args);
     if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
         &method.function_name,
         args,

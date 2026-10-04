@@ -1,4 +1,4 @@
-use crate::{ClassId, FunctionId, MemberName, MethodName, QualifiedName, Span};
+use crate::{ClassId, ClassIdentity, FunctionId, MemberName, MethodName, QualifiedName, Span};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ pub struct ExternalMethodDeclaration {
     pub attributes: MethodAttributes,
     pub is_static: bool,
     pub callable: crate::CallableIdentity,
-    pub implicit_class_argument: Option<String>,
+    pub implicit_class_argument: Option<ClassIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -32,6 +32,9 @@ use crate::builtins::common::{
 };
 use runmat_value::NumericDType;
 
+#[path = "zeros/gpu.rs"]
+mod gpu;
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "zeros",
@@ -121,9 +124,15 @@ enum OutputTemplate {
     Single,
     Logical,
     Integer(IntegerStorage),
-    /// GPU-resident zeros array request via 'gpuArray' keyword or gpuArray.zeros() static method
-    GpuArray,
+    /// GPU residency is independent of the requested underlying element class.
+    GpuArray(GpuElementClass),
     Like(Value),
+}
+
+#[derive(Clone, Copy)]
+enum GpuElementClass {
+    Numeric(NumericDType),
+    Logical,
 }
 
 impl ParsedZeros {
@@ -133,6 +142,7 @@ impl ParsedZeros {
         let mut shape_source: Option<Vec<usize>> = None;
         let mut like_proto: Option<Value> = None;
         let mut class_override: Option<OutputTemplate> = None;
+        let mut gpu_output = false;
         let mut implicit_proto: Option<Value> = None;
 
         let mut idx = 0;
@@ -144,7 +154,7 @@ impl ParsedZeros {
                         if like_proto.is_some() {
                             return Err(zeros_error(&ZEROS_ERROR_LIKE_DUPLICATE));
                         }
-                        if class_override.is_some() {
+                        if class_override.is_some() || gpu_output {
                             return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
@@ -158,7 +168,7 @@ impl ParsedZeros {
                         continue;
                     }
                     "logical" => {
-                        if like_proto.is_some() {
+                        if like_proto.is_some() || class_override.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
                                 "logical class override",
@@ -169,7 +179,7 @@ impl ParsedZeros {
                         continue;
                     }
                     "double" => {
-                        if like_proto.is_some() {
+                        if like_proto.is_some() || class_override.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
                                 "double class override",
@@ -180,7 +190,7 @@ impl ParsedZeros {
                         continue;
                     }
                     "single" => {
-                        if like_proto.is_some() {
+                        if like_proto.is_some() || class_override.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
                                 "single class override",
@@ -192,7 +202,7 @@ impl ParsedZeros {
                     }
                     "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
                     | "uint64" => {
-                        if like_proto.is_some() {
+                        if like_proto.is_some() || class_override.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
                                 format!("{keyword} class override"),
@@ -206,13 +216,13 @@ impl ParsedZeros {
                         continue;
                     }
                     "gpuArray" | "gpuarray" => {
-                        if like_proto.is_some() {
+                        if like_proto.is_some() || gpu_output {
                             return Err(zeros_error_with_detail(
                                 &ZEROS_ERROR_CLASS_CONFLICT,
                                 "gpuArray class override",
                             ));
                         }
-                        class_override = Some(OutputTemplate::GpuArray);
+                        gpu_output = true;
                         idx += 1;
                         continue;
                     }
@@ -301,6 +311,22 @@ impl ParsedZeros {
         } else {
             OutputTemplate::Double
         };
+        let template = if gpu_output {
+            let class = match template {
+                OutputTemplate::Double => GpuElementClass::Numeric(NumericDType::F64),
+                OutputTemplate::Single => GpuElementClass::Numeric(NumericDType::F32),
+                OutputTemplate::Logical => GpuElementClass::Logical,
+                OutputTemplate::Integer(storage) => {
+                    GpuElementClass::Numeric(storage.numeric_dtype())
+                }
+                OutputTemplate::Like(_) | OutputTemplate::GpuArray(_) => {
+                    return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
+                }
+            };
+            OutputTemplate::GpuArray(class)
+        } else {
+            template
+        };
 
         Ok(Self { shape, template })
     }
@@ -312,7 +338,7 @@ async fn build_output(parsed: ParsedZeros) -> crate::BuiltinResult<Value> {
         OutputTemplate::Single => zeros_single(&parsed.shape),
         OutputTemplate::Logical => zeros_logical(&parsed.shape),
         OutputTemplate::Integer(storage) => zeros_integer_like(&storage, &parsed.shape),
-        OutputTemplate::GpuArray => zeros_gpu(&parsed.shape).await,
+        OutputTemplate::GpuArray(element_class) => gpu::build(&parsed.shape, element_class).await,
         OutputTemplate::Like(proto) => zeros_like(&proto, &parsed.shape).await,
     }
 }
@@ -396,40 +422,6 @@ fn force_host_allocation(shape: &[usize]) -> bool {
 
 fn zeros_logical(shape: &[usize]) -> crate::BuiltinResult<Value> {
     Ok(Value::LogicalArray(LogicalArray::zeros(shape.to_vec())))
-}
-
-/// Create an explicitly GPU-resident zeros array.
-async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider()
-        .ok_or_else(|| builtin_error("zeros: no acceleration provider is available"))?;
-    let precision = provider.precision();
-    let dtype = dtype_from_precision(precision);
-    let handle = match provider.zeros(shape) {
-        Ok(handle) => handle,
-        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
-            let host = tensor::zeros_with_dtype(shape, dtype)?;
-            gpu_helpers::upload_tensor(provider, &host)?
-        }
-        Err(cause) => {
-            return Err(crate::build_runtime_error(format!(
-                "zeros: provider allocation failed: {cause}"
-            ))
-            .with_builtin("zeros")
-            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
-            .build())
-        }
-    };
-    validate_constructor_gpu_output(
-        "zeros",
-        provider,
-        handle,
-        shape,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-        Some(precision),
-        None,
-        false,
-    )
-    .map(Value::GpuTensor)
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -599,13 +591,6 @@ fn log_zeros_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
     );
 }
 
-fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
-    match precision {
-        ProviderPrecision::F32 => NumericDType::F32,
-        ProviderPrecision::F64 => NumericDType::F64,
-    }
-}
-
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
@@ -702,6 +687,35 @@ pub(crate) mod tests {
         let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
 
         let error = zeros_double(&[2, 2]).expect_err("invalid provider output must be terminal");
+        assert!(error.message().contains("invalid constructor result"));
+        assert_eq!(
+            provider
+                .result
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .retirements(),
+            1
+        );
+    }
+
+    #[test]
+    fn explicit_gpu_zeros_retires_invalid_owned_provider_result() {
+        let _guard = clear_accel_provider_state();
+        let provider = Box::leak(Box::new(InvalidAutomaticZerosProvider {
+            owner: TestAllocationOwner::new(),
+            result: Mutex::new(None),
+        }));
+        // SAFETY: the leaked fixture has a unique immutable device id.
+        unsafe { runmat_accelerate_api::register_device_provider(provider) };
+        let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let error = block_on(zeros_builtin(vec![
+            Value::Num(2.0),
+            Value::Num(2.0),
+            Value::from("gpuArray"),
+        ]))
+        .expect_err("malformed explicit provider result");
         assert!(error.message().contains("invalid constructor result"));
         assert_eq!(
             provider
@@ -1078,6 +1092,135 @@ pub(crate) mod tests {
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![0; 4]))
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn explicit_gpu_class_is_not_erased_by_residency_selector() {
+        test_support::with_test_provider(|_| {
+            for (class, expected_precision, expected_integer, logical) in [
+                ("double", Some(ProviderPrecision::F64), None, false),
+                ("single", Some(ProviderPrecision::F32), None, false),
+                ("uint64", None, Some(IntegerElementType::U64), false),
+                ("logical", None, None, true),
+            ] {
+                let result = block_on(zeros_builtin(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from(class),
+                    Value::from("gpuArray"),
+                ]))
+                .expect("typed GPU zeros");
+                let Value::GpuTensor(handle) = result else {
+                    panic!("explicit GPU constructor must stay resident");
+                };
+                assert_eq!(handle.shape(), vec![2, 3]);
+                if !logical {
+                    assert_eq!(
+                        runmat_accelerate_api::handle_precision(&handle),
+                        expected_precision
+                    );
+                }
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    expected_integer
+                );
+                assert_eq!(runmat_accelerate_api::handle_is_logical(&handle), logical);
+            }
+            let default = block_on(zeros_builtin(vec![
+                Value::Num(2.0),
+                Value::from("gpuArray"),
+            ]))
+            .expect("default GPU zeros");
+            let Value::GpuTensor(default) = default else {
+                panic!("default GPU zeros must stay resident");
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&default),
+                Some(ProviderPrecision::F64)
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn conflicting_gpu_class_controls_reject_before_provider_work() {
+        let _guard = clear_accel_provider_state();
+        for args in [
+            vec![
+                Value::Num(2.0),
+                Value::from("single"),
+                Value::from("double"),
+                Value::from("gpuArray"),
+            ],
+            vec![
+                Value::Num(2.0),
+                Value::from("gpuArray"),
+                Value::from("single"),
+            ],
+            vec![
+                Value::Num(2.0),
+                Value::from("gpuArray"),
+                Value::from("gpuArray"),
+            ],
+        ] {
+            let error = block_on(zeros_builtin(args)).expect_err("conflicting class controls");
+            assert!(error.to_string().contains("class"));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn static_and_feval_gpu_zeros_use_one_class_selector() {
+        test_support::with_test_provider(|_| {
+            let args = [Value::Num(2.0), Value::Num(3.0), Value::from("single")];
+            let direct = block_on(crate::call_builtin_async_with_outputs(
+                "gpuArray.zeros",
+                &args,
+                1,
+            ))
+            .expect("dotted static zeros");
+            let via_feval = block_on(crate::call_feval_async_with_outputs(
+                Value::from("gpuArray.zeros"),
+                &args,
+                1,
+            ))
+            .expect("feval static zeros");
+            for result in [direct, via_feval] {
+                let Value::GpuTensor(handle) = result else {
+                    panic!("static GPU zeros must remain resident");
+                };
+                assert_eq!(handle.shape(), vec![2, 3]);
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&handle),
+                    Some(ProviderPrecision::F32)
+                );
+            }
+            let primitive = block_on(crate::call_builtin_async_with_outputs(
+                "uint8.zeros",
+                &[Value::Num(2.0)],
+                1,
+            ))
+            .expect("primitive static zeros");
+            assert!(
+                matches!(primitive, Value::Tensor(ref tensor) if tensor.numeric_dtype() == NumericDType::U8)
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn default_gpu_class_never_falls_back_to_preferred_single() {
+        test_support::with_f32_test_provider(|_| {
+            let result = block_on(zeros_builtin(vec![
+                Value::Num(2.0),
+                Value::from("gpuArray"),
+            ]));
+            assert!(
+                result.is_err(),
+                "F32-only provider must not publish single for default double request"
             );
         });
     }

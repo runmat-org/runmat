@@ -7,6 +7,10 @@ use runmat_types::{
     ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
+#[cfg(test)]
+#[path = "creation/zeros_tests.rs"]
+mod zeros_tests;
+
 pub(super) fn infer_zeros(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     let literals = &request.literals.literal_args;
@@ -16,26 +20,84 @@ pub(super) fn infer_zeros(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
     let trailing_class = literals
         .last()
         .and_then(literal_text)
-        .filter(|value| !value.eq_ignore_ascii_case("like"));
+        .filter(|value| !value.eq_ignore_ascii_case("like"))
+        .filter(|_| like_index.is_none_or(|index| index + 1 != literals.len() - 1));
+    let gpu_output = trailing_class
+        .as_deref()
+        .is_some_and(|class| class.eq_ignore_ascii_case("gpuarray"));
+    let element_class = if gpu_output {
+        literals
+            .get(literals.len().saturating_sub(2))
+            .and_then(literal_text)
+            .filter(|class| {
+                NumericClass::from_class_name(class).is_some()
+                    || class.eq_ignore_ascii_case("logical")
+            })
+    } else {
+        trailing_class.clone()
+    };
     let dimension_end = like_index.unwrap_or_else(|| {
-        trailing_class
-            .as_ref()
-            .map_or(literals.len(), |_| literals.len().saturating_sub(1))
+        literals.len().saturating_sub(
+            usize::from(trailing_class.is_some())
+                + usize::from(gpu_output && element_class.is_some()),
+        )
     });
 
     let mut output = like_index
         .and_then(|index| request.arguments.get(index + 1))
         .cloned()
         .unwrap_or_else(default_double_scalar);
+    if gpu_output && element_class.is_none() && literals.len() >= 2 {
+        let preceding = literals.len() - 2;
+        if matches!(literals[preceding], LiteralValue::Unknown)
+            && matches!(
+                request.arguments[preceding].kind,
+                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+            )
+        {
+            output.kind = ValueKindFact::Unknown;
+        }
+    }
 
-    if let Some(class) = trailing_class.as_deref() {
+    let known_class_controls: Vec<_> = literals
+        .iter()
+        .enumerate()
+        .filter_map(|(index, literal)| {
+            if like_index.is_some_and(|like| index == like + 1) {
+                return None;
+            }
+            let class = literal_text(literal)?;
+            (NumericClass::from_class_name(&class).is_some()
+                || class.eq_ignore_ascii_case("logical")
+                || class.eq_ignore_ascii_case("gpuarray"))
+            .then_some((index, class))
+        })
+        .collect();
+    if known_class_controls.len() > 1
+        && !(known_class_controls.len() == 2
+            && known_class_controls[1].0 == literals.len() - 1
+            && known_class_controls[1].1.eq_ignore_ascii_case("gpuarray")
+            && !known_class_controls[0].1.eq_ignore_ascii_case("gpuarray"))
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-ZEROS-CLASS-CONFLICT",
+            "class and gpuArray controls must be a single element class followed by gpuArray",
+            known_class_controls[1].0,
+        ));
+    }
+    if like_index.is_some() && !known_class_controls.is_empty() {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-ZEROS-CLASS-CONFLICT",
+            "like cannot be combined with class or gpuArray controls",
+            known_class_controls[0].0,
+        ));
+    }
+
+    if let Some(class) = element_class.as_deref() {
         if let Some(numeric_class) = NumericClass::from_class_name(class) {
             output.kind = numeric_kind(numeric_class, NumericDomain::Real);
         } else if class.eq_ignore_ascii_case("logical") {
             output.kind = ValueKindFact::Logical;
-        } else if class.eq_ignore_ascii_case("gpuarray") {
-            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            output.residency = ResidencyFact::Device { provider: None };
         } else {
             diagnostics.push(argument_error(
                 "RM-CATALOG-ZEROS-CLASS",
@@ -44,12 +106,14 @@ pub(super) fn infer_zeros(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             ));
         }
     }
+    if gpu_output {
+        output.residency = ResidencyFact::Device { provider: None };
+        output.storage = StorageFact::Dense;
+    }
 
     if dimension_end > 0 {
         output.shape = zeros_shape(request, dimension_end);
         output.storage = StorageFact::Dense;
-    } else if like_index.is_none() {
-        output = default_double_scalar();
     }
     finish_fixed(entry, request, output, diagnostics)
 }

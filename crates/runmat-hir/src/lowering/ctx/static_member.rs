@@ -44,7 +44,7 @@ impl LoweringCtx {
         if let Some(class_argument) = method.implicit_class_argument {
             call_args.push(HirExpr {
                 id: self.alloc_expr_id(),
-                kind: HirExprKind::String(StringLiteral(class_argument)),
+                kind: HirExprKind::String(StringLiteral(class_argument.display_name().to_owned())),
                 span: base.span(),
             });
         }

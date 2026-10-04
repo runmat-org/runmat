@@ -64,6 +64,26 @@ fn implicit_class_arguments_are_preserved_for_bare_methods() {
 }
 
 #[test]
+fn gpu_zeros_lowers_to_canonical_constructor_with_typed_class_selector() {
+    for source in [
+        "A = gpuArray.zeros;",
+        "A = gpuArray.zeros();",
+        "A = gpuArray.zeros(2, 3, 'single');",
+    ] {
+        let call = first_call(source, &LoweringContext::empty());
+        assert!(matches!(call.callee, HirCallableRef::Builtin(ref id) if id.0 == "zeros"));
+        assert!(
+            matches!(&call.args.last().unwrap().kind, HirExprKind::String(value) if value.0 == "gpuArray")
+        );
+        if source.contains("single") {
+            assert!(
+                matches!(&call.args[call.args.len() - 2].kind, HirExprKind::String(value) if value.0 == "single")
+            );
+        }
+    }
+}
+
+#[test]
 fn omitted_parentheses_preserve_requested_output_arity() {
     for (bare, explicit) in [
         ("uint8.empty;", "uint8.empty();"),
