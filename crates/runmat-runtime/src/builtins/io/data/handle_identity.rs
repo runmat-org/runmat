@@ -2,13 +2,15 @@
 //!
 //! This is not a resource certificate. Values outside the synchronous work
 //! budget are unavailable until a cooperative staged identity producer exists.
+//! Fixed-width numeric encodings are bounded by the node limit; the byte
+//! limit covers variable text and shape payloads, not every hash framing byte.
 
 use runmat_execution::Digest;
 use runmat_value::{NumericDType, NumericScalar, Value};
 use sha2::{Digest as _, Sha256};
 
 const MAX_NODES: usize = 4_096;
-const MAX_BYTES: usize = 1_048_576;
+const MAX_TEXT_SHAPE_BYTES: usize = 1_048_576;
 const MAX_DEPTH: usize = 64;
 
 #[repr(u8)]
@@ -27,30 +29,51 @@ enum ValueTag {
     Struct,
 }
 
-struct HashBudget {
+pub(super) struct HashBudget {
     nodes: usize,
-    bytes: usize,
+    text_shape_bytes: usize,
+    exhausted: bool,
 }
 
 impl HashBudget {
+    pub(super) fn new() -> Self {
+        Self {
+            nodes: MAX_NODES,
+            text_shape_bytes: MAX_TEXT_SHAPE_BYTES,
+            exhausted: false,
+        }
+    }
+
+    pub(super) fn is_exhausted(&self) -> bool {
+        self.exhausted
+    }
+
     fn node(&mut self) -> Option<()> {
-        self.nodes = self.nodes.checked_sub(1)?;
+        self.nodes = self.nodes.checked_sub(1).or_else(|| {
+            self.exhausted = true;
+            None
+        })?;
         Some(())
     }
 
     fn bytes(&mut self, count: usize) -> Option<()> {
-        self.bytes = self.bytes.checked_sub(count)?;
+        self.text_shape_bytes = self.text_shape_bytes.checked_sub(count).or_else(|| {
+            self.exhausted = true;
+            None
+        })?;
         Some(())
     }
 }
 
-pub(super) fn exact_digest(value: &Value) -> Option<Digest> {
+pub(super) fn exact_digest_with(budget: &mut HashBudget, value: &Value) -> Option<Digest> {
+    if budget.exhausted {
+        return None;
+    }
     let mut hasher = Sha256::new();
-    let mut budget = HashBudget {
-        nodes: MAX_NODES,
-        bytes: MAX_BYTES,
-    };
-    hash_value(&mut hasher, &mut budget, value, 0)?;
+    if hash_value(&mut hasher, budget, value, 0).is_none() {
+        budget.exhausted = true;
+        return None;
+    }
     Some(Digest::from_bytes(hasher.finalize().into()))
 }
 
@@ -163,7 +186,10 @@ fn text_bytes(hash: &mut Sha256, budget: &mut HashBudget, value: &str) -> Option
 }
 
 fn shape(hash: &mut Sha256, budget: &mut HashBudget, dimensions: &[usize]) -> Option<()> {
-    budget.nodes = budget.nodes.checked_sub(dimensions.len())?;
+    budget.nodes = budget.nodes.checked_sub(dimensions.len()).or_else(|| {
+        budget.exhausted = true;
+        None
+    })?;
     budget.bytes(dimensions.len().checked_mul(8)?)?;
     length(hash, dimensions.len());
     for dimension in dimensions {

@@ -72,6 +72,17 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
     assert!(handle_admission::input(&huge_chars)
         .identity_digest
         .is_none());
+    let mut whole_call = super::super::handle_identity::HashBudget::new();
+    let first =
+        handle_admission::input_with_budget(&Value::String("a".repeat(600_000)), &mut whole_call);
+    let second =
+        handle_admission::input_with_budget(&Value::String("b".repeat(600_000)), &mut whole_call);
+    assert!(first.identity_digest.is_some());
+    assert!(
+        second.identity_digest.is_none(),
+        "aggregate text work exceeds one call budget"
+    );
+    assert!(whole_call.is_exhausted());
 }
 
 #[test]

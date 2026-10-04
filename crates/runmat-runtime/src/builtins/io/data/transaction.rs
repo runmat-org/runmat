@@ -39,11 +39,7 @@ async fn data_tx_write_builtin(
     }
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.write arrayName")?;
-    let facts = [
-        handle_admission::input(&array_name),
-        handle_admission::input(&slice),
-        handle_admission::input(&values),
-    ];
+    let facts = handle_admission::inputs(&[&array_name, &slice, &values]);
     handle_admission::execute_facts(
         runtime.as_ref(),
         &owner,
@@ -82,10 +78,7 @@ async fn data_tx_set_attr_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let key_text = parse_string(&key, "DataTransaction.set_attr key")?;
-    let facts = [
-        handle_admission::input(&key),
-        handle_admission::input(&value),
-    ];
+    let facts = handle_admission::inputs(&[&key, &value]);
     handle_admission::execute_facts(
         runtime.as_ref(),
         &owner,
@@ -120,7 +113,7 @@ async fn data_tx_set_attrs_builtin(
     attrs: Value,
 ) -> BuiltinResult<Value> {
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
-    let facts = [handle_admission::input(&attrs)];
+    let facts = handle_admission::inputs(&[&attrs]);
     let Value::Struct(incoming) = attrs else {
         return Err(data_error(
             "DataTransaction.set_attrs: attrs must be struct",
@@ -171,10 +164,7 @@ async fn data_tx_resize_builtin(
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.resize arrayName")?;
     let shape = parse_shape_from_value(&new_shape)?;
-    let facts = [
-        handle_admission::input(&array_name),
-        handle_admission::input(&new_shape),
-    ];
+    let facts = handle_admission::inputs(&[&array_name, &new_shape]);
     handle_admission::execute_facts(
         runtime.as_ref(),
         &owner,
@@ -218,11 +208,9 @@ async fn data_tx_fill_builtin(
     }
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.fill arrayName")?;
-    let mut facts = vec![
-        handle_admission::input(&array_name),
-        handle_admission::input(&value),
-    ];
-    facts.extend(rest.iter().map(handle_admission::input));
+    let mut controls = vec![&array_name, &value];
+    controls.extend(rest.iter());
+    let facts = handle_admission::inputs(&controls);
     let slice_spec = rest.first().cloned();
     handle_admission::execute_facts(
         runtime.as_ref(),
@@ -261,7 +249,7 @@ async fn data_tx_delete_array_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.delete_array arrayName")?;
-    let facts = [handle_admission::input(&array_name)];
+    let facts = handle_admission::inputs(&[&array_name]);
     handle_admission::execute_facts(
         runtime.as_ref(),
         &owner,
@@ -298,10 +286,7 @@ async fn data_tx_create_array_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.create_array arrayName")?;
-    let facts = [
-        handle_admission::input(&array_name),
-        handle_admission::input(&meta),
-    ];
+    let facts = handle_admission::inputs(&[&array_name, &meta]);
     let meta = parse_array_meta(&array_name_text, &meta)?;
     handle_admission::execute_facts(
         runtime.as_ref(),
@@ -348,7 +333,11 @@ async fn commit(
     rest: Vec<Value>,
     operation: Op,
 ) -> BuiltinResult<Value> {
-    let mut input_facts = rest.iter().map(handle_admission::input).collect::<Vec<_>>();
+    let mut identity_budget = super::handle_identity::HashBudget::new();
+    let mut input_facts = rest
+        .iter()
+        .map(|value| handle_admission::input_with_budget(value, &mut identity_budget))
+        .collect::<Vec<_>>();
     let options = match rest.as_slice() {
         [] => None,
         [Value::Struct(options)] => Some(options),
@@ -382,18 +371,44 @@ async fn commit(
         }
         let mut queue_facts = vec![handle_admission::queue_input(tx)];
         for write in &tx.writes {
-            if let Some(slice) = &write.slice_spec {
-                queue_facts.push(handle_admission::input(slice));
+            if identity_budget.is_exhausted() {
+                break;
             }
-            queue_facts.push(handle_admission::input(&write.value));
+            if let Some(slice) = &write.slice_spec {
+                queue_facts.push(handle_admission::input_with_budget(
+                    slice,
+                    &mut identity_budget,
+                ));
+            }
+            queue_facts.push(handle_admission::input_with_budget(
+                &write.value,
+                &mut identity_budget,
+            ));
         }
         for fill in &tx.fills {
-            if let Some(slice) = &fill.slice_spec {
-                queue_facts.push(handle_admission::input(slice));
+            if identity_budget.is_exhausted() {
+                break;
             }
-            queue_facts.push(handle_admission::input(&fill.value));
+            if let Some(slice) = &fill.slice_spec {
+                queue_facts.push(handle_admission::input_with_budget(
+                    slice,
+                    &mut identity_budget,
+                ));
+            }
+            queue_facts.push(handle_admission::input_with_budget(
+                &fill.value,
+                &mut identity_budget,
+            ));
         }
-        queue_facts.extend(tx.attrs.values().map(handle_admission::input));
+        for value in tx.attrs.values() {
+            if identity_budget.is_exhausted() {
+                break;
+            }
+            queue_facts.push(handle_admission::input_with_budget(
+                value,
+                &mut identity_budget,
+            ));
+        }
         Ok((
             tx.dataset_path.clone(),
             tx.base_sequence,

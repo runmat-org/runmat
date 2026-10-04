@@ -17,9 +17,10 @@ pub(super) fn select(
     operation: DatasetHandleOperation,
     arguments: &[&Value],
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
+    let mut budget = super::handle_identity::HashBudget::new();
     let facts = arguments
         .iter()
-        .map(|&value| input(value))
+        .map(|&value| input_with_budget(value, &mut budget))
         .collect::<Vec<_>>();
     select_facts(runtime, owner, operation, &facts)
 }
@@ -80,11 +81,33 @@ pub(super) async fn execute_facts<T>(
     super::execution::execute(runtime, receipt, effect).await
 }
 
+#[cfg(test)]
 pub(super) fn input(value: &Value) -> DatasetHandleInput {
+    let mut budget = super::handle_identity::HashBudget::new();
+    input_with_budget(value, &mut budget)
+}
+
+pub(super) fn input_with_budget(
+    value: &Value,
+    budget: &mut super::handle_identity::HashBudget,
+) -> DatasetHandleInput {
+    let identity_digest = super::handle_identity::exact_digest_with(budget, value);
     DatasetHandleInput {
-        fact: crate::value_fact::value_fact(value),
-        identity_digest: super::handle_identity::exact_digest(value),
+        fact: if identity_digest.is_some() {
+            crate::value_fact::value_fact(value)
+        } else {
+            runmat_types::ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue)
+        },
+        identity_digest,
     }
+}
+
+pub(super) fn inputs(arguments: &[&Value]) -> Vec<DatasetHandleInput> {
+    let mut budget = super::handle_identity::HashBudget::new();
+    arguments
+        .iter()
+        .map(|value| input_with_budget(value, &mut budget))
+        .collect()
 }
 
 #[derive(serde::Serialize)]
