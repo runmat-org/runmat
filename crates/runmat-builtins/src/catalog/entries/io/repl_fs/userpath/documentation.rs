@@ -56,7 +56,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
             BuiltinDocumentationLink { label: "Session hydration", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-core/src/session/user_path.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Path origin, revision, and captured namespace", location: "builtins::common::path_state::tests" }],
-        notes: &["Native and browser durable storage adapters and isolated application-settings example fixtures require integrated execution qualification."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

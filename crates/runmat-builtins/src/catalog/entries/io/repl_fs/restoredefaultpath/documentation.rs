@@ -53,7 +53,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
             BuiltinDocumentationLink { label: "Origin-preserving search path", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/common/path_state/layers.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Factory restoration and origin preservation", location: "builtins::common::path_state::tests" }],
-        notes: &["Integrated native and browser session-hydration execution remains required."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
