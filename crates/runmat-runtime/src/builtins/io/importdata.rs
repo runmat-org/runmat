@@ -247,6 +247,12 @@ where
     builtin_path = "crate::builtins::io::importdata"
 )]
 async fn importdata_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
+        return Err(importdata_error_with(
+            &IMPORTDATA_ERROR_ARGUMENT,
+            "importdata: at most three outputs are available",
+        ));
+    }
     if rest.len() > 2 {
         return Err(importdata_error(&IMPORTDATA_ERROR_ARGUMENT));
     }
@@ -869,6 +875,16 @@ mod tests {
         let out = block_on(importdata_builtin(Value::from("data.txt"), Vec::new()))
             .expect("import from captured owner");
         assert_eq!(tensor_data(&out), (vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn excessive_outputs_reject_before_missing_file_read() {
+        let _requested = crate::output_count::push_output_count(Some(4));
+        let err = block_on(importdata_builtin(Value::from("missing.txt"), Vec::new()))
+            .expect_err("output bound");
+        assert_eq!(err.identifier(), Some("RunMat:importdata:InvalidArgument"));
+        assert!(err.message().contains("at most three outputs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
