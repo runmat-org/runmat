@@ -182,7 +182,7 @@ fn preference_read_is_unpolled_effect_free_and_cancellation_suppresses_publicati
     let error = run(read_smtp_server(Some(runtime))).expect_err("cancelled read");
     assert_eq!(
         error.identifier(),
-        crate::context::ExecutionServiceError::Cancelled
+        crate::execution::ExecutionServiceError::Cancelled
             .into_runtime_error()
             .identifier()
     );
