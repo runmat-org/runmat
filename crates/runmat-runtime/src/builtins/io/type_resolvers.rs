@@ -30,22 +30,6 @@ pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::cell()
 }
 
-pub fn load_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    struct_type(args, ctx)
-}
-
-pub fn save_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
-pub fn matfile_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-pub fn matfile_subsref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 pub fn accept_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -139,14 +123,6 @@ mod tests {
             }
         };
     }
-
-    assert_resolver!(
-        load_type_resolver,
-        load_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
-    assert_resolver!(save_type_resolver, save_type, &[], Type::Num);
 
     assert_resolver!(
         accept_type_resolver,

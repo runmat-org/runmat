@@ -1,19 +1,12 @@
 //! MATLAB-compatible `load` builtin for RunMat.
 
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
-};
 use std::collections::HashMap;
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
 
 use flate2::read::ZlibDecoder;
 use regex::Regex;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
@@ -34,172 +27,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::object_serialization::restore_value_from_mat_load;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const LOAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Struct containing the loaded variables.",
-}];
-const LOAD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const LOAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: Some("\"matlab.mat\""),
-    description: "MAT-file path.",
-}];
-const LOAD_INPUTS_FILENAME_VARS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"matlab.mat\""),
-        description: "MAT-file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "varName",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Variable names to load.",
-    },
-];
-const LOAD_INPUTS_FILENAME_REGEXP: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"matlab.mat\""),
-        description: "MAT-file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-regexp\""),
-        description: "Regular-expression selection option.",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Regex patterns matched against variable names.",
-    },
-];
-const LOAD_INPUTS_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Compatibility options such as '-mat' and '-regexp'.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option arguments and variable selectors.",
-    },
-];
-const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "S = load()",
-        inputs: &LOAD_INPUTS_NONE,
-        outputs: &LOAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = load(filename)",
-        inputs: &LOAD_INPUTS_FILENAME,
-        outputs: &LOAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = load(filename, varName1, varName2, ...)",
-        inputs: &LOAD_INPUTS_FILENAME_VARS,
-        outputs: &LOAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = load(filename, \"-regexp\", pattern1, ...)",
-        inputs: &LOAD_INPUTS_FILENAME_REGEXP,
-        outputs: &LOAD_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = load(option, value, ...)",
-        inputs: &LOAD_INPUTS_OPTIONS,
-        outputs: &LOAD_OUTPUT,
-    },
-];
-const LOAD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.INVALID_ARGUMENT",
-    identifier: Some("RunMat:load:InvalidArgument"),
-    when: "Arguments do not match a supported load invocation form.",
-    message: "load: invalid argument",
+use runmat_builtins::{
+    LOAD_ERROR_FILENAME, LOAD_ERROR_INVALID_ARGUMENT, LOAD_ERROR_INVALID_OPTION, LOAD_ERROR_IO,
+    LOAD_ERROR_OUTPUT_COUNT, LOAD_ERROR_SELECTION, LOAD_ERROR_WORKSPACE,
 };
-const LOAD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.INVALID_OPTION",
-    identifier: Some("RunMat:load:InvalidOption"),
-    when: "An option token or option argument is invalid.",
-    message: "load: invalid option",
-};
-const LOAD_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.FILENAME",
-    identifier: Some("RunMat:load:Filename"),
-    when: "Filename is invalid or cannot be normalized.",
-    message: "load: invalid filename",
-};
-const LOAD_ERROR_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.SELECTION",
-    identifier: Some("RunMat:load:Selection"),
-    when: "Requested variables are missing or no variables are selected.",
-    message: "load: variable selection failed",
-};
-const LOAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.IO",
-    identifier: Some("RunMat:load:Io"),
-    when: "MAT-file data cannot be read or decoded.",
-    message: "load: MAT-file I/O failure",
-};
-const LOAD_ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.OUTPUT_COUNT",
-    identifier: Some("RunMat:load:OutputCount"),
-    when: "Caller requests more outputs than supported by load.",
-    message: "load: unsupported output count",
-};
-const LOAD_ERROR_WORKSPACE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOAD.WORKSPACE",
-    identifier: Some("RunMat:load:Workspace"),
-    when: "Statement-form load cannot assign values into workspace.",
-    message: "load: workspace assignment failed",
-};
-const LOAD_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    LOAD_ERROR_INVALID_ARGUMENT,
-    LOAD_ERROR_INVALID_OPTION,
-    LOAD_ERROR_FILENAME,
-    LOAD_ERROR_SELECTION,
-    LOAD_ERROR_IO,
-    LOAD_ERROR_OUTPUT_COUNT,
-    LOAD_ERROR_WORKSPACE,
-];
-pub const LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOAD_ERRORS,
-};
-
-pub const LOAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "integer_value = load(...) or S.integer_field = load(...)",
-        inputs: &[],
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Level-5 MAT integer class tags reconstruct signed or unsigned values of the same class, width, and shape, including nested cell, structure, sparse, complex-component, and RunMat object-envelope payloads.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -230,26 +61,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "load",
-    category = "io/mat",
-    summary = "Load variables from a MAT-file.",
-    keywords = "load,mat,workspace",
-    accel = "cpu",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::load_type),
-    descriptor(crate::builtins::io::mat::load::LOAD_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::mat::load::LOAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    // current_output_count() is set by the dispatcher only for multi-output Unpack patterns
-    // like `[a, b] = load(...)`. Guard against requesting more than one struct output.
-    if let Some(n) = crate::output_count::current_output_count() {
-        if n > 1 {
-            return Err(load_error_with(
-                &LOAD_ERROR_OUTPUT_COUNT,
-                "load supports at most one output argument",
-            ));
-        }
+    // The dispatcher scopes this count to the current call. Presentation
+    // output context may belong to an enclosing expression, so it is not an
+    // independent upper-bound witness for this invocation.
+    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(load_error_with(
+            &LOAD_ERROR_OUTPUT_COUNT,
+            "load supports at most one output argument",
+        ));
     }
     let eval = evaluate(&args).await?;
 
@@ -1756,6 +1579,7 @@ fn read_tagged<R: Read>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::LOAD_DESCRIPTOR;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -6,10 +6,7 @@ use std::path::{Path, PathBuf};
 
 use futures::future::LocalBoxFuture;
 use regex::Regex;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, IntValue, IntegerStorage, NumericDType, NumericStorage, StructValue,
@@ -31,166 +28,9 @@ use crate::builtins::introspection::object_serialization::prepare_value_for_mat_
 use crate::workspace;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const SAVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zero status code on success.",
-}];
-const SAVE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const SAVE_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: Some("\"matlab.mat\""),
-    description: "MAT-file output path.",
-}];
-const SAVE_INPUTS_FILENAME_VARS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"matlab.mat\""),
-        description: "MAT-file output path.",
-    },
-    BuiltinParamDescriptor {
-        name: "varName",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Workspace variable names to persist.",
-    },
-];
-const SAVE_INPUTS_STRUCT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"matlab.mat\""),
-        description: "MAT-file output path.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-struct\""),
-        description: "Struct field export option.",
-    },
-    BuiltinParamDescriptor {
-        name: "structVar",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Workspace struct variable name.",
-    },
-];
-const SAVE_INPUTS_REGEXP: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"matlab.mat\""),
-        description: "MAT-file output path.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-regexp\""),
-        description: "Regex selection option.",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Regex patterns matched against workspace variable names.",
-    },
-];
-const SAVE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "status = save()",
-        inputs: &SAVE_INPUTS_NONE,
-        outputs: &SAVE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = save(filename)",
-        inputs: &SAVE_INPUTS_FILENAME,
-        outputs: &SAVE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = save(filename, varName1, varName2, ...)",
-        inputs: &SAVE_INPUTS_FILENAME_VARS,
-        outputs: &SAVE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = save(filename, \"-struct\", structVar, field1, ...)",
-        inputs: &SAVE_INPUTS_STRUCT,
-        outputs: &SAVE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "status = save(filename, \"-regexp\", pattern1, ...)",
-        inputs: &SAVE_INPUTS_REGEXP,
-        outputs: &SAVE_OUTPUT,
-    },
-];
-const SAVE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:save:InvalidArgument"),
-    when: "Arguments do not match supported save invocation forms.",
-    message: "save: invalid argument",
-};
-const SAVE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.INVALID_OPTION",
-    identifier: Some("RunMat:save:InvalidOption"),
-    when: "Option token or option value is invalid.",
-    message: "save: invalid option",
-};
-const SAVE_ERROR_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.SELECTION",
-    identifier: Some("RunMat:save:Selection"),
-    when: "Requested variables or struct fields cannot be resolved.",
-    message: "save: variable selection failed",
-};
-const SAVE_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.FILENAME",
-    identifier: Some("RunMat:save:Filename"),
-    when: "Filename is invalid or cannot be normalized.",
-    message: "save: invalid filename",
-};
-const SAVE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.IO",
-    identifier: Some("RunMat:save:Io"),
-    when: "MAT-file cannot be written or finalized.",
-    message: "save: MAT-file I/O failure",
-};
-const SAVE_ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.UNSUPPORTED",
-    identifier: Some("RunMat:save:Unsupported"),
-    when: "Unsupported save mode or value type is requested.",
-    message: "save: unsupported operation",
-};
-const SAVE_ERROR_WORKSPACE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SAVE.WORKSPACE",
-    identifier: Some("RunMat:save:Workspace"),
-    when: "Workspace state is unavailable.",
-    message: "save: workspace state unavailable",
-};
-const SAVE_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    SAVE_ERROR_INVALID_ARGUMENT,
-    SAVE_ERROR_INVALID_OPTION,
-    SAVE_ERROR_SELECTION,
-    SAVE_ERROR_FILENAME,
-    SAVE_ERROR_IO,
-    SAVE_ERROR_UNSUPPORTED,
-    SAVE_ERROR_WORKSPACE,
-];
-pub const SAVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SAVE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SAVE_ERRORS,
+use runmat_builtins::{
+    SAVE_ERROR_FILENAME, SAVE_ERROR_INVALID_ARGUMENT, SAVE_ERROR_INVALID_OPTION, SAVE_ERROR_IO,
+    SAVE_ERROR_SELECTION, SAVE_ERROR_UNSUPPORTED, SAVE_ERROR_WORKSPACE,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::save")]
@@ -222,12 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "save",
-    category = "io/mat",
-    summary = "Save workspace variables to a MAT-file.",
-    keywords = "save,mat,workspace",
-    sink = true,
-    type_resolver(crate::builtins::io::type_resolvers::save_type),
-    descriptor(crate::builtins::io::mat::save::SAVE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::mat::save"
 )]
 async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1339,6 +1174,7 @@ fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::SAVE_DESCRIPTOR;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

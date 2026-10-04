@@ -4,11 +4,7 @@ use runmat_types::MemberAccess;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    MatFileOptionName,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, MatFileOptionName};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
@@ -25,8 +21,7 @@ use crate::{
 };
 
 const BUILTIN_NAME: &str = "matfile";
-pub(super) const MATFILE_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("matlab.io.MatFile");
+pub(super) use runmat_builtins::MATFILE_CLASS;
 const MATFILE_SUBSREF: &str = "matlab.io.MatFile.subsref";
 const MATFILE_SUBSASGN: &str = "matlab.io.MatFile.subsasgn";
 pub(super) const PROPERTIES_FIELD: &str = "Properties";
@@ -36,167 +31,9 @@ pub(super) const WRITABLE_FIELD: &str = "Writable";
 static MATFILE_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(MATFILE_CLASS);
 
-const MATFILE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "m",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "MAT-file compatibility object.",
-}];
-const MATFILE_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "MAT-file path.",
-}];
-const MATFILE_INPUTS_WRITABLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MAT-file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Writable\""),
-        description: "Writable option name.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: Some("false"),
-        description: "Whether whole-variable dot assignment writes back to the MAT-file.",
-    },
-];
-const MATFILE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "m = matfile(filename)",
-        inputs: &MATFILE_INPUTS_FILENAME,
-        outputs: &MATFILE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "m = matfile(filename, 'Writable', tf)",
-        inputs: &MATFILE_INPUTS_WRITABLE,
-        outputs: &MATFILE_OUTPUT,
-    },
-];
-const MATFILE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MATFILE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:matfile:InvalidArgument"),
-    when: "Arguments do not match supported matfile invocation forms.",
-    message: "matfile: invalid argument",
-};
-const MATFILE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MATFILE.INVALID_OPTION",
-    identifier: Some("RunMat:matfile:InvalidOption"),
-    when: "Name-value options are invalid or unsupported.",
-    message: "matfile: invalid option",
-};
-const MATFILE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MATFILE.IO",
-    identifier: Some("RunMat:matfile:Io"),
-    when: "MAT-file data cannot be read or written.",
-    message: "matfile: MAT-file I/O failure",
-};
-const MATFILE_ERROR_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MATFILE.SELECTION",
-    identifier: Some("RunMat:matfile:Selection"),
-    when: "Requested MAT-file variable is missing or invalid.",
-    message: "matfile: variable selection failed",
-};
-const MATFILE_ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MATFILE.UNSUPPORTED",
-    identifier: Some("RunMat:matfile:Unsupported"),
-    when: "Partial MAT-file indexing or unsupported object operations are requested.",
-    message: "matfile: unsupported operation",
-};
-const MATFILE_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    MATFILE_ERROR_INVALID_ARGUMENT,
-    MATFILE_ERROR_INVALID_OPTION,
-    MATFILE_ERROR_IO,
-    MATFILE_ERROR_SELECTION,
-    MATFILE_ERROR_UNSUPPORTED,
-];
-pub const MATFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATFILE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MATFILE_ERRORS,
-};
-
-const SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "MAT-file property or whole variable value.",
-}];
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MAT-file object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-];
-const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = matlab.io.MatFile.subsref(m, S)",
-    inputs: &SUBSREF_INPUTS,
-    outputs: &SUBSREF_OUTPUT,
-}];
-pub const MATFILE_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MATFILE_ERRORS,
-};
-
-const SUBSASGN_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MAT-file object.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value to write.",
-    },
-];
-const SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "m = matlab.io.MatFile.subsasgn(m, S, rhs)",
-    inputs: &SUBSASGN_INPUTS,
-    outputs: &MATFILE_OUTPUT,
-}];
-pub const MATFILE_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MATFILE_ERRORS,
+use runmat_builtins::{
+    MATFILE_ERROR_INVALID_ARGUMENT, MATFILE_ERROR_INVALID_OPTION, MATFILE_ERROR_IO,
+    MATFILE_ERROR_SELECTION, MATFILE_ERROR_UNSUPPORTED,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::matfile")]
@@ -230,11 +67,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name = "matfile",
     binding_variant = "default",
     context = true,
-    category = "io/mat",
-    summary = "Create a MAT-file object for whole-variable reads and writes.",
-    keywords = "matfile,mat,MAT-file,Writable",
-    type_resolver(crate::builtins::io::type_resolvers::matfile_type),
-    descriptor(crate::builtins::io::mat::matfile::MATFILE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::matfile"
 )]
 pub async fn matfile_builtin(
@@ -270,11 +102,6 @@ pub async fn matfile_builtin(
     name = "matlab.io.MatFile.subsref",
     binding_variant = "default",
     context = true,
-    category = "io/mat",
-    summary = "Read MAT-file object properties or whole variables.",
-    keywords = "matfile,subsref,MAT-file",
-    type_resolver(crate::builtins::io::type_resolvers::matfile_subsref_type),
-    descriptor(crate::builtins::io::mat::matfile::MATFILE_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::matfile"
 )]
 pub async fn matfile_subsref(
@@ -338,11 +165,6 @@ async fn matfile_read_step(
     name = "matlab.io.MatFile.subsasgn",
     binding_variant = "default",
     context = true,
-    category = "io/mat",
-    summary = "Write whole variables through a writable MAT-file object.",
-    keywords = "matfile,subsasgn,MAT-file,Writable",
-    type_resolver(crate::builtins::io::type_resolvers::matfile_type),
-    descriptor(crate::builtins::io::mat::matfile::MATFILE_SUBSASGN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::matfile"
 )]
 pub async fn matfile_subsasgn(
