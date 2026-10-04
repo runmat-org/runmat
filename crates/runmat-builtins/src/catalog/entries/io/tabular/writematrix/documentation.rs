@@ -21,7 +21,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
         BuiltinDocumentationSection { heading: "Residency, ownership and execution", paragraphs: &[
             "This is a host file-I/O sink and fusion boundary. Automatically resident values gather through their owning provider; direct explicit `gpuArray` input is a named RunMat extension, admitted before readback. No device kernel or device-resident output is advertised.",
-            "The selected filesystem provider, relative working directory and advertised lease are captured before awaited operand preparation and retained through open, write, flush and publication. Cancellation or failure can leave partial bytes. Finite complete-call memory evidence for gathered input and text formatting is not certified by this builtin.",
+            "The selected filesystem provider, relative working directory and advertised lease are captured before awaited operand preparation and retained through writing. Cancellation or failure can leave partial bytes, including after an overwrite truncates the destination. Large matrices and formatted text consume host memory.",
             "The original example programs and captions are retained here. The runnable gallery below uses isolated destination fixtures and assertions:",
             "Historical example 1 (Save a numeric matrix to a CSV file):\nA = [1 2 3; 4 5 6];\nwritematrix(A, \"results.csv\")",
             "Historical example 2 (Export data with a custom semicolon delimiter):\nA = [1 2 3; 4 5 6];\nwritematrix(A, \"results.dat\", 'Delimiter', ';')",
@@ -64,6 +64,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "writematrix runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix.rs") },
+            BuiltinDocumentationLink { label: "writematrix controls", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix/controls.rs") },
+            BuiltinDocumentationLink { label: "writematrix formatting", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix/format.rs") },
+            BuiltinDocumentationLink { label: "writematrix writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/writematrix/writer.rs") },
             BuiltinDocumentationLink { label: "Captured filesystem owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/path.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Matrix formatting, exact integers, append, and options", location: "builtins::io::tabular::writematrix::tests" }],
