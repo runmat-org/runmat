@@ -14,12 +14,6 @@ const JAVA_ADAPTER: &str = "java";
     name = "javaObject",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Construct an object from a Java class.",
-    keywords = "javaObject,java,jvm,constructor",
-    descriptor(runmat_builtins::JAVA_OBJECT_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_object_builtin(
@@ -33,12 +27,6 @@ async fn java_object_builtin(
     name = "javaObjectEDT",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Construct a Java object on the Desktop event-dispatch thread.",
-    keywords = "javaObjectEDT,java,jvm,desktop,edt,constructor",
-    descriptor(runmat_builtins::JAVA_OBJECT_EDT_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_object_edt_builtin(
@@ -52,12 +40,6 @@ async fn java_object_edt_builtin(
     name = "javaMethod",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Invoke a static or instance Java method.",
-    keywords = "javaMethod,java,jvm,method",
-    descriptor(runmat_builtins::JAVA_METHOD_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_method_builtin(
@@ -78,12 +60,6 @@ async fn java_method_builtin(
     name = "javaMethodEDT",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Invoke a Java method on the Desktop event-dispatch thread.",
-    keywords = "javaMethodEDT,java,jvm,desktop,edt,method",
-    descriptor(runmat_builtins::JAVA_METHOD_EDT_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_method_edt_builtin(
@@ -132,12 +108,6 @@ async fn java_method_dispatch(
     name = "javaArray",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Create a Java object array with the requested dimensions.",
-    keywords = "javaArray,java,jvm,array",
-    descriptor(runmat_builtins::JAVA_ARRAY_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_array_builtin(
@@ -151,14 +121,6 @@ async fn java_array_builtin(
     name = "javaaddpath",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Add an entry to the current session's dynamic Java classpath.",
-    keywords = "javaaddpath,java,jvm,classpath",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(runmat_builtins::JAVA_ADD_PATH_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_add_path_builtin(
@@ -194,14 +156,6 @@ async fn java_add_path_builtin(
     name = "javarmpath",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Remove an entry from the current session's dynamic Java classpath.",
-    keywords = "javarmpath,java,jvm,classpath",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(runmat_builtins::JAVA_REMOVE_PATH_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_remove_path_builtin(
@@ -223,12 +177,6 @@ async fn java_remove_path_builtin(
     name = "javaclasspath",
     binding_variant = "default",
     context = true,
-    execution_stack = "process",
-    category = "interop/java",
-    summary = "Inspect or replace the current session's Java classpath.",
-    keywords = "javaclasspath,java,jvm,classpath",
-    descriptor(runmat_builtins::JAVA_CLASSPATH_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn java_class_path_builtin(
@@ -274,11 +222,6 @@ async fn java_class_path_builtin(
     name = "jenv",
     binding_variant = "default",
     context = true,
-    category = "interop/java",
-    summary = "Inspect or configure the Java runtime environment for this session.",
-    keywords = "jenv,java,jvm,environment",
-    descriptor(runmat_builtins::JENV_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn jenv_builtin(
@@ -296,11 +239,6 @@ async fn jenv_builtin(
     name = "usejava",
     binding_variant = "default",
     context = true,
-    category = "interop/java",
-    summary = "Test whether a Java runtime feature is available.",
-    keywords = "usejava,java,jvm,awt,swing,desktop",
-    descriptor(runmat_builtins::USEJAVA_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 async fn use_java_builtin(
@@ -319,11 +257,6 @@ async fn use_java_builtin(
 #[runtime_builtin(
     name = "isjava",
     binding_variant = "default",
-    category = "interop/java",
-    summary = "Test whether a value carries Java foreign-reference identity.",
-    keywords = "isjava,java,jvm,object",
-    descriptor(runmat_builtins::ISJAVA_DESCRIPTOR),
-    integer_audit(runmat_builtins::JAVA_INTEGER_AUDIT),
     builtin_path = "crate::builtins::interop::java"
 )]
 fn is_java_builtin(value: Value) -> BuiltinResult<Value> {

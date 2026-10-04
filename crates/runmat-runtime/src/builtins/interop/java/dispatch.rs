@@ -50,6 +50,14 @@ impl JavaOperation {
             Self::UseJava => "usejava",
         }
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    const fn output_count(self) -> usize {
+        match self {
+            Self::AddClasspath | Self::RemoveClasspath | Self::SetClasspath => 0,
+            _ => 1,
+        }
+    }
 }
 
 pub(super) async fn invoke_java(
@@ -68,6 +76,7 @@ pub(super) async fn invoke_java(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let symbol = operation.symbol();
+        let output_count = operation.output_count();
         let context = context.ok_or_else(|| {
             java_error(
                 &JAVA_ERROR_HOST_UNAVAILABLE,
@@ -86,10 +95,18 @@ pub(super) async fn invoke_java(
                     adapter: super::JAVA_ADAPTER.into(),
                     symbol: symbol.into(),
                     arguments,
-                    requested_outputs: 1,
+                    requested_outputs: output_count,
                 },
             ))
             .await?;
+        if output_count == 0 {
+            if !sequence.is_empty() {
+                return Err(invalid_call(format!(
+                    "Java {symbol} returned an unexpected result value"
+                )));
+            }
+            return Ok(Value::OutputList(Vec::new()));
+        }
         let mut values = sequence.resolve(
             runmat_types::SequenceUse::RequireSingle,
             crate::sequence::SequenceResolutionContext::default(),

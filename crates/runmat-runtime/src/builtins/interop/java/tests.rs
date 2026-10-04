@@ -18,10 +18,18 @@ mod native {
         ) -> crate::context::RuntimeServiceFuture<
             Result<runmat_value::ValueSequence, crate::RuntimeError>,
         > {
+            let sink = matches!(
+                call.symbol.as_str(),
+                "add_classpath" | "remove_classpath" | "set_classpath"
+            );
             self.calls.borrow_mut().push(call);
-            Box::pin(async {
-                runmat_value::ValueSequence::single(Value::String("returned".into()))
-                    .map_err(|error| invalid_call(error.to_string()))
+            Box::pin(async move {
+                if sink {
+                    Ok(runmat_value::ValueSequence::empty())
+                } else {
+                    runmat_value::ValueSequence::single(Value::String("returned".into()))
+                        .map_err(|error| invalid_call(error.to_string()))
+                }
             })
         }
     }
@@ -86,6 +94,34 @@ mod native {
         ))
         .unwrap_err();
         assert_eq!(missing.identifier(), Some("RunMat:Foreign:HostUnavailable"));
+    }
+
+    #[test]
+    fn classpath_mutations_accept_the_adapters_zero_output_sequence() {
+        let (runtime, recorder) = context();
+        let path = Value::String("lib/example.jar".into());
+        let added = futures::executor::block_on(java_add_path_builtin(
+            Some(runtime.clone()),
+            vec![path.clone()],
+        ))
+        .unwrap();
+        assert_eq!(added, Value::OutputList(Vec::new()));
+        let removed = futures::executor::block_on(java_remove_path_builtin(
+            Some(runtime.clone()),
+            vec![path.clone()],
+        ))
+        .unwrap();
+        assert_eq!(removed, Value::OutputList(Vec::new()));
+        let replaced =
+            futures::executor::block_on(java_class_path_builtin(Some(runtime), vec![path]))
+                .unwrap();
+        assert_eq!(replaced, Value::OutputList(Vec::new()));
+        let calls = recorder.calls.borrow();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].symbol, "add_classpath");
+        assert_eq!(calls[1].symbol, "remove_classpath");
+        assert_eq!(calls[2].symbol, "set_classpath");
+        assert!(calls.iter().all(|call| call.requested_outputs == 0));
     }
 }
 
