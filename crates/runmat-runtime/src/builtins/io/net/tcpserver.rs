@@ -80,7 +80,7 @@ pub(crate) async fn tcpserver_builtin(
             BUILTIN_NAME,
         )?;
     }
-    preflight_name_value_extensions(&rest).await?;
+    let prepared_options = preflight_name_value_extensions(&rest).await?;
     let known_address = if matches!(&address, Value::GpuTensor(_)) {
         None
     } else {
@@ -118,7 +118,7 @@ pub(crate) async fn tcpserver_builtin(
         None => parse_endpoint_port(&port)?,
     };
 
-    let options = parse_name_value_pairs(rest).await?;
+    let options = parse_name_value_pairs(rest, prepared_options).await?;
 
     let listener = TcpListener::bind((host.as_str(), port)).map_err(|err| {
         super::error::with_source(
@@ -174,7 +174,9 @@ fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
     Ok(port_num)
 }
 
-async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
+async fn preflight_name_value_extensions(
+    rest: &[Value],
+) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
         return Err(tcpserver_flow(
             &TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -203,9 +205,10 @@ async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
         if let Some(option) = option {
             preflight_known_option_value(option, &pair[1])?;
         }
-        known.push((option, &pair[1]));
+        known.push(option);
     }
-    for (option, value) in known {
+    for (option, pair) in known.iter().copied().zip(rest.chunks_exact(2)) {
+        let value = &pair[1];
         match option {
             Some(NetConstructorOption::Timeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
@@ -224,10 +227,15 @@ async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
             }
             Some(NetConstructorOption::ByteOrder) => {}
             None => {}
-            Some(_) => unreachable!("tcpserver option admission excludes client-only controls"),
+            Some(_) => {
+                return Err(tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    "tcpserver: unsupported option",
+                ));
+            }
         }
     }
-    Ok(())
+    Ok(known)
 }
 
 fn preflight_known_option_value(option: NetConstructorOption, value: &Value) -> BuiltinResult<()> {
@@ -266,7 +274,12 @@ fn preflight_known_option_value(option: NetConstructorOption, value: &Value) -> 
             })?;
         }
         NetConstructorOption::UserData => {}
-        _ => unreachable!("tcpserver option admission excludes client-only controls"),
+        _ => {
+            return Err(tcpserver_flow(
+                &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                "tcpserver: unsupported option",
+            ));
+        }
     }
     Ok(())
 }
@@ -290,7 +303,10 @@ impl Default for ParsedOptions {
     }
 }
 
-async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions> {
+async fn parse_name_value_pairs(
+    rest: Vec<Value>,
+    prepared: Vec<Option<NetConstructorOption>>,
+) -> BuiltinResult<ParsedOptions> {
     if rest.is_empty() {
         return Ok(ParsedOptions::default());
     }
@@ -303,22 +319,33 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
 
     let mut options = ParsedOptions::default();
     let mut iter = rest.into_iter();
-    while let Some(name_raw) = iter.next() {
+    for prepared_option in prepared {
+        let name_raw = iter.next().expect("preflight retained paired option name");
         let value_raw = iter
             .next()
             .expect("even-length vector ensures paired name/value");
-        let name_value = gather_if_needed_async(&name_raw)
-            .await
-            .map_err(tcpserver_internal_source)?;
-
-        let name = string_scalar(&name_value, "OptionName").map_err(|err| {
-            tcpserver_flow(
-                &TCPSERVER_ERROR_INVALID_NAME_VALUE,
-                format!("tcpserver: invalid option name: {err}"),
-            )
-        })?;
-        match NetConstructorOption::tcpserver(&name) {
-            Some(NetConstructorOption::Timeout) => {
+        let option = match prepared_option {
+            Some(option) => option,
+            None => {
+                let name_value = gather_if_needed_async(&name_raw)
+                    .await
+                    .map_err(tcpserver_internal_source)?;
+                let name = string_scalar(&name_value, "OptionName").map_err(|err| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: invalid option name: {err}"),
+                    )
+                })?;
+                NetConstructorOption::tcpserver(&name).ok_or_else(|| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: unsupported option '{name}'"),
+                    )
+                })?
+            }
+        };
+        match option {
+            NetConstructorOption::Timeout => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_TIMEOUT_EXTENSION,
@@ -336,14 +363,14 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                     )
                 })?
             }
-            Some(NetConstructorOption::UserData) => {
+            NetConstructorOption::UserData => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 options.user_data = value_raw;
             }
-            Some(NetConstructorOption::Name) => {
+            NetConstructorOption::Name => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
@@ -359,7 +386,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 })?;
                 options.name = Some(text);
             }
-            Some(NetConstructorOption::ByteOrder) => {
+            NetConstructorOption::ByteOrder => {
                 let order_value = gather_if_needed_async(&value_raw)
                     .await
                     .map_err(tcpserver_internal_source)?;
@@ -377,13 +404,12 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 })?;
                 options.byte_order = canon.to_string();
             }
-            None => {
+            _ => {
                 return Err(tcpserver_flow(
                     &TCPSERVER_ERROR_INVALID_NAME_VALUE,
-                    format!("tcpserver: unsupported option '{name}'"),
+                    "tcpserver: unsupported option",
                 ));
             }
-            Some(_) => unreachable!("tcpserver option admission excludes client-only controls"),
         }
     }
 

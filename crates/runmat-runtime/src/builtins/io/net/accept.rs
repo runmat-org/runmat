@@ -29,7 +29,7 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
     if !matches!(server, Value::GpuTensor(_)) {
         extract_server_id(&server)?;
     }
-    preflight_accept_options(&rest)?;
+    let prepared_options = preflight_accept_options(&rest)?;
     super::transport::require_native_tcp(BUILTIN_NAME)?;
     let server = gather_if_needed_async(&server).await.map_err(|err| {
         super::error::with_source(
@@ -41,7 +41,7 @@ pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::Bu
     })?;
     let server_id = extract_server_id(&server)?;
 
-    let options = parse_accept_options(rest).await?;
+    let options = parse_accept_options(rest, prepared_options).await?;
 
     let shared_server = server_handle(server_id).ok_or_else(|| {
         accept_flow(
@@ -140,15 +140,17 @@ struct AcceptOptions {
     timeout: Option<f64>,
 }
 
-fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<()> {
+fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
         return Err(accept_flow(
             &ACCEPT_ERROR_INVALID_NAME_VALUE,
             "accept: name-value arguments must appear in pairs",
         ));
     }
+    let mut prepared = Vec::with_capacity(rest.len() / 2);
     for pair in rest.chunks_exact(2) {
         if matches!(&pair[0], Value::GpuTensor(_)) {
+            prepared.push(None);
             continue;
         }
         let name = crate::builtins::common::validation::value_text_scalar_string(&pair[0])
@@ -158,12 +160,12 @@ fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<()> {
                     format!("accept: invalid option name ({:?})", pair[0]),
                 )
             })?;
-        if NetConstructorOption::accept(&name).is_none() {
-            return Err(accept_flow(
+        let option = NetConstructorOption::accept(&name).ok_or_else(|| {
+            accept_flow(
                 &ACCEPT_ERROR_INVALID_NAME_VALUE,
                 format!("accept: unsupported option '{name}'"),
-            ));
-        }
+            )
+        })?;
         if !matches!(pair[1], Value::GpuTensor(_)) {
             parse_timeout_value(&pair[1]).map_err(|err| {
                 accept_flow(
@@ -172,11 +174,15 @@ fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<()> {
                 )
             })?;
         }
+        prepared.push(Some(option));
     }
-    Ok(())
+    Ok(prepared)
 }
 
-async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
+async fn parse_accept_options(
+    rest: Vec<Value>,
+    prepared: Vec<Option<NetConstructorOption>>,
+) -> BuiltinResult<AcceptOptions> {
     if rest.is_empty() {
         return Ok(AcceptOptions::default());
     }
@@ -189,22 +195,35 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
 
     let mut options = AcceptOptions::default();
     let mut iter = rest.into_iter();
-    while let Some(name_raw) = iter.next() {
+    for prepared_option in prepared {
+        let name_raw = iter.next().expect("preflight retained paired option name");
         let value_raw = iter
             .next()
             .expect("paired iteration guarantees value exists");
-        let name_value = gather_if_needed_async(&name_raw)
-            .await
-            .map_err(accept_internal_source)?;
-        let name = crate::builtins::common::validation::value_text_scalar_string(&name_value)
-            .ok_or_else(|| {
-                accept_flow(
-                    &ACCEPT_ERROR_INVALID_NAME_VALUE,
-                    format!("accept: invalid option name ({name_value:?})"),
-                )
-            })?;
-        match NetConstructorOption::accept(&name) {
-            Some(NetConstructorOption::Timeout) => {
+        let option = match prepared_option {
+            Some(option) => option,
+            None => {
+                let name_value = gather_if_needed_async(&name_raw)
+                    .await
+                    .map_err(accept_internal_source)?;
+                let name =
+                    crate::builtins::common::validation::value_text_scalar_string(&name_value)
+                        .ok_or_else(|| {
+                            accept_flow(
+                                &ACCEPT_ERROR_INVALID_NAME_VALUE,
+                                format!("accept: invalid option name ({name_value:?})"),
+                            )
+                        })?;
+                NetConstructorOption::accept(&name).ok_or_else(|| {
+                    accept_flow(
+                        &ACCEPT_ERROR_INVALID_NAME_VALUE,
+                        format!("accept: unsupported option '{name}'"),
+                    )
+                })?
+            }
+        };
+        match option {
+            NetConstructorOption::Timeout => {
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
                     .map_err(accept_internal_source)?;
@@ -216,13 +235,12 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
                 })?;
                 options.timeout = Some(timeout);
             }
-            None => {
+            _ => {
                 return Err(accept_flow(
                     &ACCEPT_ERROR_INVALID_NAME_VALUE,
-                    format!("accept: unsupported option '{name}'"),
+                    "accept: unsupported option",
                 ));
             }
-            Some(_) => unreachable!("accept option admission exposes only Timeout"),
         }
     }
     Ok(options)

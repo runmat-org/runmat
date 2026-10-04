@@ -83,7 +83,7 @@ pub(crate) async fn tcpclient_builtin(
         )?;
     }
     ensure_integer_extension(&port, &INTEGER_PORT_EXTENSION)?;
-    preflight_name_value_extensions(&rest).await?;
+    let prepared_options = preflight_name_value_extensions(&rest).await?;
     let known_host = if matches!(&host, Value::GpuTensor(_)) {
         None
     } else {
@@ -121,7 +121,7 @@ pub(crate) async fn tcpclient_builtin(
         None => parse_endpoint_port(&port)?,
     };
 
-    let options = parse_name_value_pairs(rest).await?;
+    let options = parse_name_value_pairs(rest, prepared_options).await?;
 
     let (stream, resolved_addr) =
         connect_with_timeout(&host_text, port_num, options.connect_timeout).map_err(|err| {
@@ -198,7 +198,9 @@ fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
     Ok(port_num)
 }
 
-async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
+async fn preflight_name_value_extensions(
+    rest: &[Value],
+) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
         return Err(tcpclient_flow(
             &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
@@ -227,9 +229,10 @@ async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
         if let Some(option) = option {
             preflight_known_option_value(option, &pair[1])?;
         }
-        known.push((option, &pair[1]));
+        known.push(option);
     }
-    for (option, value) in known {
+    for (option, pair) in known.iter().copied().zip(rest.chunks_exact(2)) {
+        let value = &pair[1];
         match option {
             Some(NetConstructorOption::Timeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
@@ -264,7 +267,7 @@ async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
             None => {}
         }
     }
-    Ok(())
+    Ok(known)
 }
 
 fn preflight_known_option_value(option: NetConstructorOption, value: &Value) -> BuiltinResult<()> {
@@ -338,7 +341,10 @@ impl Default for TcpClientOptions {
     }
 }
 
-async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOptions> {
+async fn parse_name_value_pairs(
+    rest: Vec<Value>,
+    prepared: Vec<Option<NetConstructorOption>>,
+) -> BuiltinResult<TcpClientOptions> {
     if rest.is_empty() {
         return Ok(TcpClientOptions::default());
     }
@@ -351,21 +357,33 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
 
     let mut options = TcpClientOptions::default();
     let mut iter = rest.into_iter();
-    while let Some(name_raw) = iter.next() {
+    for prepared_option in prepared {
+        let name_raw = iter.next().expect("preflight retained paired option name");
         let value_raw = iter
             .next()
             .expect("even-length vec ensures paired name/value");
-        let name_value = gather_if_needed_async(&name_raw)
-            .await
-            .map_err(tcpclient_internal_source)?;
-        let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
-            tcpclient_flow(
-                &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
-                format!("tcpclient: invalid option name ({err})"),
-            )
-        })?;
-        match NetConstructorOption::tcpclient(&option_name) {
-            Some(NetConstructorOption::Timeout) => {
+        let option = match prepared_option {
+            Some(option) => option,
+            None => {
+                let name_value = gather_if_needed_async(&name_raw)
+                    .await
+                    .map_err(tcpclient_internal_source)?;
+                let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: invalid option name ({err})"),
+                    )
+                })?;
+                NetConstructorOption::tcpclient(&option_name).ok_or_else(|| {
+                    tcpclient_flow(
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpclient: unsupported option '{option_name}'"),
+                    )
+                })?
+            }
+        };
+        match option {
+            NetConstructorOption::Timeout => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_TIMEOUT_EXTENSION,
@@ -383,7 +401,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                     )
                 })?;
             }
-            Some(NetConstructorOption::ConnectTimeout) => {
+            NetConstructorOption::ConnectTimeout => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_CONNECT_TIMEOUT_EXTENSION,
@@ -401,7 +419,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                     )
                 })?;
             }
-            Some(NetConstructorOption::ByteOrder) => {
+            NetConstructorOption::ByteOrder => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
@@ -423,14 +441,14 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 })?;
                 options.byte_order = canon.to_string();
             }
-            Some(NetConstructorOption::UserData) => {
+            NetConstructorOption::UserData => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 options.user_data = value_raw;
             }
-            Some(NetConstructorOption::Name) => {
+            NetConstructorOption::Name => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
@@ -446,7 +464,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                 })?;
                 options.name = Some(text);
             }
-            Some(NetConstructorOption::InputBufferSize) => {
+            NetConstructorOption::InputBufferSize => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
@@ -456,7 +474,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                     .map_err(tcpclient_internal_source)?;
                 options.input_buffer_size = parse_buffer_size(&gathered, "InputBufferSize")?;
             }
-            Some(NetConstructorOption::OutputBufferSize) => {
+            NetConstructorOption::OutputBufferSize => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
@@ -465,12 +483,6 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
                     .await
                     .map_err(tcpclient_internal_source)?;
                 options.output_buffer_size = parse_buffer_size(&gathered, "OutputBufferSize")?;
-            }
-            None => {
-                return Err(tcpclient_flow(
-                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
-                    format!("tcpclient: unsupported option '{option_name}'"),
-                ));
             }
         }
     }
