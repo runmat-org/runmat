@@ -65,8 +65,8 @@ pub(in crate::builtins::io::data) fn sanitize_label(label: &str) -> String {
 
 pub(in crate::builtins::io::data) async fn copy_file_on(
     provider: &dyn runmat_filesystem::FsProvider,
-    src: &PathBuf,
-    dst: &PathBuf,
+    src: &std::path::Path,
+    dst: &std::path::Path,
     budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
     crate::data::cooperate_data_work(budget, 0).await?;
@@ -116,8 +116,8 @@ pub(in crate::builtins::io::data) fn make_rel_data_path(
 #[async_recursion::async_recursion(?Send)]
 pub(in crate::builtins::io::data) async fn copy_dir_recursive_on(
     provider: &dyn runmat_filesystem::FsProvider,
-    src: &PathBuf,
-    dst: &PathBuf,
+    src: &std::path::Path,
+    dst: &std::path::Path,
     budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
     crate::data::cooperate_data_work(budget, 0).await?;

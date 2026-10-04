@@ -85,53 +85,51 @@ pub enum DatasetHandleOperation {
 
 impl DatasetHandleOperation {
     pub const fn accepts_role(self, role: DatasetHandleRole<'_>) -> bool {
-        match (self, role) {
+        matches!(
+            (self, role),
             (
                 Self::DatasetArray
-                | Self::DatasetArrays
-                | Self::DatasetAttrs
-                | Self::DatasetBegin
-                | Self::DatasetGetAttr
-                | Self::DatasetHasArray
-                | Self::DatasetId
-                | Self::DatasetPath
-                | Self::DatasetRefresh
-                | Self::DatasetSetAttr
-                | Self::DatasetSetAttrs
-                | Self::DatasetSnapshot
-                | Self::DatasetVersion,
+                    | Self::DatasetArrays
+                    | Self::DatasetAttrs
+                    | Self::DatasetBegin
+                    | Self::DatasetGetAttr
+                    | Self::DatasetHasArray
+                    | Self::DatasetId
+                    | Self::DatasetPath
+                    | Self::DatasetRefresh
+                    | Self::DatasetSetAttr
+                    | Self::DatasetSetAttrs
+                    | Self::DatasetSnapshot
+                    | Self::DatasetVersion,
                 DatasetHandleRole::Dataset,
-            ) => true,
-            (
+            ) | (
                 Self::ArrayChunkShape
-                | Self::ArrayCodec
-                | Self::ArrayDType
-                | Self::ArrayFill
-                | Self::ArrayName
-                | Self::ArrayRank
-                | Self::ArrayRead
-                | Self::ArrayResize
-                | Self::ArrayShape
-                | Self::ArrayWrite,
+                    | Self::ArrayCodec
+                    | Self::ArrayDType
+                    | Self::ArrayFill
+                    | Self::ArrayName
+                    | Self::ArrayRank
+                    | Self::ArrayRead
+                    | Self::ArrayResize
+                    | Self::ArrayShape
+                    | Self::ArrayWrite,
                 DatasetHandleRole::Array(_),
-            ) => true,
-            (
+            ) | (
                 Self::TransactionAbort
-                | Self::TransactionCommit
-                | Self::TransactionCreateArray
-                | Self::TransactionDeleteArray
-                | Self::TransactionFill
-                | Self::TransactionId
-                | Self::TransactionResize
-                | Self::TransactionSetAttr
-                | Self::TransactionSetAttrs
-                | Self::TransactionStatus
-                | Self::TransactionWrite
-                | Self::CommitAlias,
+                    | Self::TransactionCommit
+                    | Self::TransactionCreateArray
+                    | Self::TransactionDeleteArray
+                    | Self::TransactionFill
+                    | Self::TransactionId
+                    | Self::TransactionResize
+                    | Self::TransactionSetAttr
+                    | Self::TransactionSetAttrs
+                    | Self::TransactionStatus
+                    | Self::TransactionWrite
+                    | Self::CommitAlias,
                 DatasetHandleRole::Transaction(_),
-            ) => true,
-            _ => false,
-        }
+            )
+        )
     }
 
     pub const fn public_name(self) -> &'static str {
