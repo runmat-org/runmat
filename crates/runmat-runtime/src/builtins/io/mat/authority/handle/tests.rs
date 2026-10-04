@@ -31,6 +31,7 @@ fn object(runtime: Option<RuntimeContext>) -> ObjectInstance {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn managed_matfile_clone_is_valid_but_public_fields_cannot_retarget_it() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let runtime = context();
     let issued = object(Some(runtime.clone()));
     let clone = issued.clone();
@@ -89,6 +90,7 @@ fn revoked_captured_filesystem_keeps_typed_io_cause_on_receiver_resolution() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn detached_cross_session_and_ended_session_receivers_reject() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let runtime = context();
     let foreign = context();
     let issued = object(Some(runtime.clone()));
@@ -113,6 +115,7 @@ fn detached_cross_session_and_ended_session_receivers_reject() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn context_free_embedding_is_honestly_process_local() {
+    let _state = crate::builtins::io::mat::tests::state_guard();
     let issued = object(None);
     let unrelated = context();
     let resolved = resolve_matfile(Some(&unrelated), &issued).expect("embedding owner");
