@@ -440,7 +440,10 @@ mod geometry_tests {
     #[test]
     fn oversized_or_unbacked_cell_geometry_rejects_before_allocation() {
         assert!(shape_elements(&[usize::MAX, 2]).is_err());
-        assert_eq!(shape_elements(&[usize::MAX, usize::MAX, 0]), Ok(0));
+        assert_eq!(
+            shape_elements(&[usize::MAX, usize::MAX, 0]).expect("zero extent makes an empty array"),
+            0
+        );
         let mut payload = Cursor::new(&[][..]);
         let error = parse_cell_array(&mut payload, vec![1_000_000], Endian::Little)
             .err()

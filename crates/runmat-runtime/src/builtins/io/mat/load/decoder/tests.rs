@@ -3,7 +3,8 @@ use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServ
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use futures::executor::block_on;
-use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
