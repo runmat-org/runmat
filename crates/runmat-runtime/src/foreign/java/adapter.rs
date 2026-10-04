@@ -802,10 +802,10 @@ fn value_from_java_parts(
     Ok(Value::Foreign(reference))
 }
 
-fn classpath_paths<'a>(
-    snapshot: &'a ClasspathSnapshot,
+fn classpath_paths(
+    snapshot: &ClasspathSnapshot,
     layer: runmat_builtins::JavaClasspathQuery,
-) -> Vec<&'a std::path::PathBuf> {
+) -> Vec<&std::path::PathBuf> {
     match layer {
         runmat_builtins::JavaClasspathQuery::All => snapshot
             .bootstrap
