@@ -82,7 +82,7 @@ fn sealed_dataset_handle_workload_distinguishes_role_key_root_and_output() {
     );
     let incomplete = [crate::context::host_effect::DatasetHandleInput {
         fact: runmat_types::ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
-        scalar_digest: None,
+        identity_digest: None,
     }];
     assert!(!workload(
         first,
@@ -111,7 +111,7 @@ fn finite_handle_route_refuses_incomplete_input_identity_before_selection() {
     );
     let incomplete = [DatasetHandleInput {
         fact: runmat_types::ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
-        scalar_digest: None,
+        identity_digest: None,
     }];
     let request = HostEffectRequest {
         operation: "DataArray.write",

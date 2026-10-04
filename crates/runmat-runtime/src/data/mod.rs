@@ -785,6 +785,8 @@ pub struct DataSchema {
 pub struct PendingTxn {
     pub dataset_path: String,
     pub base_sequence: u64,
+    /// Monotonic mutation identity within this registry-issued transaction.
+    pub revision: u64,
     pub writes: Vec<PendingWrite>,
     pub resizes: Vec<PendingResize>,
     pub fills: Vec<PendingFill>,
@@ -2042,6 +2044,7 @@ pub fn start_tx_with_id(
     let pending = PendingTxn {
         dataset_path,
         base_sequence,
+        revision: 0,
         writes: Vec::new(),
         resizes: Vec::new(),
         fills: Vec::new(),
@@ -2071,6 +2074,13 @@ pub fn with_tx_mut<T>(
                 DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
             )
         })?;
+        let next_revision = tx
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| data_error("transaction mutation revision exhausted"))?;
+        // Invalidate earlier admissions even if a fallible closure mutates
+        // before returning an error. The sealed transaction ID never recycles.
+        tx.revision = next_revision;
         f(tx)
     })?
 }

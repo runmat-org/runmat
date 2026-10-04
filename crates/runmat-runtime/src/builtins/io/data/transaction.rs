@@ -336,13 +336,6 @@ async fn commit(
     operation: Op,
 ) -> BuiltinResult<Value> {
     let mut input_facts = rest.iter().map(handle_admission::input).collect::<Vec<_>>();
-    // The queued transaction payload can change while this receiver identity
-    // stays the same. Until the full typed queue snapshot is carried across
-    // admission, no reusable route may certify its resource peak.
-    input_facts.push(crate::context::host_effect::DatasetHandleInput {
-        fact: runmat_types::ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
-        scalar_digest: None,
-    });
     let options = match rest.as_slice() {
         [] => None,
         [Value::Struct(options)] => Some(options),
@@ -358,24 +351,49 @@ async fn commit(
         }
     };
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
-    let (dataset_path, base_sequence, writes, resizes, fills, create_arrays, delete_arrays, attrs) =
-        with_tx(&tx_id, |tx| {
-            if tx.status != TxnStatus::Open {
-                return Err(data_error(
-                    "DataTransaction.commit: transaction is not open",
-                ));
+    let (
+        dataset_path,
+        base_sequence,
+        writes,
+        resizes,
+        fills,
+        create_arrays,
+        delete_arrays,
+        attrs,
+        queue_facts,
+    ) = with_tx(&tx_id, |tx| {
+        if tx.status != TxnStatus::Open {
+            return Err(data_error(
+                "DataTransaction.commit: transaction is not open",
+            ));
+        }
+        let mut queue_facts = vec![handle_admission::queue_input(tx)];
+        for write in &tx.writes {
+            if let Some(slice) = &write.slice_spec {
+                queue_facts.push(handle_admission::input(slice));
             }
-            Ok((
-                tx.dataset_path.clone(),
-                tx.base_sequence,
-                tx.writes.clone(),
-                tx.resizes.clone(),
-                tx.fills.clone(),
-                tx.create_arrays.clone(),
-                tx.delete_arrays.clone(),
-                tx.attrs.clone(),
-            ))
-        })?;
+            queue_facts.push(handle_admission::input(&write.value));
+        }
+        for fill in &tx.fills {
+            if let Some(slice) = &fill.slice_spec {
+                queue_facts.push(handle_admission::input(slice));
+            }
+            queue_facts.push(handle_admission::input(&fill.value));
+        }
+        queue_facts.extend(tx.attrs.values().map(handle_admission::input));
+        Ok((
+            tx.dataset_path.clone(),
+            tx.base_sequence,
+            tx.writes.clone(),
+            tx.resizes.clone(),
+            tx.fills.clone(),
+            tx.create_arrays.clone(),
+            tx.delete_arrays.clone(),
+            tx.attrs.clone(),
+            queue_facts,
+        ))
+    })?;
+    input_facts.extend(queue_facts);
 
     let write_ops = writes.len();
     let resize_ops = resizes.len();

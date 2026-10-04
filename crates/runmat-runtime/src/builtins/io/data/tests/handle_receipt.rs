@@ -33,13 +33,47 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
     let first = handle_admission::input(&Value::String("first".into()));
     let second = handle_admission::input(&Value::String("second".into()));
     assert_eq!(first.fact, second.fact);
-    assert_ne!(first.scalar_digest, second.scalar_digest);
+    assert_ne!(first.identity_digest, second.identity_digest);
     assert_ne!(
-        handle_admission::input(&Value::Num(0.0)).scalar_digest,
-        handle_admission::input(&Value::Num(-0.0)).scalar_digest
+        handle_admission::input(&Value::Num(0.0)).identity_digest,
+        handle_admission::input(&Value::Num(-0.0)).identity_digest
     );
     let payload = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap());
-    assert!(handle_admission::input(&payload).scalar_digest.is_none());
+    let changed = Value::Tensor(Tensor::from_f32(vec![1.0, 3.0], vec![1, 2]).unwrap());
+    assert_ne!(
+        handle_admission::input(&payload).identity_digest,
+        handle_admission::input(&changed).identity_digest,
+        "same-class and same-shape native payloads need exact identity"
+    );
+    let large = Value::Tensor(Tensor::from_f32(vec![0.0; 4_097], vec![1, 4_097]).unwrap());
+    assert!(handle_admission::input(&large).identity_digest.is_none());
+    let first_slice = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap());
+    let second_slice = Value::Cell(CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap());
+    assert_ne!(
+        handle_admission::input(&first_slice).identity_digest,
+        handle_admission::input(&second_slice).identity_digest
+    );
+    let mut options = StructValue::new();
+    options.insert("if_manifest", Value::String("revision-1".into()));
+    assert!(handle_admission::input(&Value::Struct(options))
+        .identity_digest
+        .is_some());
+}
+
+#[test]
+fn sealed_transaction_queue_revision_invalidates_prior_admission_identity() {
+    let tx_id = crate::data::start_tx("queue.data".into(), 9).unwrap();
+    let first = crate::data::with_tx(&tx_id, |tx| Ok(handle_admission::queue_input(tx)))
+        .expect("new queue identity");
+    crate::data::with_tx_mut(&tx_id, |tx| {
+        tx.attrs.insert("version".into(), Value::Num(1.0));
+        Ok(())
+    })
+    .expect("first queued mutation");
+    let second = crate::data::with_tx(&tx_id, |tx| Ok(handle_admission::queue_input(tx)))
+        .expect("changed queue identity");
+    assert_ne!(first.identity_digest, second.identity_digest);
+    crate::data::remove_tx(&tx_id).unwrap();
 }
 
 #[test]

@@ -9,7 +9,7 @@ use runmat_types::ValueFact;
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct DatasetHandleInput {
     pub fact: ValueFact,
-    pub scalar_digest: Option<Digest>,
+    pub identity_digest: Option<Digest>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]

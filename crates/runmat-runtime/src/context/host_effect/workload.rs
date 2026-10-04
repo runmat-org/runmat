@@ -127,7 +127,7 @@ impl HostEffectWorkload<'_> {
     pub fn identity_complete(self) -> bool {
         match self {
             Self::DatasetHandle { inputs, .. } => {
-                inputs.iter().all(|input| input.scalar_digest.is_some())
+                inputs.iter().all(|input| input.identity_digest.is_some())
             }
             _ => true,
         }
