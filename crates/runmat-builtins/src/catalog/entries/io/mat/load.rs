@@ -19,17 +19,17 @@ pub const LOAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: Some(BuiltinWorkspaceEffect::LoadsExternalBindings),
         environment_effect: None,
         effects: &[
+            EffectKind::WorkspaceWrite,
             EffectKind::EnvironmentRead,
             EffectKind::FilesystemRead,
-            EffectKind::WorkspaceWrite,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
             EffectKind::Unknown,
         ],
         capabilities: &[
-            CapabilityRequirement::Filesystem,
             CapabilityRequirement::HostRuntime,
+            CapabilityRequirement::Filesystem,
         ],
     },
     placement: BuiltinPlacementContract {

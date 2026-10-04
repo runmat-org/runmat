@@ -16,8 +16,8 @@ pub const SAVE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::Filesystem,
         workspace_effect: Some(BuiltinWorkspaceEffect::ReadsWorkspace),
         environment_effect: None,
-        effects: &[EffectKind::EnvironmentRead, EffectKind::WorkspaceRead, EffectKind::FilesystemRead, EffectKind::FilesystemWrite, EffectKind::HostCallback, EffectKind::MaySuspend, EffectKind::MayThrow, EffectKind::Unknown],
-        capabilities: &[CapabilityRequirement::Filesystem, CapabilityRequirement::HostRuntime],
+        effects: &[EffectKind::WorkspaceRead, EffectKind::EnvironmentRead, EffectKind::FilesystemRead, EffectKind::FilesystemWrite, EffectKind::HostCallback, EffectKind::MaySuspend, EffectKind::MayThrow, EffectKind::Unknown],
+        capabilities: &[CapabilityRequirement::HostRuntime, CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,

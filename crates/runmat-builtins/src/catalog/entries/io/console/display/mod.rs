@@ -27,8 +27,8 @@ pub const DISPLAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::UserInterface,
             EffectKind::FilesystemWrite,
+            EffectKind::UserInterface,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,

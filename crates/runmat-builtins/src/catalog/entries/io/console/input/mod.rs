@@ -31,6 +31,7 @@ pub const INPUT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         effects: &[
             EffectKind::UserInterface,
             EffectKind::HostCallback,
+            EffectKind::MaySuspend,
             EffectKind::MayThrow,
             EffectKind::Unknown,
         ],
