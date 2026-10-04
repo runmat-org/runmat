@@ -1868,6 +1868,54 @@ mod tests {
     }
 
     #[test]
+    fn fileattrib_reports_unavailable_permission_facts_as_nan() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-fileattrib-unknown-facts");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-fileattrib-unknown-facts");
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        provider
+            .write_project_path(root.join("sample.bin"), b"value")
+            .unwrap();
+        let _installed = vfs::replace_provider(provider);
+        vfs::set_current_dir(&root).unwrap();
+        let _outputs = output_count::push_output_count(Some(2));
+        let Value::OutputList(outputs) =
+            run(fileattrib_builtin(vec![Value::String("sample.bin".into())])).unwrap()
+        else {
+            panic!("two requested fileattrib outputs");
+        };
+        assert_eq!(outputs[0], Value::Num(1.0));
+        let Value::Struct(attributes) = &outputs[1] else {
+            panic!("attribute struct");
+        };
+        for name in [
+            "archive",
+            "system",
+            "UserRead",
+            "UserExecute",
+            "GroupRead",
+            "GroupWrite",
+            "GroupExecute",
+            "OtherRead",
+            "OtherWrite",
+            "OtherExecute",
+        ] {
+            assert!(
+                matches!(attributes.fields.get(name), Some(Value::Num(value)) if value.is_nan()),
+                "{name}"
+            );
+        }
+        assert_eq!(attributes.fields.get("UserWrite"), Some(&Value::Bool(true)));
+        assert_eq!(
+            attributes.fields.get("directory"),
+            Some(&Value::Bool(false))
+        );
+    }
+
+    #[test]
     fn fileattrib_rejects_numeric_and_resident_inputs_before_external_access() {
         let numeric =
             run(fileattrib_builtin(vec![Value::Num(1.0)])).expect_err("numeric path must reject");
