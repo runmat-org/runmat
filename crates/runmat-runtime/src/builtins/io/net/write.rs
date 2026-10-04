@@ -338,22 +338,22 @@ async fn write_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     ensure_write_extensions(&data)?;
+    let datatype = preflight_datatype(rest)?;
     let client = gather_if_needed_async(&client)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_CLIENT))?;
     let data = gather_if_needed_async(&data)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_DATA))?;
-
-    let mut gathered_rest = Vec::with_capacity(rest.len());
-    for value in rest {
-        gathered_rest.push(
-            gather_if_needed_async(&value)
+    let datatype = match datatype {
+        PreparedWriteDatatype::Default => None,
+        PreparedWriteDatatype::Known(datatype) => Some(datatype),
+        PreparedWriteDatatype::Resident(value) => Some(parse_datatype(
+            &gather_if_needed_async(&value)
                 .await
                 .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_DATATYPE))?,
-        );
-    }
-    let datatype = parse_arguments(&gathered_rest)?;
+        )?),
+    };
 
     let client_struct = match &client {
         Value::Struct(st) => st,
@@ -486,10 +486,23 @@ impl WriteElement {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<DataType>> {
+enum PreparedWriteDatatype {
+    Default,
+    Known(DataType),
+    Resident(Value),
+}
+
+fn preflight_datatype(args: Vec<Value>) -> BuiltinResult<PreparedWriteDatatype> {
     match args.len() {
-        0 => Ok(None),
-        1 => parse_datatype(&args[0]).map(Some),
+        0 => Ok(PreparedWriteDatatype::Default),
+        1 => {
+            let value = args.into_iter().next().expect("one datatype argument");
+            if matches!(value, Value::GpuTensor(_)) {
+                Ok(PreparedWriteDatatype::Resident(value))
+            } else {
+                parse_datatype(&value).map(PreparedWriteDatatype::Known)
+            }
+        }
         _ => Err(write_flow(
             &WRITE_ERROR_INVALID_INPUT,
             "write: expected at most one datatype argument",
@@ -1164,6 +1177,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::io::net::client_state::{insert_client, remove_client_for_test};
     use crate::builtins::io::net::control::configure_stream;
+    use crate::builtins::io::net::test_support::CountingDownloadProvider;
     use runmat_value::{CharArray, IntValue, IntegerStorage, SparseTensor, StructValue, Tensor};
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};
@@ -1210,6 +1224,35 @@ pub(crate) mod tests {
 
     fn run_write(client: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(write_builtin(client, data, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_datatype_and_arity_reject_before_payload_download() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+        let payload = Value::GpuTensor(owner.resident());
+        let invalid_datatype = run_write(
+            Value::Num(0.0),
+            payload.clone(),
+            vec![Value::from("uint128")],
+        )
+        .expect_err("known invalid datatype rejects before resident payload download");
+        assert_eq!(
+            invalid_datatype.identifier(),
+            WRITE_ERROR_INVALID_DATATYPE.identifier
+        );
+        assert_eq!(owner.downloads(), 0);
+        let overarity = run_write(
+            Value::Num(0.0),
+            payload,
+            vec![Value::from("uint8"), Value::from("double")],
+        )
+        .expect_err("extra controls reject before resident payload download");
+        assert_eq!(overarity.identifier(), WRITE_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(owner.downloads(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
