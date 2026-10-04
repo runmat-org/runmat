@@ -4,9 +4,9 @@
 mod contract;
 mod documentation_support;
 mod inference_support;
-pub mod mex;
-pub mod mexcuda;
-pub mod mexext;
+mod mex;
+mod mexcuda;
+mod mexext;
 #[cfg(test)]
 mod tests;
 
