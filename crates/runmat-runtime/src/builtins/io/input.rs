@@ -107,7 +107,7 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         DEFAULT_PROMPT.to_string()
     };
-    let return_string = parsed_flag.unwrap_or(false);
+    let return_string = parsed_flag.is_some();
     loop {
         let line = interaction::request_line_async(&prompt, true)
             .await
