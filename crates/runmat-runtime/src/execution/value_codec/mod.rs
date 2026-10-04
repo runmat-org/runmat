@@ -86,7 +86,27 @@ mod tests {
             .unwrap(),
         );
         let payload = encode_durable_value(&array).unwrap();
-        assert_eq!(decode_durable_value(&payload).unwrap(), array);
+        let decoded = decode_durable_value(&payload).unwrap();
+        let Value::ObjectArray(decoded_array) = &decoded else {
+            panic!("object array")
+        };
+        assert_eq!(decoded_array.class_name().as_str(), "PreferencePayload");
+        assert_eq!(decoded_array.shape(), &[1, 1, 1]);
+        assert_eq!(decoded_array.data().len(), 1);
+        let Value::Object(decoded_object) = &decoded_array.data()[0] else {
+            panic!("plain object element")
+        };
+        assert_eq!(&decoded_object.class_name, decoded_array.class_name());
+        assert_eq!(decoded_object.properties.len(), 2);
+        assert_eq!(
+            decoded_object.properties["revision"],
+            Value::Int(IntValue::U64(u64::MAX))
+        );
+        let Value::Num(nan) = decoded_object.properties["nan"] else {
+            panic!("NaN")
+        };
+        assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0042);
+        assert_eq!(encode_durable_value(&decoded).unwrap(), payload);
         assert!(decode_inline_value(&payload).is_err());
     }
 
