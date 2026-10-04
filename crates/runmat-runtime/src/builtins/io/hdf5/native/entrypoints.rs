@@ -4,7 +4,7 @@ pub fn read_dataset(
     builtin: &'static str,
     path: PathBuf,
     dataset_path: String,
-    rest: Vec<Value>,
+    controls: SelectionControls,
 ) -> BuiltinResult<Value> {
     let file = open_file_read(builtin, &path)?;
     let ds = file.dataset(&dataset_path).map_err(|err| {
@@ -15,7 +15,7 @@ pub fn read_dataset(
         )
     })?;
     let shape = ds.shape();
-    let selection = parse_selection(&rest, builtin, &shape)?;
+    let selection = controls.resolve(builtin, &shape)?;
     read_dataset_value(builtin, &ds, selection.as_ref())
 }
 
@@ -24,8 +24,9 @@ pub fn write_dataset(
     path: PathBuf,
     dataset_path: String,
     data: Value,
-    rest: Vec<Value>,
+    controls: SelectionControls,
 ) -> BuiltinResult<()> {
+    let data = WritableData::from_value(builtin, data)?;
     let file = File::append(&path).map_err(|err| {
         io_error(
             builtin,
@@ -33,10 +34,9 @@ pub fn write_dataset(
             err,
         )
     })?;
-    if !rest.is_empty() {
-        return write_dataset_selection(builtin, &file, &dataset_path, data, rest);
+    if !matches!(&controls, SelectionControls::Whole) {
+        return write_dataset_selection(builtin, &file, &dataset_path, data, controls);
     }
-    let data = WritableData::from_value(builtin, data)?;
     if file.link_exists(&dataset_path) {
         let ds = file.dataset(&dataset_path).map_err(|err| {
             io_error(
@@ -188,8 +188,8 @@ fn write_dataset_selection(
     builtin: &'static str,
     file: &File,
     dataset_path: &str,
-    data: Value,
-    rest: Vec<Value>,
+    data: WritableData,
+    controls: SelectionControls,
 ) -> BuiltinResult<()> {
     let ds = file.dataset(dataset_path).map_err(|err| {
         io_error(
@@ -199,14 +199,14 @@ fn write_dataset_selection(
         )
     })?;
     let shape = ds.shape();
-    let selection = parse_selection(&rest, builtin, &shape)?.ok_or_else(|| {
+    let selection = controls.resolve(builtin, &shape)?.ok_or_else(|| {
         hdf5_error(
             builtin,
             &ERR_ARGUMENT,
             format!("{builtin}: expected start/count or start/count/stride selection"),
         )
     })?;
-    match WritableData::from_value(builtin, data)? {
+    match data {
         WritableData::Numeric { data, shape } => {
             validate_write_selection_shape(builtin, &shape, &selection.count)?;
             let row_major = col_major_to_row_major(&data, &shape);
@@ -242,6 +242,7 @@ pub fn write_attribute(
     attribute: String,
     data: Value,
 ) -> BuiltinResult<()> {
+    let data = WritableData::from_value(builtin, data)?;
     let file = File::append(&path).map_err(|err| {
         io_error(
             builtin,

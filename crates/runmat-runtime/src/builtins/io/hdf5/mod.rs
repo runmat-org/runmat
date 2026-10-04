@@ -143,6 +143,40 @@ async fn gather_args(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec
     Ok(gathered)
 }
 
+async fn prepare_selection_args(
+    builtin: &'static str,
+    rest: &[Value],
+) -> BuiltinResult<SelectionControls> {
+    if let Some(controls) = prepare_host_selection_controls(rest, builtin)? {
+        return Ok(controls);
+    }
+    let gathered = gather_args(builtin, rest).await?;
+    parse_selection_controls(&gathered, builtin)
+}
+
+fn preflight_writable_data(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
+    if matches!(
+        value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Tensor(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::String(_)
+            | Value::StringArray(_)
+            | Value::CharArray(_)
+            | Value::GpuTensor(_)
+    ) {
+        Ok(())
+    } else {
+        Err(hdf5_error(
+            builtin,
+            &ERR_UNSUPPORTED,
+            format!("{builtin}: only dense numeric, logical, string, and char data can be written to HDF5"),
+        ))
+    }
+}
+
 #[runtime_builtin(
     name = "h5read",
     category = "io/hdf5",
@@ -154,16 +188,10 @@ async fn gather_args(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5read_builtin(filename: Value, dataset: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(H5READ_NAME, err))?;
-    let dataset = gather_if_needed_async(&dataset)
-        .await
-        .map_err(|err| map_control_flow(H5READ_NAME, err))?;
-    let rest = gather_args(H5READ_NAME, &rest).await?;
     let path = resolve_path(&filename, H5READ_NAME)?;
     let dataset_path = hdf5_path(&dataset, H5READ_NAME, "dataset")?;
-    imp::read_dataset(H5READ_NAME, path, dataset_path, rest)
+    let selection = prepare_selection_args(H5READ_NAME, &rest).await?;
+    imp::read_dataset(H5READ_NAME, path, dataset_path, selection)
 }
 
 #[runtime_builtin(
@@ -181,16 +209,10 @@ async fn hdf5read_builtin(
     dataset: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(HDF5READ_NAME, err))?;
-    let dataset = gather_if_needed_async(&dataset)
-        .await
-        .map_err(|err| map_control_flow(HDF5READ_NAME, err))?;
-    let rest = gather_args(HDF5READ_NAME, &rest).await?;
     let path = resolve_path(&filename, HDF5READ_NAME)?;
     let dataset_path = hdf5_path(&dataset, HDF5READ_NAME, "dataset")?;
-    imp::read_dataset(HDF5READ_NAME, path, dataset_path, rest)
+    let selection = prepare_selection_args(HDF5READ_NAME, &rest).await?;
+    imp::read_dataset(HDF5READ_NAME, path, dataset_path, selection)
 }
 
 #[runtime_builtin(
@@ -209,19 +231,14 @@ async fn h5write_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
-    let dataset = gather_if_needed_async(&dataset)
-        .await
-        .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
+    let path = resolve_path(&filename, H5WRITE_NAME)?;
+    let dataset_path = hdf5_path(&dataset, H5WRITE_NAME, "dataset")?;
+    preflight_writable_data(&data, H5WRITE_NAME)?;
+    let selection = prepare_selection_args(H5WRITE_NAME, &rest).await?;
     let data = gather_if_needed_async(&data)
         .await
         .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
-    let rest = gather_args(H5WRITE_NAME, &rest).await?;
-    let path = resolve_path(&filename, H5WRITE_NAME)?;
-    let dataset_path = hdf5_path(&dataset, H5WRITE_NAME, "dataset")?;
-    imp::write_dataset(H5WRITE_NAME, path, dataset_path, data, rest)?;
+    imp::write_dataset(H5WRITE_NAME, path, dataset_path, data, selection)?;
     Ok(Value::OutputList(Vec::new()))
 }
 
@@ -241,19 +258,14 @@ async fn hdf5write_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
-    let dataset = gather_if_needed_async(&dataset)
-        .await
-        .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
+    let path = resolve_path(&filename, HDF5WRITE_NAME)?;
+    let dataset_path = hdf5_path(&dataset, HDF5WRITE_NAME, "dataset")?;
+    preflight_writable_data(&data, HDF5WRITE_NAME)?;
+    let selection = prepare_selection_args(HDF5WRITE_NAME, &rest).await?;
     let data = gather_if_needed_async(&data)
         .await
         .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
-    let rest = gather_args(HDF5WRITE_NAME, &rest).await?;
-    let path = resolve_path(&filename, HDF5WRITE_NAME)?;
-    let dataset_path = hdf5_path(&dataset, HDF5WRITE_NAME, "dataset")?;
-    imp::write_dataset(HDF5WRITE_NAME, path, dataset_path, data, rest)?;
+    imp::write_dataset(HDF5WRITE_NAME, path, dataset_path, data, selection)?;
     Ok(Value::OutputList(Vec::new()))
 }
 
@@ -273,18 +285,6 @@ async fn h5writeatt_builtin(
     attribute: Value,
     data: Value,
 ) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
-    let location = gather_if_needed_async(&location)
-        .await
-        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
-    let attribute = gather_if_needed_async(&attribute)
-        .await
-        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
-    let data = gather_if_needed_async(&data)
-        .await
-        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
     let path = resolve_path(&filename, H5WRITEATT_NAME)?;
     let location_path = hdf5_path(&location, H5WRITEATT_NAME, "location")?;
     let attr_name = string_scalar(&attribute, H5WRITEATT_NAME, "attribute")?;
@@ -295,6 +295,10 @@ async fn h5writeatt_builtin(
             "h5writeatt: attribute must not be empty",
         ));
     }
+    preflight_writable_data(&data, H5WRITEATT_NAME)?;
+    let data = gather_if_needed_async(&data)
+        .await
+        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
     imp::write_attribute(H5WRITEATT_NAME, path, location_path, attr_name, data)?;
     Ok(Value::OutputList(Vec::new()))
 }
@@ -310,12 +314,8 @@ async fn h5writeatt_builtin(
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(H5INFO_NAME, err))?;
-    let rest = gather_args(H5INFO_NAME, &rest).await?;
     let path = resolve_path(&filename, H5INFO_NAME)?;
-    let location = optional_location(rest, H5INFO_NAME)?;
+    let location = optional_location(&rest, H5INFO_NAME)?;
     imp::info(H5INFO_NAME, path, location)
 }
 
@@ -330,12 +330,8 @@ async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(HDF5INFO_NAME, err))?;
-    let rest = gather_args(HDF5INFO_NAME, &rest).await?;
     let path = resolve_path(&filename, HDF5INFO_NAME)?;
-    let location = optional_location(rest, HDF5INFO_NAME)?;
+    let location = optional_location(&rest, HDF5INFO_NAME)?;
     imp::info(HDF5INFO_NAME, path, location)
 }
 
@@ -350,16 +346,12 @@ async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Va
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| map_control_flow(H5DISP_NAME, err))?;
-    let rest = gather_args(H5DISP_NAME, &rest).await?;
     let path = resolve_path(&filename, H5DISP_NAME)?;
-    let location = optional_location(rest, H5DISP_NAME)?;
+    let location = optional_location(&rest, H5DISP_NAME)?;
     imp::disp(H5DISP_NAME, path, location).map(Value::String)
 }
 
-fn optional_location(rest: Vec<Value>, builtin: &'static str) -> BuiltinResult<String> {
+fn optional_location(rest: &[Value], builtin: &'static str) -> BuiltinResult<String> {
     match rest.len() {
         0 => Ok("/".to_string()),
         1 => hdf5_path(&rest[0], builtin, "location"),
@@ -382,7 +374,7 @@ mod imp {
         builtin: &'static str,
         _path: PathBuf,
         _dataset_path: String,
-        _rest: Vec<Value>,
+        _controls: SelectionControls,
     ) -> BuiltinResult<Value> {
         Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
     }
@@ -392,7 +384,7 @@ mod imp {
         _path: PathBuf,
         _dataset_path: String,
         _data: Value,
-        _rest: Vec<Value>,
+        _controls: SelectionControls,
     ) -> BuiltinResult<()> {
         Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
     }
@@ -423,3 +415,5 @@ use native as imp;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+#[cfg(test)]
+mod admission_tests;

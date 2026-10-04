@@ -246,71 +246,135 @@ pub(super) struct MatlabSelection {
     pub(super) stride: Vec<usize>,
 }
 
-pub(super) fn parse_selection(
+#[derive(Debug, Clone)]
+pub(super) enum SelectionControls {
+    Whole,
+    Range {
+        start: Vec<usize>,
+        count: Vec<usize>,
+        stride: Option<Vec<usize>>,
+    },
+}
+
+pub(super) fn parse_selection_controls(
     rest: &[Value],
     builtin: &'static str,
-    source_shape: &[usize],
-) -> BuiltinResult<Option<MatlabSelection>> {
+) -> BuiltinResult<SelectionControls> {
     match rest.len() {
-        0 => Ok(None),
+        0 => Ok(SelectionControls::Whole),
         2 | 3 => {
-            let rank = source_shape.len();
-            let mut start = numeric_vector_usize(&rest[0], builtin, "start")?;
+            let start = numeric_vector_usize(&rest[0], builtin, "start")?;
             let count = numeric_vector_usize(&rest[1], builtin, "count")?;
             let stride = if rest.len() == 3 {
-                numeric_vector_usize(&rest[2], builtin, "stride")?
+                Some(numeric_vector_usize(&rest[2], builtin, "stride")?)
             } else {
-                vec![1; rank]
+                None
             };
-            if start.len() != rank || count.len() != rank || stride.len() != rank {
-                return Err(hdf5_error(
-                    builtin,
-                    &ERR_ARGUMENT,
-                    format!("{builtin}: start, count, and stride must match dataset rank"),
-                ));
-            }
-            for item in &mut start {
-                *item -= 1;
-            }
-            for dim in 0..rank {
-                if count[dim] == 0 {
-                    return Err(hdf5_error(
-                        builtin,
-                        &ERR_ARGUMENT,
-                        format!("{builtin}: count entries must be positive"),
-                    ));
-                }
-                let last = count[dim]
-                    .checked_sub(1)
-                    .and_then(|count| count.checked_mul(stride[dim]))
-                    .and_then(|offset| start[dim].checked_add(offset))
-                    .ok_or_else(|| {
-                        hdf5_error(
-                            builtin,
-                            &ERR_ARGUMENT,
-                            format!("{builtin}: selection exceeds platform limits"),
-                        )
-                    })?;
-                if last >= source_shape[dim] {
-                    return Err(hdf5_error(
-                        builtin,
-                        &ERR_ARGUMENT,
-                        format!("{builtin}: selection exceeds dataset bounds"),
-                    ));
-                }
-            }
-            checked_shape_len(&count, builtin)?;
-            Ok(Some(MatlabSelection {
+            Ok(SelectionControls::Range {
                 start,
                 count,
                 stride,
-            }))
+            })
         }
         _ => Err(hdf5_error(
             builtin,
             &ERR_ARGUMENT,
             format!("{builtin}: expected start/count or start/count/stride selection"),
         )),
+    }
+}
+
+pub(super) fn prepare_host_selection_controls(
+    rest: &[Value],
+    builtin: &'static str,
+) -> BuiltinResult<Option<SelectionControls>> {
+    if !matches!(rest.len(), 0 | 2 | 3) {
+        return Err(hdf5_error(
+            builtin,
+            &ERR_ARGUMENT,
+            format!("{builtin}: expected start/count or start/count/stride selection"),
+        ));
+    }
+    if !rest
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return parse_selection_controls(rest, builtin).map(Some);
+    }
+    for (index, value) in rest.iter().enumerate() {
+        if matches!(value, Value::GpuTensor(_)) {
+            continue;
+        }
+        let label = match index {
+            0 => "start",
+            1 => "count",
+            _ => "stride",
+        };
+        numeric_vector_usize(value, builtin, label)?;
+    }
+    Ok(None)
+}
+
+impl SelectionControls {
+    pub(super) fn resolve(
+        self,
+        builtin: &'static str,
+        source_shape: &[usize],
+    ) -> BuiltinResult<Option<MatlabSelection>> {
+        match self {
+            Self::Whole => Ok(None),
+            Self::Range {
+                mut start,
+                count,
+                stride,
+            } => {
+                let rank = source_shape.len();
+                let stride = stride.unwrap_or_else(|| vec![1; rank]);
+                if start.len() != rank || count.len() != rank || stride.len() != rank {
+                    return Err(hdf5_error(
+                        builtin,
+                        &ERR_ARGUMENT,
+                        format!("{builtin}: start, count, and stride must match dataset rank"),
+                    ));
+                }
+                for item in &mut start {
+                    *item -= 1;
+                }
+                for dim in 0..rank {
+                    if count[dim] == 0 {
+                        return Err(hdf5_error(
+                            builtin,
+                            &ERR_ARGUMENT,
+                            format!("{builtin}: count entries must be positive"),
+                        ));
+                    }
+                    let last = count[dim]
+                        .checked_sub(1)
+                        .and_then(|count| count.checked_mul(stride[dim]))
+                        .and_then(|offset| start[dim].checked_add(offset))
+                        .ok_or_else(|| {
+                            hdf5_error(
+                                builtin,
+                                &ERR_ARGUMENT,
+                                format!("{builtin}: selection exceeds platform limits"),
+                            )
+                        })?;
+                    if last >= source_shape[dim] {
+                        return Err(hdf5_error(
+                            builtin,
+                            &ERR_ARGUMENT,
+                            format!("{builtin}: selection exceeds dataset bounds"),
+                        ));
+                    }
+                }
+                checked_shape_len(&count, builtin)?;
+                Ok(Some(MatlabSelection {
+                    start,
+                    count,
+                    stride,
+                }))
+            }
+        }
     }
 }
 

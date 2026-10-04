@@ -261,8 +261,15 @@ pub(super) fn write_attr_to_location(
     builtin: &'static str,
     location: &Location,
     name: &str,
-    data: Value,
+    data: WritableData,
 ) -> BuiltinResult<()> {
+    let encoded_strings = match &data {
+        WritableData::Strings { data, shape } => Some(encode_strings(
+            builtin,
+            &col_major_to_row_major(data, shape),
+        )?),
+        _ => None,
+    };
     if location
         .attr_names()
         .map(|names| names.iter().any(|item| item == name))
@@ -276,7 +283,7 @@ pub(super) fn write_attr_to_location(
             )
         })?;
     }
-    match WritableData::from_value(builtin, data)? {
+    match data {
         WritableData::Numeric { data, shape } => {
             let row_major = col_major_to_row_major(&data, &shape);
             let attr = location
@@ -343,9 +350,9 @@ pub(super) fn write_attr_to_location(
                 )
             })?;
         }
-        WritableData::Strings { data, shape } => {
-            let row_major = col_major_to_row_major(&data, &shape);
-            let encoded = encode_strings(builtin, &row_major)?;
+        WritableData::Strings { shape, .. } => {
+            let encoded =
+                encoded_strings.expect("string payload was encoded before attribute mutation");
             let attr = location
                 .new_attr::<VarLenUnicode>()
                 .shape(shape.as_slice())
