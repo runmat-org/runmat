@@ -29,13 +29,7 @@ transaction_entry!(
     infer_write,
     "DataTransaction.write",
     "tf = DataTransaction.write(tx, arrayName, sliceSpec, values)",
-    &[
-        d::TRANSACTION,
-        d::NAME,
-        d::SLICE_REQUIRED,
-        d::VALUES,
-        d::OPTIONS
-    ],
+    &[d::TRANSACTION, d::NAME, d::SLICE_REQUIRED, d::VALUES],
     &[d::OUT_BOOL],
     TransactionForm::Write,
     WRITE_DOC,
@@ -62,7 +56,7 @@ transaction_entry!(
     infer_resize,
     "DataTransaction.resize",
     "tf = DataTransaction.resize(tx, arrayName, newShape)",
-    &[d::TRANSACTION, d::NAME, d::NEW_SHAPE, d::OPTIONS],
+    &[d::TRANSACTION, d::NAME, d::NEW_SHAPE],
     &[d::OUT_BOOL],
     TransactionForm::Resize,
     RESIZE_DOC,
@@ -89,13 +83,7 @@ transaction_entry!(
     infer_fill,
     "DataTransaction.fill",
     "tf = DataTransaction.fill(tx, arrayName, value, sliceSpec)",
-    &[
-        d::TRANSACTION,
-        d::NAME,
-        d::VALUE,
-        d::SLICE_OPTIONAL,
-        d::OPTIONS
-    ],
+    &[d::TRANSACTION, d::NAME, d::VALUE, d::SLICE_OPTIONAL],
     &[d::OUT_BOOL],
     TransactionForm::Fill,
     FILL_DOC,

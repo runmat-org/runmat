@@ -57,6 +57,8 @@ fn all_ten_array_identities_are_sorted_source_linked_and_bound() {
 
 #[test]
 fn read_slice_and_mutation_controls_do_not_admit_ignored_extras() {
+    assert_eq!(DATAARRAY_RESIZE_DESCRIPTOR.signatures[0].inputs.len(), 2);
+    assert_eq!(DATAARRAY_FILL_DESCRIPTOR.signatures[0].inputs.len(), 2);
     let value = ValueFact::unknown(DynamicReason::RuntimeValue);
     for (entry, valid, invalid) in [
         (&DATAARRAY_READ_CATALOG_ENTRY, 2, 3),

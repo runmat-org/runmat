@@ -46,6 +46,9 @@ fn dataset_identities_are_unique_sorted_and_source_linked() {
 
 #[test]
 fn optional_default_and_nonexistent_trailing_options_have_exact_arity() {
+    assert_eq!(DATASET_GET_ATTR_DESCRIPTOR.signatures[0].inputs.len(), 3);
+    assert_eq!(DATASET_BEGIN_DESCRIPTOR.signatures[0].inputs.len(), 1);
+    assert_eq!(DATASET_SNAPSHOT_DESCRIPTOR.signatures[0].inputs.len(), 2);
     let receiver = super::super::inference::dataset();
     let control = ValueFact::scalar(ValueKindFact::String);
     for (entry, valid, invalid) in [

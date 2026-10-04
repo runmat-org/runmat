@@ -82,7 +82,7 @@ attribute!(
     infer_get_attr,
     "Dataset.get_attr",
     "value = Dataset.get_attr(ds, key, defaultValue)",
-    &[d::DATASET, d::KEY, d::DEFAULT, d::OPTIONS],
+    &[d::DATASET, d::KEY, d::DEFAULT],
     &[d::OUT_VALUE],
     DatasetForm::GetAttr,
     GET_DOC,

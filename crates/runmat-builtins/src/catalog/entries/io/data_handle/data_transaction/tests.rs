@@ -55,6 +55,9 @@ fn all_transaction_identities_and_commit_alias_are_unique_and_sorted() {
 
 #[test]
 fn queue_forms_admit_one_real_optional_slice_but_no_ignored_controls() {
+    assert_eq!(DATATX_WRITE_DESCRIPTOR.signatures[0].inputs.len(), 4);
+    assert_eq!(DATATX_RESIZE_DESCRIPTOR.signatures[0].inputs.len(), 3);
+    assert_eq!(DATATX_FILL_DESCRIPTOR.signatures[0].inputs.len(), 4);
     let value = ValueFact::unknown(DynamicReason::RuntimeValue);
     for (entry, valid, invalid) in [
         (&DATATX_WRITE_CATALOG_ENTRY, 4, 5),

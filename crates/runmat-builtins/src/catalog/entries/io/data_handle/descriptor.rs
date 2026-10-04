@@ -101,12 +101,6 @@ pub(super) const COMMIT_OPTIONS: BuiltinParamDescriptor = param(
     BuiltinParamArity::Optional,
     "Optional scalar structure with an if_manifest precondition.",
 );
-pub(super) const OPTIONS: BuiltinParamDescriptor = param(
-    "options",
-    BuiltinParamType::Any,
-    BuiltinParamArity::Variadic,
-    "Reserved name/value options.",
-);
 pub(super) const DEFAULT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "defaultValue",
     ty: BuiltinParamType::Any,
