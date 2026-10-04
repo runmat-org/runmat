@@ -81,6 +81,30 @@ fn parser_and_serializer_observe_execution_service_cancellation() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn execution_service_failure_is_not_relabelled_as_malformed_xml() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::num::NonZeroU64;
+
+    let source = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        || Box::pin(async { Err(ExecutionServiceError::WorkerLost("fixture".into())) }),
+    );
+    let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::XmlRead);
+    let error =
+        futures::executor::block_on(parse_xml_document_with_context("<root/>", &mut cooperation))
+            .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:xmlread:ExecutionFailed"));
+    assert!(std::error::Error::source(&error)
+        .expect("typed service source")
+        .downcast_ref::<ExecutionServiceError>()
+        .is_some());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn pending_xml_io_cancellation_drops_the_awaited_operation() {
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
     use runmat_execution::cancellation::CancellationSource;

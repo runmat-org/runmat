@@ -355,7 +355,7 @@ pub(super) async fn parse_xml_document_with_context(
 ) -> BuiltinResult<XmlNode> {
     let context = cooperation.operation().name();
     parse_xml_document(text, cooperation).await.map_err(|err| {
-        if cooperation.is_cancelled_error(&err) {
+        if cooperation.is_execution_error(&err) {
             return err;
         }
         let message = err.message().replace("xmlread:", &format!("{context}:"));

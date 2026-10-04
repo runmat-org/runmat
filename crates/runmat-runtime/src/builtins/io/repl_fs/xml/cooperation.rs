@@ -18,8 +18,9 @@ impl XmlCooperation {
         self.operation
     }
 
-    pub(super) fn is_cancelled_error(&self, error: &RuntimeError) -> bool {
+    pub(super) fn is_execution_error(&self, error: &RuntimeError) -> bool {
         error.identifier() == Some(self.operation.identifier(XmlDiagnosticKind::Cancelled))
+            || error.identifier() == Some(self.operation.identifier(XmlDiagnosticKind::Execution))
     }
     pub(super) fn new(runtime: Option<&RuntimeContext>, operation: XmlOperation) -> Self {
         Self {

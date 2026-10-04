@@ -148,7 +148,7 @@ async fn readstruct_builtin(
         xml_node_to_struct(&root, &options, &mut cooperation)
             .await
             .map_err(|err| {
-                if cooperation.is_cancelled_error(&err) {
+                if cooperation.is_execution_error(&err) {
                     err
                 } else {
                     xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
@@ -220,7 +220,7 @@ async fn xmlread_builtin(
     object.properties.insert(
         "DocumentElement".to_string(),
         Value::Object(root.into_object(&mut cooperation).await.map_err(|err| {
-            if cooperation.is_cancelled_error(&err) {
+            if cooperation.is_execution_error(&err) {
                 err
             } else {
                 xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
@@ -269,7 +269,7 @@ async fn xmlwrite_builtin(
             let xml = serialize_xml_value(&args[0], &mut cooperation)
                 .await
                 .map_err(|err| {
-                    if cooperation.is_cancelled_error(&err) {
+                    if cooperation.is_execution_error(&err) {
                         err
                     } else {
                         xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
@@ -288,7 +288,7 @@ async fn xmlwrite_builtin(
             let xml = serialize_xml_value(&args[1], &mut cooperation)
                 .await
                 .map_err(|err| {
-                    if cooperation.is_cancelled_error(&err) {
+                    if cooperation.is_execution_error(&err) {
                         err
                     } else {
                         xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
