@@ -52,7 +52,7 @@ async fn unzip_builtin(
         };
         let result = evaluate_with_output(&args, runtime.as_ref(), output).await?;
         if out_count == 0 {
-            return Ok(result.finish_effect_only());
+            return result.finish_effect_only();
         }
         return result.into_value_with(|value| Value::OutputList(vec![value]));
     }
@@ -233,12 +233,13 @@ pub struct UnzipResult {
 }
 
 impl UnzipResult {
-    fn finish_effect_only(self) -> Value {
+    fn finish_effect_only(self) -> BuiltinResult<Value> {
         let value = Value::OutputList(Vec::new());
         if let Some(receipt) = self.receipt {
+            receipt.checkpoint()?;
             receipt.finish(WholeWorkObservationOutcome::Success);
         }
-        value
+        Ok(value)
     }
 
     fn into_value_with(self, wrap: impl FnOnce(Value) -> Value) -> BuiltinResult<Value> {
@@ -252,6 +253,9 @@ impl UnzipResult {
             .map(wrap)
             .map_err(|err| unzip_error_with(&UNZIP_ERROR_OUTPUT, format!("unzip: {err}")));
         if let Some(receipt) = self.receipt {
+            if value.is_ok() {
+                receipt.checkpoint()?;
+            }
             receipt.finish(if value.is_ok() {
                 WholeWorkObservationOutcome::Success
             } else {

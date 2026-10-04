@@ -18,6 +18,7 @@ use runmat_execution::{
 use std::cell::{Cell, RefCell};
 use std::io::{Cursor, Write};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use zip::write::SimpleFileOptions;
 
@@ -37,6 +38,14 @@ fn archive_bytes(contents: &[u8]) -> Vec<u8> {
 struct ExactArchiveResources {
     selected: Arc<dyn vfs::FsProvider>,
     observed: RefCell<Vec<(PathBuf, PathBuf)>>,
+    valid: Arc<AtomicBool>,
+}
+
+struct ArchiveLiveness(Arc<AtomicBool>);
+impl crate::context::host_effect::HostEffectResourceLivenessLease for ArchiveLiveness {
+    fn is_current(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 impl RuntimeHostEffectResourceService for ExactArchiveResources {
@@ -66,7 +75,12 @@ impl RuntimeHostEffectResourceService for ExactArchiveResources {
             scratch_bytes: ResourceByteBound::Known(1024),
             returned_value_bytes: ResourceByteBound::Known(1024),
         })
-        .map(crate::context::host_effect::test_admission)
+        .map(
+            |evidence| crate::context::host_effect::HostEffectResourceAdmission {
+                evidence,
+                liveness_lease: Arc::new(ArchiveLiveness(self.valid.clone())),
+            },
+        )
     }
 }
 
@@ -189,6 +203,7 @@ fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swa
     let resources = Rc::new(ExactArchiveResources {
         selected: selected_owner,
         observed: RefCell::new(Vec::new()),
+        valid: Arc::new(AtomicBool::new(true)),
     });
     let placement = Rc::new(SwapDuringSelection {
         admission: resources.clone(),
@@ -229,6 +244,43 @@ fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swa
         selected
             .read_project_path("/selected-cwd/owner.txt")
             .expect("selected output"),
+        b"selected payload"
+    );
+
+    let selected_owner: Arc<dyn vfs::FsProvider> = selected.clone();
+    let workload = HostEffectWorkload::ArchiveExtract {
+        source: HostEffectSource::LocalArchive(Path::new(SELECTED_ARCHIVE)),
+        destination: Some(Path::new(SELECTED_CWD)),
+        output: HostEffectOutput::ReturnedValue,
+    };
+    let receipt = crate::context::host_effect::select_host_effect(
+        Some(&runtime),
+        HostEffectRequest {
+            operation: BUILTIN_NAME,
+            workload,
+            domain_facts: Digest::sha256(workload.identity_bytes()),
+            filesystem: &selected_owner,
+        },
+    )
+    .expect("publication selection")
+    .expect("selected receipt");
+    let second = UnzipResult {
+        filenames: vec!["/selected-cwd/owner.txt".into()],
+        receipt: Some(receipt),
+    };
+    resources.valid.store(false, Ordering::SeqCst);
+    let error = second
+        .into_value_with(std::convert::identity)
+        .expect_err("revoked authority prevents filename publication");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert_eq!(placement.observations.borrow().len(), 1);
+    assert_eq!(
+        selected
+            .read_project_path("/selected-cwd/owner.txt")
+            .expect("committed extraction is not rolled back"),
         b"selected payload"
     );
     assert!(replacement
