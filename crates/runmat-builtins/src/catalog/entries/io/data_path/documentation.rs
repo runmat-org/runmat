@@ -34,11 +34,9 @@ pub(super) const fn example(
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
-        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-            id: BuiltinExampleFixtureId { local_name: id },
-            root: BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries: &[],
-        }),
+        // These programs create their own datasets in the native runner's
+        // isolated filesystem workspace; no preloaded file is required.
+        fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: assertions },
     }

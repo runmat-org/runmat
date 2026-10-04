@@ -38,6 +38,8 @@ fn all_ten_path_identities_are_distinct_and_sorted() {
     assert_eq!(names.len(), 10);
     assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(ENTRIES.iter().all(|entry| !entry.bindings.is_empty()));
+    let errors = crate::validate_builtin_catalog(ENTRIES);
+    assert!(errors.is_empty(), "{errors:#?}");
 }
 
 #[test]
@@ -108,6 +110,26 @@ fn known_invalid_path_schema_format_and_output_count_are_diagnosed() {
 
     let excess_outputs = call(&DATA_INSPECT_CATALOG_ENTRY, vec![text()], 2);
     assert!(!excess_outputs.diagnostics.is_empty());
+
+    let singleton_text_array = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    assert!(
+        call(&DATA_OPEN_CATALOG_ENTRY, vec![singleton_text_array], 1)
+            .diagnostics
+            .is_empty()
+    );
+    let paged_char = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(1), Some(2)]),
+        StorageFact::Dense,
+    );
+    assert!(call(&DATA_OPEN_CATALOG_ENTRY, vec![paged_char], 1)
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-DATA-PATH-TEXT"));
 }
 
 #[test]

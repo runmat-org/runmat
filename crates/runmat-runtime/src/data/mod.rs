@@ -785,6 +785,14 @@ pub fn data_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+pub fn data_error_with_source(message: impl Into<String>, source: std::io::Error) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier("RUNMAT:Data:Error")
+        .with_builtin("data")
+        .with_source(source)
+        .build()
+}
+
 fn data_error_with_identifier(
     message: impl Into<String>,
     identifier: &'static str,
@@ -799,13 +807,13 @@ const DATA_MANIFEST_CONFLICT_IDENTIFIER: &str = "RunMat:data:ManifestConflict";
 const DATA_TRANSACTION_NOT_FOUND_IDENTIFIER: &str = "RunMat:data:TransactionNotFound";
 
 pub fn parse_string(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(chars) => chars
-            .row_string()
-            .ok_or_else(|| data_error(format!("{context}: expected character row vector"))),
-        _ => Err(data_error(format!("{context}: expected string value"))),
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        if matches!(value, Value::CharArray(_)) {
+            data_error(format!("{context}: expected character row vector"))
+        } else {
+            data_error(format!("{context}: expected string value"))
+        }
+    })
 }
 
 pub fn dataset_root(path: &str) -> PathBuf {
@@ -893,15 +901,16 @@ pub async fn write_array_payload_async(
 fn captured_storage_root(
     root: &Path,
 ) -> BuiltinResult<(std::sync::Arc<dyn fs::FsProvider>, PathBuf)> {
-    let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|error| {
-        data_error(format!("failed to capture data storage directory: {error}"))
+    if root.is_absolute() {
+        return Ok((fs::current_provider(), root.to_path_buf()));
+    }
+    let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|source| {
+        data_error_with_source(
+            format!("failed to capture data storage directory: {source}"),
+            source,
+        )
     })?;
-    let resolved = if root.is_absolute() {
-        root.to_path_buf()
-    } else {
-        cwd.join(root)
-    };
-    Ok((provider, resolved))
+    Ok((provider, cwd.join(root)))
 }
 
 pub async fn write_array_payload_on(
@@ -1707,7 +1716,7 @@ fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
 }
 
 pub fn dataset_object(path: &str, manifest: &DataManifest) -> Value {
-    let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.display_name().to_string());
+    let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.owned());
     obj.properties
         .insert("__data_path".to_string(), Value::String(path.to_string()));
     obj.properties.insert(

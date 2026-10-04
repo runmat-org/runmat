@@ -11,8 +11,8 @@ use super::*;
 async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.create path")?;
     let schema = parse_schema(&schema)?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&path);
+    let authority = DataPathAuthority::capture(&[&path])?;
+    let root = authority.resolve(&path)?;
     let now = now_rfc3339();
     let mut arrays = BTreeMap::new();
     for (name, mut meta) in schema.arrays {
@@ -52,8 +52,8 @@ async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value>
 )]
 async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.open path")?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&path);
+    let authority = DataPathAuthority::capture(&[&path])?;
+    let root = authority.resolve(&path)?;
     let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     let mut ds = dataset_object(&path, &manifest);
     hydrate_dataset_descriptor_on(authority.provider(), &root, &mut ds).await;
@@ -67,8 +67,8 @@ async fn data_open_builtin(path: Value) -> BuiltinResult<Value> {
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.exists path")?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&path);
+    let authority = DataPathAuthority::capture(&[&path])?;
+    let root = authority.resolve(&path)?;
     let exists = authority
         .provider()
         .metadata(&manifest_path(&root))
@@ -84,8 +84,8 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
 )]
 async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.delete path")?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&path);
+    let authority = DataPathAuthority::capture(&[&path])?;
+    let root = authority.resolve(&path)?;
     authority
         .provider()
         .remove_dir_all(&root)
@@ -107,13 +107,10 @@ async fn data_delete_builtin(path: Value) -> BuiltinResult<Value> {
 async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.copy fromPath")?;
     let to = parse_string(&to_path, "data.copy toPath")?;
-    let authority = DataPathAuthority::capture()?;
-    copy_dir_recursive_on(
-        authority.provider(),
-        &authority.resolve(&from),
-        &authority.resolve(&to),
-    )
-    .await?;
+    let authority = DataPathAuthority::capture(&[&from, &to])?;
+    let from_root = authority.resolve(&from)?;
+    let to_root = authority.resolve(&to)?;
+    copy_dir_recursive_on(authority.provider(), &from_root, &to_root).await?;
     Ok(Value::Bool(true))
 }
 
@@ -125,10 +122,12 @@ async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Va
 async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Value> {
     let from = parse_string(&from_path, "data.move fromPath")?;
     let to = parse_string(&to_path, "data.move toPath")?;
-    let authority = DataPathAuthority::capture()?;
+    let authority = DataPathAuthority::capture(&[&from, &to])?;
+    let from_root = authority.resolve(&from)?;
+    let to_root = authority.resolve(&to)?;
     authority
         .provider()
-        .rename(&authority.resolve(&from), &authority.resolve(&to))
+        .rename(&from_root, &to_root)
         .await
         .map_err(|err| {
             data_error(format!(
@@ -156,14 +155,10 @@ async fn data_import_builtin(
         ));
     }
     let source_path = parse_string(&source_path, "data.import sourcePath")?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&path);
-    copy_dir_recursive_on(
-        authority.provider(),
-        &authority.resolve(&source_path),
-        &root,
-    )
-    .await?;
+    let authority = DataPathAuthority::capture(&[&path, &source_path])?;
+    let root = authority.resolve(&path)?;
+    let source_root = authority.resolve(&source_path)?;
+    copy_dir_recursive_on(authority.provider(), &source_root, &root).await?;
     let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     Ok(dataset_object(&path, &manifest))
 }
@@ -186,13 +181,10 @@ async fn data_export_builtin(
         ));
     }
     let target_path = parse_string(&target_path, "data.export targetPath")?;
-    let authority = DataPathAuthority::capture()?;
-    copy_dir_recursive_on(
-        authority.provider(),
-        &authority.resolve(&path),
-        &authority.resolve(&target_path),
-    )
-    .await?;
+    let authority = DataPathAuthority::capture(&[&path, &target_path])?;
+    let source_root = authority.resolve(&path)?;
+    let target_root = authority.resolve(&target_path)?;
+    copy_dir_recursive_on(authority.provider(), &source_root, &target_root).await?;
     Ok(Value::Bool(true))
 }
 
@@ -203,8 +195,8 @@ async fn data_export_builtin(
 )]
 async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
     let prefix = parse_string(&path_prefix, "data.list prefix")?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&prefix);
+    let authority = DataPathAuthority::capture(&[&prefix])?;
+    let root = authority.resolve(&prefix)?;
     let entries = authority.provider().read_dir(&root).await.map_err(|err| {
         data_error(format!(
             "data.list: failed to read '{}': {err}",
@@ -245,8 +237,8 @@ async fn data_list_builtin(path_prefix: Value) -> BuiltinResult<Value> {
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.inspect path")?;
-    let authority = DataPathAuthority::capture()?;
-    let root = authority.resolve(&path);
+    let authority = DataPathAuthority::capture(&[&path])?;
+    let root = authority.resolve(&path)?;
     let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     let mut out = StructValue::new();
     out.fields.insert("path".to_string(), Value::String(path));
