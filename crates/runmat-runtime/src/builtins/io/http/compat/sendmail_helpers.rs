@@ -166,24 +166,80 @@ pub(super) fn format_mail_message(recipients: &[String], subject: &str, body: &s
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn selected_sendmail_command() -> Option<PathBuf> {
+pub(super) struct SelectedSendmailCommand {
+    pub executable: PathBuf,
+    _authority: Option<runmat_filesystem::CapturedNativePath>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn selected_sendmail_command() -> BuiltinResult<Option<SelectedSendmailCommand>> {
     let configured = std::env::var("RUNMAT_SENDMAIL_COMMAND").ok();
-    let command = configured
+    if let Some(executable) = configured
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            let path = PathBuf::from("/usr/sbin/sendmail");
-            if path.exists() {
-                Some(path)
-            } else {
-                None
-            }
-        });
-    command
+    {
+        return Ok(Some(SelectedSendmailCommand {
+            executable,
+            _authority: None,
+        }));
+    }
+    default_sendmail_command()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn default_sendmail_command() -> BuiltinResult<Option<SelectedSendmailCommand>> {
+    let authority = runmat_filesystem::capture_native_path(
+        "/usr/sbin/sendmail",
+        runmat_filesystem::NativePathIntent::Read,
+    )
+    .map_err(|source| {
+        sendmail_error_with_source(
+            SendmailFailure::Command,
+            format!("sendmail: cannot inspect local command: {source}"),
+            source,
+        )
+    })?;
+    let Some(authority) = authority else {
+        return Ok(None);
+    };
+    if std::fs::metadata(authority.path()).is_err() {
+        return Ok(None);
+    }
+    authority.check_current().map_err(|source| {
+        sendmail_error_with_source(
+            SendmailFailure::Command,
+            format!("sendmail: local command authority revoked: {source}"),
+            source,
+        )
+    })?;
+    Ok(Some(SelectedSendmailCommand {
+        executable: authority.path().to_path_buf(),
+        _authority: Some(authority),
+    }))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod command_selection_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn virtual_provider_does_not_probe_ambient_default_executable() {
+        let _serial = runmat_filesystem::provider_override_lock();
+        let _virtual = runmat_filesystem::replace_provider(Arc::new(
+            runmat_filesystem::MemoryFsProvider::with_current_dir("/virtual"),
+        ));
+        assert!(default_sendmail_command()
+            .expect("unsupported native path is not an ambient fallback")
+            .is_none());
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn selected_sendmail_command() -> Option<PathBuf> {
-    None
+    crate::builtins::common::env::var("RUNMAT_SENDMAIL_COMMAND")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
 }

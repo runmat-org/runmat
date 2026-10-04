@@ -43,3 +43,7 @@ impl RuntimeProcessService for NativeProcessService {
 pub(super) fn default_process_service() -> Rc<dyn RuntimeProcessService> {
     Rc::new(NativeProcessService)
 }
+
+#[cfg(test)]
+#[path = "process_host/tests.rs"]
+mod tests;

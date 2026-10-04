@@ -1,5 +1,25 @@
 use super::*;
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen_test::wasm_bindgen_test]
+fn selected_local_mail_command_never_reports_browser_success() {
+    let previous = crate::builtins::common::env::var("RUNMAT_SENDMAIL_COMMAND").ok();
+    crate::builtins::common::env::set_var("RUNMAT_SENDMAIL_COMMAND", "/unavailable/sendmail");
+    let error = run(sendmail_builtin(
+        None,
+        vec![Value::from("alice@example.test"), Value::from("Subject")],
+    ))
+    .expect_err("browser local command route must reject");
+    match previous {
+        Some(value) => crate::builtins::common::env::set_var("RUNMAT_SENDMAIL_COMMAND", &value),
+        None => crate::builtins::common::env::remove_var("RUNMAT_SENDMAIL_COMMAND"),
+    }
+    assert_eq!(
+        error.identifier(),
+        Some(SendmailFailure::Command.identifier())
+    );
+}
+
 #[test]
 fn websave_rejects_excess_outputs_before_input_or_http_service() {
     let _outputs = crate::output_count::push_output_count(Some(2));
