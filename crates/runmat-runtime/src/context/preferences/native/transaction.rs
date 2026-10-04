@@ -84,7 +84,7 @@ pub(super) fn worker(
                     .document
                     .user_path_revision
                     .checked_add(1)
-                    .ok_or_else(|| TransactionError::Store(NativeStoreError::RevisionExhausted))?;
+                    .ok_or(TransactionError::Store(NativeStoreError::RevisionExhausted))?;
                 changed = true;
                 return_user_path = true;
             }

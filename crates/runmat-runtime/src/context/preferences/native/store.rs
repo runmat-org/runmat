@@ -75,6 +75,7 @@ impl NativeStore {
         let lock_path = self.path.with_file_name(lock_name);
         let lock = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(lock_path)
