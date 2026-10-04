@@ -55,11 +55,43 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &BYTES,
     },
 ];
+const ERRORS: [BuiltinErrorDescriptor; 5] = [
+    super::diagnostics::error(
+        "RM.XMLWRITE.INVALID_ARGUMENT",
+        "RunMat:xmlwrite:InvalidArgument",
+        "The document, filename, input count, or output count is invalid.",
+        "xmlwrite: invalid argument",
+    ),
+    super::diagnostics::error(
+        "RM.XMLWRITE.INVALID_DOCUMENT",
+        "RunMat:xmlwrite:InvalidDocument",
+        "A document, element, or struct field cannot be serialized.",
+        "xmlwrite: invalid XML document",
+    ),
+    super::diagnostics::error(
+        "RM.XMLWRITE.IO",
+        "RunMat:xmlwrite:IoFailed",
+        "Filesystem capture, write, or authority validation fails.",
+        "xmlwrite: filesystem operation failed",
+    ),
+    super::diagnostics::error(
+        "RM.XMLWRITE.CANCELLED",
+        "RunMat:xmlwrite:Cancelled",
+        "The invocation is cancelled during XML work or filesystem I/O.",
+        "xmlwrite: execution was cancelled",
+    ),
+    super::diagnostics::error(
+        "RM.XMLWRITE.EXECUTION",
+        "RunMat:xmlwrite:ExecutionFailed",
+        "The invocation execution service fails while processing XML.",
+        "xmlwrite: execution service failed",
+    ),
+];
 pub const XMLWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &ERRORS,
 };
 pub const XMLWRITE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

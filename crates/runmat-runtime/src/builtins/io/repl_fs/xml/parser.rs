@@ -103,7 +103,14 @@ impl XmlNode {
         }
     }
 
-    pub(super) fn into_object(self) -> BuiltinResult<ObjectInstance> {
+    #[async_recursion::async_recursion(?Send)]
+    pub(super) async fn into_object(
+        self,
+        cooperation: &mut XmlCooperation,
+    ) -> BuiltinResult<ObjectInstance> {
+        cooperation
+            .completed(self.name.len() + self.text.len())
+            .await?;
         let mut object = ObjectInstance::new(XML_ELEMENT_CLASS.display_name().to_string());
         object
             .properties
@@ -114,19 +121,29 @@ impl XmlNode {
         object
             .properties
             .insert("TextContent".to_string(), char_value(self.text.trim()));
-        object.properties.insert(
-            "Attributes".to_string(),
-            Value::Struct(attributes_struct(&self)),
-        );
-        let children = self
-            .children
-            .into_iter()
-            .map(|child| child.into_object().map(Value::Object))
-            .collect::<BuiltinResult<Vec<_>>>()?;
+        let mut attributes = StructValue::new();
+        for (name, value) in &self.attributes {
+            cooperation.completed(name.len() + value.len()).await?;
+            attributes.insert(name.clone(), char_value(value));
+        }
+        object
+            .properties
+            .insert("Attributes".to_string(), Value::Struct(attributes));
+        let mut children = Vec::new();
+        children.try_reserve(self.children.len()).map_err(|err| {
+            build_runtime_error("xmlread: cannot allocate child-node collection")
+                .with_builtin("xmlread")
+                .with_source(err)
+                .build()
+        })?;
+        for child in self.children {
+            children.push(Value::Object(child.into_object(cooperation).await?));
+        }
+        let child_count = children.len();
         object.properties.insert(
             "ChildNodes".to_string(),
             Value::Cell(
-                CellArray::new(children.clone(), children.len(), 1)
+                CellArray::new(children, child_count, 1)
                     .map_err(|err| compat_error("xmlread", err))?,
             ),
         );
@@ -134,20 +151,18 @@ impl XmlNode {
     }
 }
 
-fn attributes_struct(node: &XmlNode) -> StructValue {
-    let mut st = StructValue::new();
-    for (name, value) in &node.attributes {
-        st.insert(name.clone(), char_value(value));
-    }
-    st
-}
-
-pub(super) fn xml_node_to_struct(
+#[async_recursion::async_recursion(?Send)]
+pub(super) async fn xml_node_to_struct(
     node: &XmlNode,
     options: &ReadStructOptions,
+    cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<StructValue> {
+    cooperation
+        .completed(node.name.len() + node.text.len())
+        .await?;
     let mut out = StructValue::new();
     for (name, value) in &node.attributes {
+        cooperation.completed(name.len() + value.len()).await?;
         out.insert(
             xml_struct_field_name(&format!("{name}{}", options.attribute_suffix)),
             char_value(value),
@@ -164,7 +179,7 @@ pub(super) fn xml_node_to_struct(
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
     for child in &node.children {
         let field = xml_struct_field_name(&child.name);
-        let value = xml_node_to_struct_value(child, options)?;
+        let value = xml_node_to_struct_value(child, options, cooperation).await?;
         if let Some((_, values)) = groups.iter_mut().find(|(name, _)| *name == field) {
             values.push(value);
         } else {
@@ -175,8 +190,9 @@ pub(super) fn xml_node_to_struct(
         let value = if values.len() == 1 {
             values.into_iter().next().unwrap()
         } else {
+            let value_count = values.len();
             Value::Cell(
-                CellArray::new(values.clone(), values.len(), 1)
+                CellArray::new(values, value_count, 1)
                     .map_err(|err| compat_error("readstruct", err))?,
             )
         };
@@ -185,11 +201,17 @@ pub(super) fn xml_node_to_struct(
     Ok(out)
 }
 
-fn xml_node_to_struct_value(node: &XmlNode, options: &ReadStructOptions) -> BuiltinResult<Value> {
+async fn xml_node_to_struct_value(
+    node: &XmlNode,
+    options: &ReadStructOptions,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<Value> {
     if node.attributes.is_empty() && node.children.is_empty() {
         return Ok(char_value(node.text.trim()));
     }
-    xml_node_to_struct(node, options).map(Value::Struct)
+    xml_node_to_struct(node, options, cooperation)
+        .await
+        .map(Value::Struct)
 }
 
 fn xml_struct_field_name(name: &str) -> String {
@@ -215,12 +237,14 @@ fn xml_struct_field_name(name: &str) -> String {
     out
 }
 
-fn parse_xml_document(text: &str) -> BuiltinResult<XmlNode> {
+async fn parse_xml_document(
+    text: &str,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<XmlNode> {
     let mut stack: Vec<XmlNode> = Vec::new();
     let mut root: Option<XmlNode> = None;
     let mut cursor = 0usize;
-    while let Some(open_rel) = text[cursor..].find('<') {
-        let open = cursor + open_rel;
+    while let Some(open) = next_xml_open(text, cursor, cooperation).await? {
         let preceding = &text[cursor..open];
         if !preceding.trim().is_empty() {
             if let Some(node) = stack.last_mut() {
@@ -270,7 +294,7 @@ fn parse_xml_document(text: &str) -> BuiltinResult<XmlNode> {
         }
         let self_closing = raw_tag.ends_with('/');
         let tag = raw_tag.trim_end_matches('/').trim();
-        let (name, attributes) = parse_xml_tag(tag)?;
+        let (name, attributes) = parse_xml_tag(tag, cooperation).await?;
         let node = XmlNode::new(name, attributes);
         if self_closing {
             if let Some(parent) = stack.last_mut() {
@@ -303,17 +327,54 @@ fn parse_xml_document(text: &str) -> BuiltinResult<XmlNode> {
     root.ok_or_else(|| compat_error("xmlread", "xmlread: malformed XML (no root element)"))
 }
 
-pub(super) fn parse_xml_document_with_context(
+async fn next_xml_open(
     text: &str,
-    context: &'static str,
+    cursor: usize,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<Option<usize>> {
+    let bytes = text.as_bytes();
+    let mut offset = cursor;
+    while offset < bytes.len() {
+        let end = offset.saturating_add(4096).min(bytes.len());
+        let chunk = &bytes[offset..end];
+        let position = chunk.iter().position(|byte| *byte == b'<');
+        cooperation
+            .completed(position.map_or(chunk.len(), |relative| relative + 1))
+            .await?;
+        if let Some(relative) = position {
+            return Ok(Some(offset + relative));
+        }
+        offset = end;
+    }
+    Ok(None)
+}
+
+pub(super) async fn parse_xml_document_with_context(
+    text: &str,
+    cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<XmlNode> {
-    parse_xml_document(text).map_err(|err| {
+    let context = cooperation.operation().name();
+    parse_xml_document(text, cooperation).await.map_err(|err| {
+        if cooperation.is_cancelled_error(&err) {
+            return err;
+        }
         let message = err.message().replace("xmlread:", &format!("{context}:"));
-        compat_error(context, message)
+        build_runtime_error(message)
+            .with_identifier(
+                cooperation
+                    .operation()
+                    .identifier(XmlDiagnosticKind::MalformedXml),
+            )
+            .with_builtin(context)
+            .with_source(err)
+            .build()
     })
 }
 
-fn parse_xml_tag(tag: &str) -> BuiltinResult<(String, BTreeMap<String, String>)> {
+async fn parse_xml_tag(
+    tag: &str,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<(String, BTreeMap<String, String>)> {
     let mut parts = tag.splitn(2, char::is_whitespace);
     let name = parts.next().unwrap_or_default().to_string();
     if name.is_empty() {
@@ -325,7 +386,7 @@ fn parse_xml_tag(tag: &str) -> BuiltinResult<(String, BTreeMap<String, String>)>
     let mut attrs = BTreeMap::new();
     let mut rest = parts.next().unwrap_or_default().trim();
     while !rest.is_empty() {
-        let Some(eq) = rest.find('=') else {
+        let Some(eq) = find_ascii_delimiter(rest, b'=', cooperation).await? else {
             break;
         };
         let key = rest[..eq].trim();
@@ -343,19 +404,66 @@ fn parse_xml_tag(tag: &str) -> BuiltinResult<(String, BTreeMap<String, String>)>
             ));
         }
         rest = &rest[quote.len_utf8()..];
-        let end = rest.find(quote).ok_or_else(|| {
-            compat_error("xmlread", "xmlread: malformed XML (unterminated attribute)")
-        })?;
-        attrs.insert(key.to_string(), xml_unescape(&rest[..end]));
+        let end = find_ascii_delimiter(rest, quote as u8, cooperation)
+            .await?
+            .ok_or_else(|| {
+                compat_error("xmlread", "xmlread: malformed XML (unterminated attribute)")
+            })?;
+        attrs.insert(
+            key.to_string(),
+            xml_unescape(&rest[..end], cooperation).await?,
+        );
         rest = rest[end + quote.len_utf8()..].trim_start();
     }
     Ok((name, attrs))
 }
 
-fn xml_unescape(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
+async fn find_ascii_delimiter(
+    text: &str,
+    delimiter: u8,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<Option<usize>> {
+    for (chunk_idx, chunk) in text.as_bytes().chunks(4096).enumerate() {
+        let position = chunk.iter().position(|byte| *byte == delimiter);
+        cooperation
+            .completed(position.map_or(chunk.len(), |relative| relative + 1))
+            .await?;
+        if let Some(relative) = position {
+            return Ok(Some(chunk_idx * 4096 + relative));
+        }
+    }
+    Ok(None)
+}
+
+async fn xml_unescape(text: &str, cooperation: &mut XmlCooperation) -> BuiltinResult<String> {
+    let mut out = String::new();
+    let mut rest = text;
+    let mut completed = 0usize;
+    while !rest.is_empty() {
+        let entity = [
+            ("&lt;", '<'),
+            ("&gt;", '>'),
+            ("&quot;", '"'),
+            ("&apos;", '\''),
+            ("&amp;", '&'),
+        ]
+        .into_iter()
+        .find(|(prefix, _)| rest.starts_with(*prefix));
+        if let Some((prefix, decoded)) = entity {
+            out.push(decoded);
+            rest = &rest[prefix.len()..];
+            completed += prefix.len();
+        } else {
+            let ch = rest.chars().next().expect("nonempty XML source");
+            out.push(ch);
+            rest = &rest[ch.len_utf8()..];
+            completed += ch.len_utf8();
+        }
+        if completed >= 4096 {
+            cooperation.completed(completed).await?;
+            completed = 0;
+        }
+    }
+    cooperation.completed(completed).await?;
+    Ok(out)
 }

@@ -1,19 +1,52 @@
 //! XML file compatibility helpers.
 
-use runmat_builtins::{ReadStructOption, XML_DOCUMENT_CLASS, XML_ELEMENT_CLASS};
+use runmat_builtins::{
+    ReadStructOption, XmlDiagnosticKind, XmlOperation, XML_DOCUMENT_CLASS, XML_ELEMENT_CLASS,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::fs::path_to_string;
 use crate::builtins::io::repl_fs::compat::{char_value, compat_error, gather_args, value_to_path};
+use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+#[path = "xml/cooperation.rs"]
+mod cooperation;
+use cooperation::XmlCooperation;
+
+fn xml_error(
+    operation: XmlOperation,
+    kind: XmlDiagnosticKind,
+    message: impl Into<String>,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(operation.identifier(kind))
+        .with_builtin(operation.name())
+        .build()
+}
+
+fn xml_error_with_source(
+    operation: XmlOperation,
+    kind: XmlDiagnosticKind,
+    source: RuntimeError,
+) -> RuntimeError {
+    let message = source.message().to_string();
+    build_runtime_error(message)
+        .with_identifier(operation.identifier(kind))
+        .with_builtin(operation.name())
+        .with_source(source)
+        .build()
+}
 
 #[path = "xml/source.rs"]
 mod source;
 use source::XmlFsPath;
 
-fn xml_io_error(name: &str, err: std::io::Error) -> RuntimeError {
+fn xml_io_error(operation: XmlOperation, err: std::io::Error) -> RuntimeError {
+    let name = operation.name();
     build_runtime_error(format!("{name}: {err}"))
+        .with_identifier(operation.identifier(XmlDiagnosticKind::Io))
         .with_builtin(name)
         .with_source(err)
         .build()
@@ -67,124 +100,208 @@ fn known_document_preflight(value: &Value) -> BuiltinResult<()> {
 #[runtime_builtin(
     name = "readstruct",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::xml"
 )]
-async fn readstruct_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    requested_output_preflight("readstruct")?;
+async fn readstruct_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let operation = XmlOperation::ReadStruct;
+    let mut cooperation = XmlCooperation::new(runtime.as_ref(), operation);
+    requested_output_preflight("readstruct")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     if args.is_empty() {
-        return Err(compat_error(
-            "readstruct",
+        return Err(xml_error(
+            operation,
+            XmlDiagnosticKind::InvalidArgument,
             "readstruct: filename is required",
         ));
     }
     if args.len() > 1 && !(args.len() - 1).is_multiple_of(2) {
-        return Err(compat_error(
-            "readstruct",
+        return Err(xml_error(
+            operation,
+            XmlDiagnosticKind::InvalidArgument,
             "readstruct: name-value options must be paired",
         ));
     }
-    known_text(&args[0], "readstruct", "filename")?;
-    ReadStructOptions::preflight(&args[1..])?;
+    known_text(&args[0], "readstruct", "filename")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    ReadStructOptions::preflight(&args[1..])
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
+    cooperation.completed(0).await?;
     let args = gather_args("readstruct", &args).await?;
-    scalar_text(&args[0], "readstruct", "filename")?;
-    let path = value_to_path(&args[0], "readstruct", "filename")?;
-    let options = ReadStructOptions::parse(&args[1..])?;
-    let source = XmlFsPath::capture(path).map_err(|err| xml_io_error("readstruct", err))?;
-    let text = source
-        .read_to_string()
-        .await
-        .map_err(|err| xml_io_error("readstruct", err))?;
-    let root = parse_xml_document_with_context(&text, "readstruct")?;
-    let value = Value::Struct(xml_node_to_struct(&root, &options)?);
+    scalar_text(&args[0], "readstruct", "filename")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let path = value_to_path(&args[0], "readstruct", "filename")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let options = ReadStructOptions::parse(&args[1..])
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
+    let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
+    let text = cooperation
+        .await_io(source.read_to_string())
+        .await?
+        .map_err(|err| xml_io_error(operation, err))?;
+    cooperation.completed(text.len()).await?;
+    let root = parse_xml_document_with_context(&text, &mut cooperation).await?;
+    let value = Value::Struct(
+        xml_node_to_struct(&root, &options, &mut cooperation)
+            .await
+            .map_err(|err| {
+                if cooperation.is_cancelled_error(&err) {
+                    err
+                } else {
+                    xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
+                }
+            })?,
+    );
     source
         .check_current()
-        .map_err(|err| xml_io_error("readstruct", err))?;
+        .map_err(|err| xml_io_error(operation, err))?;
     Ok(value)
 }
 
 #[runtime_builtin(
     name = "xmlread",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::xml"
 )]
-async fn xmlread_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    requested_output_preflight("xmlread")?;
+async fn xmlread_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let operation = XmlOperation::XmlRead;
+    let mut cooperation = XmlCooperation::new(runtime.as_ref(), operation);
+    requested_output_preflight("xmlread")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     if args
         .iter()
         .any(crate::builtins::common::validation::value_has_native_integer_class)
     {
-        return Err(compat_error("xmlread", "xmlread: filename must be text"));
+        return Err(xml_error(
+            operation,
+            XmlDiagnosticKind::InvalidArgument,
+            "xmlread: filename must be text",
+        ));
     }
     if args.len() != 1 {
-        return Err(compat_error(
-            "xmlread",
+        return Err(xml_error(
+            operation,
+            XmlDiagnosticKind::InvalidArgument,
             "xmlread: expected exactly one filename",
         ));
     }
-    known_text(&args[0], "xmlread", "filename")?;
+    known_text(&args[0], "xmlread", "filename")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    cooperation.completed(0).await?;
     let args = gather_args("xmlread", &args).await?;
-    scalar_text(&args[0], "xmlread", "filename")?;
-    let path = value_to_path(&args[0], "xmlread", "filename")?;
-    let source = XmlFsPath::capture(path).map_err(|err| xml_io_error("xmlread", err))?;
-    let text = source
-        .read_to_string()
-        .await
-        .map_err(|err| xml_io_error("xmlread", err))?;
-    let root = parse_xml_document_with_context(&text, "xmlread")?;
+    scalar_text(&args[0], "xmlread", "filename")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let path = value_to_path(&args[0], "xmlread", "filename")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
+    let text = cooperation
+        .await_io(source.read_to_string())
+        .await?
+        .map_err(|err| xml_io_error(operation, err))?;
+    cooperation.completed(text.len()).await?;
+    let root = parse_xml_document_with_context(&text, &mut cooperation).await?;
     let mut object = ObjectInstance::new(XML_DOCUMENT_CLASS.display_name().to_string());
     object
         .properties
         .insert("Filename".to_string(), char_value(&path_to_string(&path)));
     object
         .properties
-        .insert("Text".to_string(), Value::String(text.clone()));
+        .insert("Text".to_string(), Value::String(text));
     object
         .properties
         .insert("DocumentElementName".to_string(), char_value(&root.name));
     object.properties.insert(
         "DocumentElement".to_string(),
-        Value::Object(root.into_object()?),
+        Value::Object(root.into_object(&mut cooperation).await.map_err(|err| {
+            if cooperation.is_cancelled_error(&err) {
+                err
+            } else {
+                xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
+            }
+        })?),
     );
     source
         .check_current()
-        .map_err(|err| xml_io_error("xmlread", err))?;
+        .map_err(|err| xml_io_error(operation, err))?;
     Ok(Value::Object(object))
 }
 
 #[runtime_builtin(
     name = "xmlwrite",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::xml"
 )]
-async fn xmlwrite_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    requested_output_preflight("xmlwrite")?;
+async fn xmlwrite_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let operation = XmlOperation::XmlWrite;
+    let mut cooperation = XmlCooperation::new(runtime.as_ref(), operation);
+    requested_output_preflight("xmlwrite")
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     if !matches!(args.len(), 1 | 2) {
-        return Err(compat_error(
-            "xmlwrite",
+        return Err(xml_error(
+            operation,
+            XmlDiagnosticKind::InvalidArgument,
             "xmlwrite: expected document or filename and document",
         ));
     }
     if args.len() == 2 {
-        known_text(&args[0], "xmlwrite", "filename")?;
+        known_text(&args[0], "xmlwrite", "filename").map_err(|err| {
+            xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
+        })?;
     }
     let document = if args.len() == 2 { &args[1] } else { &args[0] };
-    known_document_preflight(document)?;
+    known_document_preflight(document)
+        .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    cooperation.completed(0).await?;
     let args = gather_args("xmlwrite", &args).await?;
     match args.len() {
         1 => {
-            let xml = serialize_xml_value(&args[0])?;
+            let xml = serialize_xml_value(&args[0], &mut cooperation)
+                .await
+                .map_err(|err| {
+                    if cooperation.is_cancelled_error(&err) {
+                        err
+                    } else {
+                        xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
+                    }
+                })?;
+            cooperation.completed(xml.len()).await?;
             Ok(char_value(&xml))
         }
         2 => {
-            scalar_text(&args[0], "xmlwrite", "filename")?;
-            let path = value_to_path(&args[0], "xmlwrite", "filename")?;
-            let xml = serialize_xml_value(&args[1])?;
-            let destination =
-                XmlFsPath::capture(path).map_err(|err| xml_io_error("xmlwrite", err))?;
-            destination
-                .write(xml.as_bytes())
+            scalar_text(&args[0], "xmlwrite", "filename").map_err(|err| {
+                xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
+            })?;
+            let path = value_to_path(&args[0], "xmlwrite", "filename").map_err(|err| {
+                xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err)
+            })?;
+            let xml = serialize_xml_value(&args[1], &mut cooperation)
                 .await
-                .map_err(|err| xml_io_error("xmlwrite", err))?;
+                .map_err(|err| {
+                    if cooperation.is_cancelled_error(&err) {
+                        err
+                    } else {
+                        xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
+                    }
+                })?;
+            cooperation.completed(xml.len()).await?;
+            let destination =
+                XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
+            cooperation
+                .await_io(destination.write(xml.as_bytes()))
+                .await?
+                .map_err(|err| xml_io_error(operation, err))?;
+            cooperation.completed(0).await?;
             Ok(Value::Num(xml.len() as f64))
         }
         _ => Err(compat_error(

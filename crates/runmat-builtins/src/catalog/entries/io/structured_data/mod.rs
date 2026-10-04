@@ -4,6 +4,9 @@ mod readstruct;
 mod xmlread;
 mod xmlwrite;
 mod inference;
+mod diagnostics;
+
+pub use diagnostics::{XmlDiagnosticKind, XmlOperation};
 
 pub use readstruct::{READSTRUCT_CATALOG_ENTRY, READSTRUCT_DESCRIPTOR};
 pub use xmlread::{XMLREAD_CATALOG_ENTRY, XMLREAD_DESCRIPTOR, XMLREAD_INTEGER_AUDIT};

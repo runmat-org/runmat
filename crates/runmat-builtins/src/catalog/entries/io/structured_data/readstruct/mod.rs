@@ -55,11 +55,55 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &RESULT,
     },
 ];
+const ERRORS: [BuiltinErrorDescriptor; 7] = [
+    super::diagnostics::error(
+        "RM.READSTRUCT.INVALID_ARGUMENT",
+        "RunMat:readstruct:InvalidArgument",
+        "The filename, output count, or name-value arity is invalid.",
+        "readstruct: invalid argument",
+    ),
+    super::diagnostics::error(
+        "RM.READSTRUCT.INVALID_OPTION",
+        "RunMat:readstruct:InvalidOption",
+        "An option name or value is unsupported.",
+        "readstruct: unsupported option",
+    ),
+    super::diagnostics::error(
+        "RM.READSTRUCT.MALFORMED_XML",
+        "RunMat:readstruct:MalformedXml",
+        "The source is not a supported well-formed XML document.",
+        "readstruct: malformed XML",
+    ),
+    super::diagnostics::error(
+        "RM.READSTRUCT.PROJECTION",
+        "RunMat:readstruct:ProjectionFailed",
+        "An XML node cannot be projected to a scalar struct.",
+        "readstruct: XML projection failed",
+    ),
+    super::diagnostics::error(
+        "RM.READSTRUCT.IO",
+        "RunMat:readstruct:IoFailed",
+        "Filesystem capture, read, or authority validation fails.",
+        "readstruct: filesystem operation failed",
+    ),
+    super::diagnostics::error(
+        "RM.READSTRUCT.CANCELLED",
+        "RunMat:readstruct:Cancelled",
+        "The invocation is cancelled during XML work or filesystem I/O.",
+        "readstruct: execution was cancelled",
+    ),
+    super::diagnostics::error(
+        "RM.READSTRUCT.EXECUTION",
+        "RunMat:readstruct:ExecutionFailed",
+        "The invocation execution service fails while processing XML.",
+        "readstruct: execution service failed",
+    ),
+];
 pub const READSTRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &ERRORS,
 };
 pub const READSTRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

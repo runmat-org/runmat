@@ -25,11 +25,49 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor 
     inputs: &INPUT,
     outputs: &OUTPUT,
 }];
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
+    super::diagnostics::error(
+        "RM.XMLREAD.INVALID_ARGUMENT",
+        "RunMat:xmlread:InvalidArgument",
+        "The filename, input count, or output count is invalid.",
+        "xmlread: invalid argument",
+    ),
+    super::diagnostics::error(
+        "RM.XMLREAD.MALFORMED_XML",
+        "RunMat:xmlread:MalformedXml",
+        "The source is not a supported well-formed XML document.",
+        "xmlread: malformed XML",
+    ),
+    super::diagnostics::error(
+        "RM.XMLREAD.PROJECTION",
+        "RunMat:xmlread:ProjectionFailed",
+        "A parsed XML node cannot become a document object.",
+        "xmlread: XML projection failed",
+    ),
+    super::diagnostics::error(
+        "RM.XMLREAD.IO",
+        "RunMat:xmlread:IoFailed",
+        "Filesystem capture, read, or authority validation fails.",
+        "xmlread: filesystem operation failed",
+    ),
+    super::diagnostics::error(
+        "RM.XMLREAD.CANCELLED",
+        "RunMat:xmlread:Cancelled",
+        "The invocation is cancelled during XML work or filesystem I/O.",
+        "xmlread: execution was cancelled",
+    ),
+    super::diagnostics::error(
+        "RM.XMLREAD.EXECUTION",
+        "RunMat:xmlread:ExecutionFailed",
+        "The invocation execution service fails while processing XML.",
+        "xmlread: execution service failed",
+    ),
+];
 pub const XMLREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &ERRORS,
 };
 pub const XMLREAD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
