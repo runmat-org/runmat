@@ -6,6 +6,7 @@ use crate::builtins::common::test_support;
 use crate::builtins::io::filetext::{fclose, fopen, registry};
 use crate::RuntimeError;
 use runmat_accelerate_api::HostTensorView;
+use runmat_builtins::FPRINTF_ERROR_INVALID_IDENTIFIER;
 use runmat_filesystem::File;
 use runmat_time::system_time_now;
 use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor};
