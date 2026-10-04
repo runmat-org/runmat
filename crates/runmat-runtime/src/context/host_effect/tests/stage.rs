@@ -5,11 +5,15 @@ struct Reserved {
     live: Arc<AtomicBool>,
     drops: Arc<AtomicUsize>,
     bytes: u64,
+    capacity: u64,
 }
 
 impl HostEffectStageReservation for Reserved {
     fn reserved_bytes(&self) -> u64 {
         self.bytes
+    }
+    fn capacity_bytes(&self) -> u64 {
+        self.capacity
     }
     fn is_current(&self) -> bool {
         self.live.load(Ordering::SeqCst)
@@ -27,6 +31,8 @@ struct StagedResources {
     stage_scratch: ResourceByteBound,
     final_scratch: ResourceByteBound,
     reserved: u64,
+    capacity: u64,
+    separate_final_permit: bool,
     live: Arc<AtomicBool>,
     drops: Arc<AtomicUsize>,
 }
@@ -61,6 +67,7 @@ impl RuntimeHostEffectResourceService for StagedResources {
                     live: self.live.clone(),
                     drops: self.drops.clone(),
                     bytes: self.reserved,
+                    capacity: self.capacity,
                 }),
             }
         })
@@ -72,9 +79,27 @@ impl RuntimeHostEffectResourceService for StagedResources {
         facts: HostEffectFinalFacts<'_>,
         runtime: &RuntimeContext,
     ) -> Option<HostEffectResourceAdmission> {
-        matches!(facts, HostEffectFinalFacts::TestOnly(_))
+        let mut admission = matches!(facts, HostEffectFinalFacts::TestOnly(_))
             .then(|| self.admission(request, runtime))
-            .flatten()
+            .flatten()?;
+        if self.separate_final_permit {
+            admission.output_allocation_permit = Some(Arc::new(SeparatePermit));
+        }
+        Some(admission)
+    }
+}
+
+#[derive(Debug)]
+struct SeparatePermit;
+impl runmat_value::ExactHostAllocationPermit for SeparatePermit {
+    fn reserve_exact(
+        &self,
+        _: usize,
+    ) -> Result<
+        Arc<dyn runmat_value::ExactHostAllocationReservation>,
+        runmat_value::ExactHostNumericAllocationError,
+    > {
+        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
     }
 }
 
@@ -98,6 +123,8 @@ fn staged_runtime(
         stage_scratch,
         final_scratch,
         reserved,
+        capacity: budget,
+        separate_final_permit: false,
         live: live.clone(),
         drops: drops.clone(),
     });
@@ -338,6 +365,45 @@ fn staged_receipt_suppresses_feedback_when_scan_reservation_is_revoked() {
 }
 
 #[test]
+fn staged_final_rejects_a_second_output_quota_authority() {
+    let (runtime, placement, _, _) = staged_runtime(
+        ResourceByteBound::Known(16),
+        ResourceByteBound::Known(16),
+        16,
+        64,
+    );
+    let drops = Arc::new(AtomicUsize::new(0));
+    let resources = Rc::new(StagedResources {
+        revision: Digest::sha256(b"staged-resource-v1"),
+        stage_scratch: ResourceByteBound::Known(16),
+        final_scratch: ResourceByteBound::Known(16),
+        reserved: 16,
+        capacity: 64,
+        separate_final_permit: true,
+        live: Arc::new(AtomicBool::new(true)),
+        drops: drops.clone(),
+    });
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_host_effect_resources(resources);
+    let runtime = runtime.with_service_ports(ports);
+    let stage =
+        admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .err()
+    .expect("independent output authority is contradictory");
+    assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
+    assert_eq!(placement.selections.get(), 0);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn same_session_cannot_rebind_placement_parallel_or_cancellation_authority() {
     for replacement in 0..4 {
         let (runtime, placement, live, drops) = staged_runtime(
@@ -371,6 +437,8 @@ fn same_session_cannot_rebind_placement_parallel_or_cancellation_authority() {
                         stage_scratch: ResourceByteBound::Known(16),
                         final_scratch: ResourceByteBound::Known(16),
                         reserved: 16,
+                        capacity: 64,
+                        separate_final_permit: false,
                         live,
                         drops: Arc::new(AtomicUsize::new(0)),
                     })),

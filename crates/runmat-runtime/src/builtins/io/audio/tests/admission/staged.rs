@@ -9,61 +9,62 @@ use crate::context::host_effect::{
 };
 use crate::context::{RuntimeContext, RuntimeHostEffectResourceService, RuntimeServicePorts};
 use runmat_execution::{Digest, ResourceByteBound};
-use runmat_value::{
-    ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
-};
+use runmat_value::{ExactHostAllocationReservation, ExactHostNumericAllocationError};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
-struct TestOutputQuota {
-    live: Arc<AtomicUsize>,
-    limit: usize,
-}
-
-#[derive(Debug)]
 struct TestOutputReservation {
-    live: Arc<AtomicUsize>,
+    live_total: Arc<AtomicUsize>,
+    live_output: Arc<AtomicUsize>,
     bytes: usize,
 }
 
 impl Drop for TestOutputReservation {
     fn drop(&mut self) {
-        self.live.fetch_sub(self.bytes, Ordering::SeqCst);
+        self.live_output.fetch_sub(self.bytes, Ordering::SeqCst);
+        self.live_total.fetch_sub(self.bytes, Ordering::SeqCst);
     }
 }
 impl ExactHostAllocationReservation for TestOutputReservation {}
 
-impl ExactHostAllocationPermit for TestOutputQuota {
-    fn reserve_exact(
-        &self,
-        bytes: usize,
-    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
-        self.live
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
-                live.checked_add(bytes).filter(|total| *total <= self.limit)
-            })
-            .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
-        Ok(Arc::new(TestOutputReservation {
-            live: self.live.clone(),
-            bytes,
-        }))
-    }
-}
-
 struct TestStageReservation {
     current: Arc<AtomicBool>,
-    live: Arc<AtomicUsize>,
+    live_stage: Arc<AtomicUsize>,
+    live_output: Arc<AtomicUsize>,
+    live_total: Arc<AtomicUsize>,
+    capacity: usize,
 }
 impl Drop for TestStageReservation {
     fn drop(&mut self) {
-        self.live.fetch_sub(128 * 1024, Ordering::SeqCst);
+        self.live_stage.fetch_sub(128 * 1024, Ordering::SeqCst);
+        self.live_total.fetch_sub(128 * 1024, Ordering::SeqCst);
     }
 }
 impl HostEffectStageReservation for TestStageReservation {
     fn reserved_bytes(&self) -> u64 {
         128 * 1024
+    }
+    fn capacity_bytes(&self) -> u64 {
+        self.capacity as u64
+    }
+    fn reserve_output_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
+        self.live_total
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
+                live.checked_add(bytes)
+                    .filter(|total| *total <= self.capacity)
+            })
+            .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
+        self.live_output.fetch_add(bytes, Ordering::SeqCst);
+        Ok(Arc::new(TestOutputReservation {
+            live_total: self.live_total.clone(),
+            live_output: self.live_output.clone(),
+            bytes,
+        }))
     }
     fn is_current(&self) -> bool {
         self.current.load(Ordering::SeqCst)
@@ -85,6 +86,8 @@ struct StagedTestResources {
     live_output: Arc<AtomicUsize>,
     current: Arc<AtomicBool>,
     live_stage: Arc<AtomicUsize>,
+    live_total: Arc<AtomicUsize>,
+    capacity: usize,
 }
 
 impl RuntimeHostEffectResourceService for StagedTestResources {
@@ -108,12 +111,13 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
         {
             return None;
         }
-        self.live_stage
+        self.live_total
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
                 live.checked_add(128 * 1024)
-                    .filter(|total| *total <= 256 * 1024)
+                    .filter(|total| *total <= self.capacity)
             })
             .ok()?;
+        self.live_stage.fetch_add(128 * 1024, Ordering::SeqCst);
         Some(HostEffectStageAdmission {
             evidence: HostEffectStageEvidence {
                 authority_revision: Digest::sha256(b"test-staged-native-wave"),
@@ -121,7 +125,10 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
             },
             reservation: Arc::new(TestStageReservation {
                 current: self.current.clone(),
-                live: self.live_stage.clone(),
+                live_stage: self.live_stage.clone(),
+                live_output: self.live_output.clone(),
+                live_total: self.live_total.clone(),
+                capacity: self.capacity,
             }),
         })
     }
@@ -162,12 +169,7 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
                 returned_value_bytes: ResourceByteBound::Known(if effect_only { 0 } else { 16 }),
             },
             liveness_lease: Arc::new(TestCurrent(self.current.clone())),
-            output_allocation_permit: (!effect_only).then(|| {
-                Arc::new(TestOutputQuota {
-                    live: self.live_output.clone(),
-                    limit: 16,
-                }) as Arc<dyn ExactHostAllocationPermit>
-            }),
+            output_allocation_permit: None,
         })
     }
 }
@@ -190,6 +192,8 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
         live_output: Arc::new(AtomicUsize::new(0)),
         current: Arc::new(AtomicBool::new(true)),
         live_stage: Arc::new(AtomicUsize::new(0)),
+        live_total: Arc::new(AtomicUsize::new(0)),
+        capacity: 256 * 1024,
     });
     let placement = Rc::new(Placement::default());
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
@@ -260,6 +264,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     assert_eq!(placement.observations.borrow().len(), 1);
     assert_eq!(resources.live_output.load(Ordering::SeqCst), 16);
     assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
+    assert_eq!(resources.live_total.load(Ordering::SeqCst), 16);
     let Value::Tensor(samples) = &value else {
         panic!("single-output decode must return tensor");
     };
@@ -267,6 +272,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     drop(value);
     assert_eq!(resources.live_output.load(Ordering::SeqCst), 0);
     assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
+    assert_eq!(resources.live_total.load(Ordering::SeqCst), 0);
 
     let discarded = {
         let _outputs = crate::output_count::push_output_count(Some(0));
@@ -279,8 +285,49 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     };
     assert!(output_list(discarded).is_empty());
     assert_eq!(resources.live_output.load(Ordering::SeqCst), 0);
+    assert_eq!(resources.live_total.load(Ordering::SeqCst), 0);
     assert_eq!(resources.stage_calls.get(), 4);
     assert_eq!(resources.final_calls.get(), 2);
     assert_eq!(placement.selections.get(), 2);
     assert_eq!(placement.observations.borrow().len(), 2);
+}
+
+#[test]
+fn scan_and_exact_output_compete_in_one_managed_allocation_ledger() {
+    let live_stage = Arc::new(AtomicUsize::new(128 * 1024));
+    let live_output = Arc::new(AtomicUsize::new(0));
+    let live_total = Arc::new(AtomicUsize::new(128 * 1024));
+    let reservation = TestStageReservation {
+        current: Arc::new(AtomicBool::new(true)),
+        live_stage: live_stage.clone(),
+        live_output: live_output.clone(),
+        live_total: live_total.clone(),
+        capacity: 128 * 1024,
+    };
+    assert!(matches!(
+        reservation.reserve_output_exact(16),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert_eq!(live_total.load(Ordering::SeqCst), 128 * 1024);
+    drop(reservation);
+    assert_eq!(live_total.load(Ordering::SeqCst), 0);
+
+    let reservation = TestStageReservation {
+        current: Arc::new(AtomicBool::new(true)),
+        live_stage,
+        live_output: live_output.clone(),
+        live_total: live_total.clone(),
+        capacity: 128 * 1024 + 16,
+    };
+    live_total.store(128 * 1024, Ordering::SeqCst);
+    reservation.live_stage.store(128 * 1024, Ordering::SeqCst);
+    let output = reservation
+        .reserve_output_exact(16)
+        .expect("combined peak fits");
+    assert_eq!(live_total.load(Ordering::SeqCst), 128 * 1024 + 16);
+    drop(reservation);
+    assert_eq!(live_total.load(Ordering::SeqCst), 16);
+    drop(output);
+    assert_eq!(live_total.load(Ordering::SeqCst), 0);
+    assert_eq!(live_output.load(Ordering::SeqCst), 0);
 }

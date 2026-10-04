@@ -4,6 +4,7 @@
 
 use super::*;
 use runmat_execution::{PlacementRevision, ResourceByteBound};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostEffectStageEvidence {
@@ -12,12 +13,99 @@ pub struct HostEffectStageEvidence {
     pub scratch_bytes: ResourceByteBound,
 }
 
-/// The installed service holds a real scratch reservation until the final
-/// receipt is dropped. A size assertion without an enforcing reservation is
+/// The installed service holds a real scan reservation until the final
+/// receipt is dropped and atomically charges exact output allocations to the
+/// same managed-byte ledger. A size assertion or separate output budget is
 /// not a valid implementation of this trait.
 pub trait HostEffectStageReservation: Send + Sync {
     fn reserved_bytes(&self) -> u64;
+    /// Capacity of the same managed-allocation ledger used for the scan and
+    /// every exact output reservation. This is not a process-RSS certificate.
+    fn capacity_bytes(&self) -> u64;
+    /// Atomically charge this exact output against the scan's live charge and
+    /// all other reservations on this authority. Implementations must reject
+    /// revocation and keep the charge until the returned owner is dropped.
+    /// The default deliberately makes staged returned values unavailable.
+    fn reserve_output_exact(
+        &self,
+        _bytes: usize,
+    ) -> Result<
+        Arc<dyn runmat_value::ExactHostAllocationReservation>,
+        runmat_value::ExactHostNumericAllocationError,
+    > {
+        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+    }
     fn is_current(&self) -> bool;
+}
+
+struct StagedOutputPermit {
+    reservation: Arc<dyn HostEffectStageReservation>,
+    max_output_bytes: u64,
+    live_output_bytes: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+struct StagedOutputReservation {
+    _authority_reservation: Arc<dyn runmat_value::ExactHostAllocationReservation>,
+    live_output_bytes: Arc<AtomicU64>,
+    bytes: u64,
+}
+
+impl Drop for StagedOutputReservation {
+    fn drop(&mut self) {
+        self.live_output_bytes
+            .fetch_sub(self.bytes, Ordering::SeqCst);
+    }
+}
+
+impl runmat_value::ExactHostAllocationReservation for StagedOutputReservation {}
+
+impl std::fmt::Debug for StagedOutputPermit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagedOutputPermit")
+            .field("max_output_bytes", &self.max_output_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
+    fn reserve_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<
+        Arc<dyn runmat_value::ExactHostAllocationReservation>,
+        runmat_value::ExactHostNumericAllocationError,
+    > {
+        let requested = u64::try_from(bytes)
+            .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
+        if !self.reservation.is_current() {
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        self.live_output_bytes
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
+                live.checked_add(requested)
+                    .filter(|total| *total <= self.max_output_bytes)
+            })
+            .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
+        let authority_reservation = match self.reservation.reserve_output_exact(bytes) {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                self.live_output_bytes
+                    .fetch_sub(requested, Ordering::SeqCst);
+                return Err(error);
+            }
+        };
+        if !self.reservation.is_current() {
+            self.live_output_bytes
+                .fetch_sub(requested, Ordering::SeqCst);
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        Ok(Arc::new(StagedOutputReservation {
+            _authority_reservation: authority_reservation,
+            live_output_bytes: self.live_output_bytes.clone(),
+            bytes: requested,
+        }))
+    }
 }
 
 pub struct HostEffectStageAdmission {
@@ -45,6 +133,17 @@ impl HostEffectStagePermit {
 
     pub fn reservation(&self) -> Arc<dyn HostEffectStageReservation> {
         self.reservation.clone()
+    }
+
+    pub(super) fn output_permit(
+        &self,
+        max_output_bytes: u64,
+    ) -> Arc<dyn runmat_value::ExactHostAllocationPermit> {
+        Arc::new(StagedOutputPermit {
+            reservation: self.reservation.clone(),
+            max_output_bytes,
+            live_output_bytes: Arc::new(AtomicU64::new(0)),
+        })
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {
@@ -162,6 +261,8 @@ pub fn try_admit_host_effect_stage(
         return Err(stale_resource());
     }
     if admission.reservation.reserved_bytes() < scratch_bytes
+        || admission.reservation.reserved_bytes() > admission.reservation.capacity_bytes()
+        || admission.reservation.capacity_bytes() > available
         || admission.reservation.reserved_bytes() > available
     {
         return Err(insufficient(

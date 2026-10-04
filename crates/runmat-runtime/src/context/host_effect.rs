@@ -70,9 +70,10 @@ pub struct HostEffectResourceAdmission {
     /// Revocation guard for the installed source/codec authority. Allocation
     /// enforcement is a separate prerequisite of `evidence` being truthful.
     pub liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
-    /// Optional exact output payload reservation authority. The operation
-    /// owner may require it for a finite route; ordinary unbounded calls do
-    /// not fabricate one. A retained output keeps its reservation until drop.
+    /// Direct/a-priori exact output authority only. A staged call must leave
+    /// this empty: its output permit is derived from the captured scan
+    /// reservation so scan and output compete in one managed byte ledger.
+    /// A retained output keeps its reservation until drop.
     pub output_allocation_permit: Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>,
 }
 
@@ -146,6 +147,11 @@ fn select_host_effect_inner(
     let evidence = admission.evidence;
     if let Some(stage) = stage.as_ref() {
         stage.validate_final_evidence(evidence)?;
+        if admission.output_allocation_permit.is_some() {
+            return Err(stage::invalid_stage(
+                "final route supplied a separate output allocation authority",
+            ));
+        }
     }
     let Some(revision) = service.whole_work_host_service_revision(
         runtime.program_revision().cloned(),
@@ -248,6 +254,13 @@ fn select_host_effect_inner(
                 .build(),
         );
     }
+    let output_allocation_permit = match stage.as_ref() {
+        Some(stage) => match retained_bytes {
+            ResourceByteBound::Known(bytes) => Some(stage.output_permit(bytes)),
+            ResourceByteBound::Unavailable(_) => None,
+        },
+        None => admission.output_allocation_permit,
+    };
     Ok(Some(HostEffectReceipt {
         runtime: runtime.clone(),
         selected,
@@ -255,7 +268,7 @@ fn select_host_effect_inner(
             .as_ref()
             .map_or_else(Instant::now, |stage| stage.started),
         resource_liveness_lease: admission.liveness_lease,
-        output_allocation_permit: admission.output_allocation_permit,
+        output_allocation_permit,
         _stage: stage,
     }))
 }
