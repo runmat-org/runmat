@@ -62,4 +62,20 @@ fn server_constructor_has_sound_fields_and_invalid_control_diagnostics() {
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-TCPSERVER-OPTION"));
+
+    let infinite = CallRequest {
+        arguments: vec![text(), double(), text(), double()],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(0.0),
+            LiteralValue::String("Timeout".into()),
+            LiteralValue::Number(f64::INFINITY),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&infinite, &TCPSERVER_CATALOG_ENTRY);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-TCPSERVER-TIMEOUT"));
 }

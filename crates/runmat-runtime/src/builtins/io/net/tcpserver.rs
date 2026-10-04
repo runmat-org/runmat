@@ -3,8 +3,8 @@
 use super::control::{canonicalize_byte_order, default_user_data, parse_port, string_scalar};
 use super::server_state::{insert_server, DEFAULT_TIMEOUT_SECONDS, HANDLE_ID_FIELD};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, TCPSERVER_ERROR_BIND_FAILED, TCPSERVER_ERROR_INTERNAL,
-    TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
+    BuiltinErrorDescriptor, NetConstructorOption, TCPSERVER_ERROR_BIND_FAILED,
+    TCPSERVER_ERROR_INTERNAL, TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
     TCPSERVER_ERROR_INVALID_PORT,
     TCPSERVER_EXPLICIT_GPU_INPUT_EXTENSION as EXPLICIT_GPU_INPUT_EXTENSION,
     TCPSERVER_INTEGER_PORT_EXTENSION as INTEGER_PORT_EXTENSION,
@@ -112,30 +112,97 @@ pub(crate) async fn tcpserver_builtin(
 
 async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {
     if !rest.len().is_multiple_of(2) {
-        return Ok(());
+        return Err(tcpserver_flow(
+            &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+            "tcpserver: name-value arguments must appear in pairs",
+        ));
     }
+    let mut known = Vec::with_capacity(rest.len() / 2);
     for pair in rest.chunks_exact(2) {
-        let Ok(name) = string_scalar(&pair[0], "OptionName") else {
-            continue;
+        let option = match &pair[0] {
+            Value::GpuTensor(_) => None,
+            value => {
+                let name = string_scalar(value, "OptionName").map_err(|err| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: invalid option name: {err}"),
+                    )
+                })?;
+                Some(NetConstructorOption::tcpserver(&name).ok_or_else(|| {
+                    tcpserver_flow(
+                        &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                        format!("tcpserver: unsupported option '{name}'"),
+                    )
+                })?)
+            }
         };
-        match name.to_ascii_lowercase().as_str() {
-            "timeout" => {
+        if let Some(option) = option {
+            preflight_known_option_value(option, &pair[1])?;
+        }
+        known.push((option, &pair[1]));
+    }
+    for (option, value) in known {
+        match option {
+            Some(NetConstructorOption::Timeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-                    &pair[1],
+                    value,
                     &INTEGER_TIMEOUT_EXTENSION,
                     BUILTIN_NAME,
                     "Timeout",
                 )
                 .await?;
             }
-            "userdata" | "name" => {
+            Some(NetConstructorOption::UserData | NetConstructorOption::Name) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
             }
-            _ => {}
+            Some(NetConstructorOption::ByteOrder) => {}
+            None => {}
+            Some(_) => unreachable!("tcpserver option admission excludes client-only controls"),
         }
+    }
+    Ok(())
+}
+
+fn preflight_known_option_value(option: NetConstructorOption, value: &Value) -> BuiltinResult<()> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(());
+    }
+    match option {
+        NetConstructorOption::Timeout => {
+            parse_timeout(value).map_err(|err| {
+                tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: invalid Timeout value: {err}"),
+                )
+            })?;
+        }
+        NetConstructorOption::ByteOrder => {
+            let text = string_scalar(value, "ByteOrder").map_err(|err| {
+                tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: invalid ByteOrder value: {err}"),
+                )
+            })?;
+            if canonicalize_byte_order(&text).is_none() {
+                return Err(tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: unsupported ByteOrder '{text}'"),
+                ));
+            }
+        }
+        NetConstructorOption::Name => {
+            string_scalar(value, "Name").map_err(|err| {
+                tcpserver_flow(
+                    &TCPSERVER_ERROR_INVALID_NAME_VALUE,
+                    format!("tcpserver: invalid Name value: {err}"),
+                )
+            })?;
+        }
+        NetConstructorOption::UserData => {}
+        _ => unreachable!("tcpserver option admission excludes client-only controls"),
     }
     Ok(())
 }
@@ -186,9 +253,8 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 format!("tcpserver: invalid option name: {err}"),
             )
         })?;
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "timeout" => {
+        match NetConstructorOption::tcpserver(&name) {
+            Some(NetConstructorOption::Timeout) => {
                 crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                     &value_raw,
                     &INTEGER_TIMEOUT_EXTENSION,
@@ -206,14 +272,14 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                     )
                 })?
             }
-            "userdata" => {
+            Some(NetConstructorOption::UserData) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
                 options.user_data = value_raw;
             }
-            "name" => {
+            Some(NetConstructorOption::Name) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     BUILTIN_NAME,
@@ -229,7 +295,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 })?;
                 options.name = Some(text);
             }
-            "byteorder" => {
+            Some(NetConstructorOption::ByteOrder) => {
                 let order_value = gather_if_needed_async(&value_raw)
                     .await
                     .map_err(|err| tcpserver_flow(&TCPSERVER_ERROR_INTERNAL, err.message()))?;
@@ -247,12 +313,13 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<ParsedOptions
                 })?;
                 options.byte_order = canon.to_string();
             }
-            _ => {
+            None => {
                 return Err(tcpserver_flow(
                     &TCPSERVER_ERROR_INVALID_NAME_VALUE,
                     format!("tcpserver: unsupported option '{name}'"),
                 ));
             }
+            Some(_) => unreachable!("tcpserver option admission excludes client-only controls"),
         }
     }
 
@@ -372,6 +439,7 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
 pub(crate) mod tests {
     use super::super::server_state::remove_server_for_test;
     use super::*;
+    use crate::builtins::io::net::test_support::CountingDownloadProvider;
     use runmat_builtins::TCPSERVER_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
@@ -401,6 +469,33 @@ pub(crate) mod tests {
 
     fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(tcpserver_builtin(address, port, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_options_reject_before_resident_bind_address_download() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+        let address = Value::GpuTensor(owner.resident());
+        let err = run_tcpserver(
+            address.clone(),
+            Value::Num(80.0),
+            vec![Value::from("EnableTransferDelay"), Value::Bool(true)],
+        )
+        .expect_err("known invalid option rejects before address download");
+        assert_eq!(
+            err.identifier(),
+            TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier
+        );
+        let err = run_tcpserver(address, Value::Num(80.0), vec![Value::from("Timeout")])
+            .expect_err("incomplete option pair rejects before address download");
+        assert_eq!(
+            err.identifier(),
+            TCPSERVER_ERROR_INVALID_NAME_VALUE.identifier
+        );
+        assert_eq!(owner.downloads(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

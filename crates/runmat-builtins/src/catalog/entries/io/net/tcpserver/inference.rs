@@ -70,12 +70,47 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             || request
                 .literals
                 .literal_string_at(index)
-                .is_some_and(|literal| !known_option(&literal))
+                .is_some_and(|literal| {
+                    super::super::NetConstructorOption::tcpserver(&literal).is_none()
+                })
         {
             result.diagnostics.push(argument_error(
                 "RM-CATALOG-TCPSERVER-OPTION",
                 "unsupported tcpserver option name",
                 index,
+            ));
+        }
+        if request
+            .literals
+            .literal_string_at(index)
+            .is_some_and(|literal| {
+                super::super::NetConstructorOption::tcpserver(&literal)
+                    == Some(super::super::NetConstructorOption::Timeout)
+            })
+            && request.arguments.get(index + 1).is_some_and(|value| {
+                value.shape.is_definitely_nonscalar()
+                    || !matches!(
+                        value.kind,
+                        ValueKindFact::Numeric(NumericFact {
+                            domain: NumericDomain::Real,
+                            ..
+                        }) | ValueKindFact::Unknown
+                    )
+                    || request
+                        .literals
+                        .literal_args
+                        .get(index + 1)
+                        .is_some_and(|literal| {
+                            super::super::constructor_inference::known_invalid_timeout(
+                                literal, false,
+                            )
+                        })
+            })
+        {
+            result.diagnostics.push(argument_error(
+                "RM-CATALOG-TCPSERVER-TIMEOUT",
+                "tcpserver Timeout must be a finite, nonnegative numeric scalar",
+                index + 1,
             ));
         }
     }
@@ -87,11 +122,4 @@ fn real_double() -> ValueFact {
         class: NumericClass::Double,
         domain: NumericDomain::Real,
     }))
-}
-
-fn known_option(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "timeout" | "userdata" | "name" | "byteorder"
-    )
 }

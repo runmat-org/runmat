@@ -62,4 +62,20 @@ fn constructor_facts_preserve_host_property_classes_and_known_invalid_controls()
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-TCPCLIENT-OPTION"));
+
+    let negative_timeout = CallRequest {
+        arguments: vec![text(), double(), text(), double()],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(80.0),
+            LiteralValue::String("Timeout".into()),
+            LiteralValue::Number(-1.0),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&negative_timeout, &TCPCLIENT_CATALOG_ENTRY);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-TCPCLIENT-TIMEOUT"));
 }

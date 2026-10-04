@@ -1,8 +1,9 @@
 //! MATLAB-compatible `accept` builtin for RunMat networking.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, ACCEPT_ERROR_ACCEPT_FAILED, ACCEPT_ERROR_INTERNAL,
-    ACCEPT_ERROR_INVALID_NAME_VALUE, ACCEPT_ERROR_INVALID_SERVER, ACCEPT_ERROR_TIMEOUT,
+    BuiltinErrorDescriptor, NetConstructorOption, ACCEPT_ERROR_ACCEPT_FAILED,
+    ACCEPT_ERROR_INTERNAL, ACCEPT_ERROR_INVALID_NAME_VALUE, ACCEPT_ERROR_INVALID_SERVER,
+    ACCEPT_ERROR_TIMEOUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
@@ -25,6 +26,10 @@ const BUILTIN_NAME: &str = "accept";
     builtin_path = "crate::builtins::io::net::accept"
 )]
 pub(crate) async fn accept_builtin(server: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if !matches!(server, Value::GpuTensor(_)) {
+        extract_server_id(&server)?;
+    }
+    preflight_accept_options(&rest)?;
     let server = gather_if_needed_async(&server)
         .await
         .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
@@ -125,6 +130,44 @@ struct AcceptOptions {
     timeout: Option<f64>,
 }
 
+fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<()> {
+    if !rest.len().is_multiple_of(2) {
+        return Err(accept_flow(
+            &ACCEPT_ERROR_INVALID_NAME_VALUE,
+            "accept: name-value arguments must appear in pairs",
+        ));
+    }
+    for pair in rest.chunks_exact(2) {
+        let name = match &pair[0] {
+            Value::GpuTensor(_) => continue,
+            Value::String(name) => name.clone(),
+            Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
+            Value::StringArray(strings) if strings.data.len() == 1 => strings.data[0].clone(),
+            other => {
+                return Err(accept_flow(
+                    &ACCEPT_ERROR_INVALID_NAME_VALUE,
+                    format!("accept: invalid option name ({other:?})"),
+                ))
+            }
+        };
+        if NetConstructorOption::accept(&name).is_none() {
+            return Err(accept_flow(
+                &ACCEPT_ERROR_INVALID_NAME_VALUE,
+                format!("accept: unsupported option '{name}'"),
+            ));
+        }
+        if !matches!(pair[1], Value::GpuTensor(_)) {
+            parse_timeout_value(&pair[1]).map_err(|err| {
+                accept_flow(
+                    &ACCEPT_ERROR_INVALID_NAME_VALUE,
+                    format!("accept: invalid Timeout value: {err}"),
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
 async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> {
     if rest.is_empty() {
         return Ok(AcceptOptions::default());
@@ -156,9 +199,8 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
                 ));
             }
         };
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "timeout" => {
+        match NetConstructorOption::accept(&name) {
+            Some(NetConstructorOption::Timeout) => {
                 let gathered = gather_if_needed_async(&value_raw)
                     .await
                     .map_err(|err| accept_flow(&ACCEPT_ERROR_INTERNAL, err.message()))?;
@@ -170,12 +212,13 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
                 })?;
                 options.timeout = Some(timeout);
             }
-            _ => {
+            None => {
                 return Err(accept_flow(
                     &ACCEPT_ERROR_INVALID_NAME_VALUE,
                     format!("accept: unsupported option '{name}'"),
                 ));
             }
+            Some(_) => unreachable!("accept option admission exposes only Timeout"),
         }
     }
     Ok(options)
@@ -330,6 +373,7 @@ pub(crate) mod tests {
     use super::super::server_state::{remove_server_for_test, HANDLE_ID_FIELD as SERVER_FIELD};
     use super::super::tcpserver::tcpserver_builtin;
     use super::*;
+    use crate::builtins::io::net::test_support::CountingDownloadProvider;
     use runmat_builtins::ACCEPT_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
@@ -370,6 +414,25 @@ pub(crate) mod tests {
 
     fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(accept_builtin(server, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn known_invalid_timeout_rejects_before_resident_server_download() {
+        let _lock = crate::builtins::common::test_support::accel_test_lock();
+        let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+        let server = Value::GpuTensor(owner.resident());
+        let err = run_accept(
+            server.clone(),
+            vec![Value::from("Timeout"), Value::Num(-1.0)],
+        )
+        .expect_err("invalid timeout rejects before resident server download");
+        assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_NAME_VALUE.identifier);
+        let err = run_accept(server, vec![Value::from("Backlog"), Value::Num(1.0)])
+            .expect_err("unknown option rejects before resident server download");
+        assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_NAME_VALUE.identifier);
+        assert_eq!(owner.downloads(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

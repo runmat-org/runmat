@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Bind address, port, and options", paragraphs: &[
             "`tcpserver(address, port)` binds to the requested interface; pass `\"0.0.0.0\"` or `\"::\"` to listen on every IPv4 or IPv6 adapter respectively.",
             "The documented port range is 1 through 65535. In RunMat mode, port zero requests an ephemeral operating-system-assigned port reported by `ServerPort`.",
-            "The current parser accepts nonnegative double values or `Inf` for `Timeout`; `ByteOrder` accepts little- or big-endian text. RunMat mode additionally accepts typed-integer port and timeout values and legacy `UserData` and `Name` options.",
+            "The current server parser accepts finite, nonnegative double values for `Timeout`; unlike the client constructor it rejects `Inf`. `ByteOrder` accepts little- or big-endian text. RunMat mode additionally accepts typed-integer port and timeout values and legacy `UserData` and `Name` options.",
             "The documented one-argument `tcpserver(port)` form is not implemented; provide both address and port.",
         ] },
         BuiltinDocumentationSection { heading: "Result, placement, and failures", paragraphs: &[

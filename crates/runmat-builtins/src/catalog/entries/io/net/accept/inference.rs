@@ -50,7 +50,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             || request
                 .literals
                 .literal_string_at(index)
-                .is_some_and(|literal| !literal.eq_ignore_ascii_case("Timeout"))
+                .is_some_and(|literal| {
+                    super::super::NetConstructorOption::accept(&literal).is_none()
+                })
         {
             result.diagnostics.push(argument_error(
                 "RM-CATALOG-NET-ACCEPT-OPTION",
@@ -71,7 +73,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     .literals
                     .literal_args
                     .get(index + 1)
-                    .is_some_and(known_invalid_timeout)
+                    .is_some_and(|literal| {
+                        super::super::constructor_inference::known_invalid_timeout(literal, true)
+                    })
             {
                 result.diagnostics.push(argument_error(
                     "RM-CATALOG-NET-ACCEPT-TIMEOUT",
@@ -82,19 +86,4 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     result
-}
-
-fn known_invalid_timeout(literal: &LiteralValue) -> bool {
-    match literal {
-        LiteralValue::Integer { .. } => literal.integer_value_i128().is_none_or(|n| n < 0),
-        LiteralValue::Number(value) => value.is_nan() || *value < 0.0,
-        LiteralValue::Real {
-            text,
-            class: NumericClass::Double,
-        } => text
-            .parse::<f64>()
-            .ok()
-            .is_none_or(|value| value.is_nan() || value < 0.0),
-        _ => false,
-    }
 }

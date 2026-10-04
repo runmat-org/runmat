@@ -68,12 +68,52 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             || request
                 .literals
                 .literal_string_at(index)
-                .is_some_and(|literal| !known_option(&literal))
+                .is_some_and(|literal| {
+                    super::super::NetConstructorOption::tcpclient(&literal).is_none()
+                })
         {
             result.diagnostics.push(argument_error(
                 "RM-CATALOG-TCPCLIENT-OPTION",
                 "unsupported tcpclient option name",
                 index,
+            ));
+        }
+        if request
+            .literals
+            .literal_string_at(index)
+            .is_some_and(|literal| {
+                matches!(
+                    super::super::NetConstructorOption::tcpclient(&literal),
+                    Some(
+                        super::super::NetConstructorOption::Timeout
+                            | super::super::NetConstructorOption::ConnectTimeout
+                    )
+                )
+            })
+            && request.arguments.get(index + 1).is_some_and(|value| {
+                value.shape.is_definitely_nonscalar()
+                    || !matches!(
+                        value.kind,
+                        ValueKindFact::Numeric(NumericFact {
+                            domain: NumericDomain::Real,
+                            ..
+                        }) | ValueKindFact::Unknown
+                    )
+                    || request
+                        .literals
+                        .literal_args
+                        .get(index + 1)
+                        .is_some_and(|literal| {
+                            super::super::constructor_inference::known_invalid_timeout(
+                                literal, true,
+                            )
+                        })
+            })
+        {
+            result.diagnostics.push(argument_error(
+                "RM-CATALOG-TCPCLIENT-TIMEOUT",
+                "tcpclient timeout controls require nonnegative numeric scalars or positive Inf",
+                index + 1,
             ));
         }
     }
@@ -85,17 +125,4 @@ fn real_double() -> ValueFact {
         class: NumericClass::Double,
         domain: NumericDomain::Real,
     }))
-}
-
-fn known_option(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "timeout"
-            | "connecttimeout"
-            | "byteorder"
-            | "userdata"
-            | "name"
-            | "inputbuffersize"
-            | "outputbuffersize"
-    )
 }
