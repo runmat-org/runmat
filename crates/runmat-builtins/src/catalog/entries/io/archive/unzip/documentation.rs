@@ -31,14 +31,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Compressed archives are limited to 512 MiB; extraction counts at most 10 GiB of written entry bytes. Deflate and stored entries are supported by the ZIP reader; malformed or unsupported archives raise `RunMat:unzip:Zip`.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "Extraction is host filesystem I/O and a fusion boundary, not an accelerator kernel. ZIP source and folder controls must be host text; numeric gpuArray handles are rejected before provider download. Native URL retrieval streams into a temporary archive under the compressed-byte limit. Browser URL retrieval currently receives a complete response before checking the same limit, so hosts must constrain response buffering.",
+            "Extraction is host filesystem I/O and a fusion boundary, not an accelerator kernel. ZIP source and folder controls must be host text; numeric gpuArray handles are rejected before provider download. URL retrieval uses the installed HTTP transport and its bounded archive stream; hosts without that capability reject the request before extraction. Native retrieval streams into a temporary archive. Browser retrieval checks each received chunk against the byte limit before appending it, then retains the complete accepted archive for extraction. The archive-byte limit is not a guarantee on total live memory.",
             "The active filesystem provider and HTTP transport determine availability. `~` path expansion reads the caller environment. A path is not a transferable file snapshot; distributed workers require an independently staged archive and destination.",
         ] },
     ],
     examples: &[BuiltinExample {
         id: "default-destination",
         title: "Extract into the current folder",
-        program: "files = unzip('sample.zip');\ntext = fileread(files{1});\ntext",
+        program: "unzip('sample.zip');\ntext = fileread('sample.txt');\ntext",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
@@ -48,7 +48,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             entries: &[BuiltinFilesystemEntry::File { relative_path: "sample.zip", content: BuiltinFixtureContent::Bytes(SAMPLE_ZIP) }],
         }),
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(iscell(files)); assert(isequal(size(files), [1 1])); assert(strcmp(text, sprintf('alpha\\n')));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isfile('sample.txt')); assert(strcmp(text, sprintf('alpha\\n')));" },
     }, BuiltinExample {
         id: "local-archive",
         title: "Extract a ZIP archive and inspect the returned files",
@@ -88,6 +88,20 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             ..BuiltinExampleRequirements::NONE
         },
         verification: BuiltinExampleVerification::Assertions { source: "assert(iscell(files)); assert(isequal(size(files), [1 1])); assert(strcmp(text, sprintf('alpha\\n')));" },
+    }, BuiltinExample {
+        id: "returned-file-list",
+        title: "Use the returned file list",
+        program: "files = unzip('measurements.zip', 'measurements');\nfirstFile = files{1};\ntext = fileread(firstFile);\ntext",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+            id: BuiltinExampleFixtureId { local_name: "zip-measurements-text" },
+            root: BuiltinFilesystemRoot::IsolatedWorkspace,
+            entries: &[BuiltinFilesystemEntry::File { relative_path: "measurements.zip", content: BuiltinFixtureContent::Bytes(SAMPLE_ZIP) }],
+        }),
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(iscell(files)); assert(isequal(size(files), [1 1])); assert(ischar(firstFile)); assert(isfile(firstFile)); assert(strcmp(text, sprintf('alpha\\n')));" },
     }],
     example_exemption: None,
     faqs: &[
@@ -105,7 +119,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime archive domain", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/archive/unzip.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Runtime archive domain", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/archive/unzip.rs") },
+            BuiltinDocumentationLink { label: "Bounded archive HTTP input", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/archive/unzip/source/http.rs") },
+            BuiltinDocumentationLink { label: "Browser HTTP stream", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/http/browser/stream.rs") },
+        ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Extraction, security, output and HTTP behavior", location: "builtins::io::archive::unzip::tests" }],
         notes: &[],
     },
