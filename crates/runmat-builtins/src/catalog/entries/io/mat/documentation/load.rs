@@ -52,6 +52,8 @@ pub(in super::super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "MAT load entry and selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load.rs") },
+            BuiltinDocumentationLink { label: "MAT load controls and variable selection", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load/controls.rs") },
+            BuiltinDocumentationLink { label: "MAT load source read and value restoration", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load/reader.rs") },
             BuiltinDocumentationLink { label: "MAT element decoder and typed values", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load/decoder.rs") },
             BuiltinDocumentationLink { label: "MAT tag and payload validation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load/decoder/tagged.rs") },
             BuiltinDocumentationLink { label: "Captured MAT filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority.rs") },
