@@ -26,7 +26,7 @@ pub use stage::{
 pub use workload::{
     AudioDecodeOutput, AudioFrameRange, DatasetHandleInput, DatasetHandleKey,
     DatasetHandleOperation, DatasetHandleRole, DatasetPathOperation, HostEffectOutput,
-    HostEffectSource, HostEffectWorkload,
+    HostEffectSource, HostEffectWorkload, MatDecodeOutput, MatDecodeSelection,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]

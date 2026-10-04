@@ -213,6 +213,8 @@ fn archive_identity_retains_the_original_tuple_encoding() {
 
 #[path = "tests/audio.rs"]
 mod audio;
+#[path = "tests/mat.rs"]
+mod mat;
 #[path = "tests/stage.rs"]
 mod stage;
 #[path = "tests/dataset.rs"]

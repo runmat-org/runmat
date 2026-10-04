@@ -8,6 +8,8 @@ pub use dataset::{
     DatasetHandleInput, DatasetHandleKey, DatasetHandleOperation, DatasetHandleRole,
     DatasetPathOperation,
 };
+mod mat;
+pub use mat::{MatDecodeOutput, MatDecodeSelection};
 
 /// The requested result is distinct from the committed side effects. No
 /// output still needs a bound for temporary codec and result storage.
@@ -82,6 +84,11 @@ pub enum HostEffectWorkload<'a> {
         inputs: &'a [DatasetHandleInput],
         output: HostEffectOutput,
     },
+    MatDecode {
+        source: &'a Path,
+        selection: MatDecodeSelection<'a>,
+        output: MatDecodeOutput,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -122,6 +129,13 @@ struct DatasetHandleFacts<'a> {
     output: HostEffectOutput,
 }
 
+#[derive(serde::Serialize)]
+struct MatDecodeFacts<'a> {
+    source: &'a [u8],
+    selection: MatDecodeSelection<'a>,
+    output: MatDecodeOutput,
+}
+
 impl HostEffectWorkload<'_> {
     /// An absent control digest is not a fabricated reusable identity.
     pub fn identity_complete(self) -> bool {
@@ -140,6 +154,7 @@ impl HostEffectWorkload<'_> {
             | Self::DatasetPath { output, .. } => output,
             Self::DatasetHandle { output, .. } => output,
             Self::AudioDecode { output, .. } => output.host_effect_output(),
+            Self::MatDecode { output, .. } => output.host_effect_output(),
         }
     }
 
@@ -213,6 +228,16 @@ impl HostEffectWorkload<'_> {
                 output,
             })
             .expect("typed dataset handle facts serialize"),
+            Self::MatDecode {
+                source,
+                selection,
+                output,
+            } => serde_json::to_vec(&MatDecodeFacts {
+                source: source.as_os_str().as_encoded_bytes(),
+                selection,
+                output,
+            })
+            .expect("typed MAT decode facts serialize"),
         }
     }
 }
