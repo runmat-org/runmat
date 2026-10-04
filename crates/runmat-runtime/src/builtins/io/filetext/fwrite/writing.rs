@@ -57,11 +57,16 @@ pub(super) fn flatten_elements(value: &Value) -> Result<Vec<WriteElement>, Strin
 }
 
 pub(super) fn flatten_char_array(ca: &CharArray) -> Vec<f64> {
-    let mut values = Vec::with_capacity(ca.rows.saturating_mul(ca.cols));
-    for c in 0..ca.cols {
-        for r in 0..ca.rows {
-            let idx = r * ca.cols + c;
-            values.push(ca.data[idx] as u32 as f64);
+    let mut values = Vec::with_capacity(ca.data.len());
+    let Some(page_len) = ca.rows.checked_mul(ca.cols).filter(|len| *len > 0) else {
+        return values;
+    };
+    for page in ca.data.chunks(page_len) {
+        for c in 0..ca.cols {
+            for r in 0..ca.rows {
+                let idx = r * ca.cols + c;
+                values.push(page[idx] as u32 as f64);
+            }
         }
     }
     values

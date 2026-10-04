@@ -217,7 +217,7 @@ pub(super) fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
     if (rounded - scalar).abs() > f64::EPSILON {
         return Err("skip value must be an integer".to_string());
     }
-    if rounded >= i64::MAX as f64 {
+    if rounded >= i64::MAX as f64 || rounded >= usize::MAX as f64 + 1.0 {
         return Err("skip value is too large".to_string());
     }
     Ok(rounded as usize)
@@ -315,12 +315,7 @@ pub(super) fn machine_format_from_label(label: &str) -> Result<MachineFormat, St
 }
 
 pub(super) fn scalar_string(value: &Value, err: &str) -> Result<String, String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(err.to_string()),
-    }
+    extract_scalar_string(value).ok_or_else(|| err.to_string())
 }
 
 pub(super) fn value_to_scalar(value: &Value, err: &str) -> Result<f64, String> {

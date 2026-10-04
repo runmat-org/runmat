@@ -208,12 +208,7 @@ pub(super) fn classify_ordered_indices(
 }
 
 pub(super) fn is_string_like(value: &Value) -> bool {
-    match value {
-        Value::String(_) => true,
-        Value::CharArray(ca) if ca.rows == 1 => true,
-        Value::StringArray(sa) if sa.data.len() == 1 => true,
-        _ => false,
-    }
+    crate::builtins::common::validation::value_is_text_scalar(value)
 }
 
 pub(super) fn matches_keyword(value: &Value, keyword: &str) -> bool {

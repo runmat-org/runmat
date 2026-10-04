@@ -1,4 +1,20 @@
 use super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn nd_character_payload_flattens_every_page_in_column_first_order() {
+    let chars =
+        runmat_value::CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+            .unwrap();
+    let values = flatten_char_array(&chars);
+    assert_eq!(
+        values,
+        "acbdegfh"
+            .chars()
+            .map(|ch| ch as u32 as f64)
+            .collect::<Vec<_>>()
+    );
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fwrite_double_precision_writes_native_endian() {

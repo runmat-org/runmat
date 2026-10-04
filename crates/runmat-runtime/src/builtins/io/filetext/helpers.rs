@@ -7,10 +7,13 @@ use runmat_value::{CharArray, Tensor, Value};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) fn extract_scalar_string(value: &Value) -> Option<String> {
+    if !crate::builtins::common::validation::value_is_text_scalar(value) {
+        return None;
+    }
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::CharArray(ca) => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) => Some(sa.data[0].clone()),
         _ => None,
     }
 }

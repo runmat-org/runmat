@@ -1,4 +1,33 @@
 use super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn double_skip_checked_against_platform_width_before_conversion() {
+    let value = 4_294_967_296.0;
+    #[cfg(target_pointer_width = "32")]
+    assert_eq!(
+        parse_skip_scalar(value),
+        Err("skip value is too large".into())
+    );
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(parse_skip_scalar(value), Ok(4_294_967_296_usize));
+    assert!(parse_skip_scalar(i64::MAX as f64).is_err());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn precision_text_accepts_trailing_singletons_but_not_character_pages() {
+    let row = Value::CharArray(
+        CharArray::new_with_shape("uint8".chars().collect(), vec![1, 5, 1, 1]).unwrap(),
+    );
+    assert!(is_string_like(&row));
+    assert!(parse_precision(Some(&row)).is_ok());
+    let pages = Value::CharArray(
+        CharArray::new_with_shape("uint8".chars().collect(), vec![1, 1, 5]).unwrap(),
+    );
+    assert!(!is_string_like(&pages));
+    assert!(parse_precision(Some(&pages)).is_err());
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fread_descriptor_signatures_cover_core_forms() {
