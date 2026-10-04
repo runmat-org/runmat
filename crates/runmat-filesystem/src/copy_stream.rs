@@ -1,6 +1,6 @@
 //! Captured-provider, bounded-chunk copy with caller-owned cooperation.
 
-use crate::{FileHandle, FsProvider, OpenFlags};
+use crate::{FsProvider, OpenFlags};
 use async_trait::async_trait;
 use std::io;
 use std::path::Path;
