@@ -98,9 +98,11 @@ fn format_and_filename_errors_keep_owning_identifiers_and_causes() {
         Some("RunMat:memmapfile:InvalidFormat")
     );
 
-    let invalid_filename =
-        futures::executor::block_on(super::super::memmapfile_builtin(vec![Value::Num(7.0)]))
-            .expect_err("filename must be text");
+    let invalid_filename = futures::executor::block_on(super::super::memmapfile_builtin(
+        None,
+        vec![Value::Num(7.0)],
+    ))
+    .expect_err("filename must be text");
     assert_eq!(
         invalid_filename.identifier(),
         Some("RunMat:memmapfile:InvalidFilename")
@@ -137,11 +139,11 @@ fn selected_file_read_failure_retains_provider_cause() {
     ));
     let _selected = super::super::vfs::replace_provider(provider);
     super::super::vfs::set_current_dir(&root).unwrap();
-    let missing =
-        futures::executor::block_on(super::super::memmapfile_builtin(vec![Value::String(
-            "missing.bin".into(),
-        )]))
-        .expect_err("missing selected file");
+    let missing = futures::executor::block_on(super::super::memmapfile_builtin(
+        None,
+        vec![Value::String("missing.bin".into())],
+    ))
+    .expect_err("missing selected file");
     assert_eq!(missing.identifier(), Some("RunMat:memmapfile:ReadFailed"));
     assert!(missing.source().is_some());
 }
@@ -167,21 +169,32 @@ fn wide_repeat_property_is_exact_without_a_large_file() {
     let _selected = super::super::vfs::replace_provider(provider);
     super::super::vfs::set_current_dir(&root).unwrap();
     let wide = (1_u64 << 53) + 1;
-    let Value::Object(mapped) =
-        futures::executor::block_on(super::super::memmapfile_builtin(vec![
+    let Value::Object(mapped) = futures::executor::block_on(super::super::memmapfile_builtin(
+        None,
+        vec![
             Value::String("one.bin".into()),
             char_value("Repeat"),
             Value::Int(IntValue::U64(wide)),
-        ]))
-        .unwrap()
-    else {
+        ],
+    ))
+    .unwrap() else {
         panic!("memmapfile object");
     };
-    assert_eq!(
-        mapped.properties.get("Repeat"),
-        Some(&Value::Int(IntValue::U64(wide)))
-    );
-    let Value::Tensor(data) = mapped.properties.get("Data").unwrap() else {
+    let property = |name| {
+        let path = crate::object::indexing::ObjectSubscriptPath::single(
+            crate::object::indexing::ObjectSubscript::member(name),
+        )
+        .to_standard_substruct_value()
+        .unwrap();
+        futures::executor::block_on(super::live::subsref(
+            None,
+            Value::Object(mapped.clone()),
+            path,
+        ))
+        .unwrap()
+    };
+    assert_eq!(property("Repeat"), Value::Int(IntValue::U64(wide)));
+    let Value::Tensor(data) = property("Data") else {
         panic!("numeric payload");
     };
     assert_eq!(data.shape, vec![1, 1]);

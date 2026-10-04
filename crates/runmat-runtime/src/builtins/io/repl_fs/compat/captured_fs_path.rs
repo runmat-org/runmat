@@ -43,6 +43,18 @@ impl CapturedFsPath {
         Ok(bytes)
     }
 
+    pub(super) async fn open_mapped(
+        &self,
+        writable: bool,
+    ) -> io::Result<Option<vfs::CapturedMappedBacking>> {
+        self.check_current()?;
+        let backing =
+            vfs::capture_mapped_backing_on(Arc::clone(&self.provider), self.path.clone(), writable)
+                .await?;
+        self.check_current()?;
+        Ok(backing)
+    }
+
     pub(super) async fn metadata(&self) -> io::Result<vfs::FsMetadata> {
         self.check_current()?;
         let metadata = self.provider.metadata(&self.path).await?;

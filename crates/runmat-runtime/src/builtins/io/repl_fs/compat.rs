@@ -452,9 +452,13 @@ async fn restoredefaultpath_builtin(
 #[runtime_builtin(
     name = "memmapfile",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn memmapfile_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     output_count::validate_fixed_outputs(
         &MEMMAPFILE_DESCRIPTOR,
         &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
@@ -522,10 +526,25 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let mut offset = 0usize;
     let mut format = MemmapFormat::default();
     let mut repeat: Option<usize> = None;
-    for (option, value) in options {
-        let value = gather_if_needed_async(value)
+    let mut cooperation = runtime
+        .as_ref()
+        .map(crate::context::RuntimeContext::cpu_cooperation);
+    if let Some(cooperation) = &mut cooperation {
+        cooperation
+            .checkpoint(0)
             .await
-            .map_err(|source| map_control_flow("memmapfile", source))?;
+            .map_err(|source| source.into_runtime_error())?;
+    }
+    for (option, value) in options {
+        let gathered = if let Some(cooperation) = &cooperation {
+            cooperation
+                .await_cancellable(gather_if_needed_async(value))
+                .await
+                .map_err(|source| source.into_runtime_error())?
+        } else {
+            gather_if_needed_async(value).await
+        };
+        let value = gathered.map_err(|source| map_control_flow("memmapfile", source))?;
         match option {
             MemmapOption::Writable => writable = truthy(&value),
             MemmapOption::Offset => offset = numeric_usize(&value, "Offset")?,
@@ -536,7 +555,92 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
     }
     format.validate_layout(repeat)?;
-    let bytes = input.read().await.map_err(|source| {
+    let opened = if let Some(cooperation) = &cooperation {
+        cooperation
+            .await_cancellable(input.open_mapped(writable))
+            .await
+            .map_err(|source| source.into_runtime_error())?
+    } else {
+        input.open_mapped(writable).await
+    };
+    let mapped = opened.map_err(|source| {
+        build_runtime_error(format!("memmapfile: {source}"))
+            .with_builtin("memmapfile")
+            .with_identifier(
+                MEMMAPFILE_ERROR_READ_FAILED
+                    .identifier
+                    .expect("typed mapped-source error"),
+            )
+            .with_source(source)
+            .build()
+    })?;
+    if let Some(backing) = mapped {
+        let extent = usize::try_from(backing.opened_extent()).map_err(|source| {
+            build_runtime_error("memmapfile: mapped source exceeds addressable size")
+                .with_builtin("memmapfile")
+                .with_identifier(
+                    MEMMAPFILE_ERROR_INVALID_CONTROL
+                        .identifier
+                        .expect("typed mapped-size error"),
+                )
+                .with_source(source)
+                .build()
+        })?;
+        if offset > extent {
+            return Err(memmapfile::typed_error(
+                &MEMMAPFILE_ERROR_INVALID_CONTROL,
+                "memmapfile: Offset exceeds file size",
+            ));
+        }
+        let authority = memmapfile::issue_authority(runtime.as_ref(), backing)?;
+        let receiver = runmat_value::MemmapReceiverState {
+            authority: runmat_value::MemmapReceiverAuthority::Opened(authority),
+            offset,
+            repeat,
+            writable,
+            fields: format.receiver_fields(),
+            format_presentation: format.receiver_presentation(),
+        };
+        let mut object =
+            ObjectInstance::new(MEMMAPFILE_CLASS.owned()).with_memmap_receiver(receiver);
+        object
+            .properties
+            .insert("Filename".into(), char_value(&path_to_string(&input.path)));
+        if let Some(cooperation) = &mut cooperation {
+            cooperation
+                .checkpoint(0)
+                .await
+                .map_err(|source| source.into_runtime_error())?;
+        }
+        input.check_current().map_err(|source| {
+            build_runtime_error("memmapfile: mapped source authority changed before publication")
+                .with_builtin("memmapfile")
+                .with_identifier(
+                    MEMMAPFILE_ERROR_READ_FAILED
+                        .identifier
+                        .expect("typed source error"),
+                )
+                .with_source(source)
+                .build()
+        })?;
+        memmapfile::ensure_class_registered();
+        return Ok(Value::Object(object));
+    }
+    if writable {
+        return Err(memmapfile::typed_error(
+            &MEMMAPFILE_ERROR_INVALID_CONTROL,
+            "memmapfile: selected filesystem provider cannot supply writable mapped ranges",
+        ));
+    }
+    let read = if let Some(cooperation) = &cooperation {
+        cooperation
+            .await_cancellable(input.read())
+            .await
+            .map_err(|source| source.into_runtime_error())?
+    } else {
+        input.read().await
+    };
+    let bytes = read.map_err(|source| {
         build_runtime_error(format!("memmapfile: {source}"))
             .with_builtin("memmapfile")
             .with_identifier(
@@ -554,29 +658,37 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let data_value = format.decode(&bytes[offset..], repeat)?;
-    let mut object = ObjectInstance::new(MEMMAPFILE_CLASS.owned());
+    let receiver = runmat_value::MemmapReceiverState {
+        authority: runmat_value::MemmapReceiverAuthority::Detached(Box::new(data_value)),
+        offset,
+        repeat,
+        writable: false,
+        fields: format.receiver_fields(),
+        format_presentation: format.receiver_presentation(),
+    };
+    let mut object = ObjectInstance::new(MEMMAPFILE_CLASS.owned()).with_memmap_receiver(receiver);
     object.properties.insert(
         "Filename".to_string(),
         char_value(&path_to_string(&input.path)),
     );
-    object
-        .properties
-        .insert("Writable".to_string(), Value::Bool(writable));
-    object.properties.insert(
-        "Offset".to_string(),
-        memmapfile::memmap_count_value(offset)?,
-    );
-    object
-        .properties
-        .insert("Format".to_string(), format.to_value()?);
-    object.properties.insert(
-        "Repeat".to_string(),
-        repeat
-            .map(memmapfile::memmap_count_value)
-            .transpose()?
-            .unwrap_or_else(|| char_value("Inf")),
-    );
-    object.properties.insert("Data".to_string(), data_value);
+    if let Some(cooperation) = &mut cooperation {
+        cooperation
+            .checkpoint(0)
+            .await
+            .map_err(|source| source.into_runtime_error())?;
+    }
+    input.check_current().map_err(|source| {
+        build_runtime_error("memmapfile: source authority changed before publication")
+            .with_builtin("memmapfile")
+            .with_identifier(
+                MEMMAPFILE_ERROR_READ_FAILED
+                    .identifier
+                    .expect("typed source error"),
+            )
+            .with_source(source)
+            .build()
+    })?;
+    memmapfile::ensure_class_registered();
     Ok(Value::Object(object))
 }
 
@@ -759,6 +871,15 @@ mod tests {
     #[path = "preferences.rs"]
     mod preference_tests;
 
+    fn mapped_property(receiver: Value, name: &str) -> Value {
+        let path = crate::object::indexing::ObjectSubscriptPath::single(
+            crate::object::indexing::ObjectSubscript::member(name),
+        )
+        .to_standard_substruct_value()
+        .expect("property path");
+        run(memmapfile::live::subsref(None, receiver, path)).expect("mapped property")
+    }
+
     #[test]
     fn winqueryreg_decodes_dword_as_exact_int32() {
         let positive = parse_registry_query_value(
@@ -819,16 +940,16 @@ mod tests {
             )
             .unwrap(),
         );
-        let value = run(memmapfile_builtin(vec![
-            Value::String(path_to_string(&path)),
-            char_value("Format"),
-            fmt,
-        ]))
+        let value = run(memmapfile_builtin(
+            None,
+            vec![
+                Value::String(path_to_string(&path)),
+                char_value("Format"),
+                fmt,
+            ],
+        ))
         .unwrap();
-        let Value::Object(object) = value else {
-            panic!("expected object");
-        };
-        let Some(Value::Struct(data)) = object.properties.get("Data") else {
+        let Value::Struct(data) = mapped_property(value, "Data") else {
             panic!("expected Data struct");
         };
         let Some(Value::Tensor(samples)) = data.fields.get("samples") else {
@@ -846,11 +967,14 @@ mod tests {
     fn memmapfile_integer_controls_are_gated_before_file_access() {
         assert_eq!(MEMMAPFILE_INTEGER_CAPABILITIES.len(), 3);
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = run(memmapfile_builtin(vec![
-            Value::String("definitely-missing.bin".into()),
-            Value::String("Offset".into()),
-            Value::Int(runmat_value::IntValue::U64(0)),
-        ]))
+        let error = run(memmapfile_builtin(
+            None,
+            vec![
+                Value::String("definitely-missing.bin".into()),
+                Value::String("Offset".into()),
+                Value::Int(runmat_value::IntValue::U64(0)),
+            ],
+        ))
         .expect_err("typed integer control must be gated");
         assert_eq!(
             error.identifier(),
@@ -862,9 +986,10 @@ mod tests {
     #[test]
     fn memmapfile_rejects_excess_requested_outputs_before_file_access() {
         let _requested = output_count::push_output_count(Some(2));
-        let error = run(memmapfile_builtin(vec![Value::String(
-            "definitely-missing-output-count.bin".into(),
-        )]))
+        let error = run(memmapfile_builtin(
+            None,
+            vec![Value::String("definitely-missing-output-count.bin".into())],
+        ))
         .expect_err("fixed single result");
         assert_eq!(
             error.identifier(),
@@ -1014,18 +1139,21 @@ mod tests {
             .expect("table input");
         let _provider = vfs::replace_provider(provider);
         vfs::set_current_dir(&root).expect("table cwd");
-        let result = futures::executor::block_on(memmapfile_builtin(vec![
-            Value::String("records.bin".into()),
-            char_value("Format"),
-            format,
-            char_value("Repeat"),
-            Value::Num(2.0),
-        ]))
+        let result = futures::executor::block_on(memmapfile_builtin(
+            None,
+            vec![
+                Value::String("records.bin".into()),
+                char_value("Format"),
+                format,
+                char_value("Repeat"),
+                Value::Num(2.0),
+            ],
+        ))
         .expect("mapped table");
         let Value::Object(mapped) = result else {
             panic!("memmapfile result");
         };
-        assert_eq!(mapped.properties.get("Data"), Some(&expected));
+        assert_eq!(mapped_property(Value::Object(mapped), "Data"), expected);
     }
 
     #[test]
@@ -1046,11 +1174,14 @@ mod tests {
             )
             .unwrap(),
         );
-        let error = futures::executor::block_on(memmapfile_builtin(vec![
-            Value::String("definitely-missing-format-table.bin".into()),
-            char_value("Format"),
-            duplicated,
-        ]))
+        let error = futures::executor::block_on(memmapfile_builtin(
+            None,
+            vec![
+                Value::String("definitely-missing-format-table.bin".into()),
+                char_value("Format"),
+                duplicated,
+            ],
+        ))
         .expect_err("duplicate fields fail before file access");
         assert!(error.message().contains("unique"));
         let overflow = MemmapFormat {
@@ -1110,24 +1241,30 @@ mod tests {
     fn memmapfile_known_invalid_controls_reject_before_earlier_download_or_read() {
         let filename = Value::String("definitely-missing-preflight.bin".into());
         let earlier_resident = unregistered_resident_value();
-        let unknown = run(memmapfile_builtin(vec![
-            filename.clone(),
-            Value::String("Offset".into()),
-            earlier_resident.clone(),
-            Value::String("Unknown".into()),
-            Value::Num(1.0),
-        ]))
+        let unknown = run(memmapfile_builtin(
+            None,
+            vec![
+                filename.clone(),
+                Value::String("Offset".into()),
+                earlier_resident.clone(),
+                Value::String("Unknown".into()),
+                Value::Num(1.0),
+            ],
+        ))
         .expect_err("unknown option is a preflight error");
         assert!(unknown.message().contains("unsupported option"));
         assert!(!unknown.message().to_ascii_lowercase().contains("provider"));
 
-        let invalid = run(memmapfile_builtin(vec![
-            filename,
-            Value::String("Offset".into()),
-            earlier_resident,
-            Value::String("Format".into()),
-            Value::String("not-a-supported-dtype".into()),
-        ]))
+        let invalid = run(memmapfile_builtin(
+            None,
+            vec![
+                filename,
+                Value::String("Offset".into()),
+                earlier_resident,
+                Value::String("Format".into()),
+                Value::String("not-a-supported-dtype".into()),
+            ],
+        ))
         .expect_err("invalid known format is a preflight error");
         assert!(invalid.message().contains("unsupported Format type"));
         assert!(!invalid.message().to_ascii_lowercase().contains("provider"));

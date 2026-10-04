@@ -5,7 +5,16 @@ use runmat_builtins::{
     BuiltinErrorDescriptor, MEMMAPFILE_ERROR_INVALID_CONTROL, MEMMAPFILE_ERROR_INVALID_FORMAT,
     MEMMAPFILE_ERROR_INVALID_OPTION,
 };
-use runmat_value::{CellArray, IntegerStorage, NumericDType, NumericScalar, Tensor, Value};
+use runmat_value::{
+    CellArray, IntegerStorage, MemmapElementType, MemmapFieldState, MemmapFormatPresentationState,
+    MemmapReceiverState, NumericDType, NumericScalar, Tensor, Value,
+};
+
+mod authority;
+mod encode;
+pub(in crate::builtins::io::repl_fs::compat) mod live;
+pub(super) use authority::issue as issue_authority;
+pub(super) use live::ensure_class_registered;
 
 pub(super) fn typed_error(
     descriptor: &BuiltinErrorDescriptor,
@@ -159,6 +168,67 @@ impl Default for MemmapFormat {
 }
 
 impl MemmapFormat {
+    pub(super) fn receiver_fields(&self) -> Vec<MemmapFieldState> {
+        std::iter::once(MemmapFieldState {
+            name: self.field.clone(),
+            element: self.dtype.into(),
+            shape: self.shape.clone(),
+        })
+        .chain(self.additional_fields.iter().map(|field| MemmapFieldState {
+            name: Some(field.name.clone()),
+            element: field.dtype.into(),
+            shape: field.shape.clone(),
+        }))
+        .collect()
+    }
+
+    pub(super) fn receiver_presentation(&self) -> MemmapFormatPresentationState {
+        match self.presentation {
+            MemmapFormatPresentation::TypeName => MemmapFormatPresentationState::TypeName,
+            MemmapFormatPresentation::Cell { columns } => {
+                MemmapFormatPresentationState::Cell { columns }
+            }
+        }
+    }
+
+    pub(super) fn from_receiver(receiver: &MemmapReceiverState) -> BuiltinResult<Self> {
+        let fields = &receiver.fields;
+        let first = fields
+            .first()
+            .ok_or_else(|| format_error("memmapfile: sealed Format is empty"))?;
+        if first.name.is_none() && fields.len() != 1 {
+            return Err(format_error("memmapfile: unnamed Format has extra fields"));
+        }
+        let to_dtype = |element| match element {
+            MemmapElementType::Numeric(dtype) => MemmapDataType::Numeric(dtype),
+            MemmapElementType::Character => MemmapDataType::Character,
+        };
+        let format = Self {
+            dtype: to_dtype(first.element),
+            shape: first.shape.clone(),
+            field: first.name.clone(),
+            additional_fields: fields[1..]
+                .iter()
+                .map(|field| {
+                    field.name.as_ref().map(|name| MemmapField {
+                        dtype: to_dtype(field.element),
+                        shape: field.shape.clone(),
+                        name: name.clone(),
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| format_error("memmapfile: sealed Format field is unnamed"))?,
+            presentation: match receiver.format_presentation {
+                MemmapFormatPresentationState::TypeName => MemmapFormatPresentation::TypeName,
+                MemmapFormatPresentationState::Cell { columns } => {
+                    MemmapFormatPresentation::Cell { columns }
+                }
+            },
+        };
+        format.validate_layout(None)?;
+        Ok(format)
+    }
+
     pub(super) fn validate_layout(&self, repeat: Option<usize>) -> BuiltinResult<usize> {
         let mut record_bytes = memmap_field_bytes(self.dtype, &self.shape)?;
         if let Some(name) = &self.field {
@@ -286,6 +356,15 @@ impl MemmapFormat {
         Ok(Value::Cell(
             CellArray::new(cells, rows, columns).map_err(format_error)?,
         ))
+    }
+}
+
+impl From<MemmapDataType> for MemmapElementType {
+    fn from(value: MemmapDataType) -> Self {
+        match value {
+            MemmapDataType::Numeric(dtype) => Self::Numeric(dtype),
+            MemmapDataType::Character => Self::Character,
+        }
     }
 }
 

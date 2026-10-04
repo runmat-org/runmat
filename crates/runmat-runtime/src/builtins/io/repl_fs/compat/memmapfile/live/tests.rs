@@ -1,0 +1,256 @@
+use super::*;
+use crate::object::indexing::{
+    ObjectIndexComponent, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
+};
+use runmat_filesystem::{self as vfs, MemoryFsProvider};
+use runmat_value::{IntValue, IntegerStorage, Tensor};
+use std::sync::Arc;
+
+fn property(name: &str) -> Value {
+    ObjectSubscriptPath::single(ObjectSubscript::member(name))
+        .to_standard_substruct_value()
+        .expect("typed property path")
+}
+
+fn indexed_data(index: usize) -> Value {
+    ObjectSubscriptPath::new(vec![
+        ObjectSubscript::member("Data"),
+        ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+            components: vec![ObjectIndexComponent::Value(Value::Num(index as f64))],
+        }),
+    ])
+    .unwrap()
+    .to_standard_substruct_value()
+    .unwrap()
+}
+
+fn indexed_field(record: usize, field: &str, index: usize) -> Value {
+    ObjectSubscriptPath::new(vec![
+        ObjectSubscript::member("Data"),
+        ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+            components: vec![ObjectIndexComponent::Value(Value::Num(record as f64))],
+        }),
+        ObjectSubscript::member(field),
+        ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+            components: vec![ObjectIndexComponent::Value(Value::Num(index as f64))],
+        }),
+    ])
+    .unwrap()
+    .to_standard_substruct_value()
+    .unwrap()
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
+    let _lock = vfs::provider_override_lock();
+    #[cfg(target_arch = "wasm32")]
+    let root = std::path::PathBuf::from("/memmap-live");
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-memmap-live");
+    let selected = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
+    selected
+        .write_project_path(root.join("data.bin"), b"\x01\x02\x03\x04")
+        .unwrap();
+    let _selected = vfs::replace_provider(selected.clone());
+    vfs::set_current_dir(&root).unwrap();
+    let mapped = futures::executor::block_on(super::super::super::memmapfile_builtin(
+        None,
+        vec![
+            Value::String("data.bin".into()),
+            Value::String("Writable".into()),
+            Value::Bool(true),
+        ],
+    ))
+    .expect("live memmap receiver");
+    let Value::Object(object) = &mapped else {
+        panic!("object receiver")
+    };
+    assert!(object.memmap_receiver().is_some());
+    assert!(!object.properties.contains_key("Data"));
+    let alias = mapped.clone();
+    let replacement = Arc::new(MemoryFsProvider::with_current_dir(root.join("replacement")));
+    replacement
+        .write_project_path(root.join("replacement/data.bin"), b"xxxx")
+        .unwrap();
+    let _replacement = vfs::replace_provider(replacement.clone());
+    vfs::set_current_dir(root.join("replacement")).unwrap();
+
+    let updated = futures::executor::block_on(subsasgn(
+        None,
+        mapped,
+        indexed_data(2),
+        Value::Int(IntValue::U8(9)),
+    ))
+    .expect("indexed mapped write");
+    assert_eq!(
+        selected.read_project_path(root.join("data.bin")).unwrap(),
+        b"\x01\x09\x03\x04"
+    );
+    assert_eq!(
+        replacement
+            .read_project_path(root.join("replacement/data.bin"))
+            .unwrap(),
+        b"xxxx"
+    );
+    for receiver in [alias, updated] {
+        let Value::Tensor(data) =
+            futures::executor::block_on(subsref(None, receiver, property("Data")))
+                .expect("live read through original owner")
+        else {
+            panic!("numeric Data")
+        };
+        assert_eq!(
+            data.integer_storage(),
+            Some(&IntegerStorage::U8(vec![1, 9, 3, 4]))
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mapped_receiver_controls_clone_independently_without_changing_backing() {
+    let _lock = vfs::provider_override_lock();
+    #[cfg(target_arch = "wasm32")]
+    let root = std::path::PathBuf::from("/memmap-clones");
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-memmap-clones");
+    let provider = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
+    provider
+        .write_project_path(root.join("data.bin"), b"a")
+        .unwrap();
+    let _selected = vfs::replace_provider(provider);
+    vfs::set_current_dir(&root).unwrap();
+    let original = futures::executor::block_on(super::super::super::memmapfile_builtin(
+        None,
+        vec![
+            Value::String("data.bin".into()),
+            Value::String("Writable".into()),
+            Value::Bool(true),
+        ],
+    ))
+    .unwrap();
+    let read_only_clone = futures::executor::block_on(subsasgn(
+        None,
+        original.clone(),
+        property("Writable"),
+        Value::Bool(false),
+    ))
+    .unwrap();
+    assert_eq!(
+        futures::executor::block_on(subsref(None, original, property("Writable"))).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        futures::executor::block_on(subsref(None, read_only_clone.clone(), property("Writable")))
+            .unwrap(),
+        Value::Bool(false)
+    );
+    let rhs = Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![7]), vec![1, 1]).unwrap());
+    let error = futures::executor::block_on(subsasgn(None, read_only_clone, property("Data"), rhs))
+        .unwrap_err();
+    assert!(error.message().contains("read-only"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn indexed_read_observes_only_current_selected_byte_and_forged_class_has_no_authority() {
+    let _lock = vfs::provider_override_lock();
+    #[cfg(target_arch = "wasm32")]
+    let root = std::path::PathBuf::from("/memmap-selected-read");
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-memmap-selected-read");
+    let provider = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
+    provider
+        .write_project_path(root.join("data.bin"), b"\x01\x02\x03\x04")
+        .unwrap();
+    let _selected = vfs::replace_provider(provider.clone());
+    vfs::set_current_dir(&root).unwrap();
+    let mapped = futures::executor::block_on(super::super::super::memmapfile_builtin(
+        None,
+        vec![
+            Value::String("data.bin".into()),
+            Value::String("Writable".into()),
+            Value::Bool(true),
+        ],
+    ))
+    .unwrap();
+    let alias = mapped.clone();
+    futures::executor::block_on(subsasgn(
+        None,
+        alias,
+        indexed_data(2),
+        Value::Int(IntValue::U8(9)),
+    ))
+    .unwrap();
+    let selected = futures::executor::block_on(subsref(None, mapped, indexed_data(2))).unwrap();
+    let Value::Tensor(selected) = selected else {
+        panic!("selected tensor")
+    };
+    assert_eq!(
+        selected.integer_storage(),
+        Some(&IntegerStorage::U8(vec![9]))
+    );
+
+    let forged = Value::Object(runmat_value::ObjectInstance::new(MEMMAPFILE_CLASS.owned()));
+    let error = futures::executor::block_on(subsref(None, forged, property("Data"))).unwrap_err();
+    assert!(error.message().contains("sealed state"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn indexed_named_field_write_preserves_other_fields_and_elements() {
+    let _lock = vfs::provider_override_lock();
+    #[cfg(target_arch = "wasm32")]
+    let root = std::path::PathBuf::from("/memmap-field-range");
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-memmap-field-range");
+    let provider = Arc::new(MemoryFsProvider::with_current_dir(root.clone()));
+    provider
+        .write_project_path(root.join("record.bin"), b"\x01\x02\x03\x04")
+        .unwrap();
+    let _selected = vfs::replace_provider(provider.clone());
+    vfs::set_current_dir(&root).unwrap();
+    let format = super::super::MemmapFormat {
+        dtype: super::super::MemmapDataType::Numeric(runmat_value::NumericDType::U8),
+        shape: vec![1, 2],
+        field: Some("first".into()),
+        additional_fields: vec![super::super::MemmapField {
+            dtype: super::super::MemmapDataType::Numeric(runmat_value::NumericDType::U8),
+            shape: vec![1, 2],
+            name: "second".into(),
+        }],
+        presentation: super::super::MemmapFormatPresentation::Cell { columns: 3 },
+    }
+    .to_value()
+    .unwrap();
+    let mapped = futures::executor::block_on(super::super::super::memmapfile_builtin(
+        None,
+        vec![
+            Value::String("record.bin".into()),
+            Value::String("Format".into()),
+            format,
+            Value::String("Writable".into()),
+            Value::Bool(true),
+        ],
+    ))
+    .unwrap();
+    let selected = indexed_field(1, "second", 1);
+    let updated = futures::executor::block_on(subsasgn(
+        None,
+        mapped,
+        selected.clone(),
+        Value::Int(IntValue::U8(9)),
+    ))
+    .unwrap();
+    assert_eq!(
+        provider.read_project_path(root.join("record.bin")).unwrap(),
+        b"\x01\x02\x09\x04"
+    );
+    let Value::Tensor(field) =
+        futures::executor::block_on(subsref(None, updated, selected)).unwrap()
+    else {
+        panic!("selected field tensor")
+    };
+    assert_eq!(field.integer_storage(), Some(&IntegerStorage::U8(vec![9])));
+}
