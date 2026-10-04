@@ -190,8 +190,6 @@ pub(in crate::builtins::io::data) fn default_chunk_shape(shape: &[usize]) -> Vec
     out
 }
 
-#[async_recursion::async_recursion(?Send)]
-
 pub(in crate::builtins::io::data) fn parse_shape_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<usize>> {

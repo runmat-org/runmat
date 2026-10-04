@@ -119,6 +119,7 @@ pub(in crate::builtins::io::data) fn make_rel_data_path(
     Ok(rel.to_string_lossy().to_string())
 }
 
+#[async_recursion::async_recursion(?Send)]
 pub(in crate::builtins::io::data) async fn copy_dir_recursive_on(
     provider: &dyn runmat_filesystem::FsProvider,
     src: &PathBuf,
