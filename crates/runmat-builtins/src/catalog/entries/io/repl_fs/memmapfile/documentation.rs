@@ -22,6 +22,22 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isequal(m.Data.samples, uint16([1; 2]))); assert(strcmp(class(m.Data.samples), 'uint16'));",
     },
+}, BuiltinExample {
+    id: "indexed-write-through",
+    title: "Update one mapped record and observe the opened file",
+    program: "m = memmapfile('samples.bin', 'Format', {'uint16', [2 1], 'samples'}, 'Writable', true);\nm.Data.samples(2) = uint16(7);\nn = memmapfile('samples.bin', 'Format', {'uint16', [2 1], 'samples'});\nassert(isequal(n.Data.samples, uint16([1; 7])));",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::NativeFilesystem,
+    fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+        id: BuiltinExampleFixtureId { local_name: "indexed-write-through" },
+        root: BuiltinFilesystemRoot::IsolatedWorkspace,
+        entries: SAMPLE,
+    }),
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions {
+        source: "assert(isequal(n.Data.samples, uint16([1; 7])));",
+    },
 }];
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
@@ -29,14 +45,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("memmapfile"),
     slug: Some("memmapfile"),
     summary: "Read binary records using a declared native numeric format.",
-    description: "`memmapfile` reads file bytes and returns an object with Filename, Writable, Offset, Format, Repeat, and Data properties. Numeric payloads retain their declared class, including exact 64-bit integers. The current Data value is materialized in memory; Writable does not yet provide write-through mapping.",
+    description: "`memmapfile` returns an object with Filename, Writable, Offset, Format, Repeat, and Data properties. Providers with opened-range support retain one captured file backing: reading Data decodes its current bytes, and Writable permits checked write-through assignment. Numeric payloads retain their declared class, including exact 64-bit integers.",
     keywords: &["memmapfile", "binary", "format", "mapping"],
     related: &["fread", "fwrite", "fileattrib"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Forms and record geometry",
             paragraphs: &[
-                "`m = memmapfile(filename)` reads UInt8 data. Name/Value pairs configure Writable, Offset, Format, and Repeat; incomplete or unknown pairs are errors.",
+                "`m = memmapfile(filename)` exposes UInt8 data. Name/Value pairs configure Writable, Offset, Format, and Repeat; incomplete or unknown pairs are errors.",
                 "Format accepts a native type name or an n-by-3 cell table. Each table row gives a type, positive dimension vector, and unique field name. File records contain those fields in row order; Data is a structure array when more than one complete record is read.",
                 "Supported numeric names are int8/int16/int32/int64, uint8/uint16/uint32/uint64, single, double, and char. Native integer storage and Float32 bit patterns are read without a Double conversion.",
                 "The char format returns character Data. An unnamed cell Format retains its declared dimension vector in the returned Format property.",
@@ -46,9 +62,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Current limitations",
             paragraphs: &[
-                "The current implementation reads the selected file into host memory instead of retaining a live memory-mapped backing. Writable is reported as a property but changes to Data are not written through to the file.",
+                "The native and in-memory filesystem providers support opened-range reads and writes. A selected provider without that capability can still return a detached read-only Data snapshot; a writable mapping request is rejected. A mapped Data access materializes a host value, and assigning a changed value writes its encoded bytes to the opened backing. A multi-chunk write is not an atomic file transaction.",
                 "Automatic resident structural controls may be downloaded through their provider. Explicit gpuArray structural controls require the RunMat extension; memmapfile does not run a GPU kernel.",
-                "Large files and records may require substantial host memory. Resource-bounded admission and cancellation throughout decoding are not yet available.",
+                "Large files and records may require substantial host memory. The opened extent limits file offsets, not process memory use; synchronous provider and value-codec phases may still delay cancellation.",
             ],
         },
     ],
@@ -57,7 +73,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "Does setting Writable update the file when Data changes?",
-            answer: "Not yet. Writable is retained as metadata, while Data is a host-memory copy.",
+            answer: "Yes, when the selected provider supplies an opened writable backing. Assignment through Data encodes the value and writes to that backing. If the provider cannot supply opened ranges, writable construction fails rather than reporting a false mapping.",
         },
         BuiltinDocumentationFaq {
             question: "Can Format describe records with different field types?",
@@ -88,6 +104,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinDocumentationLink {
                 label: "Typed record decoding",
                 target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/compat/memmapfile/decode.rs"),
+            },
+            BuiltinDocumentationLink {
+                label: "Sealed live receiver and class methods",
+                target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/compat/memmapfile/live.rs"),
+            },
+            BuiltinDocumentationLink {
+                label: "Provider-owned opened-range interface",
+                target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-filesystem/src/mapped_backing.rs"),
             },
         ],
         verification: &[BuiltinEvidenceReference {

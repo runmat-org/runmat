@@ -56,6 +56,7 @@ pub const MEMMAPFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
         MEMMAPFILE_ERROR_INVALID_CONTROL,
         MEMMAPFILE_ERROR_INVALID_FORMAT,
         MEMMAPFILE_ERROR_READ_FAILED,
+        MEMMAPFILE_ERROR_WRITE_FAILED,
         MEMMAPFILE_ERROR_PROVIDER_CONTROL,
         MEMMAPFILE_ERROR_CANCELLED,
         MEMMAPFILE_ERROR_INTEGER_COMPATIBILITY,
@@ -104,6 +105,12 @@ pub const MEMMAPFILE_ERROR_READ_FAILED: BuiltinErrorDescriptor = BuiltinErrorDes
     identifier: Some("RunMat:memmapfile:ReadFailed"),
     when: "The selected filesystem provider cannot read the captured file.",
     message: "memmapfile: file read failed",
+};
+pub const MEMMAPFILE_ERROR_WRITE_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEMMAPFILE.WRITE_FAILED",
+    identifier: Some("RunMat:memmapfile:WriteFailed"),
+    when: "A mapped write fails before, during, or after bytes reach the selected backing; the typed source states whether bytes committed.",
+    message: "memmapfile: mapped write failed",
 };
 pub const MEMMAPFILE_ERROR_PROVIDER_CONTROL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MEMMAPFILE.PROVIDER_CONTROL",
