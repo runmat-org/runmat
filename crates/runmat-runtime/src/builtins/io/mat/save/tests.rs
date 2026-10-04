@@ -1,5 +1,6 @@
 use super::*;
 use runmat_builtins::SAVE_DESCRIPTOR;
+use std::path::Path;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]

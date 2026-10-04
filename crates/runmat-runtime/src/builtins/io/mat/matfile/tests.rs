@@ -1,6 +1,7 @@
 use super::super::load::read_mat_file_for_builtin;
 use super::*;
 use runmat_filesystem::{self as fs, FsProvider};
+use std::path::Path;
 use std::sync::Arc;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -25,9 +26,13 @@ fn invalid_read_index_precedes_detached_receiver_authority() {
     let subscript =
         crate::object::indexing::standard_substruct_fixture_from_parts("()", Value::Num(1.0))
             .expect("fixture");
-    let mut path =
+    let path =
         crate::object::indexing::parse_standard_substruct(&subscript).expect("parsed fixture");
-    let step = path.remove(0);
+    let step = path
+        .into_steps()
+        .into_iter()
+        .next()
+        .expect("one fixture step");
     let detached = Value::Object(ObjectInstance::new(MATFILE_CLASS.owned()));
     let error = futures::executor::block_on(super::matfile_read_step(None, detached, step))
         .expect_err("partial indexing is unsupported before authority lookup");

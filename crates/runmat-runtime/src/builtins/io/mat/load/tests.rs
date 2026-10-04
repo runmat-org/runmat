@@ -1,9 +1,7 @@
 use super::super::format::{MatArray, MatClass, MatData, MAT_HEADER_LEN, MI_COMPRESSED};
 use super::*;
 use runmat_builtins::LOAD_DESCRIPTOR;
-use runmat_value::{
-    CellArray, ComplexTensor, IntValue, NumericStorage, SparseTensor, StructArray, Tensor,
-};
+use runmat_value::{CellArray, ComplexTensor, IntValue, NumericStorage, SparseTensor, Tensor};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
