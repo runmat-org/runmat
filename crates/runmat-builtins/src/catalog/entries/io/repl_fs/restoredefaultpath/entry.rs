@@ -16,7 +16,7 @@ pub const RESTOREDEFAULTPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalog
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             super::inference::infer,
         )),
-        compatibility: BuiltinCompatibility::RunMat,
+        compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::Filesystem,

@@ -21,7 +21,7 @@ pub const USERPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             super::inference::infer,
         )),
-        compatibility: BuiltinCompatibility::RunMat,
+        compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::Filesystem,

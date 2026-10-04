@@ -32,6 +32,10 @@ mod tests {
     fn zero_input_result_and_invalid_input_are_explicit() {
         let entry = &super::super::RESTOREDEFAULTPATH_CATALOG_ENTRY;
         assert_eq!(
+            entry.contract.compatibility,
+            crate::BuiltinCompatibility::Matlab
+        );
+        assert_eq!(
             entry.extensions,
             &[super::super::RESTOREDEFAULTPATH_RETURN_EXTENSION]
         );

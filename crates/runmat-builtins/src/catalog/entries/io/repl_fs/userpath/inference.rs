@@ -95,6 +95,10 @@ mod tests {
         );
         let entry = &super::super::USERPATH_CATALOG_ENTRY;
         assert_eq!(
+            entry.contract.compatibility,
+            crate::BuiltinCompatibility::Matlab
+        );
+        assert_eq!(
             entry.extensions,
             &[super::super::USERPATH_PARTIAL_PATH_EXTENSION]
         );
