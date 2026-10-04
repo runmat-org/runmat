@@ -1,15 +1,18 @@
 //! Audio-owned work accounting; the runtime execution service owns yield policy.
 
+use crate::context::host_effect::{stale_resource, HostEffectResourceLivenessLease};
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use std::future::Future;
+use std::sync::Arc;
 
 pub(super) struct AudioCooperation {
     budget: Option<CpuCooperationBudget>,
     namespace: Option<String>,
     builtin: &'static str,
     cancelled: bool,
+    resource_liveness_lease: Option<Arc<dyn HostEffectResourceLivenessLease>>,
 }
 
 impl AudioCooperation {
@@ -19,6 +22,7 @@ impl AudioCooperation {
             namespace: runtime.map(RuntimeContext::error_namespace),
             builtin,
             cancelled: false,
+            resource_liveness_lease: None,
         }
     }
 
@@ -29,6 +33,7 @@ impl AudioCooperation {
             namespace: Some("RunMat".into()),
             builtin,
             cancelled: false,
+            resource_liveness_lease: None,
         }
     }
 
@@ -38,25 +43,51 @@ impl AudioCooperation {
         self.cancelled
     }
 
+    pub(super) fn install_resource_liveness_lease(
+        &mut self,
+        lease: Arc<dyn HostEffectResourceLivenessLease>,
+    ) {
+        self.resource_liveness_lease = Some(lease);
+    }
+
+    fn check_resource_liveness(&self) -> BuiltinResult<()> {
+        if self
+            .resource_liveness_lease
+            .as_ref()
+            .is_some_and(|permit| !permit.is_current())
+        {
+            Err(stale_resource())
+        } else {
+            Ok(())
+        }
+    }
+
     /// Suspend on provider I/O without losing the invocation's cancellation
     /// wakeup. The caller retains the original I/O error for its own descriptor.
     pub(super) async fn await_io<T, E, F>(&mut self, future: F) -> BuiltinResult<Result<T, E>>
     where
         F: Future<Output = Result<T, E>>,
     {
+        self.check_resource_liveness()?;
         let Some(budget) = self.budget.as_ref() else {
-            return Ok(future.await);
+            let value = future.await;
+            self.check_resource_liveness()?;
+            return Ok(value);
         };
         let outcome = budget.await_cancellable(future).await;
-        outcome.map_err(|error| self.runtime_error(error))
+        let value = outcome.map_err(|error| self.runtime_error(error))?;
+        self.check_resource_liveness()?;
+        Ok(value)
     }
 
     pub(super) async fn completed(&mut self, units: usize) -> BuiltinResult<()> {
+        self.check_resource_liveness()?;
         let Some(budget) = self.budget.as_mut() else {
             return Ok(());
         };
         let outcome = budget.checkpoint(units as u64).await;
-        outcome.map_err(|error| self.runtime_error(error))
+        outcome.map_err(|error| self.runtime_error(error))?;
+        self.check_resource_liveness()
     }
 
     fn runtime_error(&mut self, error: ExecutionServiceError) -> RuntimeError {
@@ -83,6 +114,31 @@ mod tests {
     use futures::executor::block_on;
     use runmat_execution::cancellation::CancellationSource;
     use std::num::NonZeroU64;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct Revocable(Arc<AtomicBool>);
+    impl HostEffectResourceLivenessLease for Revocable {
+        fn is_current(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    #[test]
+    fn resource_revocation_during_await_rejects_before_audio_publication() {
+        let valid = Arc::new(AtomicBool::new(true));
+        let mut cooperation = AudioCooperation::new(None, "audioread");
+        cooperation.install_resource_liveness_lease(Arc::new(Revocable(valid.clone())));
+        let error = block_on(cooperation.await_io(async {
+            valid.store(false, Ordering::SeqCst);
+            Ok::<_, std::io::Error>(7u8)
+        }))
+        .err()
+        .expect("revoked authority");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:StaleResourceAuthority")
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

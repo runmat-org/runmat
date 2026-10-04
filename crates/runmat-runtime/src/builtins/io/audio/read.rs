@@ -32,6 +32,9 @@ pub(super) async fn audioread_builtin(
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
     cooperation.completed(0).await?;
     let receipt = select_decode(runtime.as_ref(), &input, options, outputs)?;
+    if let Some(receipt) = receipt.as_ref() {
+        cooperation.install_resource_liveness_lease(receipt.resource_liveness_lease());
+    }
     let result = async {
         cooperation.completed(0).await?;
         let decoded = decode_wave_stream(&input, options, &mut cooperation).await?;

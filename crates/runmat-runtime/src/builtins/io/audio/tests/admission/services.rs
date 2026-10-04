@@ -57,7 +57,7 @@ impl RuntimeHostEffectResourceService for Resources {
         &self,
         request: &HostEffectRequest<'_>,
         _: &RuntimeContext,
-    ) -> Option<HostEffectResourceEvidence> {
+    ) -> Option<crate::context::host_effect::HostEffectResourceAdmission> {
         self.calls.set(self.calls.get() + 1);
         self.workloads
             .borrow_mut()
@@ -67,7 +67,7 @@ impl RuntimeHostEffectResourceService for Resources {
         {
             return None;
         }
-        match request.workload {
+        let evidence = match request.workload {
             HostEffectWorkload::AudioDecode { source, .. }
                 if request.operation == AUDIOREAD_BUILTIN_NAME
                     && source == Path::new("/audio/tone.wav") =>
@@ -83,7 +83,8 @@ impl RuntimeHostEffectResourceService for Resources {
                 self.evidence
             }
             _ => None,
-        }
+        };
+        evidence.map(crate::context::host_effect::test_admission)
     }
 }
 

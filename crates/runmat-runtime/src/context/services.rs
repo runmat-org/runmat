@@ -272,7 +272,7 @@ pub trait RuntimeHostEffectResourceService {
         &self,
         request: &super::host_effect::HostEffectRequest<'_>,
         runtime: &super::RuntimeContext,
-    ) -> Option<super::host_effect::HostEffectResourceEvidence>;
+    ) -> Option<super::host_effect::HostEffectResourceAdmission>;
 }
 
 /// Session-owned execution-placement authority. The runtime exposes only

@@ -30,6 +30,39 @@ pub struct HostEffectResourceEvidence {
     pub returned_value_bytes: ResourceByteBound,
 }
 
+/// Keeps the certifying authority alive and detects its revocation across an
+/// await. This is only a liveness lease: it does not reserve memory, enforce
+/// allocation sizes, or turn an estimate into a physical peak guarantee.
+pub trait HostEffectResourceLivenessLease: Send + Sync {
+    fn is_current(&self) -> bool;
+}
+
+#[cfg(test)]
+pub(crate) struct TestHostEffectLivenessLease;
+
+#[cfg(test)]
+impl HostEffectResourceLivenessLease for TestHostEffectLivenessLease {
+    fn is_current(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+/// Synthetic selection tests only: this is not physical resource evidence.
+pub(crate) fn test_admission(evidence: HostEffectResourceEvidence) -> HostEffectResourceAdmission {
+    HostEffectResourceAdmission {
+        evidence,
+        liveness_lease: Arc::new(TestHostEffectLivenessLease),
+    }
+}
+
+pub struct HostEffectResourceAdmission {
+    pub evidence: HostEffectResourceEvidence,
+    /// Revocation guard for the installed source/codec authority. Allocation
+    /// enforcement is a separate prerequisite of `evidence` being truthful.
+    pub liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
+}
+
 pub struct HostEffectRequest<'a> {
     pub operation: &'static str,
     pub workload: HostEffectWorkload<'a>,
@@ -62,7 +95,7 @@ pub fn select_host_effect(
             Ok(None)
         };
     };
-    let Some(evidence) = runtime
+    let Some(admission) = runtime
         .service_ports()
         .host_effect_resources()
         .and_then(|port| port.admission(&request, runtime))
@@ -75,6 +108,10 @@ pub fn select_host_effect(
             Ok(None)
         };
     };
+    if !admission.liveness_lease.is_current() {
+        return Err(stale_resource());
+    }
+    let evidence = admission.evidence;
     let Some(revision) = service.whole_work_host_service_revision(
         runtime.program_revision().cloned(),
         evidence.authority_revision,
@@ -161,6 +198,9 @@ pub fn select_host_effect(
         deterministic: true,
         require_transactional_results: false,
     })?;
+    if !admission.liveness_lease.is_current() {
+        return Err(stale_resource());
+    }
     if selected.decision.signature != signature
         || selected.decision.selected != candidate.selected(request.operation)
     {
@@ -174,7 +214,14 @@ pub fn select_host_effect(
         runtime: runtime.clone(),
         selected,
         started: Instant::now(),
+        resource_liveness_lease: admission.liveness_lease,
     }))
+}
+
+pub(crate) fn stale_resource() -> crate::RuntimeError {
+    build_runtime_error("host effect resource authority changed before completion")
+        .with_identifier("RunMat:Placement:StaleResourceAuthority")
+        .build()
 }
 
 fn insufficient(detail: &str) -> crate::RuntimeError {
@@ -191,10 +238,26 @@ pub struct HostEffectReceipt {
     runtime: RuntimeContext,
     selected: RuntimeWholeWorkSelection,
     started: Instant,
+    resource_liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
 }
 
 impl HostEffectReceipt {
+    pub fn resource_liveness_lease(&self) -> Arc<dyn HostEffectResourceLivenessLease> {
+        self.resource_liveness_lease.clone()
+    }
+
+    pub fn checkpoint(&self) -> BuiltinResult<()> {
+        if self.resource_liveness_lease.is_current() {
+            Ok(())
+        } else {
+            Err(stale_resource())
+        }
+    }
+
     pub fn finish(self, outcome: WholeWorkObservationOutcome) {
+        if !self.resource_liveness_lease.is_current() {
+            return;
+        }
         let outcome = if self.runtime.is_cancelled() {
             WholeWorkObservationOutcome::Cancelled
         } else {

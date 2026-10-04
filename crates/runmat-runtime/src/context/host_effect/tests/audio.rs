@@ -161,7 +161,7 @@ fn typed_audio_evidence_budgets_effect_only_and_retained_results() {
             &self,
             request: &HostEffectRequest<'_>,
             _: &RuntimeContext,
-        ) -> Option<HostEffectResourceEvidence> {
+        ) -> Option<HostEffectResourceAdmission> {
             (request.operation == "audioread"
                 && Arc::ptr_eq(request.filesystem, fixture_fs())
                 && request.domain_facts == Digest::sha256(b"admitted-audio-controls")
@@ -181,6 +181,7 @@ fn typed_audio_evidence_budgets_effect_only_and_retained_results() {
                 ResourceByteBound::Known(16),
                 ResourceByteBound::Known(24),
             ))
+            .map(test_admission)
         }
     }
     let placement = Rc::new(Placement::default());

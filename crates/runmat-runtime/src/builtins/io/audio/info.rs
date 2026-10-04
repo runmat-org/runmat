@@ -22,6 +22,9 @@ pub(super) async fn audioinfo_builtin(
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOINFO_BUILTIN_NAME);
     cooperation.completed(0).await?;
     let receipt = select_metadata(runtime.as_ref(), &input, outputs)?;
+    if let Some(receipt) = receipt.as_ref() {
+        cooperation.install_resource_liveness_lease(receipt.resource_liveness_lease());
+    }
     let result = async {
         cooperation.completed(0).await?;
         let scan = read_audioinfo_scan(&input, &mut cooperation).await?;

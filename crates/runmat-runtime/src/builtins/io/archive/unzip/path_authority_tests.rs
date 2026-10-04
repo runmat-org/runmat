@@ -44,7 +44,7 @@ impl RuntimeHostEffectResourceService for ExactArchiveResources {
         &self,
         request: &HostEffectRequest<'_>,
         _: &RuntimeContext,
-    ) -> Option<HostEffectResourceEvidence> {
+    ) -> Option<crate::context::host_effect::HostEffectResourceAdmission> {
         let HostEffectWorkload::ArchiveExtract {
             source: HostEffectSource::LocalArchive(source),
             destination: Some(destination),
@@ -66,6 +66,7 @@ impl RuntimeHostEffectResourceService for ExactArchiveResources {
             scratch_bytes: ResourceByteBound::Known(1024),
             returned_value_bytes: ResourceByteBound::Known(1024),
         })
+        .map(crate::context::host_effect::test_admission)
     }
 }
 

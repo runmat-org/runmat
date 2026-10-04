@@ -24,7 +24,7 @@ impl RuntimeHostEffectResourceService for Resources {
         &self,
         request: &HostEffectRequest<'_>,
         _runtime: &RuntimeContext,
-    ) -> Option<HostEffectResourceEvidence> {
+    ) -> Option<HostEffectResourceAdmission> {
         (request.operation == "unzip"
             && matches!(
                 request.workload,
@@ -38,6 +38,7 @@ impl RuntimeHostEffectResourceService for Resources {
             && request.domain_facts == Digest::sha256(b"source-and-destination"))
         .then_some(self.0)
         .flatten()
+        .map(test_admission)
     }
 }
 
@@ -355,6 +356,60 @@ fn dropped_and_cancelled_receipts_release_probe_without_failure_feedback() {
     assert!(placement.observations.borrow().is_empty());
 }
 
+#[test]
+fn revoked_resource_authority_rejects_completion_and_releases_probe() {
+    use std::sync::atomic::AtomicBool;
+
+    struct Revocable(Arc<AtomicBool>);
+    impl HostEffectResourceLivenessLease for Revocable {
+        fn is_current(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+    struct RevocableResources(Arc<AtomicBool>);
+    impl RuntimeHostEffectResourceService for RevocableResources {
+        fn admission(
+            &self,
+            request: &HostEffectRequest<'_>,
+            _: &RuntimeContext,
+        ) -> Option<HostEffectResourceAdmission> {
+            Arc::ptr_eq(request.filesystem, fixture_fs()).then(|| HostEffectResourceAdmission {
+                evidence: bounds(ResourceByteBound::Known(8), ResourceByteBound::Known(8)),
+                liveness_lease: Arc::new(Revocable(self.0.clone())),
+            })
+        }
+    }
+    let valid = Arc::new(AtomicBool::new(true));
+    let placement = Rc::new(Placement::default());
+    placement.revision_available.set(true);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(placement.clone())
+                .with_host_effect_resources(Rc::new(RevocableResources(valid.clone())))
+                .with_parallel(Rc::new(Parallel(Some(16)))),
+        );
+    let receipt = select_host_effect(Some(&runtime), request(HostEffectOutput::ReturnedValue))
+        .unwrap()
+        .unwrap();
+    assert!(receipt.checkpoint().is_ok());
+    valid.store(false, Ordering::SeqCst);
+    assert_eq!(
+        receipt.checkpoint().unwrap_err().identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    receipt.finish(WholeWorkObservationOutcome::Success);
+    assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(
+        select_host_effect(Some(&runtime), request(HostEffectOutput::ReturnedValue))
+            .err()
+            .unwrap()
+            .identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_identity() {
@@ -373,7 +428,7 @@ fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_id
             &self,
             request: &HostEffectRequest<'_>,
             _runtime: &RuntimeContext,
-        ) -> Option<HostEffectResourceEvidence> {
+        ) -> Option<HostEffectResourceAdmission> {
             let HostEffectWorkload::ArchiveExtract {
                 source: HostEffectSource::LocalArchive(source),
                 destination: Some(destination),
@@ -386,10 +441,10 @@ fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_id
                 source: source.as_os_str().as_encoded_bytes().to_vec(),
                 destination: destination.as_os_str().as_encoded_bytes().to_vec(),
             });
-            Some(bounds(
+            Some(test_admission(bounds(
                 ResourceByteBound::Known(1),
                 ResourceByteBound::Known(1),
-            ))
+            )))
         }
     }
 

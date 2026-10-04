@@ -102,6 +102,9 @@ async fn evaluate_with_output(
         },
     )?;
     let execution = async {
+        if let Some(receipt) = receipt.as_ref() {
+            receipt.checkpoint()?;
+        }
         let filenames = match resolved.archive {
             ResolvedArchiveSource::Http(url) => {
                 extract_remote_archive(&url, &resolved.output_folder, runtime, resolved.filesystem)
@@ -119,6 +122,9 @@ async fn evaluate_with_output(
             }
         };
         check_cancelled(runtime)?;
+        if let Some(receipt) = receipt.as_ref() {
+            receipt.checkpoint()?;
+        }
         Ok(filenames)
     }
     .await;
