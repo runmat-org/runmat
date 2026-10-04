@@ -3,7 +3,9 @@
 use runmat_value::Value;
 
 use crate::builtins::common::path_state::CapturedUserPathAuthority;
-use crate::context::{RuntimeContext, UserPathMutation, UserPathServiceError, UserPathSetting};
+use crate::context::{
+    PreferenceServiceError, RuntimeContext, UserPathMutation, UserPathServiceError, UserPathSetting,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 enum Request {
@@ -40,9 +42,15 @@ pub(super) async fn run(runtime: Option<RuntimeContext>, args: Vec<Value>) -> Bu
             match service.commit(runtime, mutation).await {
                 Ok(snapshot) => snapshot,
                 Err(source) => {
-                    // A post-authorization failure can have an indeterminate
-                    // commit outcome. Do not resolve from the old local entry.
-                    search.mark_user_authority_stale();
+                    // A definitive rejection leaves the old path valid; only
+                    // an indeterminate authorized commit can invalidate it.
+                    if matches!(
+                        &source,
+                        UserPathServiceError::Storage(source)
+                            if matches!(source.as_ref(), PreferenceServiceError::CommitIndeterminate(_))
+                    ) {
+                        search.mark_user_authority_stale();
+                    }
                     return Err(service_error(source));
                 }
             }
@@ -258,8 +266,8 @@ mod tests {
     use super::*;
     use crate::builtins::common::path_state::SearchPath;
     use crate::context::{
-        IsolatedMemoryPreferenceService, PreferenceServiceError, RuntimeServiceFuture,
-        RuntimeServicePorts, RuntimeUserPathService, UserPathSnapshot,
+        IsolatedMemoryPreferenceService, RuntimeServiceFuture, RuntimeServicePorts,
+        RuntimeUserPathService, UserPathSnapshot,
     };
     use runmat_filesystem as fs;
     use std::{rc::Rc, sync::Arc};
@@ -306,6 +314,7 @@ mod tests {
 
         let _second =
             fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(second)));
+        fs::set_current_dir(second).expect("select second virtual current directory");
         let later_path = Arc::new(SearchPath::new(String::new()));
         let later_context = context(later_path.clone(), settings);
         let query = futures::executor::block_on(run(Some(later_context.clone()), vec![]))
@@ -343,6 +352,8 @@ mod tests {
 
     struct UncertainCommit;
 
+    struct RejectedCommit;
+
     impl RuntimeUserPathService for UncertainCommit {
         fn read(
             &self,
@@ -362,11 +373,32 @@ mod tests {
             _mutation: UserPathMutation,
         ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
             Box::pin(async {
-                Err(UserPathServiceError::Storage(
+                Err(UserPathServiceError::Storage(Box::new(
                     PreferenceServiceError::CommitIndeterminate(
                         build_runtime_error("commit outcome lost").build(),
                     ),
-                ))
+                )))
+            })
+        }
+    }
+
+    impl RuntimeUserPathService for RejectedCommit {
+        fn read(
+            &self,
+            runtime: RuntimeContext,
+        ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
+            UncertainCommit.read(runtime)
+        }
+
+        fn commit(
+            &self,
+            _runtime: RuntimeContext,
+            _mutation: UserPathMutation,
+        ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
+            Box::pin(async {
+                Err(UserPathServiceError::Storage(Box::new(
+                    PreferenceServiceError::InvalidTransaction("rejected before commit".into()),
+                )))
             })
         }
     }
@@ -413,5 +445,42 @@ mod tests {
             futures::executor::block_on(run(None, vec![super::super::char_value(&invalid)]))
                 .expect_err("one user path cannot contain path-list separators");
         assert_eq!(error.identifier(), Some("RunMat:userpath:InvalidPath"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn definitive_rejection_preserves_current_user_path_authority() {
+        let _serial = fs::provider_override_lock();
+        #[cfg(windows)]
+        let cwd = "C:\\selected";
+        #[cfg(not(windows))]
+        let cwd = "/selected";
+        let _selected = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(cwd)));
+        let search = Arc::new(SearchPath::new(String::new()));
+        search.install_captured_factory(
+            crate::builtins::common::path_state::ResolvedUserPath {
+                presentation: "old".into(),
+                search_segment: Some("old".into()),
+            },
+            1,
+            "",
+            None,
+        );
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_search_path(search.clone())
+                .with_service_ports(
+                    RuntimeServicePorts::default().with_user_path(Rc::new(RejectedCommit)),
+                );
+        let error = futures::executor::block_on(run(
+            Some(runtime.clone()),
+            vec![super::super::char_value("new")],
+        ))
+        .expect_err("definitive rejection");
+        assert_eq!(error.identifier(), Some("RunMat:userpath:Storage"));
+        assert!(search.user_authority_current());
+        assert_eq!(search.current_string(), "old");
+        let _active = crate::context::RuntimeContextGuard::enter(runtime);
+        assert!(crate::builtins::common::path_search::search_directories("lookup").is_ok());
     }
 }

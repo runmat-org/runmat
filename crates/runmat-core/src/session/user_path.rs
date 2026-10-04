@@ -167,6 +167,8 @@ mod tests {
         let _second = runmat_filesystem::replace_provider(Arc::new(
             runmat_filesystem::MemoryFsProvider::with_current_dir(second),
         ));
+        runmat_filesystem::set_current_dir(second)
+            .expect("select second virtual current directory");
         let mut later_session = RunMatSession::with_options(false, false).expect("later session");
         install_settings(&mut later_session, settings);
         execute(
