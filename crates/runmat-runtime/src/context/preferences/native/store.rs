@@ -28,6 +28,7 @@ pub(super) struct NativeStore {
 #[cfg(test)]
 pub(super) struct CommitGate {
     pub reached: std::sync::mpsc::Sender<()>,
+    pub wake_test: std::sync::mpsc::Sender<()>,
     pub resume: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
 }
 
@@ -80,8 +81,8 @@ impl NativeStore {
             .map_err(NativeStoreError::Io)?;
         match lock.try_lock() {
             Ok(()) => {}
-            Err(source) if source.kind() == io::ErrorKind::WouldBlock => return Ok(None),
-            Err(source) => return Err(NativeStoreError::Io(source)),
+            Err(fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(fs::TryLockError::Error(source)) => return Err(NativeStoreError::Io(source)),
         }
         let document = self.read()?;
         Ok(Some(NativeWrite {
@@ -139,6 +140,7 @@ impl NativeStage {
             gate.reached.send(()).map_err(|source| {
                 NativeStoreError::Io(io::Error::new(io::ErrorKind::BrokenPipe, source))
             })?;
+            let _ = gate.wake_test.send(());
             gate.resume
                 .lock()
                 .expect("test gate mutex")

@@ -200,8 +200,10 @@ fn dropped_outer_future_after_authorization_does_not_claim_rollback() {
     let driver = driver();
     let (reached_tx, reached_rx) = std::sync::mpsc::channel();
     let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let (wake_tx, wake_rx) = std::sync::mpsc::channel();
     let gate = std::sync::Arc::new(store::CommitGate {
         reached: reached_tx,
+        wake_test: wake_tx.clone(),
         resume: std::sync::Mutex::new(resume_rx),
     });
     let mut service = NativePreferenceService::new(path.clone(), driver.handle().clone()).unwrap();
@@ -211,7 +213,6 @@ fn dropped_outer_future_after_authorization_does_not_claim_rollback() {
         "app".into(),
         vec![("authorized".into(), Value::Num(9.0))],
     );
-    let (wake_tx, wake_rx) = std::sync::mpsc::channel();
     let waker = futures::task::waker(std::sync::Arc::new(WakeSignal(wake_tx)));
     let mut context = Context::from_waker(&waker);
     loop {
@@ -251,6 +252,25 @@ fn cross_process_child_entry() {
         vec![("child".into(), Value::Num(2.0))],
     ))
     .unwrap();
+    println!("RUNMAT_PREF_CHILD_DONE");
+}
+
+struct ChildWitness {
+    child: std::process::Child,
+    reader: Option<std::thread::JoinHandle<()>>,
+    reaped: bool,
+}
+
+impl Drop for ChildWitness {
+    fn drop(&mut self) {
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
 }
 
 #[test]
@@ -268,18 +288,29 @@ fn cross_process_lock_preserves_disjoint_updates() {
         .spawn()
         .unwrap();
     let output = child.stdout.take().unwrap();
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (marker_tx, marker_rx) = std::sync::mpsc::channel();
     let reader = std::thread::spawn(move || {
         for line in std::io::BufReader::new(output).lines() {
             let line = line.unwrap();
             if line.contains("RUNMAT_PREF_CHILD_READY") {
-                let _ = ready_tx.send(());
+                let _ = marker_tx.send("ready");
+            }
+            if line.contains("RUNMAT_PREF_CHILD_DONE") {
+                let _ = marker_tx.send("done");
             }
         }
     });
-    ready_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("child entered before parent publication");
+    let mut witness = ChildWitness {
+        child,
+        reader: Some(reader),
+        reaped: false,
+    };
+    assert_eq!(
+        marker_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("child entered before parent publication"),
+        "ready"
+    );
     held.document
         .groups
         .entry("app".into())
@@ -289,8 +320,22 @@ fn cross_process_lock_preserves_disjoint_updates() {
             encode_durable_value(&Value::Num(1.0)).unwrap(),
         );
     held.stage().unwrap().commit().unwrap();
-    assert!(child.wait().unwrap().success());
-    reader.join().unwrap();
+    assert_eq!(
+        marker_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("child completed after parent publication"),
+        "done"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = witness.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline, "child did not exit");
+        std::thread::park_timeout(std::time::Duration::from_millis(10));
+    };
+    witness.reaped = true;
+    assert!(status.success());
     let document = store.read().unwrap();
     assert_eq!(
         decode_durable_value(&document.groups["app"]["parent"]).unwrap(),
