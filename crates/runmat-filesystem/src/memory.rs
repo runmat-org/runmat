@@ -9,6 +9,7 @@ use std::{
 };
 
 mod rename;
+mod mapped;
 mod staged;
 
 #[derive(Clone, Debug)]
@@ -20,7 +21,11 @@ pub struct MemoryFsProvider {
 #[derive(Clone, Debug)]
 enum MemoryEntry {
     Directory,
-    File { bytes: Vec<u8>, readonly: bool },
+    File {
+        bytes: Vec<u8>,
+        readonly: bool,
+        identity: Arc<()>,
+    },
 }
 
 #[derive(Debug)]
@@ -73,7 +78,7 @@ impl MemoryFsProvider {
     pub fn write_project_path(&self, path: impl AsRef<Path>, data: &[u8]) -> io::Result<()> {
         let path = normalize_path(path.as_ref())?;
         let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
-        match guard.entries.get(&path) {
+        let identity = match guard.entries.get(&path) {
             Some(MemoryEntry::Directory) => {
                 return Err(io::Error::new(
                     ErrorKind::InvalidInput,
@@ -86,14 +91,16 @@ impl MemoryFsProvider {
                     format!("file is readonly: {}", path.display()),
                 ));
             }
-            Some(MemoryEntry::File { .. }) | None => {}
-        }
+            Some(MemoryEntry::File { identity, .. }) => identity.clone(),
+            None => Arc::new(()),
+        };
         ensure_parent_dirs(&mut guard, &path)?;
         guard.entries.insert(
             path,
             MemoryEntry::File {
                 bytes: data.to_vec(),
                 readonly: false,
+                identity,
             },
         );
         Ok(())
@@ -223,6 +230,14 @@ impl MemoryFsProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for MemoryFsProvider {
+    async fn open_mapped_backing(
+        &self,
+        path: &Path,
+        writable: bool,
+    ) -> io::Result<Option<Box<dyn crate::FsMappedBacking>>> {
+        mapped::open(self.clone(), path, writable).map(Some)
+    }
+
     fn begin_staged_replace(
         &self,
         destination: &Path,
@@ -549,7 +564,9 @@ fn entry_type(entry: &MemoryEntry) -> FsFileType {
 fn metadata_for(path: &Path, entry: Option<&MemoryEntry>) -> io::Result<FsMetadata> {
     match entry {
         Some(MemoryEntry::Directory) => Ok(FsMetadata::new(FsFileType::Directory, 0, None, false)),
-        Some(MemoryEntry::File { bytes, readonly }) => Ok(FsMetadata::new(
+        Some(MemoryEntry::File {
+            bytes, readonly, ..
+        }) => Ok(FsMetadata::new(
             FsFileType::File,
             bytes.len() as u64,
             None,

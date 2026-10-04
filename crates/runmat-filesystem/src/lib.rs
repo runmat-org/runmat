@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
 mod dialog;
+mod mapped_backing;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_path;
@@ -25,6 +26,7 @@ pub mod sandbox;
 mod wasm;
 
 pub use dialog::*;
+pub use mapped_backing::{capture_mapped_backing, CapturedMappedBacking, FsMappedBacking};
 pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
@@ -371,6 +373,17 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Opt in to an opened, fixed-extent range owner for an existing file.
+    /// `None` means the provider cannot supply live range semantics; it does
+    /// not mean the source is absent. This is not a memory-peak certificate.
+    async fn open_mapped_backing(
+        &self,
+        _resolved_absolute: &Path,
+        _writable: bool,
+    ) -> io::Result<Option<Box<dyn FsMappedBacking>>> {
+        Ok(None)
+    }
+
     /// Acquire an exclusive provider-owned staging object for one already
     /// resolved absolute destination. The returned owner must abort on Drop,
     /// including when a write, flush, or publication future is abandoned.

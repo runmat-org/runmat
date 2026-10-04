@@ -16,12 +16,22 @@ use url::Url;
 
 #[path = "native/staged.rs"]
 mod staged;
+#[path = "native/mapped.rs"]
+mod mapped;
 
 #[derive(Default)]
 pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    async fn open_mapped_backing(
+        &self,
+        path: &Path,
+        writable: bool,
+    ) -> io::Result<Option<Box<dyn crate::FsMappedBacking>>> {
+        mapped::open(path, writable).map(Some)
+    }
+
     fn begin_staged_replace(
         &self,
         destination: &Path,

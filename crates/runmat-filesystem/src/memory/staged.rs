@@ -68,6 +68,7 @@ impl FsStagedOutput for MemoryStagedOutput {
             MemoryEntry::File {
                 bytes: std::mem::take(&mut self.bytes),
                 readonly: false,
+                identity: Arc::new(()),
             },
         );
         Ok(())
