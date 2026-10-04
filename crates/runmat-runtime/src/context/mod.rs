@@ -27,10 +27,10 @@ pub mod preparation;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
-#[cfg(not(target_arch = "wasm32"))]
-pub use preferences::NativePreferenceService;
 #[cfg(target_arch = "wasm32")]
 pub use preferences::BrowserPreferenceService;
+#[cfg(not(target_arch = "wasm32"))]
+pub use preferences::NativePreferenceService;
 pub use preferences::{
     IsolatedMemoryPreferenceService, PreferenceGroups, PreferenceServiceError, PreferenceValues,
     RuntimePreferenceService,

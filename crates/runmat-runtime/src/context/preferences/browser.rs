@@ -1,7 +1,10 @@
 //! Browser application-owned settings authority (Window and Worker IndexedDB).
 
+#[path = "browser/connection.rs"]
 mod connection;
+#[path = "browser/store.rs"]
 mod store;
+#[path = "browser/transaction.rs"]
 mod transaction;
 
 use super::document::{DocumentMutation, DocumentMutationError, PreferenceDocumentError};
