@@ -1,5 +1,8 @@
 use super::*;
-use crate::{catalog::inference::infer_catalog_call, BuiltinPortability};
+use crate::{
+    catalog::inference::infer_catalog_call, BuiltinOutputMode, BuiltinParamArity,
+    BuiltinPortability,
+};
 use runmat_types::*;
 
 fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {
