@@ -181,7 +181,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     let path = dir.path().join("tone.wav");
     std::fs::write(&path, pcm16_wav(8_000, 1, &[0, 16_384])).expect("write real WAVE bytes");
     let provider: Arc<dyn runmat_filesystem::FsProvider> =
-        Arc::new(runmat_filesystem::NativeFsProvider::default());
+        Arc::new(runmat_filesystem::NativeFsProvider);
     let _guard = runmat_filesystem::replace_provider(provider.clone());
     let resources = Rc::new(StagedTestResources {
         filesystem: provider,

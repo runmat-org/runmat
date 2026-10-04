@@ -94,7 +94,7 @@ mod tests {
     fn paged_and_multiscalar_text_reject_with_owning_identifiers() {
         let paged =
             Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
-        let error = parse_arguments(&[paged.clone()])
+        let error = parse_arguments(std::slice::from_ref(&paged))
             .err()
             .expect("paged source");
         assert_eq!(error.identifier(), UNZIP_ERROR_FILENAME.identifier);
