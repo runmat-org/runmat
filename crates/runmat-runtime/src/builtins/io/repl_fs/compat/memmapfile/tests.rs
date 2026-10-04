@@ -35,6 +35,55 @@ fn character_format_returns_character_class_and_column_major_shape() {
     assert_eq!(chars.to_column_major(), vec!['A', 'B', 'C', 'D']);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn named_multirecord_format_retains_declared_field_order() {
+    let format = MemmapFormat {
+        dtype: MemmapDataType::Numeric(NumericDType::U8),
+        shape: vec![1, 1],
+        field: Some("zeta".into()),
+        additional_fields: vec![MemmapField {
+            dtype: MemmapDataType::Numeric(NumericDType::U8),
+            shape: vec![1, 1],
+            name: "alpha".into(),
+        }],
+        presentation: MemmapFormatPresentation::Cell { columns: 3 },
+    };
+    let Value::StructArray(records) = format.decode(&[1, 2, 3, 4], Some(2)).unwrap() else {
+        panic!("two format records must retain structure array class");
+    };
+    assert_eq!(
+        records.field_names().map(String::as_str).collect::<Vec<_>>(),
+        ["zeta", "alpha"]
+    );
+    let elements = records.into_elements();
+    assert_eq!(elements.len(), 2);
+    for (record, zeta, alpha) in [(&elements[0], 1, 2), (&elements[1], 3, 4)] {
+        let Some(Value::Tensor(zeta_value)) = record.fields.get("zeta") else {
+            panic!("zeta field");
+        };
+        let Some(Value::Tensor(alpha_value)) = record.fields.get("alpha") else {
+            panic!("alpha field");
+        };
+        assert_eq!(
+            zeta_value.integer_storage(),
+            Some(&IntegerStorage::U8(vec![zeta]))
+        );
+        assert_eq!(
+            alpha_value.integer_storage(),
+            Some(&IntegerStorage::U8(vec![alpha]))
+        );
+    }
+    let Value::StructArray(empty) = format.decode(&[], Some(0)).unwrap() else {
+        panic!("empty named format must retain its structure schema");
+    };
+    assert_eq!(empty.shape(), &[0, 1]);
+    assert_eq!(
+        empty.field_names().map(String::as_str).collect::<Vec<_>>(),
+        ["zeta", "alpha"]
+    );
+}
+
 #[test]
 fn format_and_filename_errors_keep_owning_identifiers_and_causes() {
     use std::error::Error;

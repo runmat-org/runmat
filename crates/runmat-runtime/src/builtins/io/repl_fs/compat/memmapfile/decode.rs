@@ -64,6 +64,13 @@ impl MemmapFormat {
         let record_bytes = self.validate_layout(repeat)?;
         let available_records = bytes.len() / record_bytes;
         let records = repeat.unwrap_or(available_records).min(available_records);
+        let names = std::iter::once(self.field.clone().expect("format table has a first field"))
+            .chain(
+                self.additional_fields
+                    .iter()
+                    .map(|field| field.name.clone()),
+            )
+            .collect();
         let mut elements = Vec::with_capacity(records);
         for record in bytes.chunks_exact(record_bytes).take(records) {
             let mut structure = StructValue::new();
@@ -90,19 +97,12 @@ impl MemmapFormat {
             elements.push(structure);
         }
         if records == 0 {
-            let names =
-                std::iter::once(self.field.clone().expect("format table has a first field"))
-                    .chain(
-                        self.additional_fields
-                            .iter()
-                            .map(|field| field.name.clone()),
-                    )
-                    .collect();
             return Ok(Value::StructArray(
                 runmat_value::StructArray::empty(names, vec![0, 1]).map_err(format_error)?,
             ));
         }
-        runmat_value::StructArray::normalize(elements, vec![records, 1]).map_err(format_error)
+        runmat_value::StructArray::normalize(names, elements, vec![records, 1])
+            .map_err(format_error)
     }
 }
 
