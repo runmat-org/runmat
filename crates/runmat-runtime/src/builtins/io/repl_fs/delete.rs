@@ -16,7 +16,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path, path_to_string};
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[path = "delete/error.rs"]
 mod error;
@@ -38,12 +38,6 @@ async fn delete_builtin(
             "delete: missing filename input",
         ));
     }
-    if args.iter().any(crate::value_contains_gpu) {
-        return Err(delete_error_with(
-            &DELETE_ERROR_INVALID_INPUT,
-            "delete: resident arguments are not supported",
-        ));
-    }
     let mut cooperation = DeleteCooperation::new(context.as_ref());
     if let [Value::Pool(pool)] = args.as_slice() {
         cooperation.completed(0).await?;
@@ -60,21 +54,19 @@ async fn delete_builtin(
         return Ok(Value::Num(0.0));
     }
     let (operands, resolve_symbolic_links) = parse_delete_options(&args)?;
-    let gathered = cooperation.await_io(gather_arguments(operands)).await??;
-
-    if gathered.iter().all(is_handle_input) {
+    if operands.iter().all(is_handle_input) {
         if resolve_symbolic_links.is_some() {
             return Err(delete_error_with(
                 &DELETE_ERROR_INVALID_INPUT,
                 "delete: ResolveSymbolicLinks is only valid for filename inputs",
             ));
         }
-        let result = cooperation.await_io(delete_handles(&gathered)).await??;
+        let result = cooperation.await_io(delete_handles(operands)).await??;
         cooperation.completed(0).await?;
         return Ok(result);
     }
 
-    if gathered.iter().any(contains_handle_input) {
+    if operands.iter().any(contains_handle_input) {
         return Err(delete_error_with(
             &DELETE_ERROR_INVALID_HANDLE,
             "delete: cannot mix handle and filename inputs",
@@ -82,7 +74,7 @@ async fn delete_builtin(
     }
 
     let mut raw_targets = Vec::new();
-    for value in &gathered {
+    for value in operands {
         collect_targets(value, &mut raw_targets)?;
     }
 

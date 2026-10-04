@@ -60,18 +60,6 @@ pub(super) fn exact_zero_one(value: &Value) -> BuiltinResult<bool> {
     })
 }
 
-pub(super) async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(out)
-}
-
 pub(super) fn collect_targets(value: &Value, targets: &mut Vec<String>) -> BuiltinResult<()> {
     match value {
         Value::String(text) => push_nonempty_target(text, targets),

@@ -19,7 +19,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Execution",
         paragraphs: &[
-            "Filesystem mutation and handle callbacks are host effects. Resident arguments, including nested resident values, are rejected before provider or filesystem access; there is no acceleration kernel or fusion route.",
+            "Filesystem mutation and handle callbacks are host effects. Filename inputs must contain host text; resident numeric values are rejected without downloading them. Handle properties and listener callbacks are not filename inputs: deletion retains their existing payloads and residency. There is no acceleration kernel or fusion route for deletion itself.",
             "Failures retain their diagnostic identifier. A missing path or unmatched pattern raises `RunMat:DELETE:FileNotFound`; a directory raises `RunMat:DELETE:Directories`; filesystem failures raise `RunMat:DELETE:PermissionDenied`.",
         ],
     },
@@ -100,7 +100,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Can I delete several files?", answer: "Yes. Pass several path arguments, a string array, a cell of path text, or a character matrix. Targets are processed sequentially." },
     BuiltinDocumentationFaq { question: "How do wildcard patterns work?", answer: "`*` and `?` match paths relative to the captured filesystem provider's working directory unless the path is absolute. An unmatched pattern raises `RunMat:DELETE:FileNotFound`." },
     BuiltinDocumentationFaq { question: "Do empty arrays raise errors?", answer: "Empty string arrays and cells do nothing; an empty string scalar is invalid." },
-    BuiltinDocumentationFaq { question: "Are resident arguments downloaded?", answer: "No. Resident values are rejected before provider access, including when nested in an argument." },
+    BuiltinDocumentationFaq { question: "Are resident arguments downloaded?", answer: "No. Resident numeric filename inputs are rejected before provider access, including within cells. Handles and listeners may retain resident properties or callback captures; deletion does not download those payloads." },
     BuiltinDocumentationFaq { question: "Does delete preserve symbolic links?", answer: "By default it removes the link itself. Set `ResolveSymbolicLinks` to true or exact one to remove its resolved target instead." },
     BuiltinDocumentationFaq { question: "Can I inspect failures?", answer: "Use `try/catch` and inspect the exception's identifier and message." },
 ];

@@ -154,6 +154,76 @@ fn delete_rejects_nested_resident_input_before_provider_access() {
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn delete_handle_with_resident_property_preserves_opaque_payload() {
+    runmat_gc::gc_test_context(|| {
+        let allocation =
+            crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1]);
+        let resident = Value::GpuTensor(allocation.handle);
+        let value = futures::executor::block_on(crate::new_handle_object_builtin(
+            "ReplFsDeleteTestHandle".to_string(),
+        ))
+        .expect("handle");
+        let Value::HandleObject(handle) = &value else {
+            panic!("expected handle")
+        };
+        runmat_gc::gc_with_value_mut(&handle.target, |target| {
+            let Value::Object(object) = target else {
+                panic!("expected object")
+            };
+            object.properties.insert("data".into(), resident.clone());
+        })
+        .expect("store resident property");
+        assert!(crate::value_contains_gpu(&value));
+        let result = delete_builtin(vec![value.clone()]).expect("delete opaque handle");
+        assert!(!crate::is_handle_valid(handle));
+        assert!(matches!(result, Value::HandleObject(ref deleted) if !deleted.valid));
+        let payload = runmat_gc::gc_with_value(&handle.target, |target| {
+            let Value::Object(object) = target else {
+                panic!("expected object")
+            };
+            object.properties.get("data").cloned()
+        })
+        .expect("read retained payload");
+        assert_eq!(payload, Some(resident));
+    });
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn delete_listener_preserves_resident_referents() {
+    runmat_gc::gc_test_context(|| {
+        let allocation =
+            crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1]);
+        let resident = Value::GpuTensor(allocation.handle);
+        let target = runmat_gc::gc_allocate(resident.clone()).expect("listener target");
+        let listener = runmat_value::Listener {
+            id: u64::MAX,
+            target,
+            target_class_name: "ReplFsDeleteTestHandle".into(),
+            event_name: "changed".into(),
+            callback: target,
+            enabled: true,
+            valid: true,
+        };
+        let value = Value::Listener(listener);
+        assert!(crate::value_contains_gpu(&value));
+        let result = delete_builtin(vec![value]).expect("delete opaque listener");
+        let Value::Listener(deleted) = result else {
+            panic!("expected listener")
+        };
+        assert!(!deleted.valid);
+        assert!(!deleted.enabled);
+        assert_eq!(deleted.target, target);
+        assert_eq!(deleted.callback, target);
+        assert_eq!(
+            runmat_gc::gc_with_value(&target, Clone::clone).expect("retained referent"),
+            resident
+        );
+    });
+}
+
 #[test]
 fn delete_uses_documented_sequential_multi_target_mutation() {
     let _lock = REPL_FS_TEST_LOCK
