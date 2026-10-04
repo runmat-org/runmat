@@ -482,6 +482,15 @@ fn integer_target(dtype: &str) -> Option<IntegerClass> {
 }
 
 impl DataArrayPayload {
+    /// Validate zero-payload semantics without allocating the eventual array.
+    /// A multi-array create calls this for every schema entry before writing
+    /// any earlier array, so a late bad dtype or shape has no filesystem effect.
+    pub fn validate_zeros(dtype: &str, shape: &[usize]) -> BuiltinResult<()> {
+        checked_shape_element_count(shape)?;
+        let _ = DataArrayValues::zeros(dtype, 0)?;
+        Ok(())
+    }
+
     pub fn zeros(dtype: String, shape: Vec<usize>) -> BuiltinResult<Self> {
         let values = DataArrayValues::zeros(&dtype, checked_shape_element_count(&shape)?)?;
         Ok(Self {

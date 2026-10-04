@@ -62,29 +62,13 @@ const LIST: BuiltinParamDescriptor =
     param("C", BuiltinParamType::Any, "Cell array of dataset paths.");
 const INSPECTION: BuiltinParamDescriptor = param("S", BuiltinParamType::Any, "Metadata structure.");
 
-pub const DATA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATA.INVALID_ARGUMENT",
-    identifier: Some("RunMat:data:InvalidArgument"),
-    when: "Arguments, receiver object, or option grammar are invalid for the requested data API.",
-    message: "data: invalid argument",
+pub const DATA_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.ERROR",
+    identifier: Some("RUNMAT:Data:Error"),
+    when: "A path, schema, format, manifest, or filesystem operation fails during the requested data call.",
+    message: "data: operation failed",
 };
-pub const DATA_ERROR_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATA.NOT_FOUND",
-    identifier: Some("RunMat:data:NotFound"),
-    when: "Referenced dataset/array/transaction object is missing or cannot be resolved.",
-    message: "data: requested object not found",
-};
-pub const DATA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATA.INTERNAL",
-    identifier: Some("RunMat:data:Internal"),
-    when: "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
-    message: "data: internal operation failed",
-};
-const ERRORS: &[BuiltinErrorDescriptor] = &[
-    DATA_ERROR_INVALID_ARGUMENT,
-    DATA_ERROR_NOT_FOUND,
-    DATA_ERROR_INTERNAL,
-];
+const ERRORS: &[BuiltinErrorDescriptor] = &[DATA_ERROR];
 
 const fn signature(
     label: &'static str,

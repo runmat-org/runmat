@@ -16,7 +16,7 @@ pub(super) struct DataPathAuthority {
 impl DataPathAuthority {
     /// The parsed path set is fixed before any filesystem effect. Absolute-only
     /// calls do not need a working directory, including when it is unavailable.
-    pub(super) fn capture(paths: &[&str]) -> BuiltinResult<Self> {
+    pub(super) fn capture(paths: &[impl AsRef<Path>]) -> BuiltinResult<Self> {
         Self::capture_with(
             paths,
             fs::current_provider,
@@ -25,11 +25,11 @@ impl DataPathAuthority {
     }
 
     fn capture_with(
-        paths: &[&str],
+        paths: &[impl AsRef<Path>],
         absolute_provider: impl FnOnce() -> Arc<dyn FsProvider>,
         relative_provider_and_dir: impl FnOnce() -> std::io::Result<(Arc<dyn FsProvider>, PathBuf)>,
     ) -> BuiltinResult<Self> {
-        if paths.iter().all(|path| Path::new(path).is_absolute()) {
+        if paths.iter().all(|path| path.as_ref().is_absolute()) {
             return Ok(Self {
                 provider: absolute_provider(),
                 cwd: None,
@@ -60,6 +60,72 @@ impl DataPathAuthority {
 
     pub(super) fn provider(&self) -> &dyn FsProvider {
         self.provider.as_ref()
+    }
+
+    /// A recursive copy into its own tree would discover the destination it
+    /// just created and recurse without bound. Canonicalize the source and the
+    /// destination's nearest existing ancestor through this same provider so
+    /// symlink aliases and `..` components cannot evade the pre-effect check.
+    pub(super) async fn admit_tree_destination(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> BuiltinResult<()> {
+        let source_canonical = self.provider.canonicalize(source).await.map_err(|cause| {
+            data_error_with_source(
+                format!(
+                    "data: failed to resolve source '{}': {cause}",
+                    source.display()
+                ),
+                cause,
+            )
+        })?;
+        let destination_canonical = self.canonical_destination(destination).await?;
+        if destination_canonical.starts_with(&source_canonical) {
+            return Err(data_error(
+                "data: destination must not be the source dataset or one of its descendants",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn canonical_destination(&self, destination: &Path) -> BuiltinResult<PathBuf> {
+        for ancestor in destination.ancestors() {
+            let mut canonical = match self.provider.canonicalize(ancestor).await {
+                Ok(path) => path,
+                Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(cause) => {
+                    return Err(data_error_with_source(
+                        format!(
+                            "data: failed to resolve destination '{}': {cause}",
+                            destination.display()
+                        ),
+                        cause,
+                    ));
+                }
+            };
+            let suffix = destination
+                .strip_prefix(ancestor)
+                .map_err(|_| data_error("data: destination is outside its canonical ancestor"))?;
+            for component in suffix.components() {
+                match component {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::Normal(part) => canonical.push(part),
+                    std::path::Component::ParentDir => {
+                        if !canonical.pop() {
+                            return Err(data_error("data: destination escapes filesystem root"));
+                        }
+                    }
+                    std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                        return Err(data_error("data: destination has an invalid path suffix"));
+                    }
+                }
+            }
+            return Ok(canonical);
+        }
+        Err(data_error(
+            "data: destination has no existing filesystem ancestor",
+        ))
     }
 }
 

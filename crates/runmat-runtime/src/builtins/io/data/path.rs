@@ -11,6 +11,9 @@ use super::*;
 async fn data_create_builtin(path: Value, schema: Value) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.create path")?;
     let schema = parse_schema(&schema)?;
+    for meta in schema.arrays.values() {
+        DataArrayPayload::validate_zeros(&meta.dtype, &meta.shape)?;
+    }
     let authority = DataPathAuthority::capture(&[&path])?;
     let root = authority.resolve(&path)?;
     let now = now_rfc3339();
@@ -110,6 +113,9 @@ async fn data_copy_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Va
     let authority = DataPathAuthority::capture(&[&from, &to])?;
     let from_root = authority.resolve(&from)?;
     let to_root = authority.resolve(&to)?;
+    authority
+        .admit_tree_destination(&from_root, &to_root)
+        .await?;
     copy_dir_recursive_on(authority.provider(), &from_root, &to_root).await?;
     Ok(Value::Bool(true))
 }
@@ -125,6 +131,9 @@ async fn data_move_builtin(from_path: Value, to_path: Value) -> BuiltinResult<Va
     let authority = DataPathAuthority::capture(&[&from, &to])?;
     let from_root = authority.resolve(&from)?;
     let to_root = authority.resolve(&to)?;
+    authority
+        .admit_tree_destination(&from_root, &to_root)
+        .await?;
     authority
         .provider()
         .rename(&from_root, &to_root)
@@ -158,6 +167,9 @@ async fn data_import_builtin(
     let authority = DataPathAuthority::capture(&[&path, &source_path])?;
     let root = authority.resolve(&path)?;
     let source_root = authority.resolve(&source_path)?;
+    authority
+        .admit_tree_destination(&source_root, &root)
+        .await?;
     copy_dir_recursive_on(authority.provider(), &source_root, &root).await?;
     let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
     Ok(dataset_object(&path, &manifest))
@@ -184,6 +196,9 @@ async fn data_export_builtin(
     let authority = DataPathAuthority::capture(&[&path, &target_path])?;
     let source_root = authority.resolve(&path)?;
     let target_root = authority.resolve(&target_path)?;
+    authority
+        .admit_tree_destination(&source_root, &target_root)
+        .await?;
     copy_dir_recursive_on(authority.provider(), &source_root, &target_root).await?;
     Ok(Value::Bool(true))
 }
@@ -252,3 +267,7 @@ async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
         .insert("updatedAt".to_string(), Value::String(manifest.updated_at));
     Ok(Value::Struct(out))
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "path/tests.rs"]
+mod tests;

@@ -1409,17 +1409,22 @@ async fn dataset_snapshot_builtin(
     let path = dataset_path_from_object(&base, "Dataset.snapshot")?;
     let label = parse_string(&label, "Dataset.snapshot label")?;
     let root = dataset_root(&path);
+    let authority = DataPathAuthority::capture(&[&root])?;
+    let resolved_root = authority.resolve(&root)?;
     let snapshots = root.join(".snapshots");
-    runmat_filesystem::create_dir_all_async(&snapshots)
+    authority
+        .provider()
+        .create_dir_all(&resolved_root.join(".snapshots"))
         .await
-        .map_err(|err| {
-            data_error(format!(
-                "Dataset.snapshot: failed to create snapshots dir: {err}"
-            ))
+        .map_err(|source| {
+            crate::data::data_error_with_source(
+                format!("Dataset.snapshot: failed to create snapshots dir: {source}"),
+                source,
+            )
         })?;
     let src = manifest_path(&root);
     let dst = snapshots.join(format!("{}.manifest.json", sanitize_label(&label)));
-    copy_file(&src, &dst).await?;
+    copy_file(&authority, &src, &dst).await?;
     Ok(Value::String(dst.to_string_lossy().to_string()))
 }
 
@@ -2158,14 +2163,14 @@ fn sanitize_label(label: &str) -> String {
         .collect()
 }
 
-async fn copy_file(src: &PathBuf, dst: &PathBuf) -> BuiltinResult<()> {
-    let authority = DataPathAuthority::capture()?;
-    copy_file_on(
-        authority.provider(),
-        &authority.resolve(src),
-        &authority.resolve(dst),
-    )
-    .await
+async fn copy_file(
+    authority: &DataPathAuthority,
+    src: &PathBuf,
+    dst: &PathBuf,
+) -> BuiltinResult<()> {
+    let src = authority.resolve(src)?;
+    let dst = authority.resolve(dst)?;
+    copy_file_on(authority.provider(), &src, &dst).await
 }
 
 async fn copy_file_on(
