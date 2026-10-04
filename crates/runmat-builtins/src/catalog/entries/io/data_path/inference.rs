@@ -60,7 +60,7 @@ fn dataset() -> ValueFact {
                 ("__data_version".into(), text()),
             ]),
             properties_complete: false,
-            handle_semantics: Some(false),
+            handle_semantics: Some(true),
         }),
         ShapeFact::Scalar,
         StorageFact::Opaque,
