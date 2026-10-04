@@ -147,14 +147,22 @@ impl ObjectInstance {
     pub fn memmap_receiver(&self) -> Option<&MemmapReceiverState> {
         match self.native_payload.as_deref() {
             Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
-            _ => None,
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | None => None,
         }
     }
 
     pub fn memmap_receiver_mut(&mut self) -> Option<&mut MemmapReceiverState> {
         match self.native_payload.as_deref_mut() {
             Some(NativeObjectPayload::MemmapReceiver(receiver)) => Some(receiver),
-            _ => None,
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | None => None,
         }
     }
 
