@@ -33,7 +33,13 @@ impl FsBoundedInput {
                 "opened source has no valid direct-read resource authority",
             ));
         }
-        handle.seek(SeekFrom::Start(0))?;
+        let opened_at = handle.seek(SeekFrom::Start(0))?;
+        if opened_at != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "opened source did not seek to its reported start",
+            ));
+        }
         check_lease(lease.as_ref(), contract)?;
         Ok(Self {
             handle,
@@ -88,6 +94,12 @@ impl Read for FsBoundedInput {
             return Ok(0);
         }
         let count = self.handle.read(&mut buffer[..allowed])?;
+        if count > allowed {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "opened source reported more bytes than its bounded read",
+            ));
+        }
         self.check_valid()?;
         self.position = self
             .position
@@ -112,7 +124,13 @@ impl Seek for FsBoundedInput {
             ));
         }
         let offset = base as u64;
-        self.handle.seek(SeekFrom::Start(offset))?;
+        let actual = self.handle.seek(SeekFrom::Start(offset))?;
+        if actual != offset {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "opened source reported a different seek position",
+            ));
+        }
         self.check_valid()?;
         self.position = offset;
         Ok(offset)

@@ -295,3 +295,83 @@ fn opened_handle_rechecks_revision_after_seek_and_read() {
     let error = input.read(&mut byte).expect_err("revision changed in read");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
 }
+
+#[test]
+fn bounded_input_rejects_inconsistent_handle_positions_and_counts() {
+    use std::io::{Cursor, Write};
+
+    struct MisreportingHandle {
+        bytes: Cursor<Vec<u8>>,
+        wrong_seek: Arc<AtomicBool>,
+        wrong_count: bool,
+    }
+    impl Read for MisreportingHandle {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let actual = self.bytes.read(buffer)?;
+            Ok(actual + usize::from(self.wrong_count))
+        }
+    }
+    impl Write for MisreportingHandle {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.bytes.write(buffer)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.bytes.flush()
+        }
+    }
+    impl Seek for MisreportingHandle {
+        fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+            let actual = self.bytes.seek(position)?;
+            Ok(actual + u64::from(self.wrong_seek.load(Ordering::SeqCst)))
+        }
+    }
+    #[async_trait::async_trait(?Send)]
+    impl crate::FileHandle for MisreportingHandle {}
+
+    let metadata = FsMetadata {
+        file_type: crate::FsFileType::File,
+        len: 4,
+        modified: None,
+        readonly: false,
+        hash: None,
+    };
+    let lease: Arc<dyn FsResourceLease> = Arc::new(RevocableLease(Arc::new(AtomicBool::new(true))));
+    let wrong_seek = Arc::new(AtomicBool::new(true));
+    let make_handle = |wrong_count| MisreportingHandle {
+        bytes: Cursor::new(b"abcd".to_vec()),
+        wrong_seek: wrong_seek.clone(),
+        wrong_count,
+    };
+    assert_eq!(
+        FsBoundedInput::new(
+            Box::new(make_handle(false)),
+            metadata.clone(),
+            lease.clone()
+        )
+        .err()
+        .expect("wrong initial position")
+        .kind(),
+        io::ErrorKind::InvalidData,
+    );
+
+    wrong_seek.store(false, Ordering::SeqCst);
+    let mut input = FsBoundedInput::new(
+        Box::new(make_handle(false)),
+        metadata.clone(),
+        lease.clone(),
+    )
+    .unwrap();
+    wrong_seek.store(true, Ordering::SeqCst);
+    assert_eq!(
+        input.seek(SeekFrom::Start(2)).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+
+    wrong_seek.store(false, Ordering::SeqCst);
+    let mut input = FsBoundedInput::new(Box::new(make_handle(true)), metadata, lease).unwrap();
+    let mut byte = [0; 1];
+    assert_eq!(
+        input.read(&mut byte).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+}
