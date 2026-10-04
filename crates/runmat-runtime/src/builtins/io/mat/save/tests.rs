@@ -286,6 +286,7 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
     let cancellation = CancellationSource::new();
     let runtime = witness
         .runtime
+        .clone()
         .with_cancellation_token(cancellation.token());
     let mut cancelled = Box::pin(super::save_builtin(
         Some(runtime),
@@ -338,6 +339,7 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
     let cancellation = CancellationSource::new();
     let runtime = witness
         .runtime
+        .clone()
         .with_cancellation_token(cancellation.token());
     let mut abandoned = Box::pin(super::save_builtin(
         Some(runtime.clone()),
