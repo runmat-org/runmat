@@ -3,11 +3,14 @@
 
 mod python;
 mod java;
+mod mex;
 
 pub use self::java::*;
+pub use self::mex::*;
 pub use self::python::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(python::ENTRIES.iter().copied());
     values.extend(java::ENTRIES.iter().copied());
+    values.extend(mex::ENTRIES.iter().copied());
 }
