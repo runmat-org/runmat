@@ -1,6 +1,51 @@
 use super::{char_value, compat_error, scalar_text};
 use crate::BuiltinResult;
-use runmat_value::{CellArray, IntegerStorage, NumericScalar, Tensor, Value};
+use runmat_value::{CellArray, IntegerStorage, NumericDType, NumericScalar, Tensor, Value};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum MemmapDataType {
+    Numeric(NumericDType),
+    Character,
+}
+
+impl MemmapDataType {
+    pub(super) fn parse(name: &str) -> BuiltinResult<Self> {
+        let dtype = match name.to_ascii_lowercase().as_str() {
+            "double" => Self::Numeric(NumericDType::F64),
+            "single" => Self::Numeric(NumericDType::F32),
+            "int8" => Self::Numeric(NumericDType::I8),
+            "int16" => Self::Numeric(NumericDType::I16),
+            "int32" => Self::Numeric(NumericDType::I32),
+            "int64" => Self::Numeric(NumericDType::I64),
+            "uint8" => Self::Numeric(NumericDType::U8),
+            "uint16" => Self::Numeric(NumericDType::U16),
+            "uint32" => Self::Numeric(NumericDType::U32),
+            "uint64" => Self::Numeric(NumericDType::U64),
+            "char" => Self::Character,
+            other => {
+                return Err(compat_error(
+                    "memmapfile",
+                    format!("memmapfile: unsupported Format type '{other}'"),
+                ));
+            }
+        };
+        Ok(dtype)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Numeric(dtype) => dtype.class_name(),
+            Self::Character => "char",
+        }
+    }
+
+    fn byte_size(self) -> usize {
+        match self {
+            Self::Numeric(dtype) => dtype.byte_size(),
+            Self::Character => 1,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MemmapOption {
@@ -40,7 +85,7 @@ impl MemmapOption {
 
 #[derive(Clone, Debug)]
 pub(super) struct MemmapFormat {
-    pub(super) dtype: String,
+    pub(super) dtype: MemmapDataType,
     pub(super) shape: Vec<usize>,
     pub(super) field: Option<String>,
     pub(super) additional_fields: Vec<MemmapField>,
@@ -48,7 +93,7 @@ pub(super) struct MemmapFormat {
 
 #[derive(Clone, Debug)]
 pub(super) struct MemmapField {
-    pub(super) dtype: String,
+    pub(super) dtype: MemmapDataType,
     pub(super) shape: Vec<usize>,
     name: String,
 }
@@ -56,7 +101,7 @@ pub(super) struct MemmapField {
 impl Default for MemmapFormat {
     fn default() -> Self {
         Self {
-            dtype: "uint8".to_string(),
+            dtype: MemmapDataType::Numeric(NumericDType::U8),
             shape: vec![1, 1],
             field: None,
             additional_fields: Vec::new(),
@@ -66,7 +111,7 @@ impl Default for MemmapFormat {
 
 impl MemmapFormat {
     pub(super) fn validate_layout(&self, repeat: Option<usize>) -> BuiltinResult<usize> {
-        let mut record_bytes = memmap_field_bytes(&self.dtype, &self.shape)?;
+        let mut record_bytes = memmap_field_bytes(self.dtype, &self.shape)?;
         if let Some(name) = &self.field {
             if name.is_empty() {
                 return Err(compat_error(
@@ -87,7 +132,7 @@ impl MemmapFormat {
                 ));
             }
             record_bytes = record_bytes
-                .checked_add(memmap_field_bytes(&segment.dtype, &segment.shape)?)
+                .checked_add(memmap_field_bytes(segment.dtype, &segment.shape)?)
                 .ok_or_else(|| {
                     compat_error("memmapfile", "memmapfile: Format record is too large")
                 })?;
@@ -103,7 +148,7 @@ impl MemmapFormat {
     pub(super) fn from_value(value: &Value) -> BuiltinResult<Self> {
         match value {
             Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => Ok(Self {
-                dtype: scalar_text(value, "memmapfile", "Format")?.to_ascii_lowercase(),
+                dtype: MemmapDataType::parse(&scalar_text(value, "memmapfile", "Format")?)?,
                 ..Self::default()
             }),
             Value::Cell(cell) => {
@@ -123,8 +168,11 @@ impl MemmapFormat {
                         "memmapfile: Format must be a three-column format table",
                     ));
                 }
-                let dtype =
-                    scalar_text(&cell.data[0], "memmapfile", "Format type")?.to_ascii_lowercase();
+                let dtype = MemmapDataType::parse(&scalar_text(
+                    &cell.data[0],
+                    "memmapfile",
+                    "Format type",
+                )?)?;
                 let shape = if cell.cols >= 2 {
                     shape_from_value(&cell.data[1])?
                 } else {
@@ -139,8 +187,11 @@ impl MemmapFormat {
                 for row in 1..cell.rows {
                     let start = row * 3;
                     additional_fields.push(MemmapField {
-                        dtype: scalar_text(&cell.data[start], "memmapfile", "Format type")?
-                            .to_ascii_lowercase(),
+                        dtype: MemmapDataType::parse(&scalar_text(
+                            &cell.data[start],
+                            "memmapfile",
+                            "Format type",
+                        )?)?,
                         shape: shape_from_value(&cell.data[start + 1])?,
                         name: scalar_text(&cell.data[start + 2], "memmapfile", "Format field")?,
                     });
@@ -163,13 +214,13 @@ impl MemmapFormat {
         if let Some(field) = &self.field {
             let mut cells = Vec::with_capacity((self.additional_fields.len() + 1) * 3);
             cells.extend([
-                char_value(&self.dtype),
+                char_value(self.dtype.name()),
                 memmap_shape_value(&self.shape)?,
                 char_value(field),
             ]);
             for segment in &self.additional_fields {
                 cells.extend([
-                    char_value(&segment.dtype),
+                    char_value(segment.dtype.name()),
                     memmap_shape_value(&segment.shape)?,
                     char_value(&segment.name),
                 ]);
@@ -179,11 +230,11 @@ impl MemmapFormat {
                     .map_err(|err| compat_error("memmapfile", err))?,
             ));
         }
-        Ok(char_value(&self.dtype))
+        Ok(char_value(self.dtype.name()))
     }
 }
 
-fn memmap_field_bytes(dtype: &str, shape: &[usize]) -> BuiltinResult<usize> {
+fn memmap_field_bytes(dtype: MemmapDataType, shape: &[usize]) -> BuiltinResult<usize> {
     if shape.is_empty() || shape.contains(&0) {
         return Err(compat_error(
             "memmapfile",
@@ -195,7 +246,7 @@ fn memmap_field_bytes(dtype: &str, shape: &[usize]) -> BuiltinResult<usize> {
         .try_fold(1usize, |product, dim| product.checked_mul(*dim))
         .ok_or_else(|| compat_error("memmapfile", "memmapfile: Format shape is too large"))?;
     elements
-        .checked_mul(dtype_size(dtype)?)
+        .checked_mul(dtype.byte_size())
         .ok_or_else(|| compat_error("memmapfile", "memmapfile: Format field is too large"))
 }
 
@@ -294,19 +345,6 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
         return None;
     }
     Some(value as usize)
-}
-
-fn dtype_size(dtype: &str) -> BuiltinResult<usize> {
-    match dtype.to_ascii_lowercase().as_str() {
-        "uint8" | "int8" | "char" => Ok(1),
-        "uint16" | "int16" => Ok(2),
-        "uint32" | "int32" | "single" => Ok(4),
-        "uint64" | "int64" | "double" => Ok(8),
-        other => Err(compat_error(
-            "memmapfile",
-            format!("memmapfile: unsupported Format type '{other}'"),
-        )),
-    }
 }
 
 mod decode;

@@ -1,7 +1,7 @@
 use super::super::compat_error;
-use super::{dtype_size, memmap_field_bytes, MemmapField, MemmapFormat};
+use super::{memmap_field_bytes, MemmapDataType, MemmapField, MemmapFormat};
 use crate::BuiltinResult;
-use runmat_value::{IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntegerStorage, NumericDType, StructValue, Tensor, Value};
 
 impl MemmapFormat {
     pub(in crate::builtins::io::repl_fs::compat) fn decode(
@@ -12,7 +12,7 @@ impl MemmapFormat {
         if self.field.is_some() {
             return self.decode_table(bytes, repeat);
         }
-        let element_size = dtype_size(&self.dtype)?;
+        let element_size = self.dtype.byte_size();
         let record_len = self
             .shape
             .iter()
@@ -28,23 +28,23 @@ impl MemmapFormat {
         } else if record_len != total_values {
             shape = vec![total_values, 1];
         }
-        let tensor =
-            if let Some(storage) = decode_integer_storage(&self.dtype, bytes, total_values) {
-                Tensor::new_integer(storage, shape)
-            } else if self.dtype.eq_ignore_ascii_case("single") {
-                let values = bytes[..total_values * element_size]
-                    .chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
-                    .collect();
-                Tensor::from_f32(values, shape)
-            } else {
-                let values = bytes[..total_values * element_size]
-                    .chunks_exact(8)
-                    .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")))
-                    .collect();
-                Tensor::new(values, shape)
-            }
-            .map_err(|error| compat_error("memmapfile", error))?;
+        let tensor = if let Some(storage) = decode_integer_storage(self.dtype, bytes, total_values)
+        {
+            Tensor::new_integer(storage, shape)
+        } else if self.dtype == MemmapDataType::Numeric(NumericDType::F32) {
+            let values = bytes[..total_values * element_size]
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
+                .collect();
+            Tensor::from_f32(values, shape)
+        } else {
+            let values = bytes[..total_values * element_size]
+                .chunks_exact(8)
+                .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")))
+                .collect();
+            Tensor::new(values, shape)
+        }
+        .map_err(|error| compat_error("memmapfile", error))?;
         let tensor = Value::Tensor(tensor);
         Ok(tensor)
     }
@@ -58,13 +58,13 @@ impl MemmapFormat {
             let mut structure = StructValue::new();
             let mut cursor = 0usize;
             let mut fields = std::iter::once(MemmapField {
-                dtype: self.dtype.clone(),
+                dtype: self.dtype,
                 shape: self.shape.clone(),
                 name: self.field.clone().expect("format table has a first field"),
             })
             .chain(self.additional_fields.iter().cloned());
             for field in &mut fields {
-                let field_bytes = memmap_field_bytes(&field.dtype, &field.shape)?;
+                let field_bytes = memmap_field_bytes(field.dtype, &field.shape)?;
                 let value = MemmapFormat {
                     dtype: field.dtype,
                     shape: field.shape,
@@ -96,36 +96,44 @@ impl MemmapFormat {
     }
 }
 
-fn decode_integer_storage(dtype: &str, bytes: &[u8], value_count: usize) -> Option<IntegerStorage> {
-    let bytes = &bytes[..value_count.checked_mul(dtype_size(dtype).ok()?)?];
-    Some(match dtype.to_ascii_lowercase().as_str() {
-        "int8" => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
-        "uint8" | "char" => IntegerStorage::U8(bytes.to_vec()),
-        "int16" => IntegerStorage::I16(
+fn decode_integer_storage(
+    dtype: MemmapDataType,
+    bytes: &[u8],
+    value_count: usize,
+) -> Option<IntegerStorage> {
+    let bytes = &bytes[..value_count.checked_mul(dtype.byte_size())?];
+    Some(match dtype {
+        MemmapDataType::Numeric(NumericDType::I8) => {
+            IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect())
+        }
+        MemmapDataType::Numeric(NumericDType::U8) | MemmapDataType::Character => {
+            IntegerStorage::U8(bytes.to_vec())
+        }
+        MemmapDataType::Numeric(NumericDType::I16) => IntegerStorage::I16(
             bytes
                 .chunks_exact(2)
                 .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
                 .collect(),
         ),
-        "uint16" => IntegerStorage::U16(
+        MemmapDataType::Numeric(NumericDType::U16) => IntegerStorage::U16(
             bytes
                 .chunks_exact(2)
                 .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
                 .collect(),
         ),
-        "int32" => IntegerStorage::I32(
+        MemmapDataType::Numeric(NumericDType::I32) => IntegerStorage::I32(
             bytes
                 .chunks_exact(4)
                 .map(|chunk| i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
                 .collect(),
         ),
-        "uint32" => IntegerStorage::U32(
+        MemmapDataType::Numeric(NumericDType::U32) => IntegerStorage::U32(
             bytes
                 .chunks_exact(4)
                 .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
                 .collect(),
         ),
-        "int64" => IntegerStorage::I64(
+        MemmapDataType::Numeric(NumericDType::I64) => IntegerStorage::I64(
             bytes
                 .chunks_exact(8)
                 .map(|chunk| {
@@ -136,7 +144,7 @@ fn decode_integer_storage(dtype: &str, bytes: &[u8], value_count: usize) -> Opti
                 })
                 .collect(),
         ),
-        "uint64" => IntegerStorage::U64(
+        MemmapDataType::Numeric(NumericDType::U64) => IntegerStorage::U64(
             bytes
                 .chunks_exact(8)
                 .map(|chunk| {
@@ -147,6 +155,6 @@ fn decode_integer_storage(dtype: &str, bytes: &[u8], value_count: usize) -> Opti
                 })
                 .collect(),
         ),
-        _ => return None,
+        MemmapDataType::Numeric(NumericDType::F32 | NumericDType::F64) => return None,
     })
 }

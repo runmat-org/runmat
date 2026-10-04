@@ -894,7 +894,7 @@ fn query_windows_registry(_root: &str, _key: &str, _value: Option<&str>) -> Buil
 
 #[cfg(test)]
 mod tests {
-    use super::memmapfile::shape_from_value;
+    use super::memmapfile::{shape_from_value, MemmapDataType};
     use super::*;
     use crate::builtins::io::repl_fs::preferences::{
         getpref_builtin, ispref_builtin, setpref_builtin,
@@ -1480,7 +1480,7 @@ mod tests {
     #[test]
     fn memmapfile_record_and_repeat_lengths_reject_overflow_without_allocation() {
         let impossible_record = MemmapFormat {
-            dtype: "uint8".into(),
+            dtype: MemmapDataType::parse("uint8").unwrap(),
             shape: vec![usize::MAX, 2],
             field: None,
             additional_fields: Vec::new(),
@@ -1488,7 +1488,7 @@ mod tests {
         assert!(impossible_record.decode(&[], None).is_err());
 
         let impossible_repeat = MemmapFormat {
-            dtype: "uint8".into(),
+            dtype: MemmapDataType::parse("uint8").unwrap(),
             shape: vec![2, 1],
             field: None,
             additional_fields: Vec::new(),
@@ -1620,7 +1620,7 @@ mod tests {
         .expect_err("duplicate fields fail before file access");
         assert!(error.message().contains("unique"));
         let overflow = MemmapFormat {
-            dtype: "uint64".into(),
+            dtype: MemmapDataType::parse("uint64").unwrap(),
             shape: vec![usize::MAX, 1],
             field: Some("wide".into()),
             additional_fields: Vec::new(),
@@ -1632,7 +1632,7 @@ mod tests {
     #[test]
     fn memmapfile_named_shape_presentation_does_not_round_wide_dimensions() {
         let format = MemmapFormat {
-            dtype: "uint8".into(),
+            dtype: MemmapDataType::parse("uint8").unwrap(),
             shape: vec![(1usize << 53) + 1, 1],
             field: Some("wide".into()),
             additional_fields: Vec::new(),
@@ -1650,7 +1650,7 @@ mod tests {
             .flat_map(u32::to_le_bytes)
             .collect::<Vec<_>>();
         let format = MemmapFormat {
-            dtype: "single".into(),
+            dtype: MemmapDataType::parse("single").unwrap(),
             shape: vec![1, 2],
             field: None,
             additional_fields: Vec::new(),
@@ -1779,7 +1779,7 @@ mod tests {
 
         for (dtype, bytes, expected) in cases {
             let mapped = MemmapFormat {
-                dtype: dtype.to_string(),
+                dtype: MemmapDataType::parse(dtype).unwrap(),
                 shape: vec![1, 2],
                 field: None,
                 additional_fields: Vec::new(),
@@ -1804,7 +1804,7 @@ mod tests {
         ]
         .concat();
         let mapped = MemmapFormat {
-            dtype: "uint32".to_string(),
+            dtype: MemmapDataType::parse("uint32").unwrap(),
             shape: vec![2, 1],
             field: None,
             additional_fields: Vec::new(),
