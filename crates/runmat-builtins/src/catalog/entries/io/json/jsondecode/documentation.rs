@@ -48,7 +48,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "JSON decoder and conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsondecode.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "JSON text admission and runtime binding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsondecode.rs") },
+            BuiltinDocumentationLink { label: "JSON value, array, and object conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsondecode/conversion.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Decoder unit suite", location: "builtins::io::json::jsondecode::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Matrix layout", location: "builtins::io::json::jsondecode::tests::jsondecode_matrix_to_tensor" },

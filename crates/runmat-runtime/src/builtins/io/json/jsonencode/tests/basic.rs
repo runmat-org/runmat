@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn prepared_option_identity_is_not_reparsed_after_materialization() {
     let original = vec![Value::from("pReTtYpRiNt"), Value::Bool(true)];

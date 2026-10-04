@@ -50,7 +50,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "JSON encoder and rendering", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "JSON runtime binding and gather", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode.rs") },
+            BuiltinDocumentationLink { label: "Option admission and compatibility gates", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode/options.rs") },
+            BuiltinDocumentationLink { label: "Value and container conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode/convert.rs") },
+            BuiltinDocumentationLink { label: "JSON rendering and escaping", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/json/jsonencode/render.rs") },
+        ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Encoder unit suite", location: "builtins::io::json::jsonencode::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Struct round trip", location: "builtins::io::json::jsonencode::tests::basic::jsonencode_struct_round_trip" },
