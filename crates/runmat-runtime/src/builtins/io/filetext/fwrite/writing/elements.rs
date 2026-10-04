@@ -121,7 +121,7 @@ impl<'a> Iterator for BorrowedElements<'a> {
                     }
                     *chars = None;
                 }
-                let owner: &'a runmat_value::StringArray = *array;
+                let owner: &'a runmat_value::StringArray = array;
                 let text: &'a str = owner.data.get(*index)?.as_str();
                 let separate = *index > 0;
                 *index += 1;
