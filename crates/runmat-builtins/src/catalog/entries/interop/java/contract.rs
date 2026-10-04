@@ -31,6 +31,26 @@ impl JavaFeature {
     }
 }
 
+/// Validated public `jenv` name-value control. Values remain owned by the
+/// adapter because Version resolution depends on the selected host JVM.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JavaEnvironmentControl {
+    Version,
+    ExecutionMode,
+}
+
+impl JavaEnvironmentControl {
+    pub fn parse(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("Version") {
+            Some(Self::Version)
+        } else if name.eq_ignore_ascii_case("ExecutionMode") {
+            Some(Self::ExecutionMode)
+        } else {
+            None
+        }
+    }
+}
+
 pub const JAVA_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,

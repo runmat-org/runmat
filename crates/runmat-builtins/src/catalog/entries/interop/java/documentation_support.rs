@@ -27,6 +27,12 @@ pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
             "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/foreign/java/adapter.rs",
         ),
     },
+    BuiltinDocumentationLink {
+        label: "Java builtin dispatch",
+        target: BuiltinDocumentationLinkTarget::Source(
+            "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/interop/java/dispatch.rs",
+        ),
+    },
 ];
 
 pub(super) const fn example(

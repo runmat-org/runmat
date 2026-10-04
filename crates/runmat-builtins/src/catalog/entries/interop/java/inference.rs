@@ -258,10 +258,11 @@ pub(super) fn infer(
                 arity(request, 2, Some(2), &mut diagnostics);
                 checked_text(request, 0, &mut diagnostics);
                 checked_text(request, 1, &mut diagnostics);
-                if request.literals.literal_string_at(0).is_some_and(|name| {
-                    !name.eq_ignore_ascii_case("Version")
-                        && !name.eq_ignore_ascii_case("ExecutionMode")
-                }) {
+                if request
+                    .literals
+                    .literal_string_at(0)
+                    .is_some_and(|name| super::JavaEnvironmentControl::parse(&name).is_none())
+                {
                     diagnostics.push(argument_error(
                         "RM-JAVA-OPTION",
                         "jenv supports Version and ExecutionMode",
@@ -303,6 +304,22 @@ pub(super) fn infer(
     result.diagnostics.extend(diagnostics);
     if matches!(form, JavaForm::Environment) && request.arguments.is_empty() {
         result.effects.0.remove(&EffectKind::EnvironmentWrite);
+    }
+    if matches!(form, JavaForm::Feature) {
+        match request
+            .literals
+            .literal_string_at(0)
+            .and_then(|name| super::JavaFeature::parse(&name))
+        {
+            Some(super::JavaFeature::Jvm) => {
+                result.effects.0.remove(&EffectKind::EnvironmentWrite);
+            }
+            Some(super::JavaFeature::Desktop) => {
+                result.effects.0.remove(&EffectKind::EnvironmentWrite);
+                result.effects.0.remove(&EffectKind::FilesystemRead);
+            }
+            _ => {}
+        }
     }
     result
 }

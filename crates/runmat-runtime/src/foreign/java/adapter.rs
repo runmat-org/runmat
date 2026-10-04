@@ -691,10 +691,13 @@ impl JavaAdapter {
             ));
         }
         let mut arguments = arguments.into_iter();
-        let name = string_argument(arguments.next(), "jenv option")?.to_ascii_lowercase();
+        let name = string_argument(arguments.next(), "jenv option")?;
         let value = string_argument(arguments.next(), "jenv option value")?;
-        match name.as_str() {
-            "version" => {
+        let control = runmat_builtins::JavaEnvironmentControl::parse(&name).ok_or_else(|| {
+            invalid_conversion("jenv supports the 'Version' and 'ExecutionMode' options")
+        })?;
+        match control {
+            runmat_builtins::JavaEnvironmentControl::Version => {
                 let path = std::path::PathBuf::from(&value);
                 let mut discovery = self.discovery.borrow().clone();
                 let mut config = self.config.borrow().clone();
@@ -719,17 +722,12 @@ impl JavaAdapter {
                 *self.discovery.borrow_mut() = discovery;
                 *self.config.borrow_mut() = config;
             }
-            "executionmode" => {
+            runmat_builtins::JavaEnvironmentControl::ExecutionMode => {
                 if !value.eq_ignore_ascii_case("inprocess") {
                     return Err(invalid_conversion(
                         "RunMat currently supports Java execution mode 'InProcess'",
                     ));
                 }
-            }
-            _ => {
-                return Err(invalid_conversion(
-                    "jenv supports the 'Version' and 'ExecutionMode' options",
-                ))
             }
         }
         self.status_value()

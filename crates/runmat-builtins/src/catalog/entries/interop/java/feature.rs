@@ -30,11 +30,13 @@ pub const USEJAVA_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     infer,
     &[
         EffectKind::EnvironmentRead,
+        EffectKind::EnvironmentWrite,
+        EffectKind::FilesystemRead,
         EffectKind::MaySuspend,
         EffectKind::MayThrow,
     ],
     FOREIGN_CAPABILITIES,
-    BuiltinPurity::DeterministicReadOnly,
+    BuiltinPurity::Impure,
     BuiltinAsyncBehavior::MaySuspend,
     BuiltinPlacementContract {
         portability: BuiltinPortability::NativeAndWasm,

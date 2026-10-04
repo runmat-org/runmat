@@ -24,7 +24,9 @@ pub use add_path::JAVA_ADD_PATH_CATALOG_ENTRY;
 pub use array::JAVA_ARRAY_CATALOG_ENTRY;
 pub use classpath::JAVA_CLASSPATH_CATALOG_ENTRY;
 pub use classpath_contract::{JavaClasspathControl, JavaClasspathQuery, JavaInsertionPosition};
-pub use contract::{JavaFeature, JAVA_ENVIRONMENT_CLASS, JAVA_INTEGER_AUDIT};
+pub use contract::{
+    JavaEnvironmentControl, JavaFeature, JAVA_ENVIRONMENT_CLASS, JAVA_INTEGER_AUDIT,
+};
 pub use descriptor::{
     ISJAVA_DESCRIPTOR, JAVA_ADD_PATH_DESCRIPTOR, JAVA_ARRAY_DESCRIPTOR, JAVA_CLASSPATH_DESCRIPTOR,
     JAVA_ERROR_HOST_UNAVAILABLE, JAVA_ERROR_INVALID, JAVA_ERROR_UNAVAILABLE,

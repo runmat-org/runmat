@@ -194,3 +194,60 @@ fn classpath_public_and_wire_controls_have_distinct_typed_boundaries() {
     );
     assert_eq!(JavaInsertionPosition::parse_wire("-end"), None);
 }
+
+#[test]
+fn environment_control_names_share_the_runtime_boundary() {
+    assert_eq!(
+        JavaEnvironmentControl::parse("vErSiOn"),
+        Some(JavaEnvironmentControl::Version)
+    );
+    assert_eq!(
+        JavaEnvironmentControl::parse("EXECUTIONMODE"),
+        Some(JavaEnvironmentControl::ExecutionMode)
+    );
+    assert_eq!(JavaEnvironmentControl::parse("Mode"), None);
+
+    let mut valid = request(vec![text(), text()], 1);
+    valid.literals = LiteralContext::new(vec![
+        LiteralValue::String("EXECUTIONMODE".into()),
+        LiteralValue::Unknown,
+    ]);
+    assert!(infer(&valid, &JENV_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code != "RM-JAVA-OPTION"));
+    valid.literals = LiteralContext::new(vec![
+        LiteralValue::String("Mode".into()),
+        LiteralValue::Unknown,
+    ]);
+    assert!(infer(&valid, &JENV_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-JAVA-OPTION"));
+}
+
+#[test]
+fn feature_startup_effect_is_retained_unless_literal_proves_read_only_probe() {
+    let unknown = infer(&request(vec![text()], 1), &USEJAVA_CATALOG_ENTRY);
+    assert!(unknown.effects.0.contains(&EffectKind::EnvironmentWrite));
+    for (name, writes) in [
+        ("jvm", false),
+        ("DESKTOP", false),
+        ("awt", true),
+        ("swing", true),
+    ] {
+        let mut call = request(vec![text()], 1);
+        call.literals = LiteralContext::new(vec![LiteralValue::String(name.into())]);
+        let result = infer(&call, &USEJAVA_CATALOG_ENTRY);
+        assert_eq!(
+            result.effects.0.contains(&EffectKind::EnvironmentWrite),
+            writes,
+            "{name}"
+        );
+        assert_eq!(
+            result.effects.0.contains(&EffectKind::FilesystemRead),
+            !name.eq_ignore_ascii_case("desktop"),
+            "{name}"
+        );
+    }
+}
