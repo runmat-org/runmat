@@ -12,6 +12,10 @@ use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
 use super::cooperation::MatCodecCooperation;
 use super::encoding::{encode_workspace_to_mat_bytes_for_owner, MatEncodingOwner};
 use super::load::read_mat_file_for_builtin_on_with_context;
+use crate::context::host_effect::{
+    HostEffectResourceLivenessLease, HostEffectWorkload, MatAssignmentSuffix, MatDecodeOutput,
+    MatDecodeSelection, MatEncodeMode, MatEncodeOutput, MatHandleControl,
+};
 use crate::{
     build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
     OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
@@ -21,6 +25,7 @@ const BUILTIN_NAME: &str = "matfile";
 pub(super) use runmat_builtins::MATFILE_CLASS;
 const MATFILE_SUBSREF: &str = "matlab.io.MatFile.subsref";
 const MATFILE_SUBSASGN: &str = "matlab.io.MatFile.subsasgn";
+mod admission;
 pub(super) const PROPERTIES_FIELD: &str = "Properties";
 pub(super) const SOURCE_FIELD: &str = "Source";
 pub(super) const WRITABLE_FIELD: &str = "Writable";
@@ -46,12 +51,7 @@ pub async fn matfile_builtin(
 ) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
     let controls = prepare_writable_options(rest)?;
-    if !matches!(&filename, Value::GpuTensor(_)) {
-        normalise_path(&filename)?;
-    }
-    let host_filename = gather_if_needed_async(&filename).await?;
-    let writable = controls.resolve().await?;
-    let path = normalise_path(&host_filename)?;
+    let path = normalise_path(&filename)?;
     let public_path = path.to_string_lossy().into_owned();
     let source = std::sync::Arc::new(MatFsPath::capture(path).map_err(|err| {
         matfile_error_with_source(
@@ -60,12 +60,41 @@ pub async fn matfile_builtin(
             err,
         )
     })?);
-    let reference = issue_matfile(runtime.as_ref(), source, public_path.clone(), writable)?;
-    Ok(Value::Object(matfile_object(
-        &public_path,
-        writable,
-        reference,
-    )))
+    let control_facts = controls.identity_controls();
+    let workload = HostEffectWorkload::MatHandle {
+        source: source.path(),
+        controls: &control_facts,
+    };
+    let receipt = super::admission::select(runtime.as_ref(), &source, BUILTIN_NAME, workload)?;
+    let result = async {
+        let mut cooperation = MatCodecCooperation::new(
+            runtime.as_ref(),
+            Some(&source),
+            BUILTIN_NAME,
+            &MATFILE_ERROR_IO,
+        )
+        .with_resource_liveness(
+            receipt
+                .as_ref()
+                .map(|selected| selected.resource_liveness_lease()),
+        );
+        let writable = controls.resolve(&mut cooperation).await?;
+        cooperation.completed(0).await?;
+        let reference = issue_matfile(
+            runtime.as_ref(),
+            source.clone(),
+            public_path.clone(),
+            writable,
+        )?;
+        Ok(Value::Object(matfile_object(
+            &public_path,
+            writable,
+            reference,
+        )))
+    }
+    .await;
+    super::admission::finish(receipt, &result);
+    result
 }
 
 #[runtime_builtin(
@@ -81,14 +110,56 @@ pub async fn matfile_subsref(
 ) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    let first = path.steps().first().expect("parsed nonempty MAT path");
+    let payload = first.selector_value()?;
+    if first.kind() != crate::object::indexing::ObjectIndexKind::Member {
+        return Err(matfile_error_with(
+            &MATFILE_ERROR_UNSUPPORTED,
+            format!("{MATFILE_SUBSREF}: only whole-variable member access is supported"),
+        ));
+    }
+    let field = member_name(&payload, MATFILE_SUBSREF)?;
+    reject_internal_field(&field)?;
+    let object = into_matfile_object(obj.clone(), MATFILE_SUBSREF)?;
+    let owner = resolve_matfile(runtime.as_ref(), &object)?;
+    let suffix = admission::suffix_digest(&path)
+        .map(MatAssignmentSuffix::Exact)
+        .unwrap_or(MatAssignmentSuffix::Unavailable);
+    let workload = HostEffectWorkload::MatDecode {
+        source: owner.source.path(),
+        selection: MatDecodeSelection::MemberPath {
+            member: &field,
+            suffix,
+        },
+        output: MatDecodeOutput::SingleMember,
+    };
+    let receipt =
+        super::admission::select(runtime.as_ref(), &owner.source, MATFILE_SUBSREF, workload)?;
+    let liveness = receipt
+        .as_ref()
+        .map(|selected| selected.resource_liveness_lease());
     let read_runtime = runtime.clone();
-    crate::object::protocol::execute_owned_subsref(
+    let result = crate::object::protocol::execute_owned_subsref(
         obj,
         path,
-        move |obj, step| async move { matfile_read_step(read_runtime.as_ref(), obj, step).await },
+        move |obj, step| async move {
+            check_resource_liveness(liveness.as_ref())?;
+            let value = matfile_read_step(read_runtime.as_ref(), obj, step).await?;
+            check_resource_liveness(liveness.as_ref())?;
+            Ok(value)
+        },
         None,
     )
-    .await
+    .await;
+    let result = match result {
+        Ok(value) => receipt
+            .as_ref()
+            .map_or(Ok(()), |selected| selected.checkpoint())
+            .map(|()| value),
+        Err(error) => Err(error),
+    };
+    super::admission::finish(receipt, &result);
+    result
 }
 
 async fn matfile_read_step(
@@ -146,21 +217,87 @@ pub async fn matfile_subsasgn(
 ) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    let first = path.steps().first().expect("parsed nonempty MAT path");
+    let payload = first.selector_value()?;
+    if first.kind() != crate::object::indexing::ObjectIndexKind::Member {
+        return Err(matfile_error_with(
+            &MATFILE_ERROR_UNSUPPORTED,
+            format!("{MATFILE_SUBSASGN}: partial MAT-file assignment is not supported yet"),
+        ));
+    }
+    let field = member_name(&payload, MATFILE_SUBSASGN)?;
+    if field == PROPERTIES_FIELD || field == SOURCE_FIELD || field == WRITABLE_FIELD {
+        return Err(matfile_error_with(
+            &MATFILE_ERROR_UNSUPPORTED,
+            format!("{MATFILE_SUBSASGN}: '{field}' is read-only"),
+        ));
+    }
+    reject_internal_field(&field)?;
+    validate_variable_name(&field, MATFILE_SUBSASGN)?;
+    let object = into_matfile_object(obj.clone(), MATFILE_SUBSASGN)?;
+    let owner = resolve_matfile(runtime.as_ref(), &object)?;
+    if !owner.writable {
+        return Err(matfile_error_with(
+            &MATFILE_ERROR_UNSUPPORTED,
+            "matfile: object is not writable; construct it with matfile(filename, 'Writable', true)",
+        ));
+    }
+    let suffix = admission::suffix_digest(&path)
+        .map(MatAssignmentSuffix::Exact)
+        .unwrap_or(MatAssignmentSuffix::Unavailable);
+    let workload = HostEffectWorkload::MatEncode {
+        destination: owner.source.path(),
+        mode: MatEncodeMode::AssignMember {
+            member: &field,
+            suffix,
+        },
+        output: MatEncodeOutput::UpdatedObject,
+    };
+    let receipt =
+        super::admission::select(runtime.as_ref(), &owner.source, MATFILE_SUBSASGN, workload)?;
+    let liveness = receipt
+        .as_ref()
+        .map(|selected| selected.resource_liveness_lease());
     let read_runtime = runtime.clone();
-    crate::object::protocol::execute_owned_subsasgn(
+    let read_liveness = liveness.clone();
+    let result = crate::object::protocol::execute_owned_subsasgn(
         obj,
         path,
         vec![rhs],
-        move |obj, step| async move { matfile_read_step(read_runtime.as_ref(), obj, step).await },
+        move |obj, step| async move {
+            check_resource_liveness(read_liveness.as_ref())?;
+            let result = matfile_read_step(read_runtime.as_ref(), obj, step).await?;
+            check_resource_liveness(read_liveness.as_ref())?;
+            Ok(result)
+        },
         move |obj, step, mut values| async move {
             let rhs = values
                 .pop()
                 .ok_or_else(|| matfile_error("matfile assignment value is missing"))?;
-            matfile_write_step(runtime.as_ref(), obj, step, rhs).await
+            matfile_write_step(runtime.as_ref(), obj, step, rhs, liveness).await
         },
         None,
     )
-    .await
+    .await;
+    let result = match result {
+        Ok(value) => receipt
+            .as_ref()
+            .map_or(Ok(()), |selected| selected.checkpoint())
+            .map(|()| value),
+        Err(error) => Err(error),
+    };
+    super::admission::finish(receipt, &result);
+    result
+}
+
+fn check_resource_liveness(
+    lease: Option<&std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
+) -> BuiltinResult<()> {
+    if lease.is_some_and(|lease| !lease.is_current()) {
+        Err(crate::context::host_effect::stale_resource())
+    } else {
+        Ok(())
+    }
 }
 
 async fn matfile_write_step(
@@ -168,6 +305,7 @@ async fn matfile_write_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
+    resource_liveness: Option<std::sync::Arc<dyn HostEffectResourceLivenessLease>>,
 ) -> BuiltinResult<Value> {
     let payload = step.selector_value()?;
     let object = into_matfile_object(obj, MATFILE_SUBSASGN)?;
@@ -199,7 +337,8 @@ async fn matfile_write_step(
         Some(&owner.source),
         BUILTIN_NAME,
         &MATFILE_ERROR_IO,
-    );
+    )
+    .with_resource_liveness(resource_liveness);
     cooperation.completed(0).await?;
 
     let mut entries =
@@ -342,18 +481,12 @@ async fn read_existing_entries_for_assignment(
     }
 }
 
-enum PreparedWritableName {
-    Known,
-    Resident(Value),
-}
-
 enum PreparedWritableValue {
     Known(bool),
-    Resident(Value),
+    Resident(runmat_accelerate_api::GpuTensorHandle),
 }
 
 struct PreparedWritablePair {
-    name: PreparedWritableName,
     value: PreparedWritableValue,
 }
 
@@ -370,61 +503,57 @@ fn prepare_writable_options(rest: Vec<Value>) -> BuiltinResult<PreparedWritableO
     let mut values = rest.into_iter();
     while let Some(name) = values.next() {
         let value = values.next().expect("validated complete Writable pair");
-        let name = if matches!(&name, Value::GpuTensor(_)) {
-            PreparedWritableName::Resident(name)
-        } else {
-            let name = value_to_string_scalar(&name).ok_or_else(|| {
-                matfile_error_with(
-                    &MATFILE_ERROR_INVALID_OPTION,
-                    "matfile: option names must be character vectors or string scalars",
-                )
-            })?;
-            if MatFileOptionName::parse(&name) != Some(MatFileOptionName::Writable) {
-                return Err(matfile_error_with(
-                    &MATFILE_ERROR_INVALID_OPTION,
-                    format!("matfile: unsupported option '{name}'"),
-                ));
+        let name = value_to_string_scalar(&name).ok_or_else(|| {
+            matfile_error_with(
+                &MATFILE_ERROR_INVALID_OPTION,
+                "matfile: option names must be character vectors or string scalars",
+            )
+        })?;
+        if MatFileOptionName::parse(&name) != Some(MatFileOptionName::Writable) {
+            return Err(matfile_error_with(
+                &MATFILE_ERROR_INVALID_OPTION,
+                format!("matfile: unsupported option '{name}'"),
+            ));
+        }
+        let value = match value {
+            Value::GpuTensor(handle) => PreparedWritableValue::Resident(handle),
+            value => {
+                PreparedWritableValue::Known(value_to_bool_scalar(&value).ok_or_else(|| {
+                    matfile_error_with(
+                        &MATFILE_ERROR_INVALID_OPTION,
+                        "matfile: Writable must be a scalar logical or numeric value",
+                    )
+                })?)
             }
-            PreparedWritableName::Known
         };
-        let value = if matches!(&value, Value::GpuTensor(_)) {
-            PreparedWritableValue::Resident(value)
-        } else {
-            PreparedWritableValue::Known(value_to_bool_scalar(&value).ok_or_else(|| {
-                matfile_error_with(
-                    &MATFILE_ERROR_INVALID_OPTION,
-                    "matfile: Writable must be a scalar logical or numeric value",
-                )
-            })?)
-        };
-        pairs.push(PreparedWritablePair { name, value });
+        pairs.push(PreparedWritablePair { value });
     }
     Ok(PreparedWritableOptions(pairs))
 }
 
 impl PreparedWritableOptions {
-    async fn resolve(self) -> BuiltinResult<bool> {
+    fn identity_controls(&self) -> Vec<MatHandleControl> {
+        self.0
+            .iter()
+            .map(|pair| match &pair.value {
+                PreparedWritableValue::Known(value) => MatHandleControl::KnownWritable(*value),
+                PreparedWritableValue::Resident(handle) => {
+                    MatHandleControl::ResidentWritable(handle.wire_descriptor())
+                }
+            })
+            .collect()
+    }
+
+    async fn resolve(self, cooperation: &mut MatCodecCooperation<'_>) -> BuiltinResult<bool> {
         let mut writable = false;
         for pair in self.0 {
-            if let PreparedWritableName::Resident(name) = pair.name {
-                let value = gather_if_needed_async(&name).await?;
-                let name = value_to_string_scalar(&value).ok_or_else(|| {
-                    matfile_error_with(
-                        &MATFILE_ERROR_INVALID_OPTION,
-                        "matfile: option names must be character vectors or string scalars",
-                    )
-                })?;
-                if MatFileOptionName::parse(&name) != Some(MatFileOptionName::Writable) {
-                    return Err(matfile_error_with(
-                        &MATFILE_ERROR_INVALID_OPTION,
-                        format!("matfile: unsupported option '{name}'"),
-                    ));
-                }
-            }
             writable = match pair.value {
                 PreparedWritableValue::Known(value) => value,
-                PreparedWritableValue::Resident(value) => {
-                    let gathered = gather_if_needed_async(&value).await?;
+                PreparedWritableValue::Resident(handle) => {
+                    let resident = Value::GpuTensor(handle);
+                    let gathered = cooperation
+                        .await_io(gather_if_needed_async(&resident))
+                        .await??;
                     value_to_bool_scalar(&gathered).ok_or_else(|| {
                         matfile_error_with(
                             &MATFILE_ERROR_INVALID_OPTION,

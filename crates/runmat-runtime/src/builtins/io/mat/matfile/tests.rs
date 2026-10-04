@@ -64,6 +64,119 @@ fn known_invalid_writable_pair_does_not_download_resident_filename() {
     assert_eq!(owner.downloads(), 0);
 }
 
+fn finite_runtime() -> crate::context::RuntimeContext {
+    struct Finite;
+    impl crate::context::RuntimeParallelService for Finite {
+        fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+            crate::context::RuntimeParallelResources {
+                memory_available_bytes: Some(1024),
+                ..Default::default()
+            }
+        }
+    }
+    crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        crate::context::RuntimeServicePorts::default().with_parallel(std::rc::Rc::new(Finite)),
+    )
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn finite_matfile_constructor_rejects_before_resident_writable_download() {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    let error = futures::executor::block_on(super::matfile_builtin(
+        Some(finite_runtime()),
+        Value::from("blocked.mat"),
+        vec![Value::from("Writable"), Value::GpuTensor(owner.resident())],
+    ))
+    .expect_err("finite constructor has no complete resource producer");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(owner.downloads(), 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
+    let _lock = fs::provider_override_lock();
+    let _accel = crate::builtins::common::test_support::accel_test_lock();
+    let (directory, filename) = if cfg!(windows) {
+        (r"C:\mat", r"C:\mat\missing.mat")
+    } else {
+        ("/mat", "/mat/missing.mat")
+    };
+    let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
+    let _provider = fs::replace_provider(selected.clone());
+    fs::set_current_dir(directory).expect("virtual cwd");
+    let object = futures::executor::block_on(matfile_builtin(
+        Value::from("missing.mat"),
+        vec![Value::from("Writable"), Value::Bool(true)],
+    ))
+    .expect("context-free writable handle");
+    let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
+    let _gpu = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    let subscript = crate::object::indexing::ObjectSubscriptPath::new(vec![
+        crate::object::indexing::ObjectSubscript::member("A"),
+        crate::object::indexing::ObjectSubscript::parentheses(
+            crate::object::indexing::ObjectIndexSelector::IndexValues {
+                components: vec![Value::Num(1.0).into()],
+            },
+        ),
+    ])
+    .expect("nested path")
+    .to_standard_substruct_value()
+    .expect("protocol value");
+    let error = futures::executor::block_on(super::matfile_subsasgn(
+        Some(finite_runtime()),
+        object,
+        subscript,
+        Value::GpuTensor(owner.resident()),
+    ))
+    .expect_err("finite path must reject before first MAT read");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(owner.downloads(), 0);
+    let missing =
+        futures::executor::block_on(selected.read(Path::new(filename))).expect_err("no write");
+    assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn finite_matfile_member_read_rejects_before_missing_file_is_opened() {
+    let _lock = fs::provider_override_lock();
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
+    let _provider = fs::replace_provider(selected);
+    fs::set_current_dir(directory).expect("virtual cwd");
+    let object = futures::executor::block_on(matfile_builtin(Value::from("missing.mat"), vec![]))
+        .expect("context-free receiver");
+    let subscript =
+        crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("A"))
+            .expect("member selector");
+    let error = futures::executor::block_on(super::matfile_subsref(
+        Some(finite_runtime()),
+        object,
+        subscript,
+    ))
+    .expect_err("finite member read needs complete resource evidence before open");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn invalid_read_index_precedes_detached_receiver_authority() {

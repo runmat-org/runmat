@@ -28,6 +28,7 @@ pub use workload::{
     DatasetHandleOperation, DatasetHandleRole, DatasetPathOperation, HostEffectOutput,
     HostEffectSource, HostEffectWorkload, MatDecodeOutput, MatDecodeSelection,
     MatEncodeMode, MatEncodeOutput, MatStructSelection,
+    MatAssignmentSuffix, MatHandleControl,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -110,6 +111,19 @@ fn select_host_effect_inner(
     }
     if let Some(facts) = final_facts {
         facts.validate_for(&request)?;
+    }
+    if !request.workload.has_exact_identity() {
+        let finite = runtime
+            .and_then(|runtime| runtime.service_ports().parallel())
+            .and_then(|parallel| parallel.placement_resources().memory_available_bytes)
+            .is_some();
+        return if finite {
+            Err(insufficient(
+                "exact host effect control identity is unavailable",
+            ))
+        } else {
+            Ok(None)
+        };
     }
     let Some(runtime) = runtime else {
         return Ok(None);

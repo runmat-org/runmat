@@ -10,7 +10,8 @@ pub use dataset::{
 };
 mod mat;
 pub use mat::{
-    MatDecodeOutput, MatDecodeSelection, MatEncodeMode, MatEncodeOutput, MatStructSelection,
+    MatAssignmentSuffix, MatDecodeOutput, MatDecodeSelection, MatEncodeMode, MatEncodeOutput,
+    MatHandleControl, MatStructSelection,
 };
 
 /// The requested result is distinct from the committed side effects. No
@@ -96,6 +97,10 @@ pub enum HostEffectWorkload<'a> {
         mode: MatEncodeMode<'a>,
         output: MatEncodeOutput,
     },
+    MatHandle {
+        source: &'a Path,
+        controls: &'a [MatHandleControl],
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -150,6 +155,12 @@ struct MatEncodeFacts<'a> {
     output: MatEncodeOutput,
 }
 
+#[derive(serde::Serialize)]
+struct MatHandleFacts<'a> {
+    source: &'a [u8],
+    controls: &'a [MatHandleControl],
+}
+
 impl HostEffectWorkload<'_> {
     /// An absent control digest is not a fabricated reusable identity.
     pub fn identity_complete(self) -> bool {
@@ -161,6 +172,25 @@ impl HostEffectWorkload<'_> {
         }
     }
 
+    pub const fn has_exact_identity(self) -> bool {
+        !matches!(
+            self,
+            Self::MatEncode {
+                mode: MatEncodeMode::AssignMember {
+                    suffix: MatAssignmentSuffix::Unavailable,
+                    ..
+                },
+                ..
+            } | Self::MatDecode {
+                selection: MatDecodeSelection::MemberPath {
+                    suffix: MatAssignmentSuffix::Unavailable,
+                    ..
+                },
+                ..
+            }
+        )
+    }
+
     pub const fn output(self) -> HostEffectOutput {
         match self {
             Self::ArchiveExtract { output, .. }
@@ -170,6 +200,7 @@ impl HostEffectWorkload<'_> {
             Self::AudioDecode { output, .. } => output.host_effect_output(),
             Self::MatDecode { output, .. } => output.host_effect_output(),
             Self::MatEncode { output, .. } => output.host_effect_output(),
+            Self::MatHandle { .. } => HostEffectOutput::ReturnedValue,
         }
     }
 
@@ -263,6 +294,11 @@ impl HostEffectWorkload<'_> {
                 output,
             })
             .expect("typed MAT encode facts serialize"),
+            Self::MatHandle { source, controls } => serde_json::to_vec(&MatHandleFacts {
+                source: source.as_os_str().as_encoded_bytes(),
+                controls,
+            })
+            .expect("typed MAT handle facts serialize"),
         }
     }
 }

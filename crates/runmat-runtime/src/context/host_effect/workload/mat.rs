@@ -2,6 +2,8 @@
 //! selectors; placement never interprets option spelling or regex syntax.
 
 use super::HostEffectOutput;
+use runmat_accelerate_api::GpuTensorWireDescriptor;
+use runmat_execution::Digest;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub enum MatDecodeSelection<'a> {
@@ -9,6 +11,10 @@ pub enum MatDecodeSelection<'a> {
     Selected {
         names: &'a [String],
         patterns: &'a [String],
+    },
+    MemberPath {
+        member: &'a str,
+        suffix: MatAssignmentSuffix,
     },
 }
 
@@ -36,7 +42,20 @@ pub enum MatEncodeMode<'a> {
     },
     AssignMember {
         member: &'a str,
+        suffix: MatAssignmentSuffix,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum MatAssignmentSuffix {
+    Exact(Digest),
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum MatHandleControl {
+    KnownWritable(bool),
+    ResidentWritable(GpuTensorWireDescriptor),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
