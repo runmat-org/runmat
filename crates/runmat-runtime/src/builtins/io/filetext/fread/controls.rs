@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone, Copy)]
 pub(super) enum ControlRole {
     FileId,
     Size,
@@ -36,6 +37,30 @@ pub(super) fn preflight_control(value: &Value, role: ControlRole) -> BuiltinResu
                 &FREAD_RESIDENT_CONTROL_EXTENSION,
                 BUILTIN_NAME,
             )?;
+            let element_count = handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                .ok_or_else(|| {
+                    fread_error_with_detail(
+                        &FREAD_ERROR_INVALID_INPUT,
+                        "resident control shape exceeds platform limits",
+                    )
+                })?;
+            let shape_valid = match role {
+                ControlRole::FileId | ControlRole::Skip => element_count == 1,
+                ControlRole::Size => element_count <= 2,
+            };
+            if !shape_valid {
+                let error = match role {
+                    ControlRole::Skip => &FREAD_ERROR_INVALID_OPTION,
+                    ControlRole::FileId | ControlRole::Size => &FREAD_ERROR_INVALID_INPUT,
+                };
+                return Err(fread_error_with_detail(
+                    error,
+                    "resident control has invalid element count",
+                ));
+            }
             if runmat_accelerate_api::handle_is_logical(handle) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &FREAD_LOGICAL_CONTROL_EXTENSION,
@@ -101,7 +126,7 @@ pub(super) type ClassifiedArgs<'a> = (
     Option<&'a Value>,
 );
 
-pub(super) fn classify_arguments<'a>(args: &'a [&'a Value]) -> Result<ClassifiedArgs<'a>, String> {
+pub(super) fn classify_arguments<'a>(args: &[&'a Value]) -> Result<ClassifiedArgs<'a>, String> {
     let mut filtered_indices: Vec<usize> = Vec::with_capacity(args.len());
     let mut like_proto: Option<&Value> = None;
     let mut i = 0usize;
@@ -254,12 +279,11 @@ impl SizeSpec {
 pub(super) fn parse_size(arg: Option<&Value>) -> Result<SizeSpec, String> {
     match arg {
         None => Ok(SizeSpec::All),
-        Some(Value::String(s)) => parse_size_string(s),
-        Some(Value::CharArray(ca)) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+        Some(value @ (Value::String(_) | Value::CharArray(_) | Value::StringArray(_))) => {
+            let text = extract_scalar_string(value)
+                .ok_or_else(|| "size argument must be numeric or a size vector".to_string())?;
             parse_size_string(&text)
         }
-        Some(Value::StringArray(sa)) if sa.data.len() == 1 => parse_size_string(&sa.data[0]),
         Some(Value::Tensor(t)) => parse_size_tensor(t),
         Some(Value::Int(int)) => Ok(SizeSpec::Count(int_to_usize(
             int,

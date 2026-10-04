@@ -125,48 +125,8 @@ impl FreadEval {
 }
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadEval> {
-    let raw_refs: Vec<&Value> = rest.iter().collect();
-    let (raw_size, raw_precision, raw_skip, _, raw_like) =
-        map_string_result(classify_arguments(&raw_refs), &FREAD_ERROR_INVALID_INPUT)?;
-    if raw_like.is_some() {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &FREAD_LIKE_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    if let Some(prototype) = raw_like {
-        let precision =
-            map_string_result(parse_precision(raw_precision), &FREAD_ERROR_INVALID_OPTION)?;
-        map_string_result(
-            validate_like_prototype(prototype),
-            &FREAD_ERROR_INVALID_OPTION,
-        )?;
-        map_string_result(
-            validate_like_output_kind(prototype, precision.output),
-            &FREAD_ERROR_INVALID_OPTION,
-        )?;
-    }
-    preflight_control(fid_value, ControlRole::FileId)?;
-    if let Some(value) = raw_size {
-        preflight_control(value, ControlRole::Size)?;
-    }
-    if let Some(value) = raw_skip {
-        preflight_control(value, ControlRole::Skip)?;
-    }
-    let fid_host = gather_value(fid_value).await?;
-    let fid = map_string_result(parse_fid(&fid_host), &FREAD_ERROR_INVALID_INPUT)?;
-    if fid < 0 {
-        return Err(fread_error_with_detail(
-            &FREAD_ERROR_INVALID_INPUT,
-            "file identifier must be non-negative",
-        ));
-    }
-    if fid < 3 {
-        return Err(fread_error_with_detail(
-            &FREAD_ERROR_INVALID_INPUT,
-            "standard input/output identifiers are not supported yet",
-        ));
-    }
+    let prepared = PreparedFreadCall::new(fid_value, rest)?;
+    let fid = prepared.resolve_fid().await?;
 
     let info = registry::info_for(fid).ok_or_else(|| {
         fread_error_with_message(
@@ -187,37 +147,8 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         )
     })?;
 
-    let arg_refs: Vec<&Value> = rest.iter().collect();
-    let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
-        map_string_result(classify_arguments(&arg_refs), &FREAD_ERROR_INVALID_INPUT)?;
-    let size_host = match size_arg {
-        Some(value) => Some(gather_value(value).await?),
-        None => None,
-    };
-    let precision_host = match precision_arg {
-        Some(value) => Some(gather_value(value).await?),
-        None => None,
-    };
-    let skip_host = match skip_arg {
-        Some(value) => Some(gather_value(value).await?),
-        None => None,
-    };
-    let machine_host = match machine_arg {
-        Some(value) => Some(gather_value(value).await?),
-        None => None,
-    };
-
-    let size_spec = map_string_result(parse_size(size_host.as_ref()), &FREAD_ERROR_INVALID_INPUT)?;
-    let precision = map_string_result(
-        parse_precision(precision_host.as_ref()),
-        &FREAD_ERROR_INVALID_OPTION,
-    )?;
-    let skip_bytes =
-        map_string_result(parse_skip(skip_host.as_ref()), &FREAD_ERROR_INVALID_OPTION)?;
-    let machine_format = map_string_result(
-        parse_machine_format(machine_host.as_ref(), &info.machinefmt),
-        &FREAD_ERROR_INVALID_OPTION,
-    )?;
+    let like = prepared.like;
+    let controls = prepared.resolve_controls(&info.machinefmt).await?;
 
     let mut guard = handle.lock().map_err(|_| {
         fread_error_with_detail(
@@ -232,26 +163,29 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         )
     })?;
 
-    let (mut eval, encountered_eof) =
-        read_from_handle(file, &size_spec, &precision, skip_bytes, machine_format).map_err(
-            |error| {
-                let detail = error.to_string();
-                let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
-                let mut builder =
-                    build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
-                        .with_builtin(BUILTIN_NAME)
-                        .with_source(error);
-                if let Some(identifier) = FREAD_ERROR_IO.identifier {
-                    builder = builder.with_identifier(identifier);
-                }
-                builder.build()
-            },
-        )?;
+    let (mut eval, encountered_eof) = read_from_handle(
+        file,
+        &controls.size,
+        &controls.precision,
+        controls.skip,
+        controls.machine,
+    )
+    .map_err(|error| {
+        let detail = error.to_string();
+        let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
+        let mut builder = build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(error);
+        if let Some(identifier) = FREAD_ERROR_IO.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })?;
     drop(guard);
     if encountered_eof {
         registry::mark_eof_encountered(fid);
     }
-    eval.apply_like(like_arg, precision)?;
+    eval.apply_like(like, controls.precision)?;
     Ok(eval)
 }
 
@@ -320,14 +254,14 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
         .map_err(map_control_flow)
 }
 
-#[derive(Clone, Copy)]
-
+mod admission;
 mod controls;
 mod decode;
 mod output;
 mod precision;
 mod reader;
 
+use admission::*;
 use controls::*;
 use decode::*;
 use output::*;
