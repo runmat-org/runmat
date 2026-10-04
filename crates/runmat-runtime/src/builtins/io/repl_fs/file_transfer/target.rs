@@ -2,18 +2,6 @@ use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub(super) async fn remove_existing(path: &Path, is_directory: bool) -> io::Result<()> {
-    let result = if is_directory {
-        vfs::remove_dir_all_async(path).await
-    } else {
-        vfs::remove_file_async(path).await
-    };
-    match result {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        other => other,
-    }
-}
-
 pub(super) async fn same_path(left: &Path, right: &Path) -> bool {
     if left == right {
         return true;
