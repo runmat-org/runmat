@@ -68,12 +68,7 @@ fn parse_diary_arg(value: &Value) -> BuiltinResult<DiaryCommand> {
 }
 
 fn scalar_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value)
 }
 
 fn empty_return_value() -> Value {
@@ -167,5 +162,19 @@ mod tests {
             .expect_err("diary has no public output");
         assert_eq!(error.identifier(), Some("RunMat:diary:TooManyOutputs"));
         assert!(!dir.path().join("should-not-open.log").exists());
+    }
+
+    #[test]
+    fn paged_character_name_rejected_but_trailing_singleton_admitted() {
+        let paged = runmat_value::CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2])
+            .expect("paged char");
+        assert!(parse_diary_arg(&Value::CharArray(paged)).is_err());
+        let trailing =
+            runmat_value::CharArray::new_with_shape("log".chars().collect(), vec![1, 3, 1])
+                .expect("trailing singleton");
+        assert_eq!(
+            parse_diary_arg(&Value::CharArray(trailing)).expect("supported row"),
+            DiaryCommand::Filename("log".into())
+        );
     }
 }

@@ -50,3 +50,28 @@ fn no_public_output_and_known_modes_match_runtime_surface() {
         1
     );
 }
+
+#[test]
+fn character_pages_are_invalid_but_trailing_singleton_is_possible() {
+    let entry = &FORMAT_CATALOG_ENTRY;
+    let character = |shape| {
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(shape),
+            runmat_types::StorageFact::Dense,
+        )
+    };
+    assert!(inference::infer(
+        &request(Some(character(vec![Some(1), Some(2), Some(2)])), None),
+        entry
+    )
+    .diagnostics
+    .iter()
+    .any(|d| d.code == "RM-CATALOG-FORMAT-TEXT"));
+    assert!(inference::infer(
+        &request(Some(character(vec![Some(1), Some(2), Some(1)])), None),
+        entry
+    )
+    .diagnostics
+    .is_empty());
+}

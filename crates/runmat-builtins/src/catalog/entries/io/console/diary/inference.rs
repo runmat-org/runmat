@@ -52,7 +52,13 @@ fn definitely_nontext(value: &ValueFact) -> bool {
     match value.kind {
         ValueKindFact::Character => value.shape.known_dims().is_some_and(|dims| {
             dims.first()
-                .is_some_and(|rows| rows.is_some_and(|rows| rows != 1))
+                .copied()
+                .flatten()
+                .is_some_and(|rows| rows != 1)
+                || dims
+                    .iter()
+                    .skip(2)
+                    .any(|extent| extent.is_some_and(|n| n > 1))
         }),
         ValueKindFact::String => value.shape.element_count().is_some_and(|count| count != 1),
         ValueKindFact::Unknown => false,

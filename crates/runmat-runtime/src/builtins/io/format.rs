@@ -39,9 +39,9 @@ async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             return Ok(empty_value());
         }
         [Value::String(s)] => s.clone(),
-        [Value::CharArray(chars)] if chars.rows == 1 => {
-            chars.row_string().expect("row-validated character array")
-        }
+        [value @ Value::CharArray(_)] =>
+            crate::builtins::common::validation::value_text_scalar_string(value)
+                .ok_or_else(|| format_error_with(&FORMAT_ERROR_ARG_CONFIG, "format: unrecognized argument; expected a format name such as 'short' or 'long'"))?,
         _ => {
             return Err(format_error_with(
                 &FORMAT_ERROR_ARG_CONFIG,
@@ -266,6 +266,20 @@ mod tests {
         let _outputs = crate::output_count::push_output_count(Some(1));
         let err = block_on(format_builtin(vec![Value::from("hex")])).expect_err("sink output");
         assert_eq!(err.identifier(), Some("RunMat:format:TooManyOutputs"));
+        assert_eq!(get_display_format(), FormatMode::Long);
+        set_display_format(FormatMode::Short);
+    }
+
+    #[test]
+    fn paged_character_mode_rejected_but_trailing_singleton_admitted() {
+        let paged =
+            runmat_value::CharArray::new_with_shape("long".chars().collect(), vec![1, 2, 2])
+                .expect("paged char");
+        assert!(block_on(format_builtin(vec![Value::CharArray(paged)])).is_err());
+        let trailing =
+            runmat_value::CharArray::new_with_shape("long".chars().collect(), vec![1, 4, 1])
+                .expect("trailing singleton");
+        block_on(format_builtin(vec![Value::CharArray(trailing)])).expect("valid row");
         assert_eq!(get_display_format(), FormatMode::Long);
         set_display_format(FormatMode::Short);
     }
