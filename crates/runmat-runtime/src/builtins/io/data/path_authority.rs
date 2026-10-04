@@ -62,9 +62,13 @@ impl DataPathAuthority {
         self.provider.as_ref()
     }
 
+    pub(super) fn provider_arc(&self) -> &Arc<dyn FsProvider> {
+        &self.provider
+    }
+
     /// A recursive copy into its own tree would discover the destination it
     /// just created and recurse without bound. Canonicalize the source and the
-    /// destination's nearest existing ancestor through this same provider so
+    /// destination's existing prefixes through this same provider so
     /// symlink aliases and `..` components cannot evade the pre-effect check.
     pub(super) async fn admit_tree_destination(
         &self,
@@ -90,42 +94,55 @@ impl DataPathAuthority {
     }
 
     async fn canonical_destination(&self, destination: &Path) -> BuiltinResult<PathBuf> {
-        for ancestor in destination.ancestors() {
-            let mut canonical = match self.provider.canonicalize(ancestor).await {
-                Ok(path) => path,
-                Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(cause) => {
-                    return Err(data_error_with_source(
-                        format!(
-                            "data: failed to resolve destination '{}': {cause}",
-                            destination.display()
-                        ),
-                        cause,
-                    ));
+        let root = destination
+            .ancestors()
+            .last()
+            .ok_or_else(|| data_error("data: destination has no filesystem root"))?;
+        let mut canonical = self.provider.canonicalize(root).await.map_err(|cause| {
+            data_error_with_source(
+                format!(
+                    "data: failed to resolve destination root '{}': {cause}",
+                    root.display()
+                ),
+                cause,
+            )
+        })?;
+        let suffix = destination
+            .strip_prefix(root)
+            .map_err(|_| data_error("data: destination is outside its filesystem root"))?;
+        for component in suffix.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::Normal(part) => {
+                    canonical.push(part);
+                    canonical = self.canonicalize_if_existing(&canonical).await?;
                 }
-            };
-            let suffix = destination
-                .strip_prefix(ancestor)
-                .map_err(|_| data_error("data: destination is outside its canonical ancestor"))?;
-            for component in suffix.components() {
-                match component {
-                    std::path::Component::CurDir => {}
-                    std::path::Component::Normal(part) => canonical.push(part),
-                    std::path::Component::ParentDir => {
-                        if !canonical.pop() {
-                            return Err(data_error("data: destination escapes filesystem root"));
-                        }
+                std::path::Component::ParentDir => {
+                    if !canonical.pop() {
+                        return Err(data_error("data: destination escapes filesystem root"));
                     }
-                    std::path::Component::Prefix(_) | std::path::Component::RootDir => {
-                        return Err(data_error("data: destination has an invalid path suffix"));
-                    }
+                    canonical = self.canonicalize_if_existing(&canonical).await?;
+                }
+                std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                    return Err(data_error("data: destination has an invalid path suffix"));
                 }
             }
-            return Ok(canonical);
         }
-        Err(data_error(
-            "data: destination has no existing filesystem ancestor",
-        ))
+        Ok(canonical)
+    }
+
+    async fn canonicalize_if_existing(&self, path: &Path) -> BuiltinResult<PathBuf> {
+        match self.provider.canonicalize(path).await {
+            Ok(path) => Ok(path),
+            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+            Err(cause) => Err(data_error_with_source(
+                format!(
+                    "data: failed to resolve destination '{}': {cause}",
+                    path.display()
+                ),
+                cause,
+            )),
+        }
     }
 }
 

@@ -2399,6 +2399,18 @@ async fn copy_dir_recursive_on(
         let entry_src = entry.path().to_path_buf();
         let entry_dst = dst.join(entry.file_name());
         if entry.is_dir() {
+            let own_metadata = provider.symlink_metadata(&entry_src).await.map_err(|err| {
+                data_error(format!(
+                    "failed to inspect directory entry '{}': {err}",
+                    entry_src.display()
+                ))
+            })?;
+            if own_metadata.is_symlink() {
+                return Err(data_error(format!(
+                    "refusing to recursively copy symbolic-link directory '{}'",
+                    entry_src.display()
+                )));
+            }
             copy_dir_recursive_on(provider, &entry_src, &entry_dst).await?;
             continue;
         }
