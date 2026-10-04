@@ -1,7 +1,5 @@
 //! Compatibility filesystem, path, process, preference, and environment helpers.
 
-use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
@@ -26,11 +24,6 @@ use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_stri
 use crate::builtins::common::path_state::set_path_string;
 use crate::output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-thread_local! {
-    static PREFS: RefCell<BTreeMap<String, BTreeMap<String, Value>>> =
-        const { RefCell::new(BTreeMap::new()) };
-}
 
 const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
 const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -742,18 +735,14 @@ fn is_hidden_path(path: &Path) -> bool {
 )]
 async fn getpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     match args.len() {
-        0 => PREFS.with(|prefs| Ok(Value::Struct(all_prefs_struct(&prefs.borrow())))),
+        0 => Ok(Value::Struct(super::preferences::all_groups())),
         1 => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &GETPREF_GROUP_QUERY_EXTENSION,
                 "getpref",
             )?;
             let group = scalar_text(&args[0], "getpref", "group")?;
-            PREFS.with(|prefs| {
-                Ok(Value::Struct(group_prefs_struct(
-                    prefs.borrow().get(&group),
-                )))
-            })
+            Ok(Value::Struct(super::preferences::group_values(&group)))
         }
         2 | 3 => getpref_named(&args),
         _ => Err(compat_error("getpref", "getpref: too many input arguments")),
@@ -797,32 +786,16 @@ fn getpref_named(args: &[Value]) -> BuiltinResult<Value> {
                     ))
                 }
             };
-            let values = PREFS.with(|prefs| {
-                let mut prefs = prefs.borrow_mut();
-                let mut resolved = Vec::with_capacity(names.len());
-                for (index, preference) in names.iter().enumerate() {
-                    if let Some(value) = prefs
-                        .get(&group)
-                        .and_then(|group| group.get(preference))
-                        .cloned()
-                    {
-                        resolved.push(value);
-                    } else if let Some(defaults) = &defaults {
-                        let value = defaults[index].clone();
-                        prefs
-                            .entry(group.clone())
-                            .or_default()
-                            .insert(preference.clone(), value.clone());
-                        resolved.push(value);
-                    } else {
-                        return Err(compat_error(
-                            "getpref",
-                            format!("getpref: preference '{group}/{preference}' does not exist"),
-                        ));
-                    }
-                }
-                Ok(resolved)
-            })?;
+            let values = super::preferences::read_many(&group, &names, defaults.as_deref())
+                .map_err(|missing| {
+                    compat_error(
+                        "getpref",
+                        format!(
+                            "getpref: preference '{}/{}' does not exist",
+                            missing.group, missing.name
+                        ),
+                    )
+                })?;
             CellArray::new_with_shape(values, shape)
                 .map(Value::Cell)
                 .map_err(|err| compat_error("getpref", format!("getpref: {err}")))
@@ -831,26 +804,14 @@ fn getpref_named(args: &[Value]) -> BuiltinResult<Value> {
 }
 
 fn getpref_scalar(group: &str, preference: &str, default: Option<Value>) -> BuiltinResult<Value> {
-    PREFS.with(|prefs| {
-        let mut prefs = prefs.borrow_mut();
-        if let Some(value) = prefs
-            .get(group)
-            .and_then(|group| group.get(preference))
-            .cloned()
-        {
-            return Ok(value);
-        }
-        let Some(default) = default else {
-            return Err(compat_error(
-                "getpref",
-                format!("getpref: preference '{group}/{preference}' does not exist"),
-            ));
-        };
-        prefs
-            .entry(group.to_string())
-            .or_default()
-            .insert(preference.to_string(), default.clone());
-        Ok(default)
+    super::preferences::read_or_create(group, preference, default).map_err(|missing| {
+        compat_error(
+            "getpref",
+            format!(
+                "getpref: preference '{}/{}' does not exist",
+                missing.group, missing.name
+            ),
+        )
     })
 }
 
@@ -894,46 +855,6 @@ fn preference_names(value: &Value) -> BuiltinResult<PreferenceNames> {
     }
 }
 
-fn all_prefs_struct(prefs: &BTreeMap<String, BTreeMap<String, Value>>) -> StructValue {
-    let mut out = StructValue::new();
-    for (group, values) in prefs {
-        out.insert(
-            group.clone(),
-            Value::Struct(group_prefs_struct(Some(values))),
-        );
-    }
-    out
-}
-
-fn group_prefs_struct(values: Option<&BTreeMap<String, Value>>) -> StructValue {
-    let mut out = StructValue::new();
-    if let Some(values) = values {
-        for (name, value) in values {
-            out.insert(name.clone(), value.clone());
-        }
-    }
-    out
-}
-
-pub(crate) fn session_pref_text(group: &str, preference: &str) -> Option<String> {
-    PREFS.with(|prefs| {
-        prefs
-            .borrow()
-            .get(group)
-            .and_then(|group| group.get(preference))
-            .and_then(pref_value_to_text)
-    })
-}
-
-fn pref_value_to_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(char_row_to_string(array)),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
-    }
-}
-
 #[runtime_builtin(
     name = "setpref",
     category = "io/repl_fs",
@@ -955,13 +876,7 @@ async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let group = scalar_text(&args[0], "setpref", "group")?;
     let pref = scalar_text(&args[1], "setpref", "preference")?;
-    PREFS.with(|prefs| {
-        prefs
-            .borrow_mut()
-            .entry(group)
-            .or_default()
-            .insert(pref, args[2].clone());
-    });
+    super::preferences::set_many(group, vec![(pref, args[2].clone())]);
     Ok(Value::Num(0.0))
 }
 
@@ -984,18 +899,13 @@ async fn ispref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let group = scalar_text(&args[0], "ispref", "group")?;
-    PREFS.with(|prefs| {
-        let prefs = prefs.borrow();
-        if args.len() == 1 {
-            return Ok(Value::Bool(prefs.contains_key(&group)));
-        }
-        let pref = scalar_text(&args[1], "ispref", "preference")?;
-        Ok(Value::Bool(
-            prefs
-                .get(&group)
-                .is_some_and(|group| group.contains_key(&pref)),
-        ))
-    })
+    if args.len() == 1 {
+        return Ok(Value::Bool(super::preferences::has_group(&group)));
+    }
+    let pref = scalar_text(&args[1], "ispref", "preference")?;
+    Ok(Value::Bool(super::preferences::has_preference(
+        &group, &pref,
+    )))
 }
 
 #[runtime_builtin(
