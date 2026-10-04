@@ -240,10 +240,12 @@ mod controls;
 use controls::{normalise_path, parse_invocation, preflight_known_options, select_variables};
 
 mod reader;
+pub use reader::decode_workspace_from_mat_bytes;
+#[cfg(test)]
+pub(crate) use reader::read_mat_file;
 pub(crate) use reader::{
-    read_mat_file, read_mat_file_for_builtin, read_mat_file_for_builtin_on_with_context,
-    read_mat_file_for_builtin_on_with_resource_liveness, read_mat_file_on,
-    read_mat_file_on_with_context, read_mat_file_on_with_resource_liveness,
+    read_mat_file_for_builtin, read_mat_file_for_builtin_on_with_resource_liveness,
+    read_mat_file_on_with_resource_liveness,
 };
 
 mod decoder;

@@ -203,6 +203,6 @@ fn value_to_bool_scalar(value: &Value) -> Option<bool> {
     }
 }
 
-pub(super) fn matfile_error(message: impl Into<String>) -> RuntimeError {
+pub(in crate::builtins::io::mat) fn matfile_error(message: impl Into<String>) -> RuntimeError {
     matfile_error_with(&MATFILE_ERROR_INVALID_ARGUMENT, message)
 }

@@ -46,7 +46,8 @@ pub(super) fn finish_error(receipt: Option<HostEffectReceipt>, error: &RuntimeEr
 }
 
 fn typed_cancelled(error: &RuntimeError) -> bool {
-    let mut cause = error.source.as_deref();
+    let mut cause: Option<&(dyn std::error::Error + 'static)> =
+        error.source.as_deref().map(|source| source as _);
     while let Some(current) = cause {
         if matches!(
             current.downcast_ref::<crate::execution::ExecutionServiceError>(),

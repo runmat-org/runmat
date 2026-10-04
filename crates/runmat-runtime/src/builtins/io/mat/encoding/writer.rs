@@ -13,7 +13,7 @@ use futures::future::LocalBoxFuture;
 
 const ENCODE_WORK_CHUNK: usize = 64 * 1024;
 
-pub(super) async fn write_mat_file(
+pub(in crate::builtins::io::mat) async fn write_mat_file(
     path: &MatFsPath,
     vars: &[MatVar],
     owner: MatEncodingOwner,

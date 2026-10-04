@@ -319,7 +319,7 @@ mod receiver;
 pub(super) use receiver::matfile_error;
 use receiver::{
     into_matfile_object, matfile_object, member_name, normalise_path, prepare_writable_options,
-    reject_internal_field, validate_variable_name, PreparedWritableValue,
+    reject_internal_field, validate_variable_name,
 };
 
 fn matfile_error_with(

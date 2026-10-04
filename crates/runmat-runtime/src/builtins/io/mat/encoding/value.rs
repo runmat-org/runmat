@@ -23,7 +23,7 @@ async fn gather_with_cooperation(
     }
 }
 
-pub(super) fn convert_value_with_cooperation<'a, 'b>(
+pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
     value: Value,
     owner: MatEncodingOwner,
     mut cooperation: Option<&'a mut MatCodecCooperation<'b>>,

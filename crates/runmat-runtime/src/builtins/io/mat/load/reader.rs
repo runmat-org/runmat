@@ -17,14 +17,6 @@ pub(crate) async fn read_mat_file_for_builtin(
     }
 }
 
-pub(crate) async fn read_mat_file_for_builtin_on_with_context(
-    source: &MatFsPath,
-    builtin: &str,
-    runtime: Option<&crate::context::RuntimeContext>,
-) -> crate::BuiltinResult<Vec<(String, Value)>> {
-    read_mat_file_for_builtin_on_with_resource_liveness(source, builtin, runtime, None).await
-}
-
 pub(crate) async fn read_mat_file_for_builtin_on_with_resource_liveness(
     source: &MatFsPath,
     builtin: &str,

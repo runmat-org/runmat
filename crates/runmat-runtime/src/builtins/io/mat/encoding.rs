@@ -34,6 +34,7 @@ async fn completed(
 }
 
 mod scalars;
+use scalars::tensor_dtype_mat_class;
 
 mod writer;
 use writer::write_mat_bytes_cooperative;

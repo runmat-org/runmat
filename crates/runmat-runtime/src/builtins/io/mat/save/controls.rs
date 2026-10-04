@@ -156,7 +156,7 @@ pub(super) async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveReque
     })
 }
 
-fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
+pub(super) fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
     if let Some(token) = value_to_string_scalar(value) {
         if token.starts_with('-') {
             return Ok(Some(token.to_ascii_lowercase()));

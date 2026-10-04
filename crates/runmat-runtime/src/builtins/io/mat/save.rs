@@ -21,7 +21,7 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use runmat_builtins::{
     SAVE_ERROR_FILENAME, SAVE_ERROR_INVALID_ARGUMENT, SAVE_ERROR_INVALID_OPTION, SAVE_ERROR_IO,
-    SAVE_ERROR_SELECTION, SAVE_ERROR_UNSUPPORTED, SAVE_ERROR_WORKSPACE,
+    SAVE_ERROR_SELECTION, SAVE_ERROR_WORKSPACE,
 };
 
 #[runtime_builtin(
@@ -255,7 +255,7 @@ async fn save_builtin(
 }
 
 mod controls;
-use controls::{normalise_path, parse_arguments, preflight_known_options, SaveRequest};
+use controls::{normalise_path, option_token, parse_arguments, preflight_known_options};
 
 const BUILTIN_NAME: &str = "save";
 
@@ -287,8 +287,8 @@ fn save_error_with_source(
 #[path = "save/workspace.rs"]
 mod workspace_io;
 use workspace_io::{
-    append_existing_entries, append_struct_fields, collect_workspace_entries, deduplicate_entries,
-    ensure_workspace_entries, find_in_entries, lookup_workspace,
+    append_existing_entries, append_struct_fields, deduplicate_entries, ensure_workspace_entries,
+    find_in_entries, lookup_workspace,
 };
 
 pub use super::encoding::encode_workspace_to_mat_bytes;
