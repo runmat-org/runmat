@@ -13,7 +13,10 @@ use super::{
 };
 
 /// Reject known-invalid host siblings before a resident preference leaf has
-/// any provider effect. Final payload eligibility is checked after gathering.
+/// any provider effect. GPU placeholders validate aggregate structure and
+/// already-host payload limits only: they do not bound downloaded bytes or
+/// certify a finite whole-call resource peak. The exact host value is encoded
+/// and checked again after gathering, before application-store mutation.
 pub fn validate_durable_preparation(value: &Value) -> Result<(), ValueCodecError> {
     let payload = encode_durable_preparation_value(value)?;
     require_durable(&payload, "$")?;

@@ -45,6 +45,31 @@ mod tests {
     }
 
     #[test]
+    fn resident_preparation_placeholder_does_not_certify_downloaded_payload_limits() {
+        use runmat_accelerate_api::test_support::TestAllocationOwner;
+        use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+
+        const ELEMENTS: usize = (1024 * 1024 / 8) + 1;
+        let owner = TestAllocationOwner::new();
+        let resident = owner
+            .allocate_zeroed(
+                vec![1, ELEMENTS],
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .expect("real resident backing");
+        validate_durable_preparation(&Value::GpuTensor(resident.handle))
+            .expect("placeholder checks grammar, not downloaded byte size");
+        let host = Value::Tensor(
+            Tensor::new(vec![0.0; ELEMENTS], vec![1, ELEMENTS]).expect("matching host payload"),
+        );
+        assert!(matches!(
+            encode_durable_value(&host),
+            Err(ValueCodecError::Invalid { .. })
+        ));
+    }
+
+    #[test]
     fn preference_aggregates_are_durable_only_and_keep_plain_object_bits() {
         let mut object = runmat_value::ObjectInstance::new("PreferencePayload");
         object
