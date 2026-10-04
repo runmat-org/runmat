@@ -461,7 +461,8 @@ pub(crate) async fn read_mat_file_on_with_context(
     source: &MatFsPath,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    let file = source.open().await.map_err(|err| {
+    let mut cooperation = decoder::MatDecodeCooperation::new(runtime, Some(source));
+    let file = cooperation.await_io(source.open()).await?.map_err(|err| {
         load_error_with_source(
             &LOAD_ERROR_IO,
             format!("load: failed to open '{}': {err}", source.path().display()),
@@ -469,7 +470,6 @@ pub(crate) async fn read_mat_file_on_with_context(
         )
     })?;
     let mut reader = BufReader::new(file);
-    let mut cooperation = decoder::MatDecodeCooperation::new(runtime, Some(source));
     let entries = decoder::read_mat_reader_cooperative(&mut reader, &mut cooperation).await?;
     check_source_current(source)?;
     restore_loaded_entries(entries, Some(source)).await

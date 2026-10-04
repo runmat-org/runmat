@@ -5,6 +5,7 @@ use super::super::super::authority::MatFsPath;
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult};
+use std::future::Future;
 
 pub(super) struct MatDecodeCooperation<'a> {
     budget: Option<CpuCooperationBudget>,
@@ -33,17 +34,28 @@ impl<'a> MatDecodeCooperation<'a> {
             budget
                 .checkpoint(bytes as u64)
                 .await
-                .map_err(|error| match error {
-                    ExecutionServiceError::Cancelled => {
-                        build_runtime_error("load: MAT decoding was cancelled")
-                            .with_identifier("RunMat:Cancelled")
-                            .with_builtin("load")
-                            .build()
-                    }
-                    other => other.into_runtime_error(),
-                })?;
+                .map_err(runtime_error)?;
         }
         self.check_source()
+    }
+
+    pub(super) async fn await_io<T, E, F>(&mut self, future: F) -> BuiltinResult<Result<T, E>>
+    where
+        F: Future<Output = Result<T, E>>,
+    {
+        self.completed(0).await?;
+        let result = if let Some(budget) = self.budget.as_ref() {
+            budget
+                .await_cancellable(future)
+                .await
+                .map_err(runtime_error)?
+        } else {
+            future.await
+        };
+        if result.is_ok() {
+            self.completed(0).await?;
+        }
+        Ok(result)
     }
 
     fn check_source(&self) -> BuiltinResult<()> {
@@ -57,5 +69,18 @@ impl<'a> MatDecodeCooperation<'a> {
             })?;
         }
         Ok(())
+    }
+}
+
+fn runtime_error(error: ExecutionServiceError) -> crate::RuntimeError {
+    match error {
+        cancelled @ ExecutionServiceError::Cancelled => {
+            build_runtime_error("load: MAT decoding was cancelled")
+                .with_identifier("RunMat:Cancelled")
+                .with_builtin("load")
+                .with_source(cancelled)
+                .build()
+        }
+        other => other.into_runtime_error(),
     }
 }

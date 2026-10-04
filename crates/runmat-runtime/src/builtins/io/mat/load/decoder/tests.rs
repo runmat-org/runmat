@@ -3,7 +3,7 @@ use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServ
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use futures::executor::block_on;
-use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::cancellation::{CancellationReason, CancellationSource};
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -74,6 +74,31 @@ fn service_cancellation_interrupts_a_large_tag_before_its_tail_is_read() {
     let error = block_on(read_mat_reader_cooperative(&mut reader, &mut cooperation))
         .expect_err("service cancels inside declared tag body");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(
+        error
+            .source
+            .as_deref()
+            .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+        Some(&ExecutionServiceError::Cancelled)
+    );
     assert!((reader.position() as usize) < bytes.len());
     assert!(!source.token().is_cancelled());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn preexisting_cancellation_reads_no_header_bytes() {
+    let source = CancellationSource::new();
+    source.cancel(CancellationReason::User);
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        || Box::pin(async { Ok(()) }),
+    );
+    let mut reader = Cursor::new(header());
+    let mut cooperation = MatDecodeCooperation::with_budget(budget);
+    let error = block_on(read_mat_reader_cooperative(&mut reader, &mut cooperation))
+        .expect_err("cancel before codec read");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(reader.position(), 0);
 }

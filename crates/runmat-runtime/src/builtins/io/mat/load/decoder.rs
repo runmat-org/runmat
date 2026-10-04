@@ -142,6 +142,7 @@ pub(super) async fn read_mat_reader_cooperative<R: Read>(
     reader: &mut R,
     cooperation: &mut MatDecodeCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
+    cooperation.completed(0).await?;
     let endian = read_mat_header(reader)?;
     cooperation.completed(MAT_HEADER_LEN).await?;
     let mut streams: Vec<Box<dyn Read + '_>> = vec![Box::new(reader)];
