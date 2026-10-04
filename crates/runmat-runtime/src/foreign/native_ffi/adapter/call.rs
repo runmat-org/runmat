@@ -109,7 +109,7 @@ impl NativeFfiAdapter {
             &callback_bindings,
             &pointer_bindings,
         )
-        .map_err(|error| foreign_error(ForeignErrorKind::InvocationFailed, error.to_string()))?;
+        .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvocationFailed, error))?;
         let mut outputs = Vec::new();
         if let Some(return_value) = result.return_value {
             outputs.push(match return_value {

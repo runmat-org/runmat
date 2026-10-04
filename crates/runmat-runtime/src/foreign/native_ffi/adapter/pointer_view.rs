@@ -28,7 +28,7 @@ impl NativeFfiAdapter {
                 pointer, metadata, ..
             } => pointer
                 .value(&metadata)
-                .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string())),
+                .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
             PointerEntry::Opaque { .. } => Err(invalid_call(
                 "opaque library pointer values cannot be read without an explicit copy contract",
             )),
@@ -68,7 +68,7 @@ impl NativeFfiAdapter {
                 },
             ) => pointer
                 .value(&metadata)
-                .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string())),
+                .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
             ("datatype", PointerEntry::CallerOwned { type_name, .. }) => {
                 Ok(Value::String(type_name))
             }
@@ -92,7 +92,7 @@ impl NativeFfiAdapter {
                     &view.shape,
                     &metadata,
                 )
-                .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()))
+                .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error))
             }
             ("datatype", PointerEntry::Opaque { pointer, view, .. }) => Ok(Value::String(
                 view.borrow()
@@ -107,7 +107,7 @@ impl NativeFfiAdapter {
                 },
             ) => {
                 let value = pointer.value(&metadata).map_err(|error| {
-                    foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
+                    foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
                 })?;
                 let Value::Struct(structure) = value else {
                     return Err(invalid_call(format!(
@@ -159,7 +159,7 @@ impl NativeFfiAdapter {
                     ));
                 } else {
                     let current = pointer.value(&metadata).map_err(|error| {
-                        foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
+                        foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
                     })?;
                     let Value::Struct(mut structure) = current else {
                         return Err(invalid_call(format!(
@@ -175,7 +175,7 @@ impl NativeFfiAdapter {
                     Value::Struct(structure)
                 };
                 pointer.set_value(&replacement, &metadata).map_err(|error| {
-                    foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
+                    foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
                 })?;
                 Ok(arguments[0].clone())
             }

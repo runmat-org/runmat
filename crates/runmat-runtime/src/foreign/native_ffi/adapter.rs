@@ -21,9 +21,9 @@ use runmat_types::{
 use runmat_value::{CellArray, ForeignResourceKey, StructValue, Value};
 
 use super::super::{
-    foreign_error, ForeignAdapter, ForeignAdapterDescriptor, ForeignAdapterFuture,
-    ForeignErrorKind, ForeignExecutionPolicy, ForeignHandleRegistry, ForeignHostRegistration,
-    ForeignHostRelease, ForeignResourceMetadata,
+    foreign_error, foreign_error_with_source, ForeignAdapter, ForeignAdapterDescriptor,
+    ForeignAdapterFuture, ForeignErrorKind, ForeignExecutionPolicy, ForeignHandleRegistry,
+    ForeignHostRegistration, ForeignHostRelease, ForeignResourceMetadata,
 };
 use super::request::{
     default_alias, invalid_call, legacy_pointer_type, optional_string_argument, string_argument,
@@ -223,7 +223,7 @@ impl NativeFfiAdapter {
         manifest_path: &std::path::Path,
     ) -> Result<String, RuntimeError> {
         let manifest = NativeInterfaceArtifactManifest::read(manifest_path)
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let alias = manifest.interface_name.clone();
         if self.isolation_policy.get().isolate {
             let library_bytes = std::fs::read(library_path).map_err(|error| {
@@ -237,7 +237,7 @@ impl NativeFfiAdapter {
             })?;
             manifest
                 .validate_current_library(&library_bytes)
-                .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+                .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
             self.prepared_artifact_identities
                 .borrow_mut()
                 .insert(manifest.identity.to_string());
@@ -459,9 +459,9 @@ fn isolated_outputs(
         (1, 1) => runmat_value::ValueSequence::single(
             outputs.pop().expect("one isolated native FFI output"),
         )
-        .map_err(|error| invalid_call(error.to_string())),
+        .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
         _ => runmat_value::ValueSequence::comma_separated(outputs)
-            .map_err(|error| invalid_call(error.to_string())),
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
     }
 }
 

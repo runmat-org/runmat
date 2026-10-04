@@ -83,9 +83,9 @@ impl NativeFfiAdapter {
         };
         let preparation =
             prepare_header_with_declarations_report(&preparation, &additional_headers)
-                .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+                .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let identity = artifact_identity(&preparation.metadata)
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let notfound =
             self.insert_library(&alias, &library_path, preparation.metadata, identity, true)?;
         Ok(LegacyLoadReport {
@@ -104,7 +104,7 @@ impl NativeFfiAdapter {
         let library_path = PathBuf::from(string_argument(arguments, 0, "load_prepared")?);
         let manifest_path = PathBuf::from(string_argument(arguments, 1, "load_prepared")?);
         let manifest = NativeInterfaceArtifactManifest::read(&manifest_path)
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let alias = optional_string_argument(arguments, 2, "load_prepared")?
             .unwrap_or_else(|| manifest.interface_name.clone());
         self.load_prepared_manifest(&alias, &library_path, manifest)
@@ -128,10 +128,10 @@ impl NativeFfiAdapter {
         })?;
         manifest
             .validate_current_library(&library_bytes)
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let metadata = manifest
             .materialized_metadata(library_path)
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let identity = manifest.identity.to_string();
         self.insert_library(alias, library_path, metadata, identity, false)?;
         Ok(Value::String(alias.into()))
@@ -158,7 +158,7 @@ impl NativeFfiAdapter {
         allow_missing_symbols: bool,
     ) -> Result<Vec<String>, RuntimeError> {
         let library = runmat_native_ffi::LoadedLibrary::open(library_path.as_ref())
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let mut metadata = metadata;
         let mut missing = Vec::new();
         for declared_library in &mut metadata.libraries {
@@ -317,12 +317,12 @@ impl NativeFfiAdapter {
             definitions: Vec::new(),
             compiler_frontend: self.compiler_frontend.clone(),
         })
-        .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         let manifest = prepared.manifest;
         let manifest_path = NativeInterfaceArtifactManifest::path_for_library(&library_path);
         manifest
             .publish(&manifest_path)
-            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+            .map_err(|error| foreign_error_with_source(ForeignErrorKind::LoadFailed, error))?;
         self.load_prepared_manifest(&alias, &library_path, manifest)
     }
 }

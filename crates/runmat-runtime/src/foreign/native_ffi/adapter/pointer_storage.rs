@@ -17,7 +17,7 @@ impl NativeFfiAdapter {
             Some(value) => {
                 NativePointerResource::new(resolved.pointee.clone(), value, &resolved.metadata)
                     .map_err(|error| {
-                        foreign_error(ForeignErrorKind::InvalidCall, error.to_string())
+                        foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
                     })?
             }
             None => NativePointerResource::null(resolved.pointee),
@@ -137,7 +137,7 @@ impl NativeFfiAdapter {
             &initial_value,
             &entry.metadata,
         )
-        .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()))?;
+        .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error))?;
         self.register_caller_owned_pointer(
             pointer,
             Rc::clone(&entry.metadata),

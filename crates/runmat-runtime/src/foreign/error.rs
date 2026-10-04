@@ -1,3 +1,4 @@
+use crate::runtime_error::RuntimeErrorSourceBound;
 use crate::{build_runtime_error, RuntimeError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,4 +47,33 @@ pub fn foreign_error(kind: ForeignErrorKind, message: impl Into<String>) -> Runt
         .with_builtin("foreign")
         .with_identifier(kind.identifier())
         .build()
+}
+
+/// Retain the native/host cause under the same public foreign identifier.
+pub fn foreign_error_with_source(
+    kind: ForeignErrorKind,
+    source: impl RuntimeErrorSourceBound,
+) -> RuntimeError {
+    build_runtime_error(source.to_string())
+        .with_builtin("foreign")
+        .with_identifier(kind.identifier())
+        .with_source(source)
+        .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn foreign_identifier_keeps_original_host_cause() {
+        let error = foreign_error_with_source(
+            ForeignErrorKind::LoadFailed,
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing native library"),
+        );
+        assert_eq!(error.identifier(), Some("RunMat:Foreign:LoadFailed"));
+        assert!(std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .is_some());
+    }
 }
