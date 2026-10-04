@@ -1,0 +1,247 @@
+use super::super::super::format::MatClass;
+use super::*;
+use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+use futures::executor::block_on;
+use runmat_execution::cancellation::CancellationSource;
+use runmat_filesystem::FsProvider;
+use runmat_value::NumericStorage;
+use std::num::NonZeroU64;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+fn virtual_directory() -> &'static str {
+    if cfg!(windows) {
+        r"C:\mat"
+    } else {
+        "/mat"
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn a_large_dimension_rejects_instead_of_wrapping_its_mat_tag() {
+    let vars = [MatVar {
+        name: "x".into(),
+        array: MatArray {
+            class: MatClass::Double,
+            dims: vec![i32::MAX as usize + 1, 1],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(Vec::new()),
+                imag: None,
+            },
+        },
+    }];
+    let error = write_mat_bytes(&vars).expect_err("MAT dimensions are signed 32-bit");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    assert!(error.message().contains("int32 range"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn matfile_writer_errors_retain_matfile_identity() {
+    let vars = [MatVar {
+        name: "x".into(),
+        array: MatArray {
+            class: MatClass::Double,
+            dims: vec![i32::MAX as usize + 1, 1],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(Vec::new()),
+                imag: None,
+            },
+        },
+    }];
+    let error = block_on(write_mat_bytes_cooperative(
+        &vars,
+        MatEncodingOwner::MatFile,
+        None,
+    ))
+    .expect_err("dimension does not fit MAT tag");
+    assert_eq!(error.identifier(), Some("RunMat:matfile:Io"));
+    assert!(error.message().starts_with("matfile:"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn malformed_shape_and_complex_storage_reject_before_encoded_publication() {
+    let malformed = [
+        MatArray {
+            class: MatClass::Double,
+            dims: vec![2, 2],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(vec![1.0]),
+                imag: None,
+            },
+        },
+        MatArray {
+            class: MatClass::Double,
+            dims: vec![1, 1],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(vec![1.0]),
+                imag: Some(NumericStorage::F32(vec![1.0])),
+            },
+        },
+    ];
+    for array in malformed {
+        let error = write_mat_bytes(&[MatVar {
+            name: "bad".into(),
+            array,
+        }])
+        .expect_err("invalid matrix never yields MAT bytes");
+        assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn struct_field_width_includes_nul_and_nested_cardinality_is_checked() {
+    let scalar = MatArray {
+        class: MatClass::Double,
+        dims: vec![1, 1],
+        data: MatData::Numeric {
+            real: NumericStorage::F64(vec![1.0]),
+            imag: None,
+        },
+    };
+    let make_struct = |field_values: Vec<MatArray>| MatVar {
+        name: "record".into(),
+        array: MatArray {
+            class: MatClass::Struct,
+            dims: vec![1, 1],
+            data: MatData::Struct {
+                field_names: vec!["abc".into()],
+                field_values,
+            },
+        },
+    };
+    let bytes = write_mat_bytes(&[make_struct(vec![scalar])]).expect("valid MAT struct");
+    assert!(bytes
+        .windows(12)
+        .any(|window| window == [5, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0]));
+    assert!(bytes.windows(4).any(|window| window == b"abc\0"));
+    let error =
+        write_mat_bytes(&[make_struct(Vec::new())]).expect_err("missing nested field value");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn sparse_row_and_column_metadata_reject_before_mat_bytes() {
+    let malformed = MatVar {
+        name: "s".into(),
+        array: MatArray {
+            class: MatClass::Sparse,
+            dims: vec![2, 2],
+            data: MatData::Sparse {
+                rows: 2,
+                cols: 2,
+                col_ptrs: vec![0, 2, 1],
+                row_indices: vec![0],
+                values: NumericStorage::F64(vec![1.0]),
+                logical: false,
+            },
+        },
+    };
+    let error = write_mat_bytes(&[malformed]).expect_err("invalid sparse pointer geometry");
+    assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn cancelled_encoding_never_publishes_to_captured_owner() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        virtual_directory(),
+    ));
+    let _selected = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(virtual_directory()).expect("selected virtual cwd");
+    let path = MatFsPath::capture(PathBuf::from("cancelled.mat")).expect("capture owner");
+    let cancellation = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        cancellation.token(),
+        || Box::pin(async { Err(ExecutionServiceError::Cancelled) }),
+    );
+    let mut cooperation =
+        MatCodecCooperation::with_budget(budget, "save", &runmat_builtins::SAVE_ERROR_IO);
+    let vars = [MatVar {
+        name: "x".into(),
+        array: MatArray {
+            class: MatClass::Double,
+            dims: vec![1, 1],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(vec![42.0]),
+                imag: None,
+            },
+        },
+    }];
+    let error = block_on(write_mat_file(
+        &path,
+        &vars,
+        MatEncodingOwner::Save,
+        &mut cooperation,
+    ))
+    .expect_err("cancel before publication");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(
+        error
+            .source
+            .as_deref()
+            .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+        Some(&ExecutionServiceError::Cancelled)
+    );
+    let error = block_on(provider.read(path.path())).expect_err("no published MAT file");
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn large_numeric_encoding_cancels_inside_payload_before_write() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        virtual_directory(),
+    ));
+    let _selected = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(virtual_directory()).expect("selected virtual cwd");
+    let path =
+        MatFsPath::capture(PathBuf::from("large-cancelled.mat")).expect("capture original owner");
+    let cancellation = CancellationSource::new();
+    let turns = Arc::new(AtomicUsize::new(0));
+    let observed = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(ENCODE_WORK_CHUNK as u64).unwrap()),
+        cancellation.token(),
+        move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err(ExecutionServiceError::Cancelled) })
+        },
+    );
+    let mut cooperation =
+        MatCodecCooperation::with_budget(budget, "save", &runmat_builtins::SAVE_ERROR_IO);
+    let vars = [MatVar {
+        name: "large".into(),
+        array: MatArray {
+            class: MatClass::UInt64,
+            dims: vec![1, 20_000],
+            data: MatData::Numeric {
+                real: NumericStorage::U64(vec![u64::MAX; 20_000]),
+                imag: None,
+            },
+        },
+    }];
+    let error = block_on(write_mat_file(
+        &path,
+        &vars,
+        MatEncodingOwner::Save,
+        &mut cooperation,
+    ))
+    .expect_err("service cancels during numeric payload encoding");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(turns.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        block_on(provider.read(path.path()))
+            .expect_err("unpublished MAT bytes")
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+}

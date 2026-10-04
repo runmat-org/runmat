@@ -3,6 +3,7 @@ use super::*;
 const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink { label: "MAT object methods and whole-variable protocol", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/matfile.rs") },
     BuiltinDocumentationLink { label: "Sealed receiver and filesystem owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/authority/handle.rs") },
+    BuiltinDocumentationLink { label: "Shared MAT value conversion and writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/encoding.rs") },
 ];
 const MAT_LINKS: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink {

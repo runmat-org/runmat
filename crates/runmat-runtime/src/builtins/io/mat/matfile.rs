@@ -10,8 +10,8 @@ use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
 use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
 use super::cooperation::MatCodecCooperation;
+use super::encoding::{encode_workspace_to_mat_bytes_for_owner, MatEncodingOwner};
 use super::load::read_mat_file_for_builtin_on_with_context;
-use super::save::encode_workspace_to_mat_bytes;
 use crate::{
     build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
     OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
@@ -209,9 +209,13 @@ async fn matfile_write_step(
     let value = cooperation.await_io(gather_if_needed_async(&rhs)).await??;
     resolve_matfile(runtime, &object)?;
     replace_or_append(&mut entries, field, value);
-    let bytes = cooperation
-        .await_io(encode_workspace_to_mat_bytes(&entries))
-        .await??;
+    cooperation.completed(0).await?;
+    let bytes = encode_workspace_to_mat_bytes_for_owner(
+        &entries,
+        MatEncodingOwner::MatFile,
+        Some(&mut cooperation),
+    )
+    .await?;
     cooperation.completed(bytes.len()).await?;
     resolve_matfile(runtime, &object)?;
     cooperation

@@ -1,10 +1,13 @@
-//! Level-5 MAT value conversion and byte encoding.
+//! Shared Level-5 MAT value conversion and byte encoding.
 
-use super::super::cooperation::MatCodecCooperation;
-use super::super::format::{MatArray, MatClass, MatData};
-use super::{save_error_with, SAVE_ERROR_IO, SAVE_ERROR_SELECTION, SAVE_ERROR_UNSUPPORTED};
+use super::cooperation::MatCodecCooperation;
+use super::format::{MatArray, MatClass, MatData};
+
+mod diagnostics;
 use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
 use crate::{gather_if_needed_async, BuiltinResult};
+use diagnostics::MatEncodingFailure;
+pub(crate) use diagnostics::MatEncodingOwner;
 use futures::future::LocalBoxFuture;
 use runmat_value::{
     CharArray, ComplexStorage, IntValue, IntegerStorage, NumericDType, NumericStorage, Value,
@@ -24,7 +27,7 @@ fn canonical_dims(shape: &[usize]) -> Vec<usize> {
 }
 
 pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray>> {
-    convert_value_with_cooperation(value, None)
+    convert_value_with_cooperation(value, MatEncodingOwner::Save, None)
 }
 
 async fn completed(
@@ -39,6 +42,7 @@ async fn completed(
 
 pub(super) fn convert_value_with_cooperation<'a, 'b>(
     value: Value,
+    owner: MatEncodingOwner,
     mut cooperation: Option<&'a mut MatCodecCooperation<'b>>,
 ) -> LocalBoxFuture<'a, BuiltinResult<MatArray>> {
     Box::pin(async move {
@@ -74,7 +78,7 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 let dims = canonical_dims(&t.shape);
                 let storage = t
                     .into_numeric_storage()
-                    .map_err(|error| save_error_with(&SAVE_ERROR_IO, format!("save: {error}")))?;
+                    .map_err(|error| owner.error(MatEncodingFailure::Io, error.to_string()))?;
                 let class = tensor_dtype_mat_class(storage.numeric_dtype());
                 let data = MatData::Numeric {
                     real: storage,
@@ -167,11 +171,11 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 class: MatClass::Char,
                 dims: ca.shape.clone(),
                 data: MatData::Char {
-                    data: char_array_to_utf16_cooperative(&ca, &mut cooperation).await?,
+                    data: char_array_to_utf16_cooperative(&ca, owner, &mut cooperation).await?,
                 },
             }),
             Value::String(s) => {
-                let data = text_to_utf16_cooperative(&s, &mut cooperation).await?;
+                let data = text_to_utf16_cooperative(&s, owner, &mut cooperation).await?;
                 Ok(MatArray {
                     class: MatClass::Char,
                     dims: vec![1, data.len()],
@@ -182,13 +186,14 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 if sa.data.len() == 1 {
                     return convert_value_with_cooperation(
                         Value::String(sa.data[0].clone()),
+                        owner,
                         cooperation.as_deref_mut(),
                     )
                     .await;
                 }
                 let mut elements = Vec::with_capacity(sa.data.len());
                 for text in &sa.data {
-                    let data = text_to_utf16_cooperative(text, &mut cooperation).await?;
+                    let data = text_to_utf16_cooperative(text, owner, &mut cooperation).await?;
                     elements.push(MatArray {
                         class: MatClass::Char,
                         dims: vec![1, data.len()],
@@ -208,7 +213,7 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                     let gathered = gather_if_needed_async(element).await?;
                     completed(&mut cooperation, 0).await?;
                     elements.push(
-                        convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
+                        convert_value_with_cooperation(gathered, owner, cooperation.as_deref_mut())
                             .await?,
                     );
                 }
@@ -224,15 +229,15 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 for field in &field_names {
                     completed(&mut cooperation, field.len()).await?;
                     let val = struct_value.fields.get(field).ok_or_else(|| {
-                        save_error_with(
-                            &SAVE_ERROR_SELECTION,
-                            format!("save: missing struct field '{field}'"),
+                        owner.error(
+                            MatEncodingFailure::Selection,
+                            format!("missing struct field '{field}'"),
                         )
                     })?;
                     let gathered = gather_if_needed_async(val).await?;
                     completed(&mut cooperation, 0).await?;
                     field_values.push(
-                        convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
+                        convert_value_with_cooperation(gathered, owner, cooperation.as_deref_mut())
                             .await?,
                     );
                 }
@@ -248,18 +253,18 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
             Value::StructArray(array) => {
                 let field_names = array.field_names().cloned().collect::<Vec<_>>();
                 let capacity = array.len().checked_mul(field_names.len()).ok_or_else(|| {
-                    save_error_with(
-                        &SAVE_ERROR_SELECTION,
-                        "save: structure array exceeds platform limits",
+                    owner.error(
+                        MatEncodingFailure::Selection,
+                        "structure array exceeds platform limits",
                     )
                 })?;
                 let mut field_values = Vec::with_capacity(capacity);
                 for field in &field_names {
                     completed(&mut cooperation, field.len()).await?;
                     let column = array.field_values(field).ok_or_else(|| {
-                        save_error_with(
-                            &SAVE_ERROR_SELECTION,
-                            format!("save: missing struct field '{field}'"),
+                        owner.error(
+                            MatEncodingFailure::Selection,
+                            format!("missing struct field '{field}'"),
                         )
                     })?;
                     for value in column {
@@ -267,8 +272,12 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                         let gathered = gather_if_needed_async(value).await?;
                         completed(&mut cooperation, 0).await?;
                         field_values.push(
-                            convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
-                                .await?,
+                            convert_value_with_cooperation(
+                                gathered,
+                                owner,
+                                cooperation.as_deref_mut(),
+                            )
+                            .await?,
                         );
                     }
                 }
@@ -284,11 +293,11 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
             Value::GpuTensor(handle) => {
                 let gathered = gather_if_needed_async(&Value::GpuTensor(handle)).await?;
                 completed(&mut cooperation, 0).await?;
-                convert_value_with_cooperation(gathered, cooperation.as_deref_mut()).await
+                convert_value_with_cooperation(gathered, owner, cooperation.as_deref_mut()).await
             }
-            unsupported => Err(save_error_with(
-                &SAVE_ERROR_UNSUPPORTED,
-                format!("save: value of type '{:?}' is not supported", unsupported),
+            unsupported => Err(owner.error(
+                MatEncodingFailure::Unsupported,
+                format!("value of type '{unsupported:?}' is not supported"),
             )),
         }
     })
@@ -298,6 +307,7 @@ const TEXT_WORK_CHUNK: usize = 4096;
 
 async fn text_to_utf16_cooperative(
     text: &str,
+    owner: MatEncodingOwner,
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u16>> {
     let mut data = Vec::new();
@@ -305,9 +315,9 @@ async fn text_to_utf16_cooperative(
     for unit in text.encode_utf16() {
         if data.capacity() == data.len() {
             data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
-                save_error_with(
-                    &SAVE_ERROR_IO,
-                    format!("save: UTF-16 data cannot be allocated: {error}"),
+                owner.error(
+                    MatEncodingFailure::Io,
+                    format!("UTF-16 data cannot be allocated: {error}"),
                 )
             })?;
         }
@@ -324,14 +334,15 @@ async fn text_to_utf16_cooperative(
 
 async fn char_array_to_utf16_cooperative(
     chars: &CharArray,
+    owner: MatEncodingOwner,
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u16>> {
     let mut data = Vec::new();
     let mut work = 0usize;
     let page_len = chars.rows.checked_mul(chars.cols).ok_or_else(|| {
-        save_error_with(
-            &SAVE_ERROR_IO,
-            "save: MAT character shape exceeds platform limits",
+        owner.error(
+            MatEncodingFailure::Io,
+            "MAT character shape exceeds platform limits",
         )
     })?;
     let pages = if page_len == 0 {
@@ -345,16 +356,16 @@ async fn char_array_to_utf16_cooperative(
             .iter()
             .try_fold(1usize, |product, &size| product.checked_mul(size))
             .ok_or_else(|| {
-                save_error_with(
-                    &SAVE_ERROR_IO,
-                    "save: MAT character shape exceeds platform limits",
+                owner.error(
+                    MatEncodingFailure::Io,
+                    "MAT character shape exceeds platform limits",
                 )
             })?
     };
     if page_len.checked_mul(pages) != Some(chars.data.len()) {
-        return Err(save_error_with(
-            &SAVE_ERROR_IO,
-            "save: MAT character payload does not match its shape",
+        return Err(owner.error(
+            MatEncodingFailure::Io,
+            "MAT character payload does not match its shape",
         ));
     }
     for page in 0..pages {
@@ -363,9 +374,9 @@ async fn char_array_to_utf16_cooperative(
             for row in 0..chars.rows {
                 if data.capacity() == data.len() {
                     data.try_reserve(TEXT_WORK_CHUNK).map_err(|error| {
-                        save_error_with(
-                            &SAVE_ERROR_IO,
-                            format!("save: MAT characters cannot be allocated: {error}"),
+                        owner.error(
+                            MatEncodingFailure::Io,
+                            format!("MAT characters cannot be allocated: {error}"),
                         )
                     })?;
                 }
@@ -440,15 +451,25 @@ mod writer;
 use writer::write_mat_bytes_cooperative;
 pub(super) use writer::write_mat_file;
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
+    encode_workspace_to_mat_bytes_for_owner(entries, MatEncodingOwner::Save, None).await
+}
+
+pub(crate) async fn encode_workspace_to_mat_bytes_for_owner(
+    entries: &[(String, Value)],
+    owner: MatEncodingOwner,
+    mut cooperation: Option<&mut MatCodecCooperation<'_>>,
+) -> BuiltinResult<Vec<u8>> {
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
+        completed(&mut cooperation, 0).await?;
         let value = prepare_value_for_mat_save(value.clone()).await?;
+        completed(&mut cooperation, 0).await?;
         mat_vars.push(MatVar {
             name: name.clone(),
-            array: convert_value(value).await?,
+            array: convert_value_with_cooperation(value, owner, cooperation.as_deref_mut()).await?,
         });
     }
-    write_mat_bytes_cooperative(&mat_vars, None).await
+    write_mat_bytes_cooperative(&mat_vars, owner, cooperation).await
 }
 
 #[cfg(test)]
@@ -471,6 +492,19 @@ mod tests {
             panic!("text must become MAT char data");
         };
         assert_eq!(data, vec![0x0041, 0xd83d, 0xde00]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn matfile_encoding_uses_owning_error_identity() {
+        let error = block_on(convert_value_with_cooperation(
+            Value::OutputList(Vec::new()),
+            MatEncodingOwner::MatFile,
+            None,
+        ))
+        .expect_err("MAT-file assignment rejects unsupported payload");
+        assert_eq!(error.identifier(), Some("RunMat:matfile:Unsupported"));
+        assert!(error.message().starts_with("matfile:"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -503,6 +537,7 @@ mod tests {
         });
         let error = block_on(convert_value_with_cooperation(
             strings,
+            MatEncodingOwner::Save,
             Some(&mut cooperation),
         ))
         .expect_err("cancellation before later nested entries");

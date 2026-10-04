@@ -105,7 +105,7 @@ async fn matfile_subsasgn(
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::matfile_subsasgn(None, obj, subscript, rhs).await
 }
-use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
+use crate::builtins::io::mat::encoding::encode_workspace_to_mat_bytes;
 use futures::executor::block_on;
 use runmat_value::{CharArray, IntegerStorage, Tensor};
 use std::sync::atomic::{AtomicU64, Ordering};

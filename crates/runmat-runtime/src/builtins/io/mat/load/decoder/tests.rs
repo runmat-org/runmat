@@ -21,7 +21,7 @@ fn header() -> Vec<u8> {
 #[test]
 fn compressed_stream_matches_plain_numeric_class_and_value() {
     let plain = block_on(
-        crate::builtins::io::mat::save::encode_workspace_to_mat_bytes(&[(
+        crate::builtins::io::mat::encoding::encode_workspace_to_mat_bytes(&[(
             "answer".into(),
             Value::Num(42.25),
         )]),

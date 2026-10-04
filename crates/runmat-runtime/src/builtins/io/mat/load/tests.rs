@@ -85,7 +85,7 @@ fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
     assert_eq!(result, Value::OutputList(Vec::new()));
     TEST_WORKSPACE.with(|slot| assert_eq!(slot.borrow().get("x"), Some(&Value::Num(9.0))));
 }
-use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
+use crate::builtins::io::mat::encoding::encode_workspace_to_mat_bytes;
 use crate::workspace::WorkspaceResolver;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
