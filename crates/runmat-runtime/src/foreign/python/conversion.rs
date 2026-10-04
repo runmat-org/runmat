@@ -242,11 +242,8 @@ fn keyword_bundle(value: runmat_value::ObjectInstance) -> Result<PythonValue, Ru
             .iter()
             .zip(values)
             .map(|(name, value)| {
-                if !crate::builtins::common::validation::value_is_text_scalar(name) {
-                    return Err(invalid_conversion("pyargs names must be text"));
-                }
-                let name = String::try_from(name)
-                    .map_err(|_| invalid_conversion("pyargs names must be text"))?;
+                let name = crate::builtins::common::validation::value_text_scalar_string(name)
+                    .ok_or_else(|| invalid_conversion("pyargs names must be text"))?;
                 if name.is_empty() {
                     return Err(invalid_conversion("pyargs names must be non-empty"));
                 }

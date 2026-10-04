@@ -29,6 +29,7 @@ use super::super::{
 };
 use super::conversion::{value_from_python, value_to_python};
 use super::{IsolatedPythonClient, NestedPythonCall, NestedPythonQueue};
+use crate::builtins::common::validation::value_text_scalar_string;
 use crate::context::{ForeignCall, RuntimeContext};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -958,8 +959,7 @@ fn foreign_argument(value: Option<Value>) -> Result<ForeignRef, RuntimeError> {
 
 fn string_argument(value: Option<Value>, label: &str) -> Result<String, RuntimeError> {
     match value {
-        Some(value) => String::try_from(&value)
-            .ok()
+        Some(value) => value_text_scalar_string(&value)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| invalid_call(format!("{label} must be non-empty text"))),
         None => Err(invalid_call(format!("{label} is required"))),
@@ -970,8 +970,7 @@ fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
     match value {
         None => Ok(Vec::new()),
         Some(Value::String(value)) => Ok(vec![value]),
-        Some(Value::CharArray(value)) => value
-            .row_string()
+        Some(Value::CharArray(value)) => value_text_scalar_string(&Value::CharArray(value))
             .map(|value| vec![value])
             .ok_or_else(|| invalid_call("Python outputs must be text")),
         Some(Value::StringArray(value)) => Ok(value.data),
@@ -979,8 +978,8 @@ fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
             .data
             .iter()
             .map(|value| {
-                String::try_from(value)
-                    .map_err(|_| invalid_call("Python output names must be text"))
+                value_text_scalar_string(value)
+                    .ok_or_else(|| invalid_call("Python output names must be text"))
             })
             .collect(),
         Some(_) => Err(invalid_call("Python outputs must be text")),
@@ -990,7 +989,8 @@ fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
 fn split_file_inputs(arguments: Vec<Value>) -> Result<(Vec<String>, Vec<Value>), RuntimeError> {
     if arguments.len() >= 2 {
         if let Some(position) = arguments.iter().position(|value| {
-            String::try_from(value).is_ok_and(|value| value.eq_ignore_ascii_case("Arguments"))
+            value_text_scalar_string(value)
+                .is_some_and(|value| value.eq_ignore_ascii_case("Arguments"))
         }) {
             let Some(Value::Cell(values)) = arguments.get(position + 1) else {
                 return Err(invalid_call(
@@ -1001,8 +1001,8 @@ fn split_file_inputs(arguments: Vec<Value>) -> Result<(Vec<String>, Vec<Value>),
                 .data
                 .iter()
                 .map(|value| {
-                    String::try_from(value)
-                        .map_err(|_| invalid_call("pyrunfile Arguments must contain text"))
+                    value_text_scalar_string(value)
+                        .ok_or_else(|| invalid_call("pyrunfile Arguments must contain text"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let mut inputs = arguments;
@@ -1099,6 +1099,10 @@ fn invalid_call(message: impl Into<String>) -> RuntimeError {
         .with_identifier("RunMat:Foreign:InvalidCall")
         .build()
 }
+
+#[cfg(test)]
+#[path = "adapter/text_tests.rs"]
+mod text_tests;
 
 #[cfg(test)]
 mod tests {

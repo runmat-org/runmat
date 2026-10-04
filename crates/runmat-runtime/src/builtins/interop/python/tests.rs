@@ -38,6 +38,32 @@ fn pyargs_constructs_local_bundle_without_foreign_service() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn pyargs_accepts_effective_character_rows_and_scalar_string_arrays() {
+    let row = runmat_value::CharArray::new_with_shape(vec!['n', 'a', 'm', 'e'], vec![1, 4, 1])
+        .expect("trailing singleton row");
+    let scalar = runmat_value::StringArray::new(vec!["other".into()], vec![1, 1])
+        .expect("scalar string array");
+    let bundle = pyargs_builtin(vec![
+        Value::CharArray(row),
+        Value::Num(1.0),
+        Value::StringArray(scalar),
+        Value::Bool(true),
+    ])
+    .expect("admitted text names");
+    let Value::Object(bundle) = bundle else {
+        panic!("expected Python arguments object");
+    };
+    let Value::Cell(names) = bundle.properties.get("Names").expect("Names") else {
+        panic!("names cell");
+    };
+    assert_eq!(
+        names.data,
+        vec![Value::String("name".into()), Value::String("other".into())]
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn pyargs_rejects_invalid_pairs_before_any_python_service() {
     let odd = pyargs_builtin(vec![Value::String("x".into())])
         .err()

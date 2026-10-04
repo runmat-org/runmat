@@ -29,6 +29,21 @@ pub fn value_is_text_scalar(value: &Value) -> bool {
     }
 }
 
+/// Decode only the text-scalar forms admitted by `value_is_text_scalar`.
+/// Generic `String::try_from(Value)` also stringifies numbers and booleans,
+/// so it must not be used for a semantic text argument.
+pub fn value_text_scalar_string(value: &Value) -> Option<String> {
+    if !value_is_text_scalar(value) {
+        return None;
+    }
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::StringArray(strings) => strings.data.first().cloned(),
+        Value::CharArray(chars) => chars.row_string(),
+        _ => None,
+    }
+}
+
 pub fn value_is_nonzero_length_text(value: &Value) -> bool {
     if !value_is_text(value) {
         return false;

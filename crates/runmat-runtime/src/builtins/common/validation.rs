@@ -65,7 +65,7 @@ mod text;
 use text::{chars_to_string, value_texts};
 pub use text::{
     isvarname_value, namedargs2cell_value, validate_function_signatures_json,
-    value_is_nonzero_length_text, value_is_text, value_is_text_scalar,
+    value_is_nonzero_length_text, value_is_text, value_is_text_scalar, value_text_scalar_string,
 };
 mod numeric;
 mod cell_leaves;
