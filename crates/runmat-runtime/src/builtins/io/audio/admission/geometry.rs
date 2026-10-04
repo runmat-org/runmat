@@ -5,7 +5,7 @@ use super::*;
 use runmat_builtins::AudioDecodeResourceFacts;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-pub(super) struct AudioDecodeGeometry {
+pub(in crate::builtins::io::audio) struct AudioDecodeGeometry {
     pub(in crate::builtins::io::audio) opened_extent: u64,
     pub(in crate::builtins::io::audio) data_offset: u64,
     pub(in crate::builtins::io::audio) data_len: u64,
