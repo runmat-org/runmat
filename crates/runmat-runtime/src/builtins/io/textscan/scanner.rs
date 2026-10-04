@@ -1,10 +1,11 @@
 use super::*;
 
-pub(super) fn parse_textscan(
+pub(super) async fn parse_textscan(
     text: &str,
     elements: &[FormatElement],
     repeat: Option<usize>,
     options: &TextscanOptions,
+    cooperation: &mut TextscanCooperation,
 ) -> BuiltinResult<ParsedTextscan> {
     let output_kinds: Vec<OutputKind> = elements
         .iter()
@@ -18,6 +19,7 @@ pub(super) fn parse_textscan(
     scanner.skip_header_lines();
     let mut records = 0usize;
     while !scanner.is_eof() && repeat.map(|limit| records < limit).unwrap_or(true) {
+        cooperation.completed(0).await?;
         scanner.skip_separators();
         if scanner.is_eof() {
             break;
@@ -27,6 +29,7 @@ pub(super) fn parse_textscan(
         let row_start = scanner.pos;
         let mut failed = false;
         for idx in 0..elements.len() {
+            cooperation.completed(1).await?;
             match &elements[idx] {
                 FormatElement::Whitespace => scanner.skip_format_whitespace(),
                 FormatElement::Literal(literal) => {
@@ -78,6 +81,9 @@ pub(super) fn parse_textscan(
             break;
         }
         records += 1;
+        cooperation
+            .completed(scanner.pos.saturating_sub(row_start))
+            .await?;
         scanner.skip_separators();
     }
     Ok(ParsedTextscan {

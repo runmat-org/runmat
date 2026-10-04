@@ -127,21 +127,15 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
             "file identifier is not open for reading",
         ));
     }
-    let handle =
-        registry::shared_handle(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
-
-    let mut guard = handle.lock().map_err(|_| {
-        fgetl_error_with_detail(
-            &FGETL_ERROR_INTERNAL,
-            "failed to lock file handle (poisoned mutex)",
-        )
+    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier => {
+            fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER)
+        }
+        other => fgetl_error_with_detail(&FGETL_ERROR_IO, other.into_io_error().to_string()),
     })?;
-    let file = guard
-        .as_mut()
-        .ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
-    let read = read_text_line(file, None, BUILTIN_NAME)
+    let read = read_text_line(operation.file_mut(), None, BUILTIN_NAME)
         .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
-    drop(guard);
+    drop(operation);
     if read.encountered_eof {
         registry::mark_eof_encountered(fid);
     }

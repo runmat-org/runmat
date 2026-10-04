@@ -168,13 +168,16 @@ pub async fn evaluate(
             "file identifier is not open for writing",
         ));
     }
-    let handle = registry::shared_handle(fid).ok_or_else(|| {
-        fwrite_error_with_message(
+    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier => fwrite_error_with_message(
             FWRITE_ERROR_INVALID_IDENTIFIER.message,
             &FWRITE_ERROR_INVALID_IDENTIFIER,
-        )
+        ),
+        other => {
+            let source = other.into_io_error();
+            fwrite_error_with_source(source.to_string(), &FWRITE_ERROR_IO, source)
+        }
     })?;
-
     let skip_host = match raw_skip {
         Some(value @ Value::GpuTensor(_)) => Some(gather_value(value).await?),
         Some(value) => Some(value.clone()),
@@ -189,20 +192,13 @@ pub async fn evaluate(
     let data_host = gather_value(data_value).await?;
     let elements = map_string_result(borrow_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
 
-    let mut guard = handle.lock().map_err(|_| {
-        fwrite_error_with_detail(
-            &FWRITE_ERROR_INTERNAL,
-            "failed to lock file handle (poisoned mutex)",
-        )
-    })?;
-    let file = guard.as_mut().ok_or_else(|| {
-        fwrite_error_with_message(
-            FWRITE_ERROR_INVALID_IDENTIFIER.message,
-            &FWRITE_ERROR_INVALID_IDENTIFIER,
-        )
-    })?;
-
-    let count = write_elements(file, elements, precision_spec, skip_bytes, machine_format)?;
+    let count = write_elements(
+        operation.file_mut(),
+        elements,
+        precision_spec,
+        skip_bytes,
+        machine_format,
+    )?;
     Ok(FwriteEval::new(count))
 }
 

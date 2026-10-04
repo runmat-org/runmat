@@ -108,26 +108,27 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
         return Ok(());
     }
 
-    let handle = registry::shared_handle(fid)
-        .ok_or_else(|| frewind_error(&FREWIND_ERROR_INVALID_IDENTIFIER))?;
-    let mut guard = handle.lock().map_err(|_| {
-        frewind_error_with_detail(
-            &FREWIND_ERROR_INTERNAL,
-            "failed to lock file handle (poisoned mutex)",
-        )
+    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier => {
+            frewind_error(&FREWIND_ERROR_INVALID_IDENTIFIER)
+        }
+        other => {
+            let source = other.into_io_error();
+            frewind_error_with_source_detail(&FREWIND_ERROR_IO, source.to_string(), source)
+        }
     })?;
-    let file = guard
-        .as_mut()
-        .ok_or_else(|| frewind_error(&FREWIND_ERROR_INVALID_IDENTIFIER))?;
 
-    file.seek(SeekFrom::Start(0)).map_err(|err| {
-        frewind_error_with_source_detail(
-            &FREWIND_ERROR_IO,
-            format!("failed to rewind file: {err}"),
-            err,
-        )
-    })?;
-    drop(guard);
+    operation
+        .file_mut()
+        .seek(SeekFrom::Start(0))
+        .map_err(|err| {
+            frewind_error_with_source_detail(
+                &FREWIND_ERROR_IO,
+                format!("failed to rewind file: {err}"),
+                err,
+            )
+        })?;
+    drop(operation);
     registry::clear_eof_encountered(fid);
 
     Ok(())

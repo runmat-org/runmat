@@ -91,7 +91,7 @@ impl FprintfEval {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     let prepared = prepared::prepare(args).await?;
     let raw_format = prepared.format;
-    let target = prepared.target;
+    let mut target = prepared.target;
     let format_string =
         decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
     let format_summary = crate::builtins::common::format::validate_format_syntax(&format_string)

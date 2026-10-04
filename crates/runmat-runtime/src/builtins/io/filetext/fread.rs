@@ -140,31 +140,18 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
             "file identifier is not open for reading",
         ));
     }
-    let handle = registry::shared_handle(fid).ok_or_else(|| {
-        fread_error_with_message(
+    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier => fread_error_with_message(
             FREAD_ERROR_INVALID_IDENTIFIER.message,
             &FREAD_ERROR_INVALID_IDENTIFIER,
-        )
+        ),
+        other => fread_error_with_detail(&FREAD_ERROR_IO, other.into_io_error().to_string()),
     })?;
-
     let like = prepared.like;
     let controls = prepared.resolve_controls(&info.machinefmt).await?;
 
-    let mut guard = handle.lock().map_err(|_| {
-        fread_error_with_detail(
-            &FREAD_ERROR_INTERNAL,
-            "failed to lock file handle (poisoned mutex)",
-        )
-    })?;
-    let file = guard.as_mut().ok_or_else(|| {
-        fread_error_with_message(
-            FREAD_ERROR_INVALID_IDENTIFIER.message,
-            &FREAD_ERROR_INVALID_IDENTIFIER,
-        )
-    })?;
-
     let (mut eval, encountered_eof) = read_from_handle(
-        file,
+        operation.file_mut(),
         &controls.size,
         &controls.precision,
         controls.skip,
@@ -181,7 +168,7 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         }
         builder.build()
     })?;
-    drop(guard);
+    drop(operation);
     if encountered_eof {
         registry::mark_eof_encountered(fid);
     }

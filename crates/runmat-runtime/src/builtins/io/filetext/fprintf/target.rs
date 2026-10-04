@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::common::tensor;
-use crate::builtins::io::filetext::registry::{self, FileInfo, SharedFileHandle};
+use crate::builtins::io::filetext::registry::{self, FileInfo, FileOperation};
 use crate::console::{record_console_output, ConsoleStream};
 use runmat_builtins::{
     FPRINTF_ERROR_INVALID_IDENTIFIER, FPRINTF_ERROR_INVALID_INPUT, FPRINTF_ERROR_IO,
@@ -16,7 +16,7 @@ pub(super) enum OutputTarget {
     Stdout,
     Stderr,
     File {
-        handle: SharedFileHandle,
+        operation: FileOperation,
         encoding: String,
     },
 }
@@ -29,7 +29,7 @@ impl OutputTarget {
         }
     }
 
-    pub(super) fn write(&self, bytes: &[u8]) -> BuiltinResult<()> {
+    pub(super) fn write(&mut self, bytes: &[u8]) -> BuiltinResult<()> {
         match self {
             OutputTarget::Stdout => {
                 record_console_chunk(ConsoleStream::Stdout, bytes);
@@ -39,20 +39,8 @@ impl OutputTarget {
                 record_console_chunk(ConsoleStream::Stderr, bytes);
                 Ok(())
             }
-            OutputTarget::File { handle, .. } => {
-                let mut guard = handle.lock().map_err(|_| {
-                    fprintf_error_with_detail(
-                        &FPRINTF_ERROR_INTERNAL,
-                        "failed to lock file handle (poisoned mutex)",
-                    )
-                })?;
-                let file = guard.as_mut().ok_or_else(|| {
-                    fprintf_error_with_message(
-                        FPRINTF_ERROR_INVALID_IDENTIFIER.message,
-                        &FPRINTF_ERROR_INVALID_IDENTIFIER,
-                    )
-                })?;
-                file.write_all(bytes).map_err(|err| {
+            OutputTarget::File { operation, .. } => {
+                operation.file_mut().write_all(bytes).map_err(|err| {
                     fprintf_error_with_source(
                         format!(
                             "{}: failed to write to file ({err})",
@@ -97,14 +85,22 @@ pub(super) fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
                 )
             })?;
             ensure_writable(&info)?;
-            let handle = registry::shared_handle(fid).ok_or_else(|| {
-                fprintf_error_with_message(
+            let operation = registry::acquire_file(fid).map_err(|err| match err {
+                registry::FileOperationError::InvalidIdentifier => fprintf_error_with_message(
                     FPRINTF_ERROR_INVALID_IDENTIFIER.message,
                     &FPRINTF_ERROR_INVALID_IDENTIFIER,
-                )
+                ),
+                other => {
+                    let source = other.into_io_error();
+                    fprintf_error_with_source(
+                        format!("fprintf: file identifier is busy ({source})"),
+                        &FPRINTF_ERROR_IO,
+                        source,
+                    )
+                }
             })?;
             Ok(OutputTarget::File {
-                handle,
+                operation,
                 encoding: info.encoding.clone(),
             })
         }

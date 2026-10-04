@@ -63,9 +63,11 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "textscan",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::textscan"
 )]
 async fn textscan_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     input: Value,
     format_spec: Value,
     rest: Vec<Value>,
@@ -91,8 +93,13 @@ async fn textscan_builtin(
         Some(controls) => controls,
         None => parse_args(&gather_rest(rest).await?)?,
     };
-    let parsed = parse_input(&input, &parsed_format, repeat, &options)?;
-    build_output(parsed, &options)
+    let mut cooperation = TextscanCooperation::new(runtime.as_ref());
+    cooperation.completed(0).await?;
+    let parsed = parse_input(&input, &parsed_format, repeat, &options, &mut cooperation).await?;
+    cooperation.completed(0).await?;
+    let output = build_output(parsed, &options)?;
+    cooperation.completed(0).await?;
+    Ok(output)
 }
 
 fn is_typed_integer_value(value: &Value) -> bool {
@@ -115,13 +122,16 @@ async fn gather_rest(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 
 mod admission;
 mod column;
+mod cooperation;
 mod format;
 mod input;
 mod numeric;
 mod options;
 mod output;
 mod scanner;
-use self::{column::*, format::*, input::*, numeric::*, options::*, output::*, scanner::*};
+use self::{
+    column::*, cooperation::*, format::*, input::*, numeric::*, options::*, output::*, scanner::*,
+};
 
 #[cfg(test)]
 #[path = "textscan/tests.rs"]

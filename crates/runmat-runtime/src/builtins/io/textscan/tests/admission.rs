@@ -16,6 +16,7 @@ fn known_bad_format_rejects_before_resident_fid_download() {
     let allocation = resident_numeric();
     let wire = allocation.handle.wire_descriptor();
     let err = block_on(textscan_builtin(
+        None,
         Value::GpuTensor(allocation.handle.clone()),
         Value::from("%z"),
         Vec::new(),
@@ -30,6 +31,7 @@ fn known_bad_format_rejects_before_resident_fid_download() {
 fn known_bad_option_rejects_before_resident_value_download() {
     let allocation = resident_numeric();
     let err = block_on(textscan_builtin(
+        None,
         Value::from("1"),
         Value::from("%f"),
         vec![
@@ -49,6 +51,7 @@ fn nested_resident_in_invalid_input_rejects_before_download() {
     let nested =
         CellArray::new(vec![Value::GpuTensor(allocation.handle.clone())], 1, 1).expect("cell");
     let err = block_on(textscan_builtin(
+        None,
         Value::Cell(nested),
         Value::from("%f"),
         Vec::new(),

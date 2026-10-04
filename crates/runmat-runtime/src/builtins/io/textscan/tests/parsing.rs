@@ -45,6 +45,7 @@ fn textscan_scalar_parsers_read_typed_integer_storage_exactly() {
 fn textscan_huge_header_lines_stop_at_eof() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(textscan_builtin(
+        None,
         Value::from("x"),
         Value::from("%s"),
         vec![
@@ -60,6 +61,7 @@ fn textscan_huge_header_lines_stop_at_eof() {
 #[test]
 fn textscan_reads_mixed_columns_from_text() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("1 alpha\n2 beta\n"),
         Value::from("%f %s"),
         Vec::new(),
@@ -75,6 +77,7 @@ fn textscan_reads_mixed_columns_from_text() {
 #[test]
 fn textscan_integer_conversions_preserve_native_classes_and_wide_values() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("-999 18446744073709551615 1.25\n127 9223372036854775808 -2.5\n"),
         Value::from("%d8 %u64 %f32"),
         Vec::new(),
@@ -104,6 +107,7 @@ fn textscan_integer_conversions_preserve_native_classes_and_wide_values() {
 #[test]
 fn textscan_hex_binary_and_overflow_conversions_preserve_integer_contracts() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("0xFFFFFFFFFFFFFFFF -0x81 0b1111111111111111 999999999999999999999999999999999999999 -7\n"),
         Value::from("%x %xs8 %bu16 %d64 %u8"),
         Vec::new(),
@@ -151,6 +155,7 @@ fn textscan_hex_binary_and_overflow_conversions_preserve_integer_contracts() {
 fn textscan_documented_integer_formats_remain_enabled_in_matlab_mode() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let out = block_on(textscan_builtin(
+        None,
         Value::from("9007199254740993 0xFFFFFFFFFFFFFFFF\n"),
         Value::from("%u64 %x"),
         Vec::new(),
@@ -176,6 +181,7 @@ fn textscan_documented_integer_formats_remain_enabled_in_matlab_mode() {
 fn textscan_compatibility_gates_typed_controls_before_scanning() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(textscan_builtin(
+        None,
         Value::from("1\n"),
         Value::from("%d"),
         vec![Value::Int(IntValue::U8(1))],
@@ -190,6 +196,7 @@ fn textscan_compatibility_gates_typed_controls_before_scanning() {
 #[test]
 fn textscan_collect_output_groups_only_adjacent_same_class_columns() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("1 2 3\n4 5 6\n"),
         Value::from("%d16 %d16 %u16"),
         vec![Value::from("CollectOutput"), Value::Bool(true)],
@@ -218,6 +225,7 @@ fn textscan_collect_output_groups_only_adjacent_same_class_columns() {
 fn textscan_honors_delimiter_header_comments_and_treat_empty() {
     let text = "# header\nA,1.5\nB,NA\n% ignored\nC,3.5\n";
     let out = block_on(textscan_builtin(
+        None,
         Value::from(text),
         Value::from("%s %f"),
         vec![
@@ -246,6 +254,7 @@ fn textscan_honors_delimiter_header_comments_and_treat_empty() {
 #[test]
 fn textscan_supports_repeat_skip_collect_and_quotes() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("1,drop,2,\"hello, world\"\n3,drop,4,\"tail\"\n"),
         Value::from("%f %*s %f %q"),
         vec![
@@ -269,6 +278,7 @@ fn textscan_supports_repeat_skip_collect_and_quotes() {
 #[test]
 fn textscan_return_on_error_false_reports_parse_failure() {
     let err = block_on(textscan_builtin(
+        None,
         Value::from("1\nbad\n"),
         Value::from("%f"),
         vec![Value::from("ReturnOnError"), Value::Bool(false)],
@@ -281,6 +291,7 @@ fn textscan_return_on_error_false_reports_parse_failure() {
 #[test]
 fn textscan_honors_literals_in_format_spec() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("1,2\n3,4\n"),
         Value::from("%f,%f"),
         Vec::new(),
@@ -294,6 +305,7 @@ fn textscan_honors_literals_in_format_spec() {
 #[test]
 fn textscan_width_and_char_conversions_leave_remainder() {
     let strings = block_on(textscan_builtin(
+        None,
         Value::from("abcdef"),
         Value::from("%2s%s"),
         Vec::new(),
@@ -303,6 +315,7 @@ fn textscan_width_and_char_conversions_leave_remainder() {
     assert_eq!(text_column(&strings, 1), vec!["cdef".to_string()]);
 
     let chars = block_on(textscan_builtin(
+        None,
         Value::from("abc"),
         Value::from("%c%c%c"),
         Vec::new(),
@@ -317,6 +330,7 @@ fn textscan_width_and_char_conversions_leave_remainder() {
 #[test]
 fn textscan_collect_output_preserves_column_major_numeric_group() {
     let out = block_on(textscan_builtin(
+        None,
         Value::from("1 2\n3 4\n"),
         Value::from("%f %f"),
         vec![Value::from("CollectOutput"), Value::Bool(true)],

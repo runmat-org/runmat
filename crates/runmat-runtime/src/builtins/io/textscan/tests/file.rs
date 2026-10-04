@@ -72,6 +72,131 @@ fn registered_snapshot_retains_exact_metadata_and_observes_close() {
     assert!(snapshot.handle.lock().expect("retained slot").is_none());
     registry::reset_for_tests();
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn checked_out_file_is_busy_not_closed_and_drop_restores_exact_cursor() {
+    let _guard = registry::test_guard();
+    registry::reset_for_tests();
+    let path = file_fixture("operation-busy.txt", b"first\nsecond\n");
+    let mut options = OpenOptions::new();
+    options.read(true);
+    let file = block_on(options.open_async(&path)).expect("open file");
+    let handle = Arc::new(StdMutex::new(Some(file)));
+    let fid = registry::register_file(RegisteredFile {
+        path: path.to_path_buf(),
+        permission: "r".to_string(),
+        access: registry::FileAccess::READ,
+        machinefmt: "native".to_string(),
+        encoding: "UTF-8".to_string(),
+        handle: handle.clone(),
+    });
+    let mut operation = registry::acquire_file(fid).expect("checkout");
+    assert_eq!(operation.info.id, fid);
+    let mut first = [0; 6];
+    std::io::Read::read_exact(operation.file_mut(), &mut first).expect("read");
+    assert_eq!(&first, b"first\n");
+    assert!(matches!(
+        registry::acquire_file(fid),
+        Err(registry::FileOperationError::Busy)
+    ));
+    let reader_error = block_on(crate::builtins::io::filetext::fgetl::evaluate(
+        &Value::Num(fid as f64),
+        &[],
+    ))
+    .expect_err("a reentrant reader is busy, not closed");
+    assert_eq!(reader_error.identifier(), Some("RunMat:fgetl:IoFailure"));
+    assert!(reader_error.message().contains("another operation"));
+    let close_error = block_on(registry::close_async(fid)).expect_err("busy close");
+    assert_eq!(close_error.kind(), std::io::ErrorKind::WouldBlock);
+    assert!(registry::snapshot_file(fid).is_some());
+    drop(operation);
+    assert!(Arc::ptr_eq(
+        &handle,
+        &registry::snapshot_file(fid).expect("same entry").handle
+    ));
+    let mut second = String::new();
+    let mut resumed = registry::acquire_file(fid).expect("resume");
+    std::io::Read::read_to_string(resumed.file_mut(), &mut second).expect("remaining data");
+    assert_eq!(second, "second\n");
+    drop(resumed);
+    block_on(registry::close_async(fid))
+        .expect("close after release")
+        .expect("entry");
+    registry::reset_for_tests();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn abandoned_cooperative_file_read_restores_registered_owner_and_cursor() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::task::{Context, Poll};
+
+    let _guard = registry::test_guard();
+    registry::reset_for_tests();
+    let path = file_fixture("abandoned.txt", b"12\n34\n");
+    let mut options = OpenOptions::new();
+    options.read(true);
+    let mut file = block_on(options.open_async(&path)).expect("open file");
+    std::io::Read::read_exact(&mut file, &mut [0; 3]).expect("advance cursor");
+    let handle = Arc::new(StdMutex::new(Some(file)));
+    let fid = registry::register_file(RegisteredFile {
+        path: path.to_path_buf(),
+        permission: "r".to_string(),
+        access: registry::FileAccess::READ,
+        machinefmt: "native".to_string(),
+        encoding: "UTF-8".to_string(),
+        handle: handle.clone(),
+    });
+    let source = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).expect("quantum")),
+        source.token(),
+        || Box::pin(std::future::pending::<Result<(), ExecutionServiceError>>()),
+    );
+    let mut cooperation = TextscanCooperation::with_budget(budget);
+    let format = parse_format_spec("%f").expect("format");
+    let scan_options = TextscanOptions::default();
+    let mut call = Box::pin(input::parse_registered_file(
+        fid,
+        &format,
+        None,
+        &scan_options,
+        &mut cooperation,
+    ));
+    let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(
+        Future::poll(call.as_mut(), &mut cx),
+        Poll::Pending
+    ));
+    assert!(matches!(
+        registry::acquire_file(fid),
+        Err(registry::FileOperationError::Busy)
+    ));
+    assert_eq!(
+        block_on(registry::close_async(fid))
+            .expect_err("pending reader blocks close")
+            .kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    drop(call);
+    let mut resumed = registry::acquire_file(fid).expect("restored operation");
+    assert_eq!(
+        std::io::Seek::stream_position(resumed.file_mut()).expect("position"),
+        3
+    );
+    let mut tail = String::new();
+    std::io::Read::read_to_string(resumed.file_mut(), &mut tail).expect("tail");
+    assert_eq!(tail, "34\n");
+    drop(resumed);
+    block_on(registry::close_async(fid))
+        .expect("close")
+        .expect("entry");
+    registry::reset_for_tests();
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn textscan_repeated_file_read_preserves_next_record_position() {
@@ -93,6 +218,7 @@ fn textscan_repeated_file_read_preserves_next_record_position() {
     });
 
     let out = block_on(textscan_builtin(
+        None,
         Value::Num(fid as f64),
         Value::from("%f %s"),
         vec![Value::Num(1.0)],
@@ -176,6 +302,7 @@ fn shift_jis_registered_file_restores_source_byte_position(
     });
 
     let out = block_on(textscan_builtin(
+        None,
         Value::Num(fid as f64),
         Value::from("%f %s"),
         vec![Value::Num(1.0)],
@@ -199,6 +326,7 @@ fn shift_jis_registered_file_restores_source_byte_position(
 #[test]
 fn textscan_rejects_standard_stream_identifiers() {
     let err = block_on(textscan_builtin(
+        None,
         Value::Num(0.0),
         Value::from("%f"),
         Vec::new(),
@@ -212,6 +340,7 @@ fn textscan_rejects_standard_stream_identifiers() {
 fn excessive_output_request_rejects_before_text_or_file_scan() {
     let _outputs = crate::output_count::push_output_count(Some(2));
     let err = block_on(textscan_builtin(
+        None,
         Value::from("not a file and not parsed"),
         Value::from("%f"),
         Vec::new(),
@@ -242,6 +371,7 @@ fn textscan_reads_from_registered_file_identifier() {
     });
 
     let out = block_on(textscan_builtin(
+        None,
         Value::Num(fid as f64),
         Value::from("%f %s"),
         vec![Value::from("HeaderLines"), Value::Num(1.0)],

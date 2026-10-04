@@ -1,10 +1,108 @@
 use once_cell::sync::Lazy;
 use runmat_filesystem::File;
 use std::collections::HashMap;
+use std::io::{self, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Mutex as StdMutex};
 
 pub(crate) type SharedFileHandle = Arc<StdMutex<Option<File>>>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FileOperationError {
+    InvalidIdentifier,
+    Busy,
+    Poisoned,
+}
+
+impl FileOperationError {
+    pub(crate) fn into_io_error(self) -> io::Error {
+        match self {
+            Self::InvalidIdentifier => {
+                io::Error::new(io::ErrorKind::NotFound, "file identifier is not registered")
+            }
+            Self::Busy => io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "file identifier is in another operation",
+            ),
+            Self::Poisoned => io::Error::other("registered file handle is poisoned"),
+        }
+    }
+}
+
+/// Exact registered file checked out for one operation. No registry or handle
+/// mutex is held during filesystem callbacks, suspension, or CPU parsing.
+pub(crate) struct FileOperation {
+    fid: i32,
+    handle: SharedFileHandle,
+    file: Option<File>,
+    rollback_cursor_to: Option<u64>,
+    pub(crate) info: FileInfo,
+}
+
+impl FileOperation {
+    pub(crate) fn file_mut(&mut self) -> &mut File {
+        self.file
+            .as_mut()
+            .expect("a live operation retains its file")
+    }
+
+    pub(crate) fn restore_cursor_on_drop(&mut self, position: u64) {
+        self.rollback_cursor_to = Some(position);
+    }
+
+    pub(crate) fn commit_cursor(&mut self) {
+        self.rollback_cursor_to = None;
+    }
+}
+
+impl Drop for FileOperation {
+    fn drop(&mut self) {
+        if let (Some(position), Some(file)) = (self.rollback_cursor_to, self.file.as_mut()) {
+            let _ = file.seek(SeekFrom::Start(position));
+        }
+        let registry = REGISTRY.lock().unwrap_or_else(|poison| poison.into_inner());
+        let is_current = registry
+            .entries
+            .get(&self.fid)
+            .and_then(Entry::file_handle)
+            .is_some_and(|handle| Arc::ptr_eq(&handle, &self.handle));
+        if is_current {
+            let mut slot = self
+                .handle
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if slot.is_none() {
+                *slot = self.file.take();
+            }
+        }
+    }
+}
+
+pub(crate) fn acquire_file(fid: i32) -> Result<FileOperation, FileOperationError> {
+    let registry = REGISTRY.lock().map_err(|_| FileOperationError::Poisoned)?;
+    let entry = registry
+        .entries
+        .get(&fid)
+        .ok_or(FileOperationError::InvalidIdentifier)?;
+    let handle = entry
+        .file_handle()
+        .ok_or(FileOperationError::InvalidIdentifier)?;
+    let mut slot = handle.try_lock().map_err(|error| match error {
+        std::sync::TryLockError::WouldBlock => FileOperationError::Busy,
+        std::sync::TryLockError::Poisoned(_) => FileOperationError::Poisoned,
+    })?;
+    let file = slot.take().ok_or(FileOperationError::Busy)?;
+    let info = entry.info();
+    drop(slot);
+    drop(registry);
+    Ok(FileOperation {
+        fid,
+        handle,
+        file: Some(file),
+        rollback_cursor_to: None,
+        info,
+    })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FileAccess {
@@ -209,6 +307,7 @@ pub(crate) fn list_infos() -> Vec<FileInfo> {
     infos
 }
 
+#[cfg(test)]
 pub(crate) fn shared_handle(fid: i32) -> Option<SharedFileHandle> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
     guard
@@ -271,18 +370,35 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
             return Ok(None);
         }
         let mut guard = REGISTRY.lock().expect("file registry poisoned");
-        guard.entries.remove(&fid).map(|entry| {
-            let file = entry.file_handle().and_then(|handle| {
-                let mut guard = handle.lock().expect("registered file handle poisoned");
-                guard.take()
-            });
-            CloseEntry {
-                fid,
-                info: entry.info(),
-                entry: Some(entry),
-                file,
-                committed: false,
+        let Some(registered) = guard.entries.get(&fid) else {
+            return Ok(None);
+        };
+        let Some(handle) = registered.file_handle() else {
+            return Ok(None);
+        };
+        let mut slot = handle.try_lock().map_err(|error| match error {
+            std::sync::TryLockError::WouldBlock => io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "file identifier is in another operation",
+            ),
+            std::sync::TryLockError::Poisoned(_) => {
+                io::Error::other("registered file handle is poisoned")
             }
+        })?;
+        if slot.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "file identifier is in another operation",
+            ));
+        }
+        let file = slot.take();
+        drop(slot);
+        guard.entries.remove(&fid).map(|entry| CloseEntry {
+            fid,
+            info: entry.info(),
+            entry: Some(entry),
+            file,
+            committed: false,
         })
     };
 

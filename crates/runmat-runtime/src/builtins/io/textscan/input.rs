@@ -1,79 +1,105 @@
 use super::*;
 
-pub(super) fn parse_input(
+pub(super) async fn parse_input(
     value: &Value,
     format_spec: &[FormatElement],
     repeat: Option<usize>,
     options: &TextscanOptions,
+    cooperation: &mut TextscanCooperation,
 ) -> BuiltinResult<Vec<ColumnData>> {
     if let Some(fid) = numeric_fid(value) {
-        return parse_registered_file(fid, format_spec, repeat, options)
+        return parse_registered_file(fid, format_spec, repeat, options, cooperation)
+            .await
             .map(|parsed| parsed.columns);
     }
     let text = string_scalar(value, "textOrFileID")?;
-    parse_textscan(&text, format_spec, repeat, options).map(|parsed| parsed.columns)
+    parse_textscan(&text, format_spec, repeat, options, cooperation)
+        .await
+        .map(|parsed| parsed.columns)
 }
 
-fn parse_registered_file(
+pub(super) async fn parse_registered_file(
     fid: i32,
     format_spec: &[FormatElement],
     repeat: Option<usize>,
     options: &TextscanOptions,
+    cooperation: &mut TextscanCooperation,
 ) -> BuiltinResult<ParsedTextscan> {
     validate_fid(fid)?;
-    let snapshot = registry::snapshot_file(fid).ok_or_else(|| {
-        textscan_error_with(
+    let mut operation = registry::acquire_file(fid).map_err(|error| match error {
+        registry::FileOperationError::InvalidIdentifier => textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: invalid file identifier {fid}"),
-        )
+        ),
+        other => {
+            let source = other.into_io_error();
+            textscan_error_with_source(
+                &TEXTSCAN_ERROR_FILE,
+                format!("textscan: file identifier {fid} is busy ({source})"),
+                source,
+            )
+        }
     })?;
-    if !snapshot.info.access.read {
+    if !operation.info.access.read {
         return Err(textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: file identifier {fid} is not open for reading"),
         ));
     }
-    let mut guard = snapshot
-        .handle
-        .lock()
-        .map_err(|_| textscan_error_with(&TEXTSCAN_ERROR_FILE, "textscan: file handle poisoned"))?;
-    let file = guard.as_mut().ok_or_else(|| {
-        textscan_error_with(
-            &TEXTSCAN_ERROR_FILE,
-            format!("textscan: file identifier {fid} is closed"),
-        )
-    })?;
-    let start = file.stream_position().map_err(|err| {
+    let start = operation.file_mut().stream_position().map_err(|err| {
         textscan_error_with_source(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: unable to seek file identifier {fid} ({err})"),
             err,
         )
     })?;
+    operation.restore_cursor_on_drop(start);
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
-        textscan_error_with_source(
-            &TEXTSCAN_ERROR_FILE,
-            format!("textscan: unable to read from file identifier {fid} ({err})"),
-            err,
-        )
-    })?;
-    let encoding = if snapshot.info.encoding.trim().is_empty() {
+    let mut chunk = [0u8; 8192];
+    loop {
+        cooperation.completed(0).await?;
+        let count = operation.file_mut().read(&mut chunk).map_err(|err| {
+            textscan_error_with_source(
+                &TEXTSCAN_ERROR_FILE,
+                format!("textscan: unable to read from file identifier {fid} ({err})"),
+                err,
+            )
+        })?;
+        if count == 0 {
+            break;
+        }
+        bytes.try_reserve(count).map_err(|err| {
+            textscan_error_with_source(
+                &TEXTSCAN_ERROR_FILE,
+                "textscan: unable to reserve input buffer",
+                err,
+            )
+        })?;
+        bytes.extend_from_slice(&chunk[..count]);
+        cooperation.completed(count).await?;
+    }
+    let encoding = if operation.info.encoding.trim().is_empty() {
         "UTF-8"
     } else {
-        snapshot.info.encoding.as_str()
+        operation.info.encoding.as_str()
     };
     let decoded = DecodedFileText::decode(&bytes, encoding)?;
-    let parsed = parse_textscan(&decoded.text, format_spec, repeat, options)?;
+    cooperation.completed(bytes.len()).await?;
+    let parsed = parse_textscan(&decoded.text, format_spec, repeat, options, cooperation).await?;
     let consumed_bytes = decoded.byte_offset_for_text_pos(parsed.consumed_text_pos)?;
     let target = checked_source_position(start, consumed_bytes)?;
-    file.seek(SeekFrom::Start(target)).map_err(|err| {
-        textscan_error_with_source(
-            &TEXTSCAN_ERROR_FILE,
-            format!("textscan: unable to restore file position for identifier {fid} ({err})"),
-            err,
-        )
-    })?;
+    operation
+        .file_mut()
+        .seek(SeekFrom::Start(target))
+        .map_err(|err| {
+            textscan_error_with_source(
+                &TEXTSCAN_ERROR_FILE,
+                format!("textscan: unable to restore file position for identifier {fid} ({err})"),
+                err,
+            )
+        })?;
+    cooperation.completed(0).await?;
+    operation.commit_cursor();
     Ok(parsed)
 }
 
