@@ -7,7 +7,7 @@ use super::super::outcome::TransferOutcome;
 use crate::BuiltinResult;
 
 fn evaluate(args: &[Value]) -> BuiltinResult<TransferOutcome> {
-    futures::executor::block_on(super::execute::evaluate(args))
+    futures::executor::block_on(super::execute::evaluate(args, None))
 }
 
 fn text(path: &std::path::Path) -> Value {

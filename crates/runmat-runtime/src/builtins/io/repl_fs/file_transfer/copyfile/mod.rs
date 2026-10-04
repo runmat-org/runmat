@@ -1,5 +1,6 @@
 pub(super) mod execute;
 mod authority;
+mod cooperation;
 mod filesystem;
 mod plan;
 mod result;
@@ -17,10 +18,14 @@ use runmat_value::Value;
 #[runtime_builtin(
     name = "copyfile",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::file_transfer::copyfile"
 )]
-async fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let outcome = execute::evaluate(&args).await?;
+async fn copyfile_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let outcome = execute::evaluate(&args, context.as_ref()).await?;
     if let Some(count) = crate::output_count::current_output_count() {
         if count == 0 {
             return Ok(Value::OutputList(Vec::new()));

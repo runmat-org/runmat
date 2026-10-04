@@ -17,10 +17,10 @@ fn copy_and_move_use_the_portable_filesystem_provider() {
     runmat_filesystem::with_provider_override(Arc::new(filesystem.clone()), || {
         futures::executor::block_on(runmat_filesystem::set_current_dir_async("/workspace"))
             .expect("select the fixture's directory without changing provider swap semantics");
-        let copied = futures::executor::block_on(super::copyfile::execute::evaluate(&[
-            Value::from("source.bin"),
-            Value::from("copy.bin"),
-        ]))
+        let copied = futures::executor::block_on(super::copyfile::execute::evaluate(
+            &[Value::from("source.bin"), Value::from("copy.bin")],
+            None,
+        ))
         .expect("copy through memory provider");
         assert_eq!(copied.status(), 1.0, "{copied:?}");
 

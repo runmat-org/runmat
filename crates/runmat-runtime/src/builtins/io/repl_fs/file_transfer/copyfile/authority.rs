@@ -1,5 +1,7 @@
 //! Captured filesystem owner for one copyfile invocation.
 
+use crate::context::RuntimeContext;
+use runmat_execution::cancellation::CancellationToken;
 use runmat_filesystem::{self as vfs, FsMetadata, FsProvider};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -9,10 +11,11 @@ pub(super) struct CopyFilesystem {
     provider: Arc<dyn FsProvider>,
     cwd: PathBuf,
     lease: Option<vfs::CapturedFsResourceLease>,
+    cancellation: Option<CancellationToken>,
 }
 
 impl CopyFilesystem {
-    pub(super) fn capture() -> crate::BuiltinResult<Self> {
+    pub(super) fn capture(runtime: Option<&RuntimeContext>) -> crate::BuiltinResult<Self> {
         let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|error| {
             crate::build_runtime_error(format!(
                 "copyfile: unable to determine current directory ({error})"
@@ -26,6 +29,7 @@ impl CopyFilesystem {
             provider,
             cwd,
             lease,
+            cancellation: runtime.map(RuntimeContext::cancellation),
         })
     }
 
@@ -38,6 +42,16 @@ impl CopyFilesystem {
     }
 
     pub(super) fn check(&self) -> io::Result<()> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "copyfile: invocation cancelled",
+            ));
+        }
         if self.lease.as_ref().is_some_and(|lease| !lease.is_valid()) {
             Err(io::Error::other(
                 "copyfile: filesystem resource authority changed",
