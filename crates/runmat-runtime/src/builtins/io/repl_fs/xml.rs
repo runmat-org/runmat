@@ -109,17 +109,17 @@ async fn readstruct_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 async fn xmlread_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     requested_output_preflight("xmlread")?;
-    if args.len() != 1 {
-        return Err(compat_error(
-            "xmlread",
-            "xmlread: expected exactly one filename",
-        ));
-    }
     if args
         .iter()
         .any(crate::builtins::common::validation::value_has_native_integer_class)
     {
         return Err(compat_error("xmlread", "xmlread: filename must be text"));
+    }
+    if args.len() != 1 {
+        return Err(compat_error(
+            "xmlread",
+            "xmlread: expected exactly one filename",
+        ));
     }
     known_text(&args[0], "xmlread", "filename")?;
     let args = gather_args("xmlread", &args).await?;

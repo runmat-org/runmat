@@ -58,6 +58,7 @@ impl XmlFsPath {
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn captured_provider_and_relative_path_survive_ambient_swap() {
         let _lock = fs::provider_override_lock();
