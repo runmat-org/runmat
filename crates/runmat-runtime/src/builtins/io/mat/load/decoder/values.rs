@@ -73,11 +73,11 @@ pub(in super::super) fn mat_array_to_value(array: MatArray) -> BuiltinResult<Val
             }
         }
         MatData::Logical { data } => {
-            let total: usize = array
+            let total = array
                 .dims
                 .iter()
-                .copied()
-                .fold(1usize, |acc, d| acc.saturating_mul(d));
+                .try_fold(1usize, |acc, d| acc.checked_mul(*d))
+                .ok_or_else(|| load_error("load: logical array shape exceeds platform limits"))?;
             if data.len() != total {
                 return Err(load_error("load: logical data length mismatch"));
             }

@@ -56,6 +56,7 @@ pub(super) fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<Parse
         dims.push(1);
         dims.push(1);
     }
+    shape_elements(&dims)?;
 
     let name_elem = read_tagged(&mut cursor, false, endian)?
         .ok_or_else(|| load_error("load: matrix element missing name"))?;
@@ -294,11 +295,16 @@ fn parse_cell_array(
     dims: Vec<usize>,
     endian: Endian,
 ) -> BuiltinResult<MatArray> {
-    let total: usize = dims
-        .iter()
-        .copied()
-        .fold(1usize, |acc, d| acc.saturating_mul(d));
-    let mut elements = Vec::with_capacity(total);
+    let total = shape_elements(&dims)?;
+    ensure_remaining_element_headers(cursor, total)?;
+    let mut elements = Vec::new();
+    elements.try_reserve_exact(total).map_err(|error| {
+        super::super::load_error_with_source(
+            &runmat_builtins::LOAD_ERROR_IO,
+            "load: cell element storage cannot be allocated",
+            error,
+        )
+    })?;
     for _ in 0..total {
         let elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: cell element missing matrix payload"))?;
@@ -320,10 +326,7 @@ fn parse_struct(
     dims: Vec<usize>,
     endian: Endian,
 ) -> BuiltinResult<MatArray> {
-    let element_count = dims
-        .iter()
-        .try_fold(1usize, |product, extent| product.checked_mul(*extent))
-        .ok_or_else(|| load_error("load: struct array shape exceeds platform limits"))?;
+    let element_count = shape_elements(&dims)?;
     let len_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: struct missing maximum field length specifier"))?;
     if len_elem.data_type != MI_INT32 || len_elem.data.len() != 4 {
@@ -356,7 +359,17 @@ fn parse_struct(
     let value_count = field_count
         .checked_mul(element_count)
         .ok_or_else(|| load_error("load: struct array field count exceeds platform limits"))?;
-    let mut field_values = Vec::with_capacity(value_count);
+    ensure_remaining_element_headers(cursor, value_count)?;
+    let mut field_values = Vec::new();
+    field_values
+        .try_reserve_exact(value_count)
+        .map_err(|error| {
+            super::super::load_error_with_source(
+                &runmat_builtins::LOAD_ERROR_IO,
+                "load: struct field storage cannot be allocated",
+                error,
+            )
+        })?;
     for _ in 0..value_count {
         let elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: struct field missing matrix payload"))?;
@@ -375,6 +388,58 @@ fn parse_struct(
             field_values,
         },
     })
+}
+
+fn shape_elements(dims: &[usize]) -> BuiltinResult<usize> {
+    dims.iter()
+        .try_fold(1usize, |product, extent| product.checked_mul(*extent))
+        .ok_or_else(|| load_error("load: MAT array shape exceeds platform limits"))
+}
+
+fn ensure_remaining_element_headers(cursor: &Cursor<&[u8]>, count: usize) -> BuiltinResult<()> {
+    let remaining = cursor
+        .get_ref()
+        .len()
+        .saturating_sub(cursor.position() as usize);
+    if count > remaining / 8 {
+        return Err(load_error(
+            "load: MAT array declares more elements than its payload contains",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_or_unbacked_cell_geometry_rejects_before_allocation() {
+        assert!(shape_elements(&[usize::MAX, 2]).is_err());
+        let mut payload = Cursor::new(&[][..]);
+        let error = parse_cell_array(&mut payload, vec![1_000_000], Endian::Little)
+            .err()
+            .expect("missing million element headers");
+        assert!(error.message().contains("more elements"));
+    }
+
+    #[test]
+    fn sparse_struct_field_table_cannot_imply_unbacked_values() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&MI_INT32.to_le_bytes());
+        payload.extend_from_slice(&4u32.to_le_bytes());
+        payload.extend_from_slice(&2i32.to_le_bytes());
+        payload.extend_from_slice(&[0; 4]);
+        payload.extend_from_slice(&MI_INT8.to_le_bytes());
+        payload.extend_from_slice(&2u32.to_le_bytes());
+        payload.extend_from_slice(b"a\0");
+        payload.extend_from_slice(&[0; 6]);
+        let mut cursor = Cursor::new(payload.as_slice());
+        let error = parse_struct(&mut cursor, vec![2, 1], Endian::Little)
+            .err()
+            .expect("two values cannot fit absent headers");
+        assert!(error.message().contains("more elements"));
+    }
 }
 
 fn parse_sparse_array(
