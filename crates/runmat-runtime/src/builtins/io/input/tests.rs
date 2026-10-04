@@ -1,6 +1,9 @@
 use super::*;
 use crate::interaction::{push_queued_response, InteractionResponse};
 
+#[path = "tests/retry.rs"]
+mod retry;
+
 fn input_with_empty_prompt() -> BuiltinResult<Value> {
     futures::executor::block_on(input_builtin(vec![Value::String(String::new())]))
 }
