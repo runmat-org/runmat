@@ -2,6 +2,9 @@ use super::*;
 use futures::executor::block_on;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "tests/reentrant_provider.rs"]
+mod reentrant_provider;
+
 struct RevocableResourceLease(Arc<AtomicBool>, FsResourceContract);
 
 impl FsResourceLease for RevocableResourceLease {
@@ -81,8 +84,8 @@ fn deferred_write_failure_retains_original_io_error_object_once() {
     let _lock = fs::provider_override_lock();
     set_diary_enabled(false);
     let _ = take_diary_error();
-    record_diary_failure(io::Error::new(io::ErrorKind::BrokenPipe, "first failure"));
-    record_diary_failure(io::Error::new(
+    record_diary_open_failure(io::Error::new(io::ErrorKind::BrokenPipe, "first failure"));
+    record_diary_open_failure(io::Error::new(
         io::ErrorKind::PermissionDenied,
         "later failure",
     ));
@@ -111,12 +114,12 @@ fn invalidated_provider_resource_lease_stops_before_next_write() {
     };
     let lease: Arc<dyn FsResourceLease> = Arc::new(RevocableResourceLease(valid.clone(), contract));
     super::super::with_console_state(|state| {
-        state.diary.sink = Some(DiarySink {
+        state.diary.sink = Some(Rc::new(RefCell::new(DiarySink {
             _provider: provider.clone(),
             _resolved_path: PathBuf::from("/journal/session.log"),
             resource_lease: Some((lease, contract)),
             file,
-        });
+        })));
     });
 
     valid.store(false, Ordering::SeqCst);

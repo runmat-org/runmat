@@ -5,9 +5,13 @@ use super::{with_console_state, ConsoleEntry, ConsoleStream};
 use runmat_filesystem::{
     self as fs, File, FsProvider, FsResourceContract, FsResourceLease, OpenOptions,
 };
+use std::cell::RefCell;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
+
+type SharedDiarySink = Rc<RefCell<DiarySink>>;
 
 struct DiarySink {
     _provider: Arc<dyn FsProvider>,
@@ -33,7 +37,8 @@ impl DiarySink {
 
 pub(crate) struct DiaryState {
     filename: PathBuf,
-    sink: Option<DiarySink>,
+    sink: Option<SharedDiarySink>,
+    generation: u64,
     last_error: Option<io::Error>,
 }
 
@@ -53,17 +58,18 @@ impl Default for DiaryState {
         Self {
             filename: PathBuf::from("diary"),
             sink: None,
+            generation: 0,
             last_error: None,
         }
     }
 }
 
 fn open_sink(filename: &Path) -> io::Result<DiarySink> {
-    let (provider, cwd) = fs::current_provider_with_current_dir()?;
-    let resolved_path = if filename.is_absolute() {
-        filename.to_path_buf()
+    let (provider, resolved_path) = if filename.is_absolute() {
+        (fs::current_provider(), filename.to_path_buf())
     } else {
-        cwd.join(filename)
+        let (provider, cwd) = fs::current_provider_with_current_dir()?;
+        (provider, cwd.join(filename))
     };
     let mut options = OpenOptions::new();
     options.create(true).append(true);
@@ -106,43 +112,67 @@ pub fn take_diary_error() -> Option<io::Error> {
 
 pub fn set_diary_filename_checked(filename: impl Into<PathBuf>) -> io::Result<()> {
     let filename = filename.into();
-    let sink = open_sink(&filename)?;
+    let generation = with_console_state(|state| state.diary.generation);
+    let sink = Rc::new(RefCell::new(open_sink(&filename)?));
     with_console_state(|state| {
+        if state.diary.generation != generation {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "diary state changed while opening a file",
+            ));
+        }
         state.diary.filename = filename;
         state.diary.sink = Some(sink);
+        state.diary.generation = state.diary.generation.wrapping_add(1);
         state.diary.last_error = None;
-    });
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Compatibility wrapper for direct console clients. Unlike the checked
 /// builtin path it records an open failure for the enclosing execution.
 pub fn set_diary_filename(filename: impl Into<PathBuf>) {
     if let Err(error) = set_diary_filename_checked(filename) {
-        record_diary_failure(error);
+        record_diary_open_failure(error);
     }
 }
 
 pub fn set_diary_enabled_checked(enabled: bool) -> io::Result<()> {
     if !enabled {
-        with_console_state(|state| state.diary.sink = None);
+        with_console_state(|state| {
+            state.diary.sink = None;
+            state.diary.generation = state.diary.generation.wrapping_add(1);
+        });
         return Ok(());
     }
-    if diary_enabled() {
-        return Ok(());
-    }
-    let filename = diary_filename();
-    let sink = open_sink(&filename)?;
-    with_console_state(|state| {
-        state.diary.sink = Some(sink);
-        state.diary.last_error = None;
+    let (filename, generation, already_enabled) = with_console_state(|state| {
+        (
+            state.diary.filename.clone(),
+            state.diary.generation,
+            state.diary.sink.is_some(),
+        )
     });
-    Ok(())
+    if already_enabled {
+        return Ok(());
+    }
+    let sink = Rc::new(RefCell::new(open_sink(&filename)?));
+    with_console_state(|state| {
+        if state.diary.generation != generation {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "diary state changed while enabling",
+            ));
+        }
+        state.diary.sink = Some(sink);
+        state.diary.generation = state.diary.generation.wrapping_add(1);
+        state.diary.last_error = None;
+        Ok(())
+    })
 }
 
 pub fn set_diary_enabled(enabled: bool) {
     if let Err(error) = set_diary_enabled_checked(enabled) {
-        record_diary_failure(error);
+        record_diary_open_failure(error);
     }
 }
 
@@ -173,24 +203,41 @@ pub(super) fn write_diary_entry(entry: &ConsoleEntry) {
 }
 
 fn write_diary_text(text: &str) {
-    with_console_state(|state| {
-        let Some(sink) = state.diary.sink.as_mut() else {
-            return;
-        };
-        if let Err(error) = sink
+    let Some(owner) = with_console_state(|state| state.diary.sink.clone()) else {
+        return;
+    };
+    let result = match owner.try_borrow_mut() {
+        Ok(mut sink) => sink
             .check_resource_lease()
             .and_then(|()| sink.file.write_all(text.as_bytes()))
-            .and_then(|()| sink.file.flush())
+            .and_then(|()| sink.file.flush()),
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "diary sink is already writing during a reentrant console callback",
+        )),
+    };
+    if let Err(error) = result {
+        publish_write_failure(&owner, error);
+    }
+}
+
+fn publish_write_failure(owner: &SharedDiarySink, error: io::Error) {
+    with_console_state(|state| {
+        if state
+            .diary
+            .sink
+            .as_ref()
+            .is_some_and(|current| Rc::ptr_eq(current, owner))
         {
             state.diary.sink = None;
+            state.diary.generation = state.diary.generation.wrapping_add(1);
             state.diary.last_error.get_or_insert(error);
         }
     });
 }
 
-fn record_diary_failure(error: io::Error) {
+fn record_diary_open_failure(error: io::Error) {
     with_console_state(|state| {
-        state.diary.sink = None;
         state.diary.last_error.get_or_insert(error);
     });
 }
