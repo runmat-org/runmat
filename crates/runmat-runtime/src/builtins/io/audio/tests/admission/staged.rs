@@ -7,12 +7,13 @@ use crate::context::host_effect::{
     HostEffectResourceLivenessLease, HostEffectStageAdmission, HostEffectStageEvidence,
     HostEffectStageReservation, HostEffectWorkload,
 };
-use crate::context::{RuntimeHostEffectResourceService, RuntimeServicePorts};
+use crate::context::{RuntimeContext, RuntimeHostEffectResourceService, RuntimeServicePorts};
 use runmat_execution::{Digest, ResourceByteBound};
 use runmat_value::{
     ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
 };
 use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
