@@ -521,8 +521,43 @@ fn catalog_entries_keep_domain_modules_out_of_the_root() {
 #[test]
 fn catalog_entry_families_own_registration_without_domain_builtin_lists() {
     fn declares_catalog_entry(source: &str) -> bool {
-        source.contains("_CATALOG_ENTRY:") || source.contains("CATALOG_ENTRY: BuiltinCatalogEntry")
+        let concrete = source.lines().any(|line| {
+            line.trim_start()
+                .strip_prefix("pub const ")
+                .is_some_and(|declaration| {
+                    !declaration.starts_with('$') && declaration.contains(": BuiltinCatalogEntry")
+                })
+        }) || source.contains("_CATALOG_ENTRY:");
+        let instantiated_local_macro = source.contains("pub const $entry: BuiltinCatalogEntry")
+            && source
+                .lines()
+                .filter_map(|line| {
+                    line.trim_start()
+                        .strip_prefix("macro_rules!")
+                        .and_then(|rest| rest.trim().split_once(' '))
+                        .map(|(name, _)| name)
+                })
+                .any(|name| {
+                    let invocation = format!("{name}!(");
+                    source
+                        .lines()
+                        .any(|line| line.trim_start().starts_with(&invocation))
+                });
+        concrete || instantiated_local_macro
     }
+
+    assert!(declares_catalog_entry(
+        "pub const SAMPLE_CATALOG_ENTRY: BuiltinCatalogEntry = entry();"
+    ));
+    assert!(declares_catalog_entry(
+        "macro_rules! entry {\n        pub const $entry: BuiltinCatalogEntry = contract::entry();\n}\nentry!(SAMPLE_CATALOG_ENTRY);"
+    ));
+    assert!(!declares_catalog_entry(
+        "macro_rules! entry {\n        pub const $entry: BuiltinCatalogEntry = contract::entry();\n}"
+    ));
+    assert!(!declares_catalog_entry(
+        "pub const DOCUMENTATION: BuiltinDocumentation = documentation();"
+    ));
 
     fn visit(directory: &std::path::Path) {
         for entry in std::fs::read_dir(directory)

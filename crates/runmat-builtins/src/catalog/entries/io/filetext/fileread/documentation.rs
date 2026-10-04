@@ -35,7 +35,50 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "How do relative paths resolve?", answer: "Against the process working directory, not through bare-name MATLAB search-path lookup." },
     ],
     links: &[
-        BuiltinDocumentationLink { label: "fopen", target: BuiltinDocumentationLinkTarget::Builtin("fopen") }, BuiltinDocumentationLink { label: "fread", target: BuiltinDocumentationLinkTarget::Builtin("fread") }, BuiltinDocumentationLink { label: "string", target: BuiltinDocumentationLinkTarget::Builtin("string") }, BuiltinDocumentationLink { label: "strlength", target: BuiltinDocumentationLinkTarget::Builtin("strlength") }, BuiltinDocumentationLink { label: "fclose", target: BuiltinDocumentationLinkTarget::Builtin("fclose") }, BuiltinDocumentationLink { label: "feof", target: BuiltinDocumentationLinkTarget::Builtin("feof") }, BuiltinDocumentationLink { label: "fgets", target: BuiltinDocumentationLinkTarget::Builtin("fgets") }, BuiltinDocumentationLink { label: "filewrite", target: BuiltinDocumentationLinkTarget::Builtin("filewrite") }, BuiltinDocumentationLink { label: "fprintf", target: BuiltinDocumentationLinkTarget::Builtin("fprintf") }, BuiltinDocumentationLink { label: "frewind", target: BuiltinDocumentationLinkTarget::Builtin("frewind") }, BuiltinDocumentationLink { label: "fwrite", target: BuiltinDocumentationLinkTarget::Builtin("fwrite") },
+        BuiltinDocumentationLink {
+            label: "fopen",
+            target: BuiltinDocumentationLinkTarget::Builtin("fopen"),
+        },
+        BuiltinDocumentationLink {
+            label: "fread",
+            target: BuiltinDocumentationLinkTarget::Builtin("fread"),
+        },
+        BuiltinDocumentationLink {
+            label: "string",
+            target: BuiltinDocumentationLinkTarget::Builtin("string"),
+        },
+        BuiltinDocumentationLink {
+            label: "strlength",
+            target: BuiltinDocumentationLinkTarget::Builtin("strlength"),
+        },
+        BuiltinDocumentationLink {
+            label: "fclose",
+            target: BuiltinDocumentationLinkTarget::Builtin("fclose"),
+        },
+        BuiltinDocumentationLink {
+            label: "feof",
+            target: BuiltinDocumentationLinkTarget::Builtin("feof"),
+        },
+        BuiltinDocumentationLink {
+            label: "fgets",
+            target: BuiltinDocumentationLinkTarget::Builtin("fgets"),
+        },
+        BuiltinDocumentationLink {
+            label: "filewrite",
+            target: BuiltinDocumentationLinkTarget::Builtin("filewrite"),
+        },
+        BuiltinDocumentationLink {
+            label: "fprintf",
+            target: BuiltinDocumentationLinkTarget::Builtin("fprintf"),
+        },
+        BuiltinDocumentationLink {
+            label: "frewind",
+            target: BuiltinDocumentationLinkTarget::Builtin("frewind"),
+        },
+        BuiltinDocumentationLink {
+            label: "fwrite",
+            target: BuiltinDocumentationLinkTarget::Builtin("fwrite"),
+        },
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
