@@ -9,6 +9,7 @@ mod inference;
 mod repl_fs;
 mod text_admission;
 mod audio;
+mod json;
 
 pub use self::archive::*;
 pub use self::audio::*;
@@ -16,6 +17,7 @@ pub use self::console::*;
 pub use self::filetext::*;
 pub use self::http::*;
 pub(in crate::catalog) use self::inference::infer;
+pub use self::json::*;
 pub use self::repl_fs::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -25,4 +27,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     repl_fs::extend_entries(values);
     http::extend_entries(values);
     values.extend(audio::ENTRIES.iter().copied());
+    values.extend(json::ENTRIES.iter().copied());
 }
