@@ -70,6 +70,36 @@ pub(super) async fn write_builtin(
 ) -> crate::BuiltinResult<Value> {
     ensure_write_extensions(&data)?;
     let datatype = preflight_datatype(rest)?;
+    match &client {
+        Value::Struct(st) => {
+            extract_client_id(st)?;
+        }
+        Value::GpuTensor(_) => {}
+        _ => {
+            return Err(write_flow(
+                &WRITE_ERROR_INVALID_CLIENT,
+                "write: expected tcpclient struct as first argument",
+            ));
+        }
+    }
+    if !matches!(
+        &data,
+        Value::GpuTensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::Tensor(_)
+            | Value::SparseTensor(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::CharArray(_)
+            | Value::String(_)
+            | Value::StringArray(_)
+    ) {
+        return Err(write_flow(
+            &WRITE_ERROR_INVALID_DATA,
+            "write: unsupported input type",
+        ));
+    }
     super::transport::require_native_tcp(BUILTIN_NAME)?;
     let client = gather_if_needed_async(&client)
         .await
@@ -834,15 +864,12 @@ fn parse_byte_order(text: &str) -> ByteOrder {
 }
 
 fn scalar_string(value: &Value) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(write_flow(
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        write_flow(
             &WRITE_ERROR_INVALID_DATATYPE,
             "write: datatype argument must be a string scalar or character row vector",
-        )),
-    }
+        )
+    })
 }
 
 fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {

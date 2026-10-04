@@ -84,6 +84,16 @@ pub(crate) async fn tcpclient_builtin(
     }
     ensure_integer_extension(&port, &INTEGER_PORT_EXTENSION)?;
     preflight_name_value_extensions(&rest).await?;
+    let known_host = if matches!(&host, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_host(&host)?)
+    };
+    let known_port = if matches!(&port, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_endpoint_port(&port)?)
+    };
     super::transport::require_native_tcp(BUILTIN_NAME)?;
     let host = gather_if_needed_async(&host).await.map_err(|err| {
         super::error::with_source(
@@ -102,25 +112,14 @@ pub(crate) async fn tcpclient_builtin(
         )
     })?;
 
-    let host_text = string_scalar(&host, "tcpclient host").map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPCLIENT_ERROR_INVALID_ADDRESS,
-            format!("tcpclient: invalid host argument ({err})"),
-            err,
-        )
-    })?;
-    let port_num = parse_port(&port).map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPCLIENT_ERROR_INVALID_PORT,
-            format!("tcpclient: invalid port argument ({err})"),
-            err,
-        )
-    })?;
-    if port_num == 0 {
-        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
-    }
+    let host_text = match known_host {
+        Some(host) => host,
+        None => parse_host(&host)?,
+    };
+    let port_num = match known_port {
+        Some(port) => port,
+        None => parse_endpoint_port(&port)?,
+    };
 
     let options = parse_name_value_pairs(rest).await?;
 
@@ -171,6 +170,32 @@ pub(crate) async fn tcpclient_builtin(
     Ok(build_tcpclient_struct(
         client_id, &host_text, peer_addr, local_addr, &options,
     ))
+}
+
+fn parse_host(host: &Value) -> BuiltinResult<String> {
+    string_scalar(host, "tcpclient host").map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INVALID_ADDRESS,
+            format!("tcpclient: invalid host argument ({err})"),
+            err,
+        )
+    })
+}
+
+fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
+    let port_num = parse_port(port).map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_INVALID_PORT,
+            format!("tcpclient: invalid port argument ({err})"),
+            err,
+        )
+    })?;
+    if port_num == 0 {
+        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
+    }
+    Ok(port_num)
 }
 
 async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {

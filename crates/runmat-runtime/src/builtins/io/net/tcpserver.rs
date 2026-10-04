@@ -81,6 +81,16 @@ pub(crate) async fn tcpserver_builtin(
         )?;
     }
     preflight_name_value_extensions(&rest).await?;
+    let known_address = if matches!(&address, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_address(&address)?)
+    };
+    let known_port = if matches!(&port, Value::GpuTensor(_)) {
+        None
+    } else {
+        Some(parse_endpoint_port(&port)?)
+    };
     super::transport::require_native_tcp(BUILTIN_NAME)?;
     let address = gather_if_needed_async(&address).await.map_err(|err| {
         super::error::with_source(
@@ -99,25 +109,14 @@ pub(crate) async fn tcpserver_builtin(
         )
     })?;
 
-    let host = string_scalar(&address, "tcpserver address").map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPSERVER_ERROR_INVALID_ADDRESS,
-            err.to_string(),
-            err,
-        )
-    })?;
-    let port = parse_port(&port).map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPSERVER_ERROR_INVALID_PORT,
-            err.to_string(),
-            err,
-        )
-    })?;
-    if port == 0 {
-        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
-    }
+    let host = match known_address {
+        Some(address) => address,
+        None => parse_address(&address)?,
+    };
+    let port = match known_port {
+        Some(port) => port,
+        None => parse_endpoint_port(&port)?,
+    };
 
     let options = parse_name_value_pairs(rest).await?;
 
@@ -147,6 +146,32 @@ pub(crate) async fn tcpserver_builtin(
         options.byte_order.clone(),
     );
     Ok(build_tcpserver_struct(id, &host, local_addr, &options))
+}
+
+fn parse_address(address: &Value) -> BuiltinResult<String> {
+    string_scalar(address, "tcpserver address").map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INVALID_ADDRESS,
+            err.to_string(),
+            err,
+        )
+    })
+}
+
+fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
+    let port_num = parse_port(port).map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_INVALID_PORT,
+            err.to_string(),
+            err,
+        )
+    })?;
+    if port_num == 0 {
+        crate::compatibility::ensure_builtin_extension_enabled(&ZERO_PORT_EXTENSION, BUILTIN_NAME)?;
+    }
+    Ok(port_num)
 }
 
 async fn preflight_name_value_extensions(rest: &[Value]) -> BuiltinResult<()> {

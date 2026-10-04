@@ -148,18 +148,16 @@ fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<()> {
         ));
     }
     for pair in rest.chunks_exact(2) {
-        let name = match &pair[0] {
-            Value::GpuTensor(_) => continue,
-            Value::String(name) => name.clone(),
-            Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
-            Value::StringArray(strings) if strings.data.len() == 1 => strings.data[0].clone(),
-            other => {
-                return Err(accept_flow(
+        if matches!(&pair[0], Value::GpuTensor(_)) {
+            continue;
+        }
+        let name = crate::builtins::common::validation::value_text_scalar_string(&pair[0])
+            .ok_or_else(|| {
+                accept_flow(
                     &ACCEPT_ERROR_INVALID_NAME_VALUE,
-                    format!("accept: invalid option name ({other:?})"),
-                ))
-            }
-        };
+                    format!("accept: invalid option name ({:?})", pair[0]),
+                )
+            })?;
         if NetConstructorOption::accept(&name).is_none() {
             return Err(accept_flow(
                 &ACCEPT_ERROR_INVALID_NAME_VALUE,
@@ -198,17 +196,13 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
         let name_value = gather_if_needed_async(&name_raw)
             .await
             .map_err(accept_internal_source)?;
-        let name = match name_value {
-            Value::String(ref s) => s.clone(),
-            Value::CharArray(ref ca) if ca.rows == 1 => ca.data.iter().collect(),
-            Value::StringArray(ref sa) if sa.data.len() == 1 => sa.data[0].clone(),
-            other => {
-                return Err(accept_flow(
+        let name = crate::builtins::common::validation::value_text_scalar_string(&name_value)
+            .ok_or_else(|| {
+                accept_flow(
                     &ACCEPT_ERROR_INVALID_NAME_VALUE,
-                    format!("accept: invalid option name ({other:?})"),
-                ));
-            }
-        };
+                    format!("accept: invalid option name ({name_value:?})"),
+                )
+            })?;
         match NetConstructorOption::accept(&name) {
             Some(NetConstructorOption::Timeout) => {
                 let gathered = gather_if_needed_async(&value_raw)

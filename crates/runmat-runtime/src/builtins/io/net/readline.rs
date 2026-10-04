@@ -67,6 +67,18 @@ pub(super) async fn readline_builtin(
     if !rest.is_empty() {
         return Err(readline_error(&READLINE_ERROR_INVALID_ARGUMENTS));
     }
+    match &client {
+        Value::Struct(st) => {
+            extract_client_id(st)?;
+        }
+        Value::GpuTensor(_) => {}
+        _ => {
+            return Err(readline_flow(
+                &READLINE_ERROR_INVALID_CLIENT,
+                "readline: expected tcpclient struct as first argument",
+            ));
+        }
+    }
     super::transport::require_native_tcp(BUILTIN_NAME)?;
 
     let client = gather_if_needed_async(&client)

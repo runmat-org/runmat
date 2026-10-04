@@ -65,6 +65,18 @@ fn map_control_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -
 )]
 pub(super) async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let known = preflight_known_arguments(&rest)?;
+    match &client {
+        Value::Struct(st) => {
+            extract_client_id(st)?;
+        }
+        Value::GpuTensor(_) => {}
+        _ => {
+            return Err(read_flow(
+                &READ_ERROR_INVALID_CLIENT,
+                "read: expected tcpclient struct as first argument",
+            ));
+        }
+    }
     super::transport::require_native_tcp(BUILTIN_NAME)?;
     let options = parse_arguments(rest, known).await?;
     let client = gather_if_needed_async(&client)
@@ -628,17 +640,13 @@ fn parse_integer_count(int: &runmat_value::IntValue) -> BuiltinResult<usize> {
 }
 
 fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
-    let text = match value {
-        Value::String(s) => s.clone(),
-        Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
-        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        _ => {
-            return Err(read_flow(
+    let text =
+        crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+            read_flow(
                 &READ_ERROR_INVALID_DATATYPE,
                 "read: datatype must be a string scalar",
-            ))
-        }
-    };
+            )
+        })?;
     DataType::parse(&text).ok_or_else(|| {
         read_flow(
             &READ_ERROR_INVALID_DATATYPE,

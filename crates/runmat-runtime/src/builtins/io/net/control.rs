@@ -72,14 +72,11 @@ impl StringScalarError {
 }
 
 pub(crate) fn string_scalar(value: &Value, context: &str) -> Result<String, StringScalarError> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        other => Err(StringScalarError::new(format!(
-            "{context} must be a string scalar or character vector (got {other:?})"
-        ))),
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        StringScalarError::new(format!(
+            "{context} must be a string scalar or character vector (got {value:?})"
+        ))
+    })
 }
 
 #[derive(Debug, Error)]
