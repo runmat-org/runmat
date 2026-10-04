@@ -32,6 +32,8 @@ fn text_column(value: &Value, col: usize) -> Vec<String> {
     out
 }
 
+#[path = "tests/admission.rs"]
+mod admission;
 #[path = "tests/file.rs"]
 mod file;
 #[path = "tests/parsing.rs"]

@@ -20,16 +20,6 @@ pub(crate) fn struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }
 
-pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
-}
-
-pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::cell()
-}
-
 pub fn accept_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -158,14 +148,6 @@ mod tests {
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
-    assert_resolver!(
-        importdata_type_resolver,
-        importdata_type,
-        &[],
-        Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
-    );
-    assert_resolver!(textscan_type_resolver, textscan_type, &[], Type::cell());
-
     assert_resolver!(csvread_type_resolver, tensor_type, &[], Type::tensor());
     assert_resolver!(csvwrite_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(dlmread_type_resolver, tensor_type, &[], Type::tensor());

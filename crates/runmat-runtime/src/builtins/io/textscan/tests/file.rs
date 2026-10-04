@@ -2,22 +2,58 @@ use super::*;
 use crate::builtins::io::filetext::registry::RegisteredFile;
 use futures::executor::block_on;
 use runmat_filesystem::OpenOptions;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+
+struct FileFixture {
+    path: PathBuf,
+    _owner: runmat_filesystem::ProviderGuard,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl std::ops::Deref for FileFixture {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for FileFixture {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn file_fixture(name: &str, bytes: &[u8]) -> FileFixture {
+    let lock = runmat_filesystem::provider_override_lock();
+    let path = PathBuf::from(format!("/textscan/{name}"));
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/textscan",
+    ));
+    provider
+        .write_project_path(&path, bytes)
+        .expect("write fixture");
+    let owner = runmat_filesystem::replace_provider(provider);
+    FileFixture {
+        path,
+        _owner: owner,
+        _lock: lock,
+    }
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn textscan_repeated_file_read_preserves_next_record_position() {
     let _guard = registry::test_guard();
     registry::reset_for_tests();
-    let mut path = std::env::temp_dir();
-    path.push("runmat_textscan_file_position.txt");
-    std::fs::write(&path, "10 ten\n20 twenty\n").expect("write fixture");
+    let path = file_fixture("file-position.txt", b"10 ten\n20 twenty\n");
 
     let mut options = OpenOptions::new();
     options.read(true);
     let file = block_on(options.open_async(&path)).expect("open file");
     let handle = Arc::new(StdMutex::new(Some(file)));
     let fid = registry::register_file(RegisteredFile {
-        path: path.clone(),
+        path: path.to_path_buf(),
         permission: "r".to_string(),
         access: registry::FileAccess::READ,
         machinefmt: "native".to_string(),
@@ -41,7 +77,7 @@ fn textscan_repeated_file_read_preserves_next_record_position() {
     assert_eq!(remaining, "20 twenty\n");
 
     let _ = registry::close(fid);
-    let _ = std::fs::remove_file(path);
+    let _ = runmat_filesystem::remove_file(path);
     registry::reset_for_tests();
 }
 
@@ -90,19 +126,17 @@ fn shift_jis_registered_file_restores_source_byte_position(
 ) {
     let _guard = registry::test_guard();
     registry::reset_for_tests();
-    let mut path = std::env::temp_dir();
-    path.push(format!(
-        "runmat_textscan_shift_jis_position_{}.txt",
-        encoding.replace('-', "_")
-    ));
-    std::fs::write(&path, bytes).expect("write fixture");
+    let path = file_fixture(
+        &format!("shift-jis-{}.txt", encoding.replace('-', "_")),
+        bytes,
+    );
 
     let mut options = OpenOptions::new();
     options.read(true);
     let file = block_on(options.open_async(&path)).expect("open file");
     let handle = Arc::new(StdMutex::new(Some(file)));
     let fid = registry::register_file(RegisteredFile {
-        path: path.clone(),
+        path: path.to_path_buf(),
         permission: "r".to_string(),
         access: registry::FileAccess::READ,
         machinefmt: "native".to_string(),
@@ -126,7 +160,7 @@ fn shift_jis_registered_file_restores_source_byte_position(
     assert_eq!(remaining, b"2 next\n");
 
     let _ = registry::close(fid);
-    let _ = std::fs::remove_file(path);
+    let _ = runmat_filesystem::remove_file(path);
     registry::reset_for_tests();
 }
 
@@ -161,16 +195,14 @@ fn excessive_output_request_rejects_before_text_or_file_scan() {
 fn textscan_reads_from_registered_file_identifier() {
     let _guard = registry::test_guard();
     registry::reset_for_tests();
-    let mut path = std::env::temp_dir();
-    path.push("runmat_textscan_registered_file.txt");
-    std::fs::write(&path, "skip\n10 ten\n20 twenty\n").expect("write fixture");
+    let path = file_fixture("registered-file.txt", b"skip\n10 ten\n20 twenty\n");
 
     let mut options = OpenOptions::new();
     options.read(true);
     let file = block_on(options.open_async(&path)).expect("open file");
     let handle = Arc::new(StdMutex::new(Some(file)));
     let fid = registry::register_file(RegisteredFile {
-        path: path.clone(),
+        path: path.to_path_buf(),
         permission: "r".to_string(),
         access: registry::FileAccess::READ,
         machinefmt: "native".to_string(),
@@ -191,6 +223,6 @@ fn textscan_reads_from_registered_file_identifier() {
     );
 
     let _ = registry::close(fid);
-    let _ = std::fs::remove_file(path);
+    let _ = runmat_filesystem::remove_file(path);
     registry::reset_for_tests();
 }
