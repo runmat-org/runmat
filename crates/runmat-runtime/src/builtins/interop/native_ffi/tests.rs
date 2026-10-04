@@ -38,14 +38,16 @@ mod native {
         let (runtime, calls) = recording_context();
         let invalid = Value::OutputList(Vec::new());
         let results = [
-            futures::executor::block_on(loadlibrary_builtin(Some(runtime.clone()), vec![])),
-            futures::executor::block_on(calllib_builtin(Some(runtime.clone()), vec![])),
+            futures::executor::block_on(loadlibrary_builtin(Some(runtime.clone()), None, vec![])),
+            futures::executor::block_on(calllib_builtin(Some(runtime.clone()), None, vec![])),
             futures::executor::block_on(libfunctions_builtin(
                 Some(runtime.clone()),
+                None,
                 vec![Value::String("fixture".into()), Value::String("bad".into())],
             )),
             futures::executor::block_on(libpointer_builtin(
                 Some(runtime.clone()),
+                None,
                 vec![
                     Value::String("int32Ptr".into()),
                     Value::Num(1.0),
@@ -54,10 +56,12 @@ mod native {
             )),
             futures::executor::block_on(libstruct_builtin(
                 Some(runtime.clone()),
+                None,
                 vec![Value::String("fixture_record".into()), Value::Num(1.0)],
             )),
             futures::executor::block_on(setdatatype_builtin(
                 Some(runtime.clone()),
+                None,
                 vec![
                     Value::Num(1.0),
                     Value::String("int32Ptr".into()),
@@ -66,9 +70,10 @@ mod native {
             )),
             futures::executor::block_on(unloadlibrary_builtin(
                 Some(runtime.clone()),
+                None,
                 invalid.clone(),
             )),
-            futures::executor::block_on(libisloaded_builtin(Some(runtime), invalid)),
+            futures::executor::block_on(libisloaded_builtin(Some(runtime), None, invalid)),
         ];
         for result in results {
             assert_eq!(
@@ -86,17 +91,89 @@ mod native {
     #[test]
     fn unpolled_native_query_has_no_foreign_effect() {
         let (runtime, calls) = recording_context();
-        let future = libisloaded_builtin(Some(runtime), Value::String("fixture".into()));
+        let future = libisloaded_builtin(Some(runtime), None, Value::String("fixture".into()));
         drop(future);
         assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn impossible_public_output_counts_fail_before_foreign_service() {
+        let (runtime, calls) = recording_context();
+        let checks = [
+            futures::executor::block_on(loadlibrary_builtin(
+                Some(runtime.clone()),
+                Some(3),
+                vec![
+                    Value::String("fixture".into()),
+                    Value::String("fixture.h".into()),
+                ],
+            )),
+            futures::executor::block_on(unloadlibrary_builtin(
+                Some(runtime.clone()),
+                Some(1),
+                Value::String("fixture".into()),
+            )),
+            futures::executor::block_on(libisloaded_builtin(
+                Some(runtime.clone()),
+                Some(2),
+                Value::String("fixture".into()),
+            )),
+            futures::executor::block_on(libfunctions_builtin(
+                Some(runtime.clone()),
+                Some(2),
+                vec![Value::String("fixture".into())],
+            )),
+            futures::executor::block_on(libpointer_builtin(Some(runtime.clone()), Some(2), vec![])),
+            futures::executor::block_on(libstruct_builtin(
+                Some(runtime.clone()),
+                Some(2),
+                vec![Value::String("fixture_record".into())],
+            )),
+            futures::executor::block_on(setdatatype_builtin(
+                Some(runtime),
+                Some(1),
+                vec![
+                    Value::Num(1.0),
+                    Value::String("int32Ptr".into()),
+                    Value::Num(1.0),
+                ],
+            )),
+        ];
+        for result in checks {
+            let error = result.expect_err("impossible public output count");
+            assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));
+            assert!(error.message().contains("too many output arguments"));
+        }
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn calllib_output_count_is_left_to_prepared_signature() {
+        let (runtime, calls) = recording_context();
+        let _ = futures::executor::block_on(calllib_builtin(
+            Some(runtime),
+            Some(3),
+            vec![
+                Value::String("fixture".into()),
+                Value::String("fixture_add".into()),
+            ],
+        ));
+        assert_eq!(
+            calls.get(),
+            1,
+            "wrapper must not impose a fixed calllib output limit"
+        );
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen_test::wasm_bindgen_test]
 fn valid_native_call_reports_unsupported_browser_host() {
-    let result =
-        futures::executor::block_on(libisloaded_builtin(None, Value::String("fixture".into())));
+    let result = futures::executor::block_on(libisloaded_builtin(
+        None,
+        None,
+        Value::String("fixture".into()),
+    ));
     assert_eq!(
         result.expect_err("native FFI unavailable").identifier(),
         Some("RunMat:Foreign:UnsupportedOnWasm")

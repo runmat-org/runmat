@@ -65,12 +65,15 @@ async fn invoke_native(
     name = "loadlibrary",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn loadlibrary_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     mut arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    validate_output_count("loadlibrary", requested_outputs, 2)?;
     if arguments.is_empty() {
         return Err(invalid_builtin_call("loadlibrary expects a library path"));
     }
@@ -159,7 +162,7 @@ async fn loadlibrary_builtin(
             "native library loader returned an incomplete preparation report",
         ));
     }
-    let requested = crate::output_count::current_output_count().unwrap_or(0);
+    let requested = requested_outputs.unwrap_or(0);
     Ok(match requested {
         0 => Value::OutputList(Vec::new()),
         1 => report.remove(0),
@@ -171,10 +174,12 @@ async fn loadlibrary_builtin(
     name = "calllib",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn calllib_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
     if arguments.len() < 2 {
@@ -184,7 +189,7 @@ async fn calllib_builtin(
     }
     text_argument(&arguments[0], "calllib library alias")?;
     text_argument(&arguments[1], "calllib function name")?;
-    let requested = crate::output_count::current_output_count().unwrap_or(1);
+    let requested = requested_outputs.unwrap_or(1);
     invoke_native(
         context,
         crate::foreign::NativeFfiOperation::Call,
@@ -198,12 +203,15 @@ async fn calllib_builtin(
     name = "unloadlibrary",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn unloadlibrary_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     alias: Value,
 ) -> BuiltinResult<Value> {
+    validate_output_count("unloadlibrary", requested_outputs, 0)?;
     text_argument(&alias, "unloadlibrary alias")?;
     invoke_native(
         context,
@@ -219,12 +227,15 @@ async fn unloadlibrary_builtin(
     name = "libisloaded",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libisloaded_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     alias: Value,
 ) -> BuiltinResult<Value> {
+    validate_output_count("libisloaded", requested_outputs, 1)?;
     text_argument(&alias, "libisloaded alias")?;
     invoke_native(
         context,
@@ -239,12 +250,15 @@ async fn libisloaded_builtin(
     name = "libfunctions",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libfunctions_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    validate_output_count("libfunctions", requested_outputs, 1)?;
     if !(1..=2).contains(&arguments.len()) {
         return Err(invalid_builtin_call(
             "libfunctions expects an alias and optional -full flag",
@@ -272,12 +286,15 @@ async fn libfunctions_builtin(
     name = "libpointer",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libpointer_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    validate_output_count("libpointer", requested_outputs, 1)?;
     if arguments.len() > 2 {
         return Err(invalid_builtin_call(
             "libpointer expects an optional type and value",
@@ -299,12 +316,15 @@ async fn libpointer_builtin(
     name = "setdatatype",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn setdatatype_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     mut arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    validate_output_count("setdatatype", requested_outputs, 0)?;
     if arguments.len() < 3 {
         return Err(invalid_builtin_call(
             "setdatatype expects a pointer, type, and one or more dimensions",
@@ -331,12 +351,15 @@ async fn setdatatype_builtin(
     name = "libstruct",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libstruct_builtin(
     context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    validate_output_count("libstruct", requested_outputs, 1)?;
     if !(1..=2).contains(&arguments.len()) {
         return Err(invalid_builtin_call(
             "libstruct expects a type and optional scalar structure",
@@ -358,6 +381,21 @@ async fn libstruct_builtin(
         1,
     )
     .await
+}
+
+fn validate_output_count(
+    builtin: &'static str,
+    requested: Option<usize>,
+    maximum: usize,
+) -> BuiltinResult<()> {
+    if requested.is_some_and(|count| count > maximum) {
+        return Err(native_error(
+            &ERROR_INVALID,
+            builtin,
+            format!("{builtin}: too many output arguments"),
+        ));
+    }
+    Ok(())
 }
 
 fn invalid_builtin_call(message: impl Into<String>) -> crate::RuntimeError {
