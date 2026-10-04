@@ -4,7 +4,7 @@
 use runmat_builtins::DIARY_DESCRIPTOR;
 use runmat_builtins::{
     BuiltinErrorDescriptor, DiaryCommand, DIARY_ERROR_ARG_COUNT, DIARY_ERROR_ARG_TYPE,
-    DIARY_ERROR_TOO_MANY_OUTPUTS,
+    DIARY_ERROR_IO, DIARY_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -31,10 +31,13 @@ fn diary_error_with(
 
 fn diary_io_error(source: std::io::Error) -> crate::RuntimeError {
     let message = format!("diary: failed to open diary file ({source})");
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = DIARY_ERROR_IO.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(

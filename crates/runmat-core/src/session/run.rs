@@ -522,7 +522,6 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        let _diary_state = SessionDiaryStateGuard::new(self);
         runmat_vm::set_dynamic_eval_options(
             self.compat_mode,
             self.compat_mode.allows_runmat_extensions(),
@@ -1499,12 +1498,16 @@ impl RunMatSession {
             .unwrap_or_default();
 
         let warnings = runmat_runtime::warning_store::take_all();
+        let diary_error = runmat_runtime::console::take_diary_error();
         if error.is_none() {
-            if let Some(diary_error) = runmat_runtime::console::take_diary_error() {
+            if let Some(diary_error) = diary_error {
                 error = Some(
-                    build_runtime_error(diary_error)
-                        .with_identifier("RunMat:diary:IO")
-                        .build(),
+                    build_runtime_error(format!(
+                        "diary: failed to write diary file ({diary_error})"
+                    ))
+                    .with_identifier("RunMat:diary:IO")
+                    .with_source(diary_error)
+                    .build(),
                 );
             }
         }

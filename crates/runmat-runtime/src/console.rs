@@ -3,9 +3,15 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_time::unix_timestamp_ms;
 use runmat_value::Value;
 use std::cell::RefCell;
-use std::io::Write;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+
+mod diary;
+pub use diary::{
+    diary_enabled, diary_filename, ensure_diary_writable, record_diary_command, set_diary_enabled,
+    set_diary_enabled_checked, set_diary_filename, set_diary_filename_checked, take_diary_error,
+    toggle_diary,
+};
+use diary::{write_diary_entry, DiaryState};
 
 /// Identifies the console stream that received the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,48 +36,6 @@ runmat_thread_local! {
 }
 
 static FORWARDER: OnceCell<RwLock<Option<Arc<StreamForwarder>>>> = OnceCell::new();
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DiaryStateSnapshot {
-    pub enabled: bool,
-    pub filename: PathBuf,
-}
-
-impl Default for DiaryStateSnapshot {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            filename: PathBuf::from("diary"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct DiaryState {
-    enabled: bool,
-    filename: PathBuf,
-    last_error: Option<String>,
-}
-
-impl Default for DiaryState {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            filename: PathBuf::from("diary"),
-            last_error: None,
-        }
-    }
-}
-
-impl From<DiaryStateSnapshot> for DiaryState {
-    fn from(snapshot: DiaryStateSnapshot) -> Self {
-        Self {
-            enabled: snapshot.enabled,
-            filename: snapshot.filename,
-            last_error: None,
-        }
-    }
-}
 
 /// Guard for a dynamic command-window capture scope such as `evalc`.
 pub struct ConsoleCaptureGuard {
@@ -282,114 +246,6 @@ fn captured_text(entries: Vec<ConsoleEntry>) -> String {
     out
 }
 
-pub fn diary_enabled() -> bool {
-    with_console_state(|state| state.diary.enabled)
-}
-
-pub fn diary_filename() -> PathBuf {
-    with_console_state(|state| state.diary.filename.clone())
-}
-
-pub fn diary_state_snapshot() -> DiaryStateSnapshot {
-    with_console_state(|state| DiaryStateSnapshot {
-        enabled: state.diary.enabled,
-        filename: state.diary.filename.clone(),
-    })
-}
-
-pub fn replace_diary_state(snapshot: DiaryStateSnapshot) -> DiaryStateSnapshot {
-    with_console_state(|state| {
-        let previous = DiaryStateSnapshot {
-            enabled: state.diary.enabled,
-            filename: state.diary.filename.clone(),
-        };
-        state.diary = DiaryState::from(snapshot);
-        previous
-    })
-}
-
-pub fn take_diary_error() -> Option<String> {
-    with_console_state(|state| state.diary.last_error.take())
-}
-
-pub fn set_diary_filename(filename: impl Into<PathBuf>) {
-    with_console_state(|state| {
-        state.diary.filename = filename.into();
-        state.diary.enabled = true;
-        state.diary.last_error = None;
-    });
-}
-
-pub fn set_diary_filename_checked(filename: impl Into<PathBuf>) -> std::io::Result<()> {
-    let filename = filename.into();
-    open_diary_append(&filename).map(|_| ())?;
-    set_diary_filename(filename);
-    Ok(())
-}
-
-pub fn set_diary_enabled(enabled: bool) {
-    with_console_state(|state| {
-        state.diary.enabled = enabled;
-        if enabled {
-            state.diary.last_error = None;
-        }
-    });
-}
-
-pub fn set_diary_enabled_checked(enabled: bool) -> std::io::Result<()> {
-    if enabled {
-        ensure_diary_writable()?;
-    }
-    set_diary_enabled(enabled);
-    Ok(())
-}
-
-pub fn toggle_diary() -> std::io::Result<()> {
-    if diary_enabled() {
-        set_diary_enabled(false);
-    } else {
-        set_diary_enabled_checked(true)?;
-    }
-    Ok(())
-}
-
-pub fn ensure_diary_writable() -> std::io::Result<()> {
-    let filename = diary_filename();
-    open_diary_append(&filename).map(|_| ())
-}
-
-/// Append the top-level source text to the diary without echoing it to stdout.
-pub fn record_diary_command(text: &str) {
-    if !diary_enabled() {
-        return;
-    }
-    let mut owned = text.to_string();
-    if !owned.ends_with('\n') {
-        owned.push('\n');
-    }
-    if let Err(err) = write_diary_text(&owned) {
-        record_diary_failure(err);
-    }
-}
-
-fn write_diary_entry(entry: &ConsoleEntry) {
-    if !matches!(entry.stream, ConsoleStream::Stdout | ConsoleStream::Stderr) {
-        return;
-    }
-    if diary_enabled() {
-        if let Err(err) = write_diary_text(&entry.text) {
-            record_diary_failure(err);
-        }
-    }
-}
-
-fn record_diary_failure(err: std::io::Error) {
-    with_console_state(|state| {
-        state.diary.enabled = false;
-        state.diary.last_error = Some(format!("diary: failed to write diary file ({err})"));
-    });
-}
-
 fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
     crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
@@ -400,19 +256,6 @@ fn with_console_state<R>(callback: impl FnOnce(&mut ConsoleState) -> R) -> R {
     } else {
         FALLBACK_STATE.with(|state| callback(&mut state.borrow_mut()))
     }
-}
-
-fn write_diary_text(text: &str) -> std::io::Result<()> {
-    let filename = diary_filename();
-    let mut file = open_diary_append(&filename)?;
-    file.write_all(text.as_bytes())?;
-    file.flush()
-}
-
-fn open_diary_append(path: &PathBuf) -> std::io::Result<runmat_filesystem::File> {
-    let mut options = runmat_filesystem::OpenOptions::new();
-    options.create(true).append(true);
-    options.open(path)
 }
 
 fn is_unlabeled_nd_page_display(text: &str) -> bool {

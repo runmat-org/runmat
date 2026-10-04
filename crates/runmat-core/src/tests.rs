@@ -23,6 +23,9 @@ mod native_audio;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_data_session.rs"]
 mod native_data_session;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_diary.rs"]
+mod native_diary;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};

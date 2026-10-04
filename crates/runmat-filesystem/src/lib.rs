@@ -151,6 +151,19 @@ impl OpenOptions {
         with_provider(|provider| provider.open(&resolved, &self.flags)).map(File::from_handle)
     }
 
+    /// Open an absolute path through a previously captured provider, without
+    /// consulting the ambient provider or working directory again.
+    pub fn open_on(&self, provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<File> {
+        let path = path.as_ref();
+        if !path.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
+        provider.open(path, &self.flags).map(File::from_handle)
+    }
+
     pub async fn open_async(&self, path: impl AsRef<Path>) -> io::Result<File> {
         let provider = current_provider();
         self.open_async_on(provider.as_ref(), path).await

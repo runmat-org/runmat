@@ -7,7 +7,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "This command-window sink has no output arguments. Asking for an output raises `RunMat:diary:TooManyOutputs` before opening a file.",
     ] },
     BuiltinDocumentationSection { heading: "Host effects", paragraphs: &[
-        "Diary records command-window stdout and stderr through the active RunMat filesystem provider, including sandboxed and virtual providers. Text captured by `evalc` is excluded while that capture scope is active.",
+        "When enabled, diary captures the current RunMat filesystem provider and working directory and keeps one append handle open until disabled or changed. Later provider or directory changes do not redirect that active log. Sandboxed and virtual providers are supported. Text captured by `evalc` is excluded while that capture scope is active.",
         "Diary does not log workspace values or figures by itself. It does not execute a GPU kernel or participate in fusion; the host console text stream is the source of the file contents.",
     ] },
 ];
@@ -65,7 +65,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "Can `diary` write to host-specific filesystems?",
-        answer: "Yes. The active RunMat filesystem provider determines the destination.",
+        answer: "Yes. The provider and directory active when the diary is enabled determine the destination for that logging period.",
     },
     BuiltinDocumentationFaq {
         question: "Does GPU residency matter for `diary`?",
@@ -91,7 +91,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("diary"), slug: Some("diary"),
     summary: "Log command-window text to a file.",
-    description: "`diary` records command-window stdout and stderr text to an append-only log through the active filesystem provider. It accepts command and function syntax for enabling, disabling, toggling, and selecting the file.",
+    description: "`diary` records command-window stdout and stderr text to an append-only log through the filesystem provider captured when enabled. It accepts command and function syntax for enabling, disabling, toggling, and selecting the file.",
     keywords: &["diary", "log", "command window", "console", "file"],
     related: &["disp", "evalc", "fprintf"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
@@ -100,6 +100,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[
             BuiltinDocumentationLink { label: "Diary runtime binding", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/diary.rs") },
             BuiltinDocumentationLink { label: "Console diary owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/console.rs") },
+            BuiltinDocumentationLink { label: "Captured diary provider and append handle", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/console/diary.rs") },
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Provider append, capture exclusion, output rejection", location: "builtins::io::diary::tests" },

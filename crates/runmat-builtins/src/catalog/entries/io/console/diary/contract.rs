@@ -42,9 +42,9 @@ pub const DIARY_ERROR_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "diary: expected filename, 'on', or 'off'",
 };
 pub const DIARY_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIARY.IO", identifier: None,
-    when: "The selected diary file cannot be opened for append through the active filesystem provider.",
-    message: "diary: failed to open diary file",
+    code: "RM.DIARY.IO", identifier: Some("RunMat:diary:IO"),
+    when: "The selected diary file cannot be opened for append, or an active diary write fails through its captured filesystem provider.",
+    message: "diary: file I/O failed",
 };
 pub const DIARY_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DIARY.TOO_MANY_OUTPUTS",
