@@ -46,6 +46,14 @@ test("application settings fixture is explicit, bounded, and portable", () => {
   assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", { ...context, harness: "NativeFilesystem" }), /harness/);
 });
 
+test("mail outbox fixture requires a native host and bounded exact message", () => {
+  const fixture = { MailOutbox: { id: { local_name: "mail" }, expected_message: "To: a\n\nbody\n" } };
+  const context = { program: "sendmail('a','s');", harness: "Native", requirements: nativeRequirements };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", context), fixture);
+  assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", { ...context, harness: "Browser" }), /harness/);
+  assert.throws(() => validateBuiltinExampleFixture({ MailOutbox: { ...fixture.MailOutbox, expected_message: "" } }, "fixture", context), /nonempty/);
+});
+
 test("rejects unsafe filesystem paths and file descendants", () => {
   const base = { id: { local_name: "files" }, root: "IsolatedWorkspace" };
   assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...base, entries: [{ Directory: { relative_path: "../escape" } }] } }), /relative path/);

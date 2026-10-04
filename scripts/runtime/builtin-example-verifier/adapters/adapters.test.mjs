@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, mkdtempSync, mkdirSync } from "node:fs";
+import { readFileSync, rmSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import test from "node:test";
 
 import { fixturePath, materializeFilesystemFixture } from "./filesystem.mjs";
 import { isolateApplicationSettings } from "./application-settings.mjs";
+import { prepareMailOutbox } from "./mail-outbox.mjs";
 import { runInteraction } from "./interaction.mjs";
 import { withLoopbackFixture } from "./loopback.mjs";
 import { substituteLoopbackEndpoints } from "./substitutions.mjs";
@@ -30,6 +31,23 @@ test("application settings fixture isolates only the child environment per case"
         assert.equal(isolateApplicationSettings(first, fixture, "win32").available, false);
     } finally {
         rmSync(parent, { recursive: true, force: true });
+    }
+});
+
+test("mail outbox fixture verifies one exact message in its own directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "runmat-mail-fixture-"));
+    try {
+        const expected = "To: a\nSubject: s\n\nbody\n";
+        const fixture = prepareMailOutbox(root, { MailOutbox: { id, expected_message: expected } });
+        assert.notEqual(fixture.environment.RUNMAT_SENDMAIL_OUTBOX, process.env.RUNMAT_SENDMAIL_OUTBOX);
+        const outbox = fixture.environment.RUNMAT_SENDMAIL_OUTBOX;
+        assert.match(fixture.verify({ id: "mail", errorText: "" }).errorText, /exactly one/);
+        writeFileSync(join(outbox, "runmat-mail-1.eml"), expected);
+        assert.equal(fixture.verify({ id: "mail", errorText: "" }).errorText, "");
+        writeFileSync(join(outbox, "runmat-mail-1.eml"), "wrong");
+        assert.match(fixture.verify({ id: "mail", errorText: "" }).errorText, /different message/);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
     }
 });
 

@@ -44,6 +44,18 @@ pub(super) fn validate(
             );
             resource::validate_fixture_id(builtin, fixture.id, errors);
         }
+        BuiltinExampleFixture::MailOutbox(fixture) => {
+            require_harness(builtin, example, &[BuiltinExampleHarness::Native], errors);
+            require_native_host(builtin, example, errors);
+            resource::validate_fixture_id(builtin, fixture.id, errors);
+            if fixture.expected_message.is_empty() || fixture.expected_message.len() > 8192 {
+                push(
+                    errors,
+                    builtin,
+                    "mail outbox expected message must be nonempty and bounded",
+                );
+            }
+        }
         BuiltinExampleFixture::Filesystem(fixture) => {
             require_harness(
                 builtin,

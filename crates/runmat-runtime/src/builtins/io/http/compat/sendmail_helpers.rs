@@ -5,6 +5,56 @@ use crate::context::{
     RuntimeContext,
 };
 
+#[derive(Clone, Copy)]
+pub(super) enum SendmailFailure {
+    Arity,
+    InvalidMailInput,
+    InvalidText,
+    EmptyRecipient,
+    Attachments,
+    Outbox,
+    Command,
+    Smtp,
+    NoTransport,
+    Preferences,
+}
+
+impl SendmailFailure {
+    const fn identifier(self) -> &'static str {
+        match self {
+            Self::Arity => "RunMat:sendmail:ArgumentCount",
+            Self::InvalidMailInput => "RunMat:sendmail:InvalidMailInput",
+            Self::InvalidText => "RunMat:sendmail:InvalidText",
+            Self::EmptyRecipient => "RunMat:sendmail:EmptyRecipient",
+            Self::Attachments => "RunMat:sendmail:UnsupportedAttachments",
+            Self::Outbox => "RunMat:sendmail:OutboxFailure",
+            Self::Command => "RunMat:sendmail:CommandFailure",
+            Self::Smtp => "RunMat:sendmail:SmtpUnavailable",
+            Self::NoTransport => "RunMat:sendmail:NoTransport",
+            Self::Preferences => "RunMat:sendmail:PreferenceFailure",
+        }
+    }
+}
+
+pub(super) fn sendmail_error(kind: SendmailFailure, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("sendmail")
+        .with_identifier(kind.identifier())
+        .build()
+}
+
+pub(super) fn sendmail_error_with_source(
+    kind: SendmailFailure,
+    message: impl Into<String>,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("sendmail")
+        .with_identifier(kind.identifier())
+        .with_source(source)
+        .build()
+}
+
 pub(super) async fn read_smtp_server(
     runtime: Option<RuntimeContext>,
 ) -> BuiltinResult<Option<String>> {
@@ -28,8 +78,8 @@ pub(super) async fn read_smtp_server(
         .map_err(|source| source.into_runtime_error())?
         .map_err(|source| match source {
             PreferenceServiceError::Execution(source) => source.into_runtime_error(),
-            source => compat_error_with_source(
-                "sendmail",
+            source => sendmail_error_with_source(
+                SendmailFailure::Preferences,
                 format!("sendmail: unable to read Internet preferences ({source})"),
                 source,
             ),
@@ -61,8 +111,8 @@ fn preference_text(value: &Value) -> Option<String> {
 
 fn mail_text(value: &Value, arg: &str) -> BuiltinResult<String> {
     value_text_scalar_string(value).ok_or_else(|| {
-        compat_error(
-            "sendmail",
+        sendmail_error(
+            SendmailFailure::InvalidText,
             format!("sendmail: {arg} must be a string scalar or character vector"),
         )
     })
@@ -70,8 +120,8 @@ fn mail_text(value: &Value, arg: &str) -> BuiltinResult<String> {
 
 pub(super) fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>, String, String)> {
     if args.len() < 2 || args.len() > 4 {
-        return Err(compat_error(
-            "sendmail",
+        return Err(sendmail_error(
+            SendmailFailure::Arity,
             "sendmail: recipient, subject, optional message, and optional attachments are expected",
         ));
     }
@@ -83,14 +133,14 @@ pub(super) fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>,
         .transpose()?
         .unwrap_or_default();
     if recipients.is_empty() {
-        return Err(compat_error(
-            "sendmail",
+        return Err(sendmail_error(
+            SendmailFailure::EmptyRecipient,
             "sendmail: recipient must not be empty",
         ));
     }
     if args.len() == 4 {
-        return Err(compat_error(
-            "sendmail",
+        return Err(sendmail_error(
+            SendmailFailure::Attachments,
             "sendmail: attachments are not supported by the current mail transport",
         ));
     }
@@ -172,30 +222,33 @@ pub(super) fn try_sendmail_command(recipients: &[String], message: &str) -> Buil
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| {
-            compat_error(
-                "sendmail",
+            sendmail_error_with_source(
+                SendmailFailure::Command,
                 format!("sendmail: unable to spawn {} ({err})", command.display()),
+                err,
             )
         })?;
     {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| compat_error("sendmail", "sendmail: unable to open mail stdin"))?;
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            sendmail_error(
+                SendmailFailure::Command,
+                "sendmail: unable to open mail stdin",
+            )
+        })?;
         use std::io::Write;
-        stdin
-            .write_all(message.as_bytes())
-            .map_err(|err| compat_error("sendmail", format!("sendmail: {err}")))?;
+        stdin.write_all(message.as_bytes()).map_err(|err| {
+            sendmail_error_with_source(SendmailFailure::Command, format!("sendmail: {err}"), err)
+        })?;
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|err| compat_error("sendmail", format!("sendmail: {err}")))?;
+    let output = child.wait_with_output().map_err(|err| {
+        sendmail_error_with_source(SendmailFailure::Command, format!("sendmail: {err}"), err)
+    })?;
     if output.status.success() {
         return Ok(true);
     }
     let detail = String::from_utf8_lossy(&output.stderr);
-    Err(compat_error(
-        "sendmail",
+    Err(sendmail_error(
+        SendmailFailure::Command,
         format!(
             "sendmail: {} failed for {} ({})",
             command.display(),

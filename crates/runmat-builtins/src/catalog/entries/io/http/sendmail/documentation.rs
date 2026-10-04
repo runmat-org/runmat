@@ -1,6 +1,19 @@
 use crate::*;
 
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
+    id: "isolated-outbox",
+    title: "Capture a message in an isolated local outbox",
+    program: "status = sendmail('alice@example.test', 'Status', 'Ready');\nassert(status == 0);\ndisp(status);",
+    display_output: Some("0"),
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Native,
+    fixture: BuiltinExampleFixture::MailOutbox(BuiltinMailOutboxFixture {
+        id: BuiltinExampleFixtureId { local_name: "mail-outbox" },
+        expected_message: "To: alice@example.test\nSubject: Status\nContent-Type: text/plain; charset=utf-8\n\nReady\n",
+    }),
+    requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },
+    verification: BuiltinExampleVerification::Assertions { source: "assert(status == 0);" },
+}, BuiltinExample {
     id: "reject-numeric-mail-input",
     title: "Reject numeric mail arguments before transport selection",
     program: "sendmail(uint64(42), 'Status')",
@@ -36,7 +49,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
     ],
     examples: EXAMPLES,
-    example_exemption: Some("Positive delivery requires a configured local command or isolated outbox filesystem. The portable example verifies pre-effect rejection; runtime transport tests cover local routing and installed preference snapshots."),
+    example_exemption: None,
     faqs: &[],
     links: &[],
     media: &[],

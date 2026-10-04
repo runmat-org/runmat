@@ -23,6 +23,8 @@ pub enum BuiltinExampleFixture {
     /// A fresh application-settings authority for this example only. It is
     /// independent of its workspace filesystem and starts empty.
     ApplicationSettings(BuiltinApplicationSettingsFixture),
+    /// Isolated native outbox; verifies the exact RFC822-style message bytes.
+    MailOutbox(BuiltinMailOutboxFixture),
     Loopback(BuiltinLoopbackFixture),
     ForeignAdapter(BuiltinForeignAdapterFixture),
     CliInteraction(BuiltinCliInteractionFixture),
@@ -34,6 +36,12 @@ pub enum BuiltinExampleFixture {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinApplicationSettingsFixture {
     pub id: BuiltinExampleFixtureId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinMailOutboxFixture {
+    pub id: BuiltinExampleFixtureId,
+    pub expected_message: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

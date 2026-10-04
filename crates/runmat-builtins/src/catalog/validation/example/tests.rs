@@ -5,9 +5,9 @@ use crate::{
     BuiltinExampleVerification, BuiltinFilesystemEntry, BuiltinFilesystemFixture,
     BuiltinFilesystemRoot, BuiltinFixtureContent, BuiltinForeignAdapterFixture,
     BuiltinForeignPreparation, BuiltinHttpExchange, BuiltinHttpMethod, BuiltinHttpRequest,
-    BuiltinHttpResponse, BuiltinHttpScenario, BuiltinLoopbackFixture, BuiltinMexApi,
-    BuiltinMexPreparation, BuiltinNativeSourceLanguage, BuiltinNativeTranslationUnit,
-    BuiltinRuntimeCapability, BuiltinToolchainCapability,
+    BuiltinHttpResponse, BuiltinHttpScenario, BuiltinLoopbackFixture, BuiltinMailOutboxFixture,
+    BuiltinMexApi, BuiltinMexPreparation, BuiltinNativeSourceLanguage,
+    BuiltinNativeTranslationUnit, BuiltinRuntimeCapability, BuiltinToolchainCapability,
 };
 
 #[test]
@@ -48,6 +48,36 @@ fn application_settings_fixture_requires_supported_engine_and_valid_id() {
     let mut errors = Vec::new();
     validate("setpref", &example, &mut errors);
     assert!(errors.iter().any(|error| error.message.contains("fixture")));
+}
+
+#[test]
+fn mail_outbox_fixture_requires_native_host_and_exact_bounded_oracle() {
+    let mut example = BuiltinExample {
+        id: "mail",
+        title: "mail",
+        program: "status = sendmail('a', 's');",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Native,
+        fixture: BuiltinExampleFixture::MailOutbox(BuiltinMailOutboxFixture {
+            id: crate::BuiltinExampleFixtureId { local_name: "mail" },
+            expected_message: "To: a\nSubject: s\nContent-Type: text/plain; charset=utf-8\n\n\n",
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::NativeOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(status == 0);",
+        },
+    };
+    let mut errors = Vec::new();
+    validate("sendmail", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+    example.harness = BuiltinExampleHarness::Browser;
+    let mut errors = Vec::new();
+    validate("sendmail", &example, &mut errors);
+    assert!(!errors.is_empty());
 }
 
 const HTTP_EXCHANGES: &[BuiltinHttpExchange] = &[BuiltinHttpExchange {

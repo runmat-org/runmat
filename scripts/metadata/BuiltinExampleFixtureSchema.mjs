@@ -30,9 +30,10 @@ export function validateBuiltinExampleFixture(value, label = "example fixture", 
     if (context) compatibility(value, context, label);
     return value;
   }
-  const [tag, inner] = tagged(value, ["Filesystem", "ApplicationSettings", "Loopback", "ForeignAdapter", "CliInteraction", "DesktopHostOnly"], label);
+  const [tag, inner] = tagged(value, ["Filesystem", "ApplicationSettings", "MailOutbox", "Loopback", "ForeignAdapter", "CliInteraction", "DesktopHostOnly"], label);
   if (tag === "Filesystem") filesystem(inner, label);
   else if (tag === "ApplicationSettings") applicationSettings(inner, label);
+  else if (tag === "MailOutbox") mailOutbox(inner, label);
   else if (tag === "Loopback") loopback(inner, label);
   else if (tag === "ForeignAdapter") foreignAdapter(inner, label);
   else if (tag === "CliInteraction") cliInteraction(inner, label);
@@ -44,6 +45,13 @@ export function validateBuiltinExampleFixture(value, label = "example fixture", 
 function applicationSettings(value, label) {
   exact(value, ["id"], `${label} application settings`);
   fixtureId(value.id, label);
+}
+
+function mailOutbox(value, label) {
+  exact(value, ["id", "expected_message"], `${label} mail outbox`);
+  fixtureId(value.id, label);
+  const message = string(value.expected_message, `${label} expected message`);
+  if (!message.length || new TextEncoder().encode(message).length > 8192) throw new Error(`${label} expected message must be nonempty and bounded`);
 }
 
 export function validateBuiltinExampleRequirements(value, label = "example requirements") {
@@ -422,9 +430,9 @@ function compatibility(fixture, context, label) {
     return;
   }
   const [tag, value] = Object.entries(fixture)[0];
-  const expectedHarnesses = { Filesystem: ["Portable", "Browser", "NativeFilesystem"], ApplicationSettings: ["Portable", "Browser", "Native"], Loopback: ["NativeLoopbackNetwork"], ForeignAdapter: ["NativeForeignRuntime"], CliInteraction: ["InteractiveHost"], DesktopHostOnly: ["InteractiveHost"] };
+  const expectedHarnesses = { Filesystem: ["Portable", "Browser", "NativeFilesystem"], ApplicationSettings: ["Portable", "Browser", "Native"], MailOutbox: ["Native"], Loopback: ["NativeLoopbackNetwork"], ForeignAdapter: ["NativeForeignRuntime"], CliInteraction: ["InteractiveHost"], DesktopHostOnly: ["InteractiveHost"] };
   if (!expectedHarnesses[tag].includes(harness)) throw new Error(`${label} is incompatible with its harness`);
-  if (["Loopback", "ForeignAdapter", "CliInteraction"].includes(tag) && requirements.host !== "NativeOnly") throw new Error(`${label} requires a native-only host`);
+  if (["MailOutbox", "Loopback", "ForeignAdapter", "CliInteraction"].includes(tag) && requirements.host !== "NativeOnly") throw new Error(`${label} requires a native-only host`);
   if (tag === "DesktopHostOnly" && requirements.host !== "DesktopHostOnly") throw new Error(`${label} requires a desktop-host-only boundary`);
   if (tag !== "Loopback" && Object.values(ENDPOINT_TOKENS).some((token) => program.includes(token))) throw new Error(`${label} endpoint token requires a loopback fixture`);
   if (tag === "Loopback") for (const substitution of value.endpoint_substitutions) {

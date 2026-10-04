@@ -157,6 +157,11 @@ fn missing_port_and_storage_error_do_not_fall_back_to_ambient_preferences() {
     let (runtime, calls) = context(Reply::Io);
     let error = run(read_smtp_server(Some(runtime))).expect_err("typed storage failure");
     assert!(error.message().contains("mail preferences unavailable"));
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:sendmail:PreferenceFailure")
+    );
+    assert!(std::error::Error::source(&error).is_some());
     assert_eq!(calls.get(), 1);
 }
 
@@ -192,5 +197,44 @@ fn invalid_arguments_reject_before_installed_preference_service() {
     ))
     .expect_err("non-scalar subject");
     assert!(error.message().contains("subject"));
+    assert_eq!(error.identifier(), Some("RunMat:sendmail:InvalidText"));
+    assert_eq!(calls.get(), 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn all_known_invalid_mail_forms_have_stable_identifiers_before_preferences() {
+    let (runtime, calls) = context(Reply::Values(None));
+    let inputs = [
+        (
+            vec![Value::String("a".into())],
+            "RunMat:sendmail:ArgumentCount",
+        ),
+        (
+            vec![Value::String("".into()), Value::String("s".into())],
+            "RunMat:sendmail:EmptyRecipient",
+        ),
+        (
+            vec![
+                Value::Int(runmat_value::IntValue::U64(7)),
+                Value::String("s".into()),
+            ],
+            "RunMat:sendmail:InvalidMailInput",
+        ),
+        (
+            vec![
+                Value::String("a".into()),
+                Value::String("s".into()),
+                Value::String("b".into()),
+                Value::String("file".into()),
+            ],
+            "RunMat:sendmail:UnsupportedAttachments",
+        ),
+    ];
+    for (args, expected) in inputs {
+        let error =
+            run(sendmail_builtin(Some(runtime.clone()), args)).expect_err("invalid mail form");
+        assert_eq!(error.identifier(), Some(expected));
+    }
     assert_eq!(calls.get(), 0);
 }

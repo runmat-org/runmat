@@ -7,6 +7,7 @@ import { tmpdir } from "os";
 
 import { materializeFilesystemFixture } from "./adapters/filesystem.mjs";
 import { isolateApplicationSettings } from "./adapters/application-settings.mjs";
+import { prepareMailOutbox } from "./adapters/mail-outbox.mjs";
 import { prepareForeignFixture } from "./adapters/foreign.mjs";
 import { runInteraction } from "./adapters/interaction.mjs";
 import { withLoopbackFixture } from "./adapters/loopback.mjs";
@@ -76,6 +77,7 @@ async function runCase(binary, root, testCase, timeoutMs) {
     }
     const settings = isolateApplicationSettings(caseDirectory, testCase.fixture);
     if (!settings.available) return unavailable(testCase.id, settings.reason);
+    const mailOutbox = prepareMailOutbox(caseDirectory, testCase.fixture);
     try {
         prepareWorkspace(workspaceDirectory, testCase.fixture);
     } catch (error) {
@@ -116,7 +118,8 @@ async function runCase(binary, root, testCase, timeoutMs) {
     const transcript = testCase.fixture && typeof testCase.fixture === "object" && "CliInteraction" in testCase.fixture
         ? testCase.fixture.CliInteraction.transcript
         : null;
-    return executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, testCase.input, testCase, timeoutMs, transcript, { ...foreignEnvironment, ...settings.environment });
+    const outcome = await executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, testCase.input, testCase, timeoutMs, transcript, { ...foreignEnvironment, ...settings.environment, ...mailOutbox.environment });
+    return mailOutbox.verify(outcome);
 }
 
 async function executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, program, testCase, timeoutMs, transcript = null, environmentOverrides = {}) {
@@ -251,7 +254,7 @@ async function executeAotProgram(binary, caseDirectory, workspaceDirectory, conf
 function prepareWorkspace(workspaceDirectory, fixture) {
     if (fixture === undefined
         || fixture === "None"
-        || (fixture && typeof fixture === "object" && ("Loopback" in fixture || "CliInteraction" in fixture || "ApplicationSettings" in fixture))) {
+        || (fixture && typeof fixture === "object" && ("Loopback" in fixture || "CliInteraction" in fixture || "ApplicationSettings" in fixture || "MailOutbox" in fixture))) {
         mkdirSync(workspaceDirectory);
         return;
     }

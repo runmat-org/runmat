@@ -322,12 +322,10 @@ async fn sendmail_builtin(
         crate::builtins::common::validation::value_contains_native_integer_class(value)
             || value_contains_resident(value)
     }) {
-        return Err(build_runtime_error(
+        return Err(sendmail_error(
+            SendmailFailure::InvalidMailInput,
             "sendmail: mail arguments must be text, not numeric or resident values",
-        )
-        .with_builtin("sendmail")
-        .with_identifier("RunMat:sendmail:InvalidMailInput")
-        .build());
+        ));
     }
     let (recipients, subject, body) = parse_sendmail_args(&args)?;
     let message = format_mail_message(&recipients, &subject, &body);
@@ -335,9 +333,9 @@ async fn sendmail_builtin(
     let outbox = std::env::var("RUNMAT_SENDMAIL_OUTBOX").ok();
     if let Some(outbox) = outbox {
         let folder = PathBuf::from(outbox);
-        vfs::create_dir_all_async(&folder)
-            .await
-            .map_err(|err| compat_error("sendmail", format!("sendmail: {err}")))?;
+        vfs::create_dir_all_async(&folder).await.map_err(|err| {
+            sendmail_error_with_source(SendmailFailure::Outbox, format!("sendmail: {err}"), err)
+        })?;
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -345,7 +343,9 @@ async fn sendmail_builtin(
         let path = folder.join(format!("runmat-mail-{stamp}.eml"));
         vfs::write_async(path, message.as_bytes())
             .await
-            .map_err(|err| compat_error("sendmail", format!("sendmail: {err}")))?;
+            .map_err(|err| {
+                sendmail_error_with_source(SendmailFailure::Outbox, format!("sendmail: {err}"), err)
+            })?;
         return Ok(Value::Num(0.0));
     }
 
@@ -357,16 +357,16 @@ async fn sendmail_builtin(
         .await?
         .or_else(|| std::env::var("RUNMAT_SMTP_SERVER").ok());
     if let Some(server) = smtp_server.filter(|server| !server.trim().is_empty()) {
-        return Err(compat_error(
-            "sendmail",
+        return Err(sendmail_error(
+            SendmailFailure::Smtp,
             format!(
                 "sendmail: SMTP server '{server}' is configured, but direct SMTP transport is not available in this build; configure RUNMAT_SENDMAIL_COMMAND or RUNMAT_SENDMAIL_OUTBOX"
             ),
         ));
     }
 
-    Err(compat_error(
-        "sendmail",
+    Err(sendmail_error(
+        SendmailFailure::NoTransport,
         "sendmail: no mail transport configured; set RUNMAT_SENDMAIL_COMMAND, RUNMAT_SENDMAIL_OUTBOX, or configure a system sendmail binary",
     ))
 }
