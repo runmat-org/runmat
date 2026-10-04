@@ -57,6 +57,14 @@ fn durable_object_array_elements_count_as_nodes_and_depth() {
     assert!(payload
         .validate_for_durable_storage(ValueLimits::default())
         .is_ok());
+    let null = ValuePayload::Inline(Box::new(InlineValue::Null));
+    assert!(
+        null.validate(ValueLimits::default()).is_ok(),
+        "V2 wire null remains defined"
+    );
+    assert!(null
+        .validate_for_durable_storage(ValueLimits::default())
+        .is_err());
 }
 
 #[test]
