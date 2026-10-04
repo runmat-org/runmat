@@ -231,12 +231,9 @@ fn cell_elements_to_strings(elements: &[MatArray]) -> Option<Vec<String>> {
 }
 
 fn utf16_codes_to_string(data: &[u16]) -> String {
-    let mut chars: Vec<char> = data
+    let end = data
         .iter()
-        .map(|code| char::from_u32(*code as u32).unwrap_or('\u{FFFD}'))
-        .collect();
-    while matches!(chars.last(), Some(&'\0')) {
-        chars.pop();
-    }
-    chars.into_iter().collect()
+        .rposition(|&code| code != 0)
+        .map_or(0, |index| index + 1);
+    String::from_utf16_lossy(&data[..end])
 }

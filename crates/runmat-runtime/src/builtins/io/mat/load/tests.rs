@@ -388,6 +388,24 @@ fn load_string_array_roundtrip() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mat_string_cell_roundtrip_decodes_utf16_surrogate_pairs() {
+    let source =
+        StringArray::new(vec!["A😀".into(), "plain".into()], vec![1, 2]).expect("two strings");
+    let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+        "labels".into(),
+        Value::StringArray(source.clone()),
+    )]))
+    .expect("encode UTF-16 MAT cell");
+    let entries = load_entries_from_bytes(bytes);
+    let Value::StringArray(actual) = &entries[0].1 else {
+        panic!("expected string array from char cells");
+    };
+    assert_eq!(actual.shape, source.shape);
+    assert_eq!(actual.data, source.data);
+}
+
 #[test]
 fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
     let _guard = workspace_guard();
