@@ -10,6 +10,33 @@ pub(crate) fn resolve() -> PathBuf {
     )
 }
 
+/// Factory search-path contribution known independently of the implicit
+/// current directory. The executable/configured installation root is captured
+/// by the session; an absent root is not replaced by ".".
+pub(crate) fn configured_factory_root(cwd: &Path) -> Option<PathBuf> {
+    let configured = crate::builtins::common::env::var("RUNMAT_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty());
+    select_factory(configured, executable_path(), cwd)
+}
+
+fn select_factory(
+    configured: Option<PathBuf>,
+    executable: Option<PathBuf>,
+    cwd: &Path,
+) -> Option<PathBuf> {
+    configured
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            }
+        })
+        .or_else(|| executable.and_then(|path| path.parent().map(Path::to_path_buf)))
+}
+
 fn select(
     configured: Option<PathBuf>,
     executable: Option<PathBuf>,
@@ -67,5 +94,18 @@ mod tests {
             PathBuf::from("working")
         );
         assert_eq!(select(None, None, None), PathBuf::from("."));
+    }
+
+    #[test]
+    fn configured_factory_root_never_substitutes_implicit_cwd() {
+        #[cfg(windows)]
+        let cwd = Path::new("C:\\working");
+        #[cfg(not(windows))]
+        let cwd = Path::new("/working");
+        assert_eq!(select_factory(None, None, cwd), None);
+        assert_eq!(
+            select_factory(Some(PathBuf::from("configured")), None, cwd),
+            Some(cwd.join("configured"))
+        );
     }
 }

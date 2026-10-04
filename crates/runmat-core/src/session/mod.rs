@@ -53,10 +53,15 @@ mod config;
 mod dynamic;
 mod executable;
 mod host_services;
+#[cfg(not(target_arch = "wasm32"))]
+mod host_driver;
 mod http_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod process_host;
 mod init;
 mod project;
 mod run;
+mod user_path;
 mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
@@ -80,6 +85,12 @@ pub struct RunMatSession {
     next_semantic_function_id: usize,
     /// Canonically compiled functions discovered through the runtime search path.
     dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
+    /// Startup path facts are captured before an async application-settings
+    /// read; no later ambient provider/CWD can redefine this session owner.
+    startup_user_path_authority:
+        runmat_runtime::builtins::common::path_state::CapturedUserPathAuthority,
+    startup_environment_path: String,
+    user_path_hydrated: bool,
     /// Loaded C MEX modules and their persistent state, scoped to this session.
     #[cfg(not(target_arch = "wasm32"))]
     mex_runtime: std::rc::Rc<runmat_runtime::foreign::MexRuntimeSession>,
@@ -183,6 +194,16 @@ struct DynamicFunctionCacheEntry {
     source_text: String,
     project_revision: Option<runmat_package::ProjectRevision>,
     registry: Arc<runmat_vm::FunctionRegistry>,
+}
+
+#[cfg(test)]
+impl RunMatSession {
+    pub(crate) fn cached_source_count(&self) -> usize {
+        self.dynamic_function_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .len()
+    }
 }
 
 struct ActiveExecutionGuard {

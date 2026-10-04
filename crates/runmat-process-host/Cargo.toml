@@ -12,7 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-std", "io-util", "process", "rt", "sync"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "process", "rt", "sync"] }
 rand = "0.8"
 hmac = { workspace = true }
 sha2 = { workspace = true }

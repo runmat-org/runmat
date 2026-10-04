@@ -26,7 +26,7 @@ use url::Url;
 
 use super::transport::{self, HttpMethod, HttpRequest};
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
-use crate::builtins::io::repl_fs::compat::session_pref_text;
+use crate::builtins::io::repl_fs::preferences::session_pref_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);

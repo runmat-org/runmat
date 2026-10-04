@@ -268,6 +268,30 @@ mod tests {
     }
 
     #[test]
+    fn userpath_partial_form_crosses_the_r2026b_release_boundary() {
+        let BuiltinExtensionMode::AvailableSince(introduced) =
+            runmat_builtins::USERPATH_PARTIAL_PATH_EXTENSION.mode
+        else {
+            panic!("partial user paths must remain a versioned public form");
+        };
+        assert_eq!(
+            introduced,
+            MatlabRelease {
+                year: 2026,
+                half: MatlabReleaseHalf::B,
+            }
+        );
+        assert!(!feature_available_at(
+            MatlabRelease {
+                year: 2026,
+                half: MatlabReleaseHalf::A,
+            },
+            introduced,
+        ));
+        assert!(feature_available_at(introduced, introduced));
+    }
+
+    #[test]
     fn extension_gate_rejects_profile_behavior_misuse_in_both_profiles() {
         let behavior = BuiltinExtensionDescriptor {
             id: "fixture-profile-behavior",

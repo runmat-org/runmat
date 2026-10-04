@@ -34,10 +34,20 @@ impl FsProvider for NativeFsProvider {
         path: &Path,
         intent: crate::NativePathIntent,
     ) -> io::Result<Option<crate::NativePathGrant>> {
+        if intent == crate::NativePathIntent::ProcessWorkingDirectory && !path.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "process working directory is not an existing native directory",
+            ));
+        }
         struct StableNativeMapping;
         impl crate::NativePathAuthority for StableNativeMapping {
             fn is_valid(&self) -> bool {
                 true
+            }
+
+            fn process_revocation(&self) -> crate::NativeProcessRevocation<'_> {
+                crate::NativeProcessRevocation::Stable
             }
         }
         crate::NativePathGrant::issued_by_provider(

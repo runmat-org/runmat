@@ -12,6 +12,6 @@ pub use capability::HostCapability;
 pub use child::{
     is_process_alive, terminate_process_tree, ChildProcess, ChildStdio, ProcessExit, ResourceLimits,
 };
-pub use command::{ChildLifetime, HostCommand, StdioPolicy};
+pub use command::{ChildLifetime, CompleteProcessOutput, HostCommand, StdioPolicy};
 pub use error::{ProcessHostError, ProcessHostResult};
 pub use ipc::hidden::{HiddenMode, HiddenModeRegistry};

@@ -41,6 +41,8 @@ pub use runtime::{
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{ContextFuture, RuntimeContextGuard};
+#[cfg(not(target_arch = "wasm32"))]
+pub use services::RuntimeProcessService;
 pub use services::{
     ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
     RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,

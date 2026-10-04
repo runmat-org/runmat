@@ -1,5 +1,9 @@
 use std::rc::Rc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::host_driver::host_driver;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use super::host_driver::HostDriverInitError;
 use runmat_runtime::context::RuntimeHttpService;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_runtime::context::RuntimeServiceFuture;
@@ -50,41 +54,6 @@ impl RuntimeHttpService for LazyNativeHttpService {
             let transport = session_transport(&service, &request)?;
             transport.open_bounded(request, accepted_limit).await
         })
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn host_driver() -> Result<&'static tokio::runtime::Runtime, HostDriverInitError> {
-    use std::sync::OnceLock;
-
-    static DRIVER: OnceLock<Result<tokio::runtime::Runtime, HostDriverInitError>> = OnceLock::new();
-    DRIVER
-        .get_or_init(|| {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .map_err(|error| HostDriverInitError(std::sync::Arc::new(error)))
-        })
-        .as_ref()
-        .map_err(Clone::clone)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Clone)]
-struct HostDriverInitError(std::sync::Arc<std::io::Error>);
-
-#[cfg(not(target_arch = "wasm32"))]
-impl std::fmt::Display for HostDriverInitError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.0.as_ref(), formatter)
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl std::error::Error for HostDriverInitError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.0.as_ref())
     }
 }
 

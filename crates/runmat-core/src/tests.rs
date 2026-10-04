@@ -324,6 +324,27 @@ fn execute_path_request(
     block_on(session.execute_request(request)).result
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn system_executes_from_ordinary_core_without_a_tokio_caller() {
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let _serial = runmat_filesystem::provider_override_lock();
+    let _native = runmat_filesystem::replace_provider(std::sync::Arc::new(
+        runmat_filesystem::NativeFsProvider,
+    ));
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    let outcome = execute_text_request(
+        &mut session,
+        "[status, output] = system('echo runmat'); assert(status == 0); assert(contains(output, 'runmat'));",
+    )
+    .expect("ordinary Core execution must drive native process I/O");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "status",
+        &runmat_value::Value::Num(0.0)
+    ));
+}
+
 fn outcome_has_named_upsert(
     outcome: &abi::ExecutionOutcome,
     name: &str,
@@ -11509,6 +11530,58 @@ fn path_function_cache_recompiles_changed_source() {
         &outcome,
         "y",
         &runmat_value::Value::Num(2.0)
+    ));
+}
+
+#[test]
+fn rehash_path_invalidates_session_source_cache_without_clearing_workspace() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let functions = temp.path().join("functions");
+    std::fs::create_dir_all(&functions).expect("create functions dir");
+    let source = functions.join("changing_value.m");
+    std::fs::write(&source, "function y = changing_value()\n  y = 1;\nend\n")
+        .expect("initial function");
+    let _cwd = push_cwd(temp.path());
+    let _path = push_path_state("");
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "addpath('functions'); kept = 9; y = changing_value();",
+    )
+    .expect("populate source cache");
+    assert_eq!(session.cached_source_count(), 1);
+    let before = session
+        .runtime_context()
+        .search_path()
+        .expect("session search path")
+        .generation();
+    std::fs::write(&source, "function y = changing_value()\n  y = 2;\nend\n")
+        .expect("updated function");
+    execute_text_request(&mut session, "rehash('path');").expect("refresh source cache");
+    assert_eq!(session.cached_source_count(), 0);
+    let outcome = execute_text_request(&mut session, "y = changing_value();")
+        .expect("call updated function after refresh");
+    assert_eq!(session.cached_source_count(), 1);
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_value::Value::Num(2.0)
+    ));
+    assert_eq!(
+        session
+            .runtime_context()
+            .search_path()
+            .expect("session search path")
+            .generation(),
+        before + 1,
+    );
+    let outcome = execute_text_request(&mut session, "kept_out = kept;")
+        .expect("rehash must not clear workspace values");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "kept_out",
+        &runmat_value::Value::Num(9.0)
     ));
 }
 

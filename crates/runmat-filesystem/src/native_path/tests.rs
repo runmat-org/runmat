@@ -72,6 +72,36 @@ fn virtual_providers_do_not_export_an_ambient_native_path() {
     );
 }
 
+#[test]
+fn process_working_directory_is_issued_only_by_a_real_directory_owner() {
+    let _serial = crate::provider_override_lock();
+    let _native = crate::replace_provider(Arc::new(NativeFsProvider));
+    let directory = tempfile::tempdir().expect("directory");
+    let issued = capture_native_path(directory.path(), NativePathIntent::ProcessWorkingDirectory)
+        .expect("native capture")
+        .expect("native directory route");
+    assert_eq!(issued.path(), directory.path());
+    assert_eq!(issued.intent(), NativePathIntent::ProcessWorkingDirectory);
+    assert!(issued.check_current().is_ok());
+    assert!(matches!(
+        issued.process_revocation(),
+        NativeProcessRevocation::Stable
+    ));
+    let missing = directory.path().join("missing");
+    let error = capture_native_path(&missing, NativePathIntent::ProcessWorkingDirectory)
+        .err()
+        .expect("missing directory cannot be issued");
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    let _virtual =
+        crate::replace_provider(Arc::new(MemoryFsProvider::with_current_dir("/virtual")));
+    assert!(
+        capture_native_path("/virtual", NativePathIntent::ProcessWorkingDirectory)
+            .expect("virtual provider route")
+            .is_none()
+    );
+    assert!(issued.check_current().is_ok());
+}
+
 struct Revocable(Arc<AtomicBool>);
 
 impl NativePathAuthority for Revocable {

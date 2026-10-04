@@ -50,24 +50,6 @@ pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn fileattrib_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Union(vec![
-        Type::Num,
-        Type::OutputList(vec![Type::Num, Type::Struct { known_fields: None }]),
-    ])
-}
-
-pub fn system_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Union(vec![
-        Type::Num,
-        Type::OutputList(vec![Type::Num, Type::String]),
-    ])
-}
-
-pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::tensor(), Type::logical()])

@@ -21,7 +21,7 @@ pub(super) async fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let directories = super::arguments::parse(tokens)?;
     let replacement = super::operation::plan(directories).await?;
     let previous = crate::builtins::common::path_state::current_path_string();
-    crate::builtins::common::path_state::set_path_string(&replacement);
+    crate::builtins::common::path_state::set_path_entries(replacement);
     Ok(Value::CharArray(runmat_value::CharArray::new_row(
         &previous,
     )))

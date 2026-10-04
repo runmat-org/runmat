@@ -1,45 +1,26 @@
 //! Compatibility filesystem, path, process, preference, and environment helpers.
 
-use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(windows)]
 use std::process::Command;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinSignatureDescriptor, RehashMode, MEMMAPFILE_CLASS, MEMMAPFILE_DESCRIPTOR,
+    MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+    MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CellArray, CharArray, IntegerStorage, NumericDType, NumericScalar, ObjectInstance, StructValue,
-    Tensor, Value,
-};
+use runmat_value::{CellArray, CharArray, ObjectInstance, StructValue, Value};
 
-use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
-use crate::builtins::common::path_state::set_path_string;
+use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-thread_local! {
-    static PREFS: RefCell<BTreeMap<String, BTreeMap<String, Value>>> =
-        const { RefCell::new(BTreeMap::new()) };
-}
-
-const INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "input",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input argument.",
-}];
 const INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "input1",
@@ -86,39 +67,6 @@ const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Result value.",
 }];
-const OUTPUT_STATUS_MESSAGE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "status",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "0 on success, nonzero on failure.",
-    },
-    BuiltinParamDescriptor {
-        name: "message",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Command output or diagnostic text.",
-    },
-];
-const OUTPUT_STATUS_ATTRIB: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "status",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "1 when attributes were read, otherwise 0.",
-    },
-    BuiltinParamDescriptor {
-        name: "attributes",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Attribute struct or diagnostic struct.",
-    },
-];
-
 macro_rules! simple_descriptor {
     ($sig:ident, $desc:ident, $label:expr, $inputs:expr, $outputs:expr, $mode:expr) => {
         const $sig: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
@@ -135,316 +83,6 @@ macro_rules! simple_descriptor {
     };
 }
 
-const MEMMAPFILE_INTEGER_CONTROLS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "memmapfile-integer-property-controls",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "typed-integer Writable, Offset, Repeat, or Format-shape property values for memmapfile are a RunMat extension; the public MATLAB page specifies logical/double controls and does not establish typed-integer Format dimensions",
-        error_identifier: Some("RunMat:compatibility:MemmapfileIntegerControlsExtension"),
-    };
-
-const MEMMAPFILE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "memmapfile-explicit-gpu-argument",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "passing an explicit gpuArray argument to host-only memmapfile is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MemmapfileExplicitGpuExtension"),
-};
-
-pub const MEMMAPFILE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
-    MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
-];
-
-const MEMMAPFILE_INTEGER_SHAPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Format.shape",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat permits a typed-integer shape vector inside a Format cell and parses it from authoritative storage as positive platform dimensions without binary64 conversion; current public evidence does not establish that typed form.",
-    }];
-
-const MEMMAPFILE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Writable, Offset, or Repeat",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat accepts exact typed-integer property controls, but compatibility mode retains the public logical/double property types.",
-    }];
-
-pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "m.Data = memmapfile(..., 'Format', integer_typename)",
-        inputs: &[],
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching integer classes without a numeric cast.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "m = memmapfile(..., 'Format', {type, integer_shape, field})",
-        inputs: &MEMMAPFILE_INTEGER_SHAPE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "This compatibility-gated typed-shape extension checks dimensions exactly before byte-count arithmetic; the mapped Data class is selected independently by the textual type name.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "m = memmapfile(..., integer_property_control)",
-        inputs: &MEMMAPFILE_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access.",
-    },
-];
-const SYSTEM_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "command",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Operating-system command to execute.",
-}];
-const SYSTEM_INPUTS_ECHO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "command",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Operating-system command to execute.",
-    },
-    BuiltinParamDescriptor {
-        name: "echo",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("'-echo'"),
-        description: "The literal '-echo', which also writes command output to the console.",
-    },
-];
-const SYSTEM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "[status, output] = system(command)",
-        inputs: &SYSTEM_INPUTS_COMMAND,
-        outputs: &OUTPUT_STATUS_MESSAGE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[status, output] = system(command, '-echo')",
-        inputs: &SYSTEM_INPUTS_ECHO,
-        outputs: &OUTPUT_STATUS_MESSAGE,
-    },
-];
-pub const SYSTEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SYSTEM_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
-};
-simple_descriptor!(
-    FILEATTRIB_SIGNATURES,
-    FILEATTRIB_DESCRIPTOR,
-    "[status, attributes] = fileattrib(path)",
-    &INPUTS_ONE,
-    &OUTPUT_STATUS_ATTRIB,
-    BuiltinOutputMode::ByRequestedOutputCount
-);
-
-pub const FILEATTRIB_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "fileattrib accepts host-text paths and textual controls; numeric and provider-resident values are rejected before any gather, provider access, or filesystem operation, while numeric status and attribute fields are outputs only.",
-    };
-const GETPREF_INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "group",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Custom setting group name.",
-    },
-    BuiltinParamDescriptor {
-        name: "pref",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Setting name or cell/string array of setting names.",
-    },
-];
-const GETPREF_INPUTS_THREE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "group",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Custom setting group name.",
-    },
-    BuiltinParamDescriptor {
-        name: "pref",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Setting name or cell/string array of setting names.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Default value, or cell array of defaults for multiple setting names.",
-    },
-];
-const GETPREF_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "value = getpref()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = getpref(group, pref)",
-        inputs: &GETPREF_INPUTS_TWO,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = getpref(group, pref, value)",
-        inputs: &GETPREF_INPUTS_THREE,
-        outputs: &OUTPUT_VALUE,
-    },
-];
-pub const GETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GETPREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-pub const GETPREF_GROUP_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "getpref-group-query",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "getpref(group) group-structure query is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GetprefGroupQueryExtension"),
-};
-pub const GETPREF_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GETPREF_GROUP_QUERY_EXTENSION];
-
-const GETPREF_INTEGER_DEFAULT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight host integer classes are stored and returned unchanged when used as a missing preference default; group and preference controls remain text-only.",
-    }];
-pub const GETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "value = getpref(group, pref, integer_default)",
-        inputs: &GETPREF_INTEGER_DEFAULT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "A missing preference is stored for the current RunMat preference session as the exact integer scalar or array and returned without floating conversion; an existing preference wins unchanged. Durable cross-session storage remains a general preference-system gap.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "integer_value = getpref(group, pref)",
-        inputs: &[],
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "A host integer scalar or array stored in the current RunMat preference session is returned with its exact class, shape, and value; multiple names wrap values in a shape-preserving cell array. Durable cross-session storage remains a general preference-system gap.",
-    },
-];
-pub const ISPREF_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "ispref accepts text group and preference names; integer host or resident controls are invalid and reject before provider access.",
-};
-const SETPREF_INTEGER_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Preference values may use any MATLAB datatype; all eight integer classes retain their exact native class, shape, and payload.",
-    }];
-pub const SETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "setpref(group, preference, integer_value)",
-        inputs: &SETPREF_INTEGER_VALUE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host values are cloned into the RunMat preference session without conversion; automatic residency gathers exact storage before host persistence. Durable cross-session storage remains a general preference-system gap.",
-    }];
-simple_descriptor!(
-    SETPREF_SIGNATURES,
-    SETPREF_DESCRIPTOR,
-    "setpref(group, preference, value)",
-    &INPUTS_THREE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    ISPREF_SIGNATURES,
-    ISPREF_DESCRIPTOR,
-    "tf = ispref(group, preference)",
-    &INPUTS_TWO,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    REHASH_SIGNATURES,
-    REHASH_DESCRIPTOR,
-    "rehash()",
-    &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    USERPATH_SIGNATURES,
-    USERPATH_DESCRIPTOR,
-    "path = userpath(option)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-pub const USERPATH_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "userpath accepts no input or one host text path/command; integer and resident numeric values reject before provider or search-path access.",
-};
-simple_descriptor!(
-    RESTOREDEFAULTPATH_SIGNATURES,
-    RESTOREDEFAULTPATH_DESCRIPTOR,
-    "path = restoredefaultpath()",
-    &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    MEMMAPFILE_SIGNATURES,
-    MEMMAPFILE_DESCRIPTOR,
-    "m = memmapfile(filename, Name, Value)",
-    &INPUTS_THREE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
 simple_descriptor!(
     WINQUERYREG_SIGNATURES,
     WINQUERYREG_DESCRIPTOR,
@@ -551,26 +189,42 @@ fn value_contains_resident(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "system",
-    category = "io/repl_fs",
-    summary = "Execute an operating-system command.",
-    keywords = "system,command,shell,process",
-    accel = "cpu",
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::system_type),
-    descriptor(crate::builtins::io::repl_fs::compat::SYSTEM_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::SYSTEM_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn system_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let requested = output_count::current_output_count();
+    if requested.is_some_and(|count| count > 2) {
+        return Err(compat_error(
+            "system",
+            "system: at most two outputs are supported",
+        ));
+    }
     if args.is_empty() || args.len() > 2 {
         return Err(compat_error(
             "system",
             "system: expected command and optional echo flag",
         ));
     }
-    let command = scalar_text(&args[0], "system", "command")?;
+    let command = crate::builtins::common::validation::value_text_scalar_string(&args[0])
+        .ok_or_else(|| {
+            compat_error(
+                "system",
+                "system: command must be a string scalar or character vector",
+            )
+        })?;
     let echo = if let Some(option) = args.get(1) {
-        let option = scalar_text(option, "system", "option")?;
+        let option = crate::builtins::common::validation::value_text_scalar_string(option)
+            .ok_or_else(|| {
+                compat_error(
+                    "system",
+                    "system: option must be a string scalar or character vector",
+                )
+            })?;
         if !option.eq_ignore_ascii_case("-echo") {
             return Err(compat_error(
                 "system",
@@ -581,8 +235,7 @@ async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         false
     };
-    let result = run_system_command(&command)?;
-    let requested = output_count::current_output_count();
+    let result = system::run(runtime.as_ref(), &command).await?;
     if (echo || requested == Some(0)) && !result.1.is_empty() {
         crate::console::record_console_line(crate::console::ConsoleStream::Stdout, &result.1);
     }
@@ -591,27 +244,6 @@ async fn system_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(output_count::output_list_with_padding(count, outputs));
     }
     Ok(Value::Num(result.0 as f64))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn run_system_command(command: &str) -> BuiltinResult<(i32, String)> {
-    #[cfg(windows)]
-    let output = Command::new("cmd").args(["/C", command]).output();
-    #[cfg(not(windows))]
-    let output = Command::new("sh").args(["-c", command]).output();
-    let output = output.map_err(|err| compat_error("system", format!("system: {err}")))?;
-    let status = output.status.code().unwrap_or(1);
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    Ok((status, text))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn run_system_command(_command: &str) -> BuiltinResult<(i32, String)> {
-    Ok((
-        1,
-        "system: process execution is unavailable in WebAssembly".to_string(),
-    ))
 }
 
 fn truthy(value: &Value) -> bool {
@@ -639,14 +271,7 @@ fn cellstr(values: Vec<String>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fileattrib",
-    category = "io/repl_fs",
-    summary = "Return file attribute metadata.",
-    keywords = "fileattrib,file,folder,attributes,metadata",
-    accel = "cpu",
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::fileattrib_type),
-    descriptor(crate::builtins::io::repl_fs::compat::FILEATTRIB_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::FILEATTRIB_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -657,34 +282,52 @@ async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let path = value_to_path(&args[0], "fileattrib", "path")?;
-    if args.len() > 1 {
-        apply_fileattrib_flags(&path, &args[1..]).await?;
+    let readonly = parse_fileattrib_flags(&args[1..])?;
+    let selected = CapturedFsPath::capture(path, "fileattrib")?;
+    if let Some(readonly) = readonly {
+        selected.set_readonly(readonly).await.map_err(|source| {
+            build_runtime_error(format!("fileattrib: {source}"))
+                .with_builtin("fileattrib")
+                .with_source(source)
+                .build()
+        })?;
     }
-    match vfs::metadata_async(&path).await {
+    match selected.metadata().await {
         Ok(meta) => Ok(output_list_for_count(vec![
             Value::Num(1.0),
-            Value::Struct(fileattrib_struct(&path, &meta)),
+            Value::Struct(fileattrib_struct(&selected.path, &meta)),
         ])),
-        Err(err) => Ok(output_list_for_count(vec![
-            Value::Num(0.0),
-            Value::Struct(error_struct(&err.to_string())),
-        ])),
+        Err(err) => {
+            selected.check_current().map_err(|source| {
+                build_runtime_error(format!("fileattrib: {source}"))
+                    .with_builtin("fileattrib")
+                    .with_source(source)
+                    .build()
+            })?;
+            Ok(output_list_for_count(vec![
+                Value::Num(0.0),
+                Value::Struct(error_struct(&err.to_string())),
+            ]))
+        }
     }
 }
 
-async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<()> {
+fn parse_fileattrib_flags(flags: &[Value]) -> BuiltinResult<Option<bool>> {
+    // Decode the complete option list before the first filesystem mutation.
+    // The last writable flag determines the single provider-owned update.
+    let mut readonly = None;
     for flag_value in flags {
         let flag = scalar_text(flag_value, "fileattrib", "attribute")?;
         match flag.to_ascii_lowercase().as_str() {
-            "+w" | "w" => vfs::set_readonly_async(path, false)
-                .await
-                .map_err(|err| compat_error("fileattrib", format!("fileattrib: {err}")))?,
-            "-w" => vfs::set_readonly_async(path, true)
-                .await
-                .map_err(|err| compat_error("fileattrib", format!("fileattrib: {err}")))?,
+            "+w" | "w" => readonly = Some(false),
+            "-w" => readonly = Some(true),
             "+r" | "r" | "-r" => {
-                // MATLAB exposes read flags, but the active filesystem provider only models
-                // writable/read-only state. Treat read flags as accepted no-ops.
+                return Err(build_runtime_error(
+                    "fileattrib: read permission changes require provider permission support",
+                )
+                .with_builtin("fileattrib")
+                .with_identifier("RunMat:fileattrib:UnsupportedPermission")
+                .build());
             }
             other => {
                 return Err(compat_error(
@@ -694,25 +337,25 @@ async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<(
             }
         }
     }
-    Ok(())
+    Ok(readonly)
 }
 
 fn fileattrib_struct(path: &Path, meta: &vfs::FsMetadata) -> StructValue {
     let mut st = StructValue::new();
     st.insert("Name", char_value(&path_to_string(path)));
-    st.insert("archive", Value::Bool(false));
-    st.insert("system", Value::Bool(false));
-    st.insert("hidden", Value::Bool(is_hidden_path(path)));
+    st.insert("archive", Value::Num(f64::NAN));
+    st.insert("system", Value::Num(f64::NAN));
+    st.insert("hidden", Value::Num(f64::NAN));
     st.insert("directory", Value::Bool(meta.is_dir()));
-    st.insert("UserRead", Value::Bool(true));
+    st.insert("UserRead", Value::Num(f64::NAN));
     st.insert("UserWrite", Value::Bool(!meta.is_readonly()));
-    st.insert("UserExecute", Value::Bool(meta.is_dir()));
-    st.insert("GroupRead", Value::Bool(true));
-    st.insert("GroupWrite", Value::Bool(!meta.is_readonly()));
-    st.insert("GroupExecute", Value::Bool(meta.is_dir()));
-    st.insert("OtherRead", Value::Bool(true));
-    st.insert("OtherWrite", Value::Bool(!meta.is_readonly()));
-    st.insert("OtherExecute", Value::Bool(meta.is_dir()));
+    st.insert("UserExecute", Value::Num(f64::NAN));
+    st.insert("GroupRead", Value::Num(f64::NAN));
+    st.insert("GroupWrite", Value::Num(f64::NAN));
+    st.insert("GroupExecute", Value::Num(f64::NAN));
+    st.insert("OtherRead", Value::Num(f64::NAN));
+    st.insert("OtherWrite", Value::Num(f64::NAN));
+    st.insert("OtherExecute", Value::Num(f64::NAN));
     st
 }
 
@@ -722,377 +365,99 @@ fn error_struct(message: &str) -> StructValue {
     st
 }
 
-fn is_hidden_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with('.'))
-}
-
-#[runtime_builtin(
-    name = "getpref",
-    category = "io/repl_fs",
-    summary = "Read RunMat session preferences through getpref-shaped forms.",
-    keywords = "getpref,preference,settings",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::getpref_type),
-    descriptor(crate::builtins::io::repl_fs::compat::GETPREF_DESCRIPTOR),
-    extensions(crate::builtins::io::repl_fs::compat::GETPREF_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::GETPREF_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn getpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    match args.len() {
-        0 => PREFS.with(|prefs| Ok(Value::Struct(all_prefs_struct(&prefs.borrow())))),
-        1 => {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &GETPREF_GROUP_QUERY_EXTENSION,
-                "getpref",
-            )?;
-            let group = scalar_text(&args[0], "getpref", "group")?;
-            PREFS.with(|prefs| {
-                Ok(Value::Struct(group_prefs_struct(
-                    prefs.borrow().get(&group),
-                )))
-            })
-        }
-        2 | 3 => getpref_named(&args),
-        _ => Err(compat_error("getpref", "getpref: too many input arguments")),
-    }
-}
-
-#[derive(Debug)]
-enum PreferenceNames {
-    Scalar(String),
-    Array {
-        names: Vec<String>,
-        shape: Vec<usize>,
-    },
-}
-
-fn getpref_named(args: &[Value]) -> BuiltinResult<Value> {
-    let group = scalar_text(&args[0], "getpref", "group")?;
-    let preferences = preference_names(&args[1])?;
-    if args
-        .get(2)
-        .is_some_and(crate::dispatcher::value_contains_gpu)
-    {
-        return Err(compat_error(
-            "getpref",
-            "getpref: provider-resident default values are not supported",
-        ));
-    }
-
-    match preferences {
-        PreferenceNames::Scalar(preference) => {
-            getpref_scalar(&group, &preference, args.get(2).cloned())
-        }
-        PreferenceNames::Array { names, shape } => {
-            let defaults = match args.get(2) {
-                None => None,
-                Some(Value::Cell(cell)) if cell.shape == shape => Some(cell.data.clone()),
-                Some(_) => {
-                    return Err(compat_error(
-                        "getpref",
-                        "getpref: defaults for multiple preferences must be a cell array with matching shape",
-                    ))
-                }
-            };
-            let values = PREFS.with(|prefs| {
-                let mut prefs = prefs.borrow_mut();
-                let mut resolved = Vec::with_capacity(names.len());
-                for (index, preference) in names.iter().enumerate() {
-                    if let Some(value) = prefs
-                        .get(&group)
-                        .and_then(|group| group.get(preference))
-                        .cloned()
-                    {
-                        resolved.push(value);
-                    } else if let Some(defaults) = &defaults {
-                        let value = defaults[index].clone();
-                        prefs
-                            .entry(group.clone())
-                            .or_default()
-                            .insert(preference.clone(), value.clone());
-                        resolved.push(value);
-                    } else {
-                        return Err(compat_error(
-                            "getpref",
-                            format!("getpref: preference '{group}/{preference}' does not exist"),
-                        ));
-                    }
-                }
-                Ok(resolved)
-            })?;
-            CellArray::new_with_shape(values, shape)
-                .map(Value::Cell)
-                .map_err(|err| compat_error("getpref", format!("getpref: {err}")))
-        }
-    }
-}
-
-fn getpref_scalar(group: &str, preference: &str, default: Option<Value>) -> BuiltinResult<Value> {
-    PREFS.with(|prefs| {
-        let mut prefs = prefs.borrow_mut();
-        if let Some(value) = prefs
-            .get(group)
-            .and_then(|group| group.get(preference))
-            .cloned()
-        {
-            return Ok(value);
-        }
-        let Some(default) = default else {
-            return Err(compat_error(
-                "getpref",
-                format!("getpref: preference '{group}/{preference}' does not exist"),
-            ));
-        };
-        prefs
-            .entry(group.to_string())
-            .or_default()
-            .insert(preference.to_string(), default.clone());
-        Ok(default)
-    })
-}
-
-fn preference_names(value: &Value) -> BuiltinResult<PreferenceNames> {
-    match value {
-        Value::String(text) => Ok(PreferenceNames::Scalar(text.clone())),
-        Value::CharArray(array) if array.rows == 1 => Ok(PreferenceNames::Scalar(
-            char_row_to_string(array),
-        )),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(PreferenceNames::Scalar(array.data[0].clone()))
-        }
-        Value::StringArray(array) => Ok(PreferenceNames::Array {
-            names: array.data.clone(),
-            shape: array.shape.clone(),
-        }),
-        Value::Cell(cell) => {
-            let mut names = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
-                match value {
-                    Value::CharArray(array) if array.rows == 1 => {
-                        names.push(char_row_to_string(array));
-                    }
-                    _ => {
-                        return Err(compat_error(
-                            "getpref",
-                            "getpref: preference cell entries must be character vectors",
-                        ))
-                    }
-                }
-            }
-            Ok(PreferenceNames::Array {
-                names,
-                shape: cell.shape.clone(),
-            })
-        }
-        _ => Err(compat_error(
-            "getpref",
-            "getpref: preference must be a character vector, string scalar, cell array of character vectors, or string array",
-        )),
-    }
-}
-
-fn all_prefs_struct(prefs: &BTreeMap<String, BTreeMap<String, Value>>) -> StructValue {
-    let mut out = StructValue::new();
-    for (group, values) in prefs {
-        out.insert(
-            group.clone(),
-            Value::Struct(group_prefs_struct(Some(values))),
-        );
-    }
-    out
-}
-
-fn group_prefs_struct(values: Option<&BTreeMap<String, Value>>) -> StructValue {
-    let mut out = StructValue::new();
-    if let Some(values) = values {
-        for (name, value) in values {
-            out.insert(name.clone(), value.clone());
-        }
-    }
-    out
-}
-
-pub(crate) fn session_pref_text(group: &str, preference: &str) -> Option<String> {
-    PREFS.with(|prefs| {
-        prefs
-            .borrow()
-            .get(group)
-            .and_then(|group| group.get(preference))
-            .and_then(pref_value_to_text)
-    })
-}
-
-fn pref_value_to_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(char_row_to_string(array)),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
-    }
-}
-
-#[runtime_builtin(
-    name = "setpref",
-    category = "io/repl_fs",
-    summary = "Set RunMat session preferences.",
-    keywords = "setpref,preference,settings",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::repl_fs::compat::SETPREF_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::SETPREF_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("setpref", &args).await?;
-    if args.len() != 3 {
-        return Err(compat_error(
-            "setpref",
-            "setpref: expected group, preference, and value",
-        ));
-    }
-    let group = scalar_text(&args[0], "setpref", "group")?;
-    let pref = scalar_text(&args[1], "setpref", "preference")?;
-    PREFS.with(|prefs| {
-        prefs
-            .borrow_mut()
-            .entry(group)
-            .or_default()
-            .insert(pref, args[2].clone());
-    });
-    Ok(Value::Num(0.0))
-}
-
-#[runtime_builtin(
-    name = "ispref",
-    category = "io/repl_fs",
-    summary = "Return true for existing RunMat session preferences.",
-    keywords = "ispref,preference,settings,predicate",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::bool_type),
-    descriptor(crate::builtins::io::repl_fs::compat::ISPREF_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::ISPREF_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn ispref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(compat_error(
-            "ispref",
-            "ispref: expected group and optional preference",
-        ));
-    }
-    let group = scalar_text(&args[0], "ispref", "group")?;
-    PREFS.with(|prefs| {
-        let prefs = prefs.borrow();
-        if args.len() == 1 {
-            return Ok(Value::Bool(prefs.contains_key(&group)));
-        }
-        let pref = scalar_text(&args[1], "ispref", "preference")?;
-        Ok(Value::Bool(
-            prefs
-                .get(&group)
-                .is_some_and(|group| group.contains_key(&pref)),
-        ))
-    })
-}
-
 #[runtime_builtin(
     name = "rehash",
-    category = "io/repl_fs",
-    summary = "Refresh function/path caches.",
-    keywords = "rehash,path,cache,refresh",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::repl_fs::compat::REHASH_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn rehash_builtin(_args: Vec<Value>) -> BuiltinResult<Value> {
+async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    use crate::user_functions::DynamicFunctionRefreshRequest;
+
+    if output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(build_runtime_error("rehash: too many output arguments")
+            .with_builtin("rehash")
+            .with_identifier("RunMat:rehash:TooManyOutputs")
+            .build());
+    }
+    let request = match args.as_slice() {
+        [] => DynamicFunctionRefreshRequest::Default,
+        [argument] => {
+            let mode = scalar_text(argument, "rehash", "mode").map_err(|source| {
+                build_runtime_error(source.message().to_owned())
+                    .with_builtin("rehash")
+                    .with_identifier("RunMat:rehash:InvalidMode")
+                    .with_source(source)
+                    .build()
+            })?;
+            match RehashMode::parse(&mode) {
+                Some(RehashMode::Path) => DynamicFunctionRefreshRequest::Path,
+                Some(RehashMode::Toolbox) => DynamicFunctionRefreshRequest::Toolbox,
+                Some(RehashMode::ToolboxCache) => DynamicFunctionRefreshRequest::ToolboxCache,
+                _ => {
+                    return Err(build_runtime_error(
+                        "rehash: expected path, toolbox, or toolboxcache",
+                    )
+                    .with_builtin("rehash")
+                    .with_identifier("RunMat:rehash:InvalidMode")
+                    .build());
+                }
+            }
+        }
+        _ => {
+            return Err(build_runtime_error("rehash: too many input arguments")
+                .with_builtin("rehash")
+                .with_identifier("RunMat:rehash:InvalidCall")
+                .build());
+        }
+    };
+    crate::user_functions::try_refresh_dynamic_functions(request)
+        .await
+        .ok_or_else(|| {
+            build_runtime_error("rehash: no source-cache refresh service is installed")
+                .with_builtin("rehash")
+                .with_identifier("RunMat:rehash:Unavailable")
+                .build()
+        })??;
     Ok(Value::Num(0.0))
 }
 
 #[runtime_builtin(
     name = "userpath",
-    category = "io/repl_fs",
-    summary = "Query or set the user path.",
-    keywords = "userpath,path,user,home",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::repl_fs::compat::USERPATH_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::USERPATH_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn userpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|value| {
-        crate::builtins::common::validation::value_has_native_integer_class(value)
-            || matches!(value, Value::GpuTensor(_))
-    }) {
-        return Err(compat_error(
-            "userpath",
-            "userpath: path or command must be host text",
-        ));
-    }
-    let args = gather_args("userpath", &args).await?;
-    match args.len() {
-        0 => Ok(char_value(&default_userpath())),
-        1 => {
-            let command = scalar_text(&args[0], "userpath", "command")?;
-            match command.to_ascii_lowercase().as_str() {
-                "reset" => Ok(char_value(&default_userpath())),
-                "clear" => Ok(char_value("")),
-                path => Ok(char_value(path)),
-            }
-        }
-        _ => Err(compat_error(
-            "userpath",
-            "userpath: too many input arguments",
-        )),
-    }
-}
-
-fn default_userpath() -> String {
-    home_directory()
-        .map(|home| home.join("Documents").join("MATLAB"))
-        .map(|path| path_to_string(&path))
-        .unwrap_or_default()
+async fn userpath_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    user_path::run(runtime, args).await
 }
 
 #[runtime_builtin(
     name = "restoredefaultpath",
-    category = "io/repl_fs",
-    summary = "Restore the RunMat search path to its default value.",
-    keywords = "restoredefaultpath,path,default",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::repl_fs::compat::RESTOREDEFAULTPATH_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if !args.is_empty() {
-        return Err(compat_error(
-            "restoredefaultpath",
-            "restoredefaultpath: too many input arguments",
-        ));
-    }
-    let root = path_to_string(&super::installation_path::root());
-    set_path_string(&root);
-    Ok(char_value(&root))
+async fn restoredefaultpath_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    user_path::restore(runtime, args)
 }
 
 #[runtime_builtin(
     name = "memmapfile",
-    category = "io/repl_fs",
-    summary = "Map a file into a MATLAB-compatible memmapfile object.",
-    keywords = "memmapfile,memory map,file,binary",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::io::repl_fs::compat::MEMMAPFILE_DESCRIPTOR),
-    extensions(crate::builtins::io::repl_fs::compat::MEMMAPFILE_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::MEMMAPFILE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    output_count::validate_fixed_outputs(
+        &MEMMAPFILE_DESCRIPTOR,
+        &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
+        "memmapfile",
+    )?;
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -1102,22 +467,6 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "memmapfile",
         )?;
     }
-    for pair in args.get(1..).unwrap_or_default().chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0], "memmapfile", "option").ok() else {
-            continue;
-        };
-        if matches!(
-            name.to_ascii_lowercase().as_str(),
-            "writable" | "offset" | "repeat" | "format"
-        ) && crate::builtins::common::validation::value_contains_native_integer_class(&pair[1])
-        {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
-                "memmapfile",
-            )?;
-        }
-    }
-    let args = gather_args("memmapfile", &args).await?;
     if args.is_empty() {
         return Err(compat_error(
             "memmapfile",
@@ -1125,31 +474,52 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let filename = value_to_path(&args[0], "memmapfile", "filename")?;
+    let option_args = &args[1..];
+    if option_args.len() % 2 != 0 {
+        return Err(compat_error(
+            "memmapfile",
+            "memmapfile: name-value options must be paired",
+        ));
+    }
+    let mut options = Vec::with_capacity(option_args.len() / 2);
+    for pair in option_args.chunks_exact(2) {
+        let option = MemmapOption::from_value(&pair[0])?;
+        if crate::builtins::common::validation::value_contains_native_integer_class(&pair[1]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
+                "memmapfile",
+            )?;
+        }
+        if !value_contains_resident(&pair[1]) {
+            option.validate_host_value(&pair[1])?;
+        }
+        options.push((option, &pair[1]));
+    }
+    let input = CapturedFsPath::capture(filename, "memmapfile")?;
     let mut writable = false;
     let mut offset = 0usize;
     let mut format = MemmapFormat::default();
     let mut repeat: Option<usize> = None;
-    let mut idx = 1usize;
-    while idx < args.len() {
-        if idx + 1 >= args.len() {
-            return Err(compat_error(
-                "memmapfile",
-                "memmapfile: name-value options must be paired",
-            ));
+    for (option, value) in options {
+        let value = gather_if_needed_async(value)
+            .await
+            .map_err(|source| map_control_flow("memmapfile", source))?;
+        match option {
+            MemmapOption::Writable => writable = truthy(&value),
+            MemmapOption::Offset => offset = numeric_usize(&value, "memmapfile", "Offset")?,
+            MemmapOption::Format => format = MemmapFormat::from_value(&value)?,
+            MemmapOption::Repeat => {
+                repeat = Some(numeric_usize(&value, "memmapfile", "Repeat")?);
+            }
         }
-        let name = scalar_text(&args[idx], "memmapfile", "option")?;
-        match name.to_ascii_lowercase().as_str() {
-            "writable" => writable = truthy(&args[idx + 1]),
-            "offset" => offset = numeric_usize(&args[idx + 1], "memmapfile", "Offset")?,
-            "format" => format = MemmapFormat::from_value(&args[idx + 1])?,
-            "repeat" => repeat = Some(numeric_usize(&args[idx + 1], "memmapfile", "Repeat")?),
-            _ => {}
-        }
-        idx += 2;
     }
-    let bytes = vfs::read_async(&filename)
-        .await
-        .map_err(|err| compat_error("memmapfile", format!("memmapfile: {err}")))?;
+    format.validate_layout(repeat)?;
+    let bytes = input.read().await.map_err(|source| {
+        build_runtime_error(format!("memmapfile: {source}"))
+            .with_builtin("memmapfile")
+            .with_source(source)
+            .build()
+    })?;
     if offset > bytes.len() {
         return Err(compat_error(
             "memmapfile",
@@ -1157,10 +527,10 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let data_value = format.decode(&bytes[offset..], repeat)?;
-    let mut object = ObjectInstance::new("memmapfile".to_string());
+    let mut object = ObjectInstance::new(MEMMAPFILE_CLASS.owned());
     object.properties.insert(
         "Filename".to_string(),
-        char_value(&path_to_string(&filename)),
+        char_value(&path_to_string(&input.path)),
     );
     object
         .properties
@@ -1179,319 +549,17 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Object(object))
 }
 
-#[derive(Clone, Debug)]
-struct MemmapFormat {
-    dtype: String,
-    shape: Vec<usize>,
-    field: Option<String>,
-}
-
-impl Default for MemmapFormat {
-    fn default() -> Self {
-        Self {
-            dtype: "uint8".to_string(),
-            shape: vec![1, 1],
-            field: None,
-        }
-    }
-}
-
-impl MemmapFormat {
-    fn from_value(value: &Value) -> BuiltinResult<Self> {
-        match value {
-            Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => Ok(Self {
-                dtype: scalar_text(value, "memmapfile", "Format")?.to_ascii_lowercase(),
-                ..Self::default()
-            }),
-            Value::Cell(cell) => {
-                if cell.data.is_empty() {
-                    return Err(compat_error(
-                        "memmapfile",
-                        "memmapfile: Format cell is empty",
-                    ));
-                }
-                let dtype =
-                    scalar_text(&cell.data[0], "memmapfile", "Format type")?.to_ascii_lowercase();
-                let shape = if cell.data.len() >= 2 {
-                    shape_from_value(&cell.data[1])?
-                } else {
-                    vec![1, 1]
-                };
-                let field = if cell.data.len() >= 3 {
-                    Some(scalar_text(&cell.data[2], "memmapfile", "Format field")?)
-                } else {
-                    None
-                };
-                Ok(Self {
-                    dtype,
-                    shape,
-                    field,
-                })
-            }
-            _ => Err(compat_error(
-                "memmapfile",
-                "memmapfile: Format must be a type name or format cell array",
-            )),
-        }
-    }
-
-    fn to_value(&self) -> BuiltinResult<Value> {
-        if let Some(field) = &self.field {
-            let shape_values = self.shape.iter().map(|value| *value as f64).collect();
-            let shape = Value::Tensor(
-                Tensor::new(shape_values, vec![1, self.shape.len()])
-                    .map_err(|err| compat_error("memmapfile", err))?,
-            );
-            return Ok(Value::Cell(
-                CellArray::new(
-                    vec![char_value(&self.dtype), shape, char_value(field)],
-                    1,
-                    3,
-                )
-                .map_err(|err| compat_error("memmapfile", err))?,
-            ));
-        }
-        Ok(char_value(&self.dtype))
-    }
-
-    fn decode(&self, bytes: &[u8], repeat: Option<usize>) -> BuiltinResult<Value> {
-        let element_size = dtype_size(&self.dtype)?;
-        let record_len = self
-            .shape
-            .iter()
-            .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
-            .ok_or_else(|| compat_error("memmapfile", "memmapfile: Format shape is too large"))?;
-        let values_per_record = record_len.max(1);
-        let available_values = bytes.len() / element_size;
-        let total_values = repeat
-            .map(|count| count.saturating_mul(values_per_record))
-            .unwrap_or(available_values);
-        let total_values = total_values.min(available_values);
-        let mut shape = self.shape.clone();
-        if let Some(repeat) = repeat.filter(|repeat| *repeat > 1) {
-            shape.push(repeat);
-        } else if shape.iter().product::<usize>() != total_values {
-            shape = vec![total_values, 1];
-        }
-        let tensor = if let Some(storage) = decode_integer_storage(&self.dtype, bytes, total_values)
-        {
-            Value::Tensor(
-                Tensor::new_integer(storage, shape)
-                    .map_err(|err| compat_error("memmapfile", err))?,
-            )
-        } else {
-            let mut data = Vec::with_capacity(total_values);
-            for idx in 0..total_values {
-                let start = idx * element_size;
-                data.push(read_typed_value(
-                    &self.dtype,
-                    &bytes[start..start + element_size],
-                )?);
-            }
-            Value::Tensor(
-                Tensor::new_with_dtype(data, shape, tensor_dtype(&self.dtype))
-                    .map_err(|err| compat_error("memmapfile", err))?,
-            )
-        };
-        if let Some(field) = &self.field {
-            let mut st = StructValue::new();
-            st.insert(field.clone(), tensor);
-            Ok(Value::Struct(st))
-        } else {
-            Ok(tensor)
-        }
-    }
-}
-
-fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
-    match value {
-        Value::Num(v) => Ok(vec![positive_platform_usize(*v, "Format shape")?, 1]),
-        Value::Int(v) => Ok(vec![positive_integer_shape_dim(v)?, 1]),
-        Value::Tensor(tensor) => {
-            let len = tensor.shape.iter().product();
-            let mut shape = Vec::with_capacity(len);
-            for index in 0..len {
-                let value = tensor.numeric_value_at(index).ok_or_else(|| {
-                    compat_error("memmapfile", "memmapfile: invalid Format shape storage")
-                })?;
-                shape.push(shape_dim_from_numeric_scalar(value)?);
-            }
-            Ok(shape)
-        }
-        _ => Err(compat_error(
-            "memmapfile",
-            "memmapfile: Format shape must be a positive numeric vector",
-        )),
-    }
-}
-
-fn shape_dim_from_numeric_scalar(value: NumericScalar) -> BuiltinResult<usize> {
-    match value {
-        NumericScalar::F64(value) => positive_platform_usize(value, "Format shape"),
-        NumericScalar::F32(value) => positive_platform_usize(f64::from(value), "Format shape"),
-        integer => positive_integer_shape_dim(
-            &integer
-                .into_int_value()
-                .expect("non-floating numeric scalar must be integer"),
-        ),
-    }
-}
-
-fn positive_integer_shape_dim(value: &runmat_value::IntValue) -> BuiltinResult<usize> {
-    value
-        .try_to_usize()
-        .filter(|size| *size > 0)
-        .ok_or_else(|| {
-            compat_error(
-                "memmapfile",
-                "memmapfile: Format shape must contain positive integers",
-            )
-        })
-}
-
-fn positive_platform_usize(value: f64, arg: &str) -> BuiltinResult<usize> {
-    let Some(size) = nonnegative_platform_usize(value) else {
-        return Err(compat_error(
-            "memmapfile",
-            format!("memmapfile: {arg} must contain positive integers"),
-        ));
-    };
-    if size == 0 {
-        return Err(compat_error(
-            "memmapfile",
-            format!("memmapfile: {arg} must contain positive integers"),
-        ));
-    }
-    Ok(size)
-}
-
-fn nonnegative_platform_usize(value: f64) -> Option<usize> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
-        return None;
-    }
-    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
-        return None;
-    }
-    Some(value as usize)
-}
-
-fn dtype_size(dtype: &str) -> BuiltinResult<usize> {
-    match dtype.to_ascii_lowercase().as_str() {
-        "uint8" | "int8" | "char" => Ok(1),
-        "uint16" | "int16" => Ok(2),
-        "uint32" | "int32" | "single" => Ok(4),
-        "uint64" | "int64" | "double" => Ok(8),
-        other => Err(compat_error(
-            "memmapfile",
-            format!("memmapfile: unsupported Format type '{other}'"),
-        )),
-    }
-}
-
-fn tensor_dtype(dtype: &str) -> NumericDType {
-    match dtype.to_ascii_lowercase().as_str() {
-        "single" => NumericDType::F32,
-        "char" => NumericDType::U8,
-        _ => NumericDType::F64,
-    }
-}
-
-fn decode_integer_storage(dtype: &str, bytes: &[u8], value_count: usize) -> Option<IntegerStorage> {
-    let bytes = &bytes[..value_count.checked_mul(dtype_size(dtype).ok()?)?];
-    Some(match dtype.to_ascii_lowercase().as_str() {
-        "int8" => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
-        "uint8" => IntegerStorage::U8(bytes.to_vec()),
-        "int16" => IntegerStorage::I16(
-            bytes
-                .chunks_exact(2)
-                .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
-                .collect(),
-        ),
-        "uint16" => IntegerStorage::U16(
-            bytes
-                .chunks_exact(2)
-                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                .collect(),
-        ),
-        "int32" => IntegerStorage::I32(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                .collect(),
-        ),
-        "uint32" => IntegerStorage::U32(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                .collect(),
-        ),
-        "int64" => IntegerStorage::I64(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| {
-                    i64::from_le_bytes([
-                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
-                        chunk[7],
-                    ])
-                })
-                .collect(),
-        ),
-        "uint64" => IntegerStorage::U64(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| {
-                    u64::from_le_bytes([
-                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
-                        chunk[7],
-                    ])
-                })
-                .collect(),
-        ),
-        _ => return None,
-    })
-}
-
-fn read_typed_value(dtype: &str, bytes: &[u8]) -> BuiltinResult<f64> {
-    Ok(match dtype.to_ascii_lowercase().as_str() {
-        "uint8" | "char" => bytes[0] as f64,
-        "int8" => i8::from_le_bytes([bytes[0]]) as f64,
-        "uint16" => u16::from_le_bytes([bytes[0], bytes[1]]) as f64,
-        "int16" => i16::from_le_bytes([bytes[0], bytes[1]]) as f64,
-        "uint32" => u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64,
-        "int32" => i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64,
-        "uint64" => u64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]) as f64,
-        "int64" => i64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]) as f64,
-        "single" => f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64,
-        "double" => f64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-        other => {
-            return Err(compat_error(
-                "memmapfile",
-                format!("memmapfile: unsupported Format type '{other}'"),
-            ));
-        }
-    })
-}
-
-fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
-    match value {
-        Value::Num(v) => nonnegative_platform_usize(*v).ok_or_else(|| {
-            compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
-        }),
-        Value::Int(v) => v.try_to_usize().ok_or_else(|| {
-            compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
-        }),
-        _ => Err(compat_error(
-            name,
-            format!("{name}: {arg} must be a nonnegative integer"),
-        )),
-    }
-}
+mod captured_fs_path;
+#[cfg(test)]
+#[path = "compat/tests/bindings.rs"]
+mod binding_tests;
+#[path = "compat/user_path.rs"]
+mod user_path;
+#[path = "compat/system.rs"]
+mod system;
+use captured_fs_path::CapturedFsPath;
+mod memmapfile;
+use memmapfile::{numeric_usize, MemmapFormat, MemmapOption};
 
 #[runtime_builtin(
     name = "winqueryreg",
@@ -1640,8 +708,20 @@ fn query_windows_registry(_root: &str, _key: &str, _value: Option<&str>) -> Buil
 
 #[cfg(test)]
 mod tests {
+    use super::memmapfile::{shape_from_value, MemmapDataType};
     use super::*;
+    use crate::builtins::io::repl_fs::preferences::{
+        getpref_builtin, ispref_builtin, setpref_builtin,
+    };
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
+    use runmat_builtins::{
+        BuiltinIntegerAuditKind, FILEATTRIB_INTEGER_AUDIT, GETPREF_DESCRIPTOR,
+        GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
+        MEMMAPFILE_INTEGER_CAPABILITIES, USERPATH_INTEGER_AUDIT,
+    };
+    use runmat_filesystem::FsProvider;
+    use runmat_value::{IntegerStorage, Tensor};
+    use std::sync::Arc;
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -1737,8 +817,133 @@ mod tests {
     }
 
     #[test]
+    fn multi_name_setpref_and_ispref_keep_shape_and_missing_positions() {
+        let group = Value::String("runmatMultiPreferenceForms".into());
+        let names = Value::StringArray(
+            runmat_value::StringArray::new(vec!["first".into(), "second".into()], vec![2, 1])
+                .expect("names shape"),
+        );
+        let values = Value::Cell(
+            CellArray::new_with_shape(
+                vec![
+                    Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+                    Value::Num(2.0),
+                ],
+                vec![2, 1],
+            )
+            .expect("values shape"),
+        );
+        assert_eq!(
+            run(setpref_builtin(vec![
+                group.clone(),
+                names.clone(),
+                values.clone()
+            ]))
+            .expect("set both"),
+            Value::Num(0.0)
+        );
+        let queried =
+            run(getpref_builtin(vec![group.clone(), names.clone()])).expect("retrieve both");
+        assert_eq!(queried, values);
+        let flags = run(ispref_builtin(vec![group.clone(), names])).expect("query both");
+        let Value::LogicalArray(flags) = flags else {
+            panic!("logical array");
+        };
+        assert_eq!(flags.shape, vec![2, 1]);
+        assert_eq!(flags.data.as_slice(), &[1, 1]);
+
+        let mixed = Value::StringArray(
+            runmat_value::StringArray::new(vec!["first".into(), "missing".into()], vec![1, 2])
+                .expect("mixed shape"),
+        );
+        let flags = run(ispref_builtin(vec![group, mixed])).expect("mixed query");
+        let Value::LogicalArray(flags) = flags else {
+            panic!("logical array");
+        };
+        assert_eq!(flags.shape, vec![1, 2]);
+        assert_eq!(flags.data.as_slice(), &[1, 0]);
+    }
+
+    #[test]
+    fn invalid_multi_value_shape_rejects_before_resident_download_or_store_mutation() {
+        let group = Value::String("runmatMultiPreferenceAdmission".into());
+        let names = Value::StringArray(
+            runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
+                .expect("names shape"),
+        );
+        let wrong_shape = Value::Cell(
+            CellArray::new_with_shape(
+                vec![unregistered_resident_value(), Value::Num(2.0)],
+                vec![2, 1],
+            )
+            .expect("wrong shape"),
+        );
+        let error = run(setpref_builtin(vec![
+            group.clone(),
+            names.clone(),
+            wrong_shape,
+        ]))
+        .expect_err("shape must reject before any gather");
+        assert!(error.message().contains("matching shape"));
+        assert_eq!(
+            run(ispref_builtin(vec![group.clone()])).expect("group query"),
+            Value::Bool(false)
+        );
+        let error = run(setpref_builtin(vec![group, names, Value::Num(1.0)]))
+            .expect_err("scalar cannot fill multiple settings");
+        assert!(error.message().contains("matching shape"));
+    }
+
+    #[test]
+    fn preference_output_admission_precedes_storage_and_provider_access() {
+        let group = Value::String("runmatPreferenceOutputAdmission".into());
+        let _count = crate::output_count::push_output_count(Some(2));
+        for call in [
+            run(getpref_builtin(vec![
+                group.clone(),
+                Value::String("name".into()),
+            ])),
+            run(ispref_builtin(vec![group.clone()])),
+            run(setpref_builtin(vec![
+                group.clone(),
+                Value::String("name".into()),
+                unregistered_resident_value(),
+            ])),
+        ] {
+            let error = call.expect_err("too many outputs before effects");
+            assert!(error.message().contains("too many output"));
+        }
+        drop(_count);
+        assert_eq!(
+            run(ispref_builtin(vec![group])).expect("no mutation"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn setpref_status_result_is_a_separately_gated_extension() {
+        let _count = crate::output_count::push_output_count(Some(1));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let group = Value::String("runmatSetprefStatusAdmission".into());
+        let error = run(setpref_builtin(vec![
+            group.clone(),
+            Value::String("name".into()),
+            unregistered_resident_value(),
+        ]))
+        .expect_err("status extension must reject before gather");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SETPREF_STATUS_EXTENSION.error_identifier
+        );
+        assert_eq!(
+            run(ispref_builtin(vec![group])).expect("no mutation"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
     fn getpref_descriptor_and_integer_capabilities_cover_documented_forms() {
-        assert_eq!(GETPREF_DESCRIPTOR.signatures.len(), 3);
+        assert_eq!(GETPREF_DESCRIPTOR.signatures.len(), 4);
         assert_eq!(GETPREF_INTEGER_CAPABILITIES.len(), 2);
         assert_eq!(GETPREF_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
         assert_eq!(
@@ -2038,6 +1243,19 @@ mod tests {
     }
 
     #[test]
+    fn memmapfile_rejects_excess_requested_outputs_before_file_access() {
+        let _requested = output_count::push_output_count(Some(2));
+        let error = run(memmapfile_builtin(vec![Value::String(
+            "definitely-missing-output-count.bin".into(),
+        )]))
+        .expect_err("fixed single result");
+        assert_eq!(
+            error.identifier(),
+            MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
+    }
+
+    #[test]
     fn memmapfile_typed_shape_offset_and_repeat_parsers_are_exact() {
         use runmat_value::{IntValue, IntegerStorage};
 
@@ -2074,6 +1292,261 @@ mod tests {
         } else {
             assert!(maximum.is_err());
         }
+    }
+
+    #[test]
+    fn memmapfile_record_and_repeat_lengths_reject_overflow_without_allocation() {
+        let impossible_record = MemmapFormat {
+            dtype: MemmapDataType::parse("uint8").unwrap(),
+            shape: vec![usize::MAX, 2],
+            field: None,
+            additional_fields: Vec::new(),
+        };
+        assert!(impossible_record.decode(&[], None).is_err());
+
+        let impossible_repeat = MemmapFormat {
+            dtype: MemmapDataType::parse("uint8").unwrap(),
+            shape: vec![2, 1],
+            field: None,
+            additional_fields: Vec::new(),
+        };
+        let error = impossible_repeat
+            .decode(&[0], Some(usize::MAX))
+            .expect_err("requested records overflow before payload allocation");
+        assert!(error.message().contains("Repeat exceeds addressable size"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn memmapfile_heterogeneous_format_table_preserves_record_fields_and_integer_bits() {
+        let shape = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+        let format = Value::Cell(
+            CellArray::new(
+                vec![
+                    char_value("int16"),
+                    shape.clone(),
+                    char_value("signed"),
+                    char_value("uint64"),
+                    shape,
+                    char_value("wide"),
+                ],
+                2,
+                3,
+            )
+            .unwrap(),
+        );
+        let parsed = MemmapFormat::from_value(&format).unwrap();
+        let Value::Cell(storage) = &format else {
+            unreachable!("constructed cell format")
+        };
+        let visible_order = storage.to_column_major();
+        let normalized = Value::Cell(
+            CellArray::from_column_major(visible_order, vec![2, 3])
+                .expect("MATLAB-visible column-major format table"),
+        );
+        assert_eq!(
+            MemmapFormat::from_value(&normalized)
+                .unwrap()
+                .to_value()
+                .unwrap(),
+            format
+        );
+        parsed.validate_layout(Some(2)).unwrap();
+        assert_eq!(parsed.to_value().unwrap(), format);
+        let bytes = [
+            (-7_i16).to_le_bytes().to_vec(),
+            u64::MAX.to_le_bytes().to_vec(),
+            9_i16.to_le_bytes().to_vec(),
+            (u64::MAX - 1).to_le_bytes().to_vec(),
+        ]
+        .concat();
+        let Value::StructArray(records) = parsed.decode(&bytes, Some(2)).unwrap() else {
+            panic!("two records must be a structure array");
+        };
+        let expected = Value::StructArray(records.clone());
+        let records = records.into_elements();
+        assert_eq!(records.len(), 2);
+        for (record, signed, wide) in [(&records[0], -7, u64::MAX), (&records[1], 9, u64::MAX - 1)]
+        {
+            let Some(Value::Tensor(signed_value)) = record.fields.get("signed") else {
+                panic!("signed field");
+            };
+            let Some(Value::Tensor(wide_value)) = record.fields.get("wide") else {
+                panic!("wide field");
+            };
+            assert_eq!(
+                signed_value.integer_storage(),
+                Some(&IntegerStorage::I16(vec![signed]))
+            );
+            assert_eq!(
+                wide_value.integer_storage(),
+                Some(&IntegerStorage::U64(vec![wide]))
+            );
+        }
+
+        let _lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-memmap-table");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-memmap-table");
+        let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+            root.clone(),
+        ));
+        provider
+            .write_project_path(root.join("records.bin"), &bytes)
+            .expect("table input");
+        let _provider = vfs::replace_provider(provider);
+        vfs::set_current_dir(&root).expect("table cwd");
+        let result = futures::executor::block_on(memmapfile_builtin(vec![
+            Value::String("records.bin".into()),
+            char_value("Format"),
+            format,
+            char_value("Repeat"),
+            Value::Num(2.0),
+        ]))
+        .expect("mapped table");
+        let Value::Object(mapped) = result else {
+            panic!("memmapfile result");
+        };
+        assert_eq!(mapped.properties.get("Data"), Some(&expected));
+    }
+
+    #[test]
+    fn memmapfile_table_admission_rejects_duplicate_and_overflow_before_read() {
+        let shape = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+        let duplicated = Value::Cell(
+            CellArray::new(
+                vec![
+                    char_value("uint8"),
+                    shape.clone(),
+                    char_value("same"),
+                    char_value("uint8"),
+                    shape,
+                    char_value("same"),
+                ],
+                2,
+                3,
+            )
+            .unwrap(),
+        );
+        let error = futures::executor::block_on(memmapfile_builtin(vec![
+            Value::String("definitely-missing-format-table.bin".into()),
+            char_value("Format"),
+            duplicated,
+        ]))
+        .expect_err("duplicate fields fail before file access");
+        assert!(error.message().contains("unique"));
+        let overflow = MemmapFormat {
+            dtype: MemmapDataType::parse("uint64").unwrap(),
+            shape: vec![usize::MAX, 1],
+            field: Some("wide".into()),
+            additional_fields: Vec::new(),
+        };
+        assert!(overflow.validate_layout(None).is_err());
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn memmapfile_named_shape_presentation_does_not_round_wide_dimensions() {
+        let format = MemmapFormat {
+            dtype: MemmapDataType::parse("uint8").unwrap(),
+            shape: vec![(1usize << 53) + 1, 1],
+            field: Some("wide".into()),
+            additional_fields: Vec::new(),
+        };
+        let presented = format.to_value().expect("exact shape presentation");
+        let reparsed = MemmapFormat::from_value(&presented).expect("exact shape parsing");
+        assert_eq!(reparsed.shape, format.shape);
+    }
+
+    #[test]
+    fn memmapfile_single_payload_preserves_negative_zero_and_nan_bits() {
+        let bits = [0x8000_0000_u32, 0x7fc1_2345_u32];
+        let bytes = bits
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>();
+        let format = MemmapFormat {
+            dtype: MemmapDataType::parse("single").unwrap(),
+            shape: vec![1, 2],
+            field: None,
+            additional_fields: Vec::new(),
+        };
+        let Value::Tensor(result) = format.decode(&bytes, None).unwrap() else {
+            panic!("single tensor");
+        };
+        assert_eq!(
+            result
+                .as_f32_slice()
+                .expect("native Float32 payload")
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            bits
+        );
+    }
+
+    #[test]
+    fn memmapfile_known_invalid_controls_reject_before_earlier_download_or_read() {
+        let filename = Value::String("definitely-missing-preflight.bin".into());
+        let earlier_resident = unregistered_resident_value();
+        let unknown = run(memmapfile_builtin(vec![
+            filename.clone(),
+            Value::String("Offset".into()),
+            earlier_resident.clone(),
+            Value::String("Unknown".into()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("unknown option is a preflight error");
+        assert!(unknown.message().contains("unsupported option"));
+        assert!(!unknown.message().to_ascii_lowercase().contains("provider"));
+
+        let invalid = run(memmapfile_builtin(vec![
+            filename,
+            Value::String("Offset".into()),
+            earlier_resident,
+            Value::String("Format".into()),
+            Value::String("not-a-supported-dtype".into()),
+        ]))
+        .expect_err("invalid known format is a preflight error");
+        assert!(invalid.message().contains("unsupported Format type"));
+        assert!(!invalid.message().to_ascii_lowercase().contains("provider"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn memmapfile_captured_input_retains_provider_and_cwd_after_ambient_swap() {
+        use runmat_filesystem::MemoryFsProvider;
+        use std::sync::Arc;
+
+        let _lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected_dir = std::env::temp_dir().join("runmat-memmap-selected");
+        #[cfg(not(target_arch = "wasm32"))]
+        let other_dir = std::env::temp_dir().join("runmat-memmap-other");
+        #[cfg(target_arch = "wasm32")]
+        let selected_dir = PathBuf::from("/runmat-memmap-selected");
+        #[cfg(target_arch = "wasm32")]
+        let other_dir = PathBuf::from("/runmat-memmap-other");
+        let selected = Arc::new(MemoryFsProvider::with_current_dir(selected_dir.clone()));
+        let other = Arc::new(MemoryFsProvider::with_current_dir(other_dir.clone()));
+        selected
+            .write_project_path(selected_dir.join("source.bin"), b"selected")
+            .expect("selected source");
+        other
+            .write_project_path(selected_dir.join("source.bin"), b"wrong owner")
+            .expect("same path on foreign owner");
+        let _selected = vfs::replace_provider(selected);
+        vfs::set_current_dir(&selected_dir).expect("selected cwd");
+        let captured = CapturedFsPath::capture(PathBuf::from("source.bin"), "memmapfile")
+            .expect("capture selected input");
+        let _other = vfs::replace_provider(other);
+        vfs::set_current_dir(&other_dir).expect("other cwd");
+        assert_eq!(captured.path, selected_dir.join("source.bin"));
+        assert_eq!(
+            futures::executor::block_on(captured.read()).expect("pinned read"),
+            b"selected"
+        );
     }
 
     #[test]
@@ -2123,9 +1596,10 @@ mod tests {
 
         for (dtype, bytes, expected) in cases {
             let mapped = MemmapFormat {
-                dtype: dtype.to_string(),
+                dtype: MemmapDataType::parse(dtype).unwrap(),
                 shape: vec![1, 2],
                 field: None,
+                additional_fields: Vec::new(),
             }
             .decode(&bytes, None)
             .unwrap();
@@ -2147,9 +1621,10 @@ mod tests {
         ]
         .concat();
         let mapped = MemmapFormat {
-            dtype: "uint32".to_string(),
+            dtype: MemmapDataType::parse("uint32").unwrap(),
             shape: vec![2, 1],
             field: None,
+            additional_fields: Vec::new(),
         }
         .decode(&bytes, Some(2))
         .unwrap();
@@ -2163,14 +1638,37 @@ mod tests {
         );
     }
 
-    #[test]
-    fn system_two_outputs_returns_status_and_text() {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn system_two_outputs_returns_status_and_text() {
+        use std::rc::Rc;
+        struct Process;
+        impl crate::context::RuntimeProcessService for Process {
+            fn output_complete(
+                &self,
+                command: runmat_process_host::HostCommand,
+            ) -> crate::context::RuntimeServiceFuture<
+                runmat_process_host::ProcessHostResult<runmat_process_host::CompleteProcessOutput>,
+            > {
+                Box::pin(command.output_complete())
+            }
+        }
+        let _serial = vfs::provider_override_lock();
+        let _native = vfs::replace_provider(Arc::new(vfs::NativeFsProvider));
+        let runtime = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default().with_process(Rc::new(Process)),
+        );
         #[cfg(windows)]
         let command = "echo hello";
         #[cfg(not(windows))]
         let command = "printf hello";
         let _guard = crate::output_count::push_output_count(Some(2));
-        let value = run(system_builtin(vec![Value::String(command.to_string())])).unwrap();
+        let value = system_builtin(Some(runtime), vec![Value::String(command.to_string())])
+            .await
+            .unwrap();
         let Value::OutputList(values) = value else {
             panic!("expected output list");
         };
@@ -2184,21 +1682,36 @@ mod tests {
 
     #[test]
     fn system_rejects_integer_commands_before_process_access() {
-        let error = run(system_builtin(vec![Value::Int(
-            runmat_value::IntValue::U64(u64::MAX),
-        )]))
+        let error = run(system_builtin(
+            None,
+            vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))],
+        ))
         .expect_err("integer command must reject");
         assert!(error.message().contains("command must be"));
     }
 
     #[test]
     fn system_rejects_integer_echo_options_before_process_access() {
-        let error = run(system_builtin(vec![
-            Value::String("printf should-not-run".to_string()),
-            Value::Int(runmat_value::IntValue::U8(1)),
-        ]))
+        let error = run(system_builtin(
+            None,
+            vec![
+                Value::String("printf should-not-run".to_string()),
+                Value::Int(runmat_value::IntValue::U8(1)),
+            ],
+        ))
         .expect_err("integer option must reject");
         assert!(error.message().contains("option must be"));
+    }
+
+    #[test]
+    fn system_rejects_excess_outputs_before_process_access() {
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let error = run(system_builtin(
+            None,
+            vec![Value::String("printf should-not-run".to_string())],
+        ))
+        .expect_err("unsupported output count must reject");
+        assert!(error.message().contains("at most two outputs"));
     }
 
     #[test]
@@ -2206,6 +1719,14 @@ mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join("runmat_fileattrib_test.txt");
         std::fs::write(&path, "data").unwrap();
+        let rejected = run(fileattrib_builtin(vec![
+            Value::String(path_to_string(&path)),
+            char_value("-w"),
+            char_value("unsupported"),
+        ]))
+        .expect_err("a later invalid flag cannot leave an earlier mutation");
+        assert!(rejected.message().contains("unsupported attribute flag"));
+        assert!(!std::fs::metadata(&path).unwrap().permissions().readonly());
         run(fileattrib_builtin(vec![
             Value::String(path_to_string(&path)),
             char_value("-w"),
@@ -2221,6 +1742,111 @@ mod tests {
         let readonly = std::fs::metadata(&path).unwrap().permissions().readonly();
         assert!(!readonly);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fileattrib_read_flag_rejects_before_an_earlier_write_flag_mutates() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-fileattrib-preflight");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-fileattrib-preflight");
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        let path = root.join("input.bin");
+        provider.write_project_path(&path, b"value").unwrap();
+        let _installed = vfs::replace_provider(provider.clone());
+        let error = run(fileattrib_builtin(vec![
+            Value::String(path_to_string(&path)),
+            char_value("-w"),
+            char_value("+r"),
+        ]))
+        .expect_err("unsupported read permission must reject before mutation");
+        assert_eq!(
+            error.identifier(),
+            "RunMat:fileattrib:UnsupportedPermission"
+        );
+        assert!(!futures::executor::block_on(provider.metadata(&path))
+            .unwrap()
+            .is_readonly());
+    }
+
+    #[test]
+    fn fileattrib_captured_path_retains_provider_for_mutation_and_metadata() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-fileattrib-selected");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-fileattrib-selected");
+        let selected = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        let other = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        let path = root.join("input.bin");
+        selected.write_project_path(&path, b"selected").unwrap();
+        other.write_project_path(&path, b"foreign").unwrap();
+        let _selected = vfs::replace_provider(selected.clone());
+        vfs::set_current_dir(&root).unwrap();
+        let captured = CapturedFsPath::capture(PathBuf::from("input.bin"), "fileattrib").unwrap();
+        let _other = vfs::replace_provider(other.clone());
+        futures::executor::block_on(captured.set_readonly(true)).unwrap();
+        assert!(futures::executor::block_on(captured.metadata())
+            .unwrap()
+            .is_readonly());
+        assert!(futures::executor::block_on(selected.metadata(&path))
+            .unwrap()
+            .is_readonly());
+        assert!(!futures::executor::block_on(other.metadata(&path))
+            .unwrap()
+            .is_readonly());
+    }
+
+    #[test]
+    fn fileattrib_reports_unavailable_permission_facts_as_nan() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let root = std::env::temp_dir().join("runmat-fileattrib-unknown-facts");
+        #[cfg(target_arch = "wasm32")]
+        let root = PathBuf::from("/runmat-fileattrib-unknown-facts");
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(root.clone()));
+        provider
+            .write_project_path(root.join("sample.bin"), b"value")
+            .unwrap();
+        let _installed = vfs::replace_provider(provider);
+        vfs::set_current_dir(&root).unwrap();
+        let _outputs = output_count::push_output_count(Some(2));
+        let Value::OutputList(outputs) =
+            run(fileattrib_builtin(vec![Value::String("sample.bin".into())])).unwrap()
+        else {
+            panic!("two requested fileattrib outputs");
+        };
+        assert_eq!(outputs[0], Value::Num(1.0));
+        let Value::Struct(attributes) = &outputs[1] else {
+            panic!("attribute struct");
+        };
+        for name in [
+            "archive",
+            "system",
+            "hidden",
+            "UserRead",
+            "UserExecute",
+            "GroupRead",
+            "GroupWrite",
+            "GroupExecute",
+            "OtherRead",
+            "OtherWrite",
+            "OtherExecute",
+        ] {
+            assert!(
+                matches!(attributes.fields.get(name), Some(Value::Num(value)) if value.is_nan()),
+                "{name}"
+            );
+        }
+        assert_eq!(attributes.fields.get("UserWrite"), Some(&Value::Bool(true)));
+        assert_eq!(
+            attributes.fields.get("directory"),
+            Some(&Value::Bool(false))
+        );
     }
 
     #[test]
@@ -2254,5 +1880,145 @@ mod tests {
             .message()
             .to_ascii_lowercase()
             .contains("provider"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rehash_routes_typed_modes_to_source_refresh_without_clearing_values() {
+        use crate::user_functions::DynamicFunctionRefreshRequest;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let calls = Rc::clone(&observed);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_runtime, request| {
+            let calls = Rc::clone(&calls);
+            Box::pin(async move {
+                calls.borrow_mut().push(request);
+                Ok(())
+            })
+        })));
+        let _active = context.enter();
+        for arguments in [
+            vec![],
+            vec![char_value("path")],
+            vec![Value::String("toolbox".into())],
+            vec![char_value("toolboxcache")],
+        ] {
+            assert_eq!(run(rehash_builtin(arguments)).unwrap(), Value::Num(0.0));
+        }
+        assert_eq!(
+            observed.borrow().as_slice(),
+            &[
+                DynamicFunctionRefreshRequest::Default,
+                DynamicFunctionRefreshRequest::Path,
+                DynamicFunctionRefreshRequest::Toolbox,
+                DynamicFunctionRefreshRequest::ToolboxCache,
+            ]
+        );
+        let error = run(rehash_builtin(vec![char_value("not-a-mode")]))
+            .expect_err("invalid mode must fail before cache callback");
+        assert!(error.message().contains("expected path"));
+        assert_eq!(error.identifier(), "RunMat:rehash:InvalidMode");
+        assert_eq!(observed.borrow().len(), 4);
+        let error = run(rehash_builtin(vec![Value::Num(1.0)]))
+            .expect_err("numeric mode must fail before cache callback");
+        assert!(error.message().contains("mode must be"));
+        assert_eq!(error.identifier(), "RunMat:rehash:InvalidMode");
+        assert_eq!(observed.borrow().len(), 4);
+        let error = run(rehash_builtin(vec![
+            char_value("path"),
+            char_value("toolbox"),
+        ]))
+        .expect_err("extra mode must fail before cache callback");
+        assert_eq!(error.identifier(), "RunMat:rehash:InvalidCall");
+        assert_eq!(observed.borrow().len(), 4);
+        let _outputs = output_count::push_output_count(Some(2));
+        let error = run(rehash_builtin(Vec::new()))
+            .expect_err("unsupported output count must fail before cache callback");
+        assert_eq!(error.identifier(), "RunMat:rehash:TooManyOutputs");
+        assert_eq!(observed.borrow().len(), 4);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rehash_without_an_installed_source_refresh_service_is_not_a_noop_success() {
+        use std::rc::Rc;
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _active = context.enter();
+        let error = run(rehash_builtin(Vec::new())).expect_err("no cache owner exists");
+        assert_eq!(error.identifier(), "RunMat:rehash:Unavailable");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cancelled_rehash_rejects_before_refresh_callback() {
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let cancellation = CancellationSource::new();
+        cancellation.cancel(CancellationReason::User);
+        let calls = Rc::new(Cell::new(0));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_cancellation_token(cancellation.token());
+        let counted = Rc::clone(&calls);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
+            counted.set(counted.get() + 1);
+            Box::pin(async { Ok(()) })
+        })));
+        let _active = context.enter();
+        let error = run(rehash_builtin(Vec::new())).expect_err("cancelled refresh cannot mutate");
+        assert_eq!(error.identifier(), "RunMat:Cancelled");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn dropped_pending_rehash_drops_selected_refresh_without_publication() {
+        use std::cell::Cell;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::rc::Rc;
+        use std::task::{Context, Poll};
+
+        struct PendingRefresh(Rc<Cell<bool>>);
+        impl Future for PendingRefresh {
+            type Output = Result<(), RuntimeError>;
+            fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+                Poll::Pending
+            }
+        }
+        impl Drop for PendingRefresh {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let dropped = Rc::new(Cell::new(false));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let selected = Rc::clone(&dropped);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
+            Box::pin(PendingRefresh(Rc::clone(&selected)))
+        })));
+        let _active = context.enter();
+        let mut call = Box::pin(rehash_builtin(Vec::new()));
+        let waker = futures::task::noop_waker();
+        assert!(call
+            .as_mut()
+            .poll(&mut Context::from_waker(&waker))
+            .is_pending());
+        drop(call);
+        assert!(dropped.get());
     }
 }

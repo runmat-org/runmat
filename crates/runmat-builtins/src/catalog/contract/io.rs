@@ -16,6 +16,7 @@ pub enum IoReplFsInferenceRule {
     WorkingDirectory(WorkingDirectoryInferenceRule),
     Directory(DirectoryInferenceRule),
     Environment(EnvironmentInferenceRule),
+    Preference(PreferenceInferenceRule),
     File(FileInferenceRule),
     Path(PathInferenceRule),
     SourceInventory(SourceInventoryInferenceRule),
@@ -101,6 +102,13 @@ pub enum EnvironmentInferenceRule {
     Exists,
     Set,
     Remove,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PreferenceInferenceRule {
+    Read,
+    Exists,
+    Set,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

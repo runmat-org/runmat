@@ -2,12 +2,14 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
-use crate::builtins::common::path_state::current_path_segments;
+use crate::builtins::common::path_state::{current_path_entries, PathEntry, PathOrigin};
 use crate::builtins::io::repl_fs::path_root::is_rooted_path;
 use runmat_filesystem as vfs;
 
-pub(super) async fn plan(request: super::arguments::Request) -> crate::BuiltinResult<String> {
-    let mut existing = current_path_segments();
+pub(super) async fn plan(
+    request: super::arguments::Request,
+) -> crate::BuiltinResult<Vec<PathEntry>> {
+    let mut existing = current_path_entries();
     let mut seen = HashSet::new();
     let mut additions = Vec::new();
 
@@ -15,16 +17,29 @@ pub(super) async fn plan(request: super::arguments::Request) -> crate::BuiltinRe
         let normalized = normalize_directory(&raw).await?;
         let key = super::super::path_list::identity(&normalized);
         if seen.insert(key.clone()) {
-            existing.retain(|entry| super::super::path_list::identity(entry) != key);
-            additions.push(normalized);
+            let retained_origin = existing
+                .iter()
+                .find(|entry| {
+                    super::super::path_list::identity(&entry.path) == key
+                        && entry.origin == PathOrigin::User
+                })
+                .or_else(|| {
+                    existing
+                        .iter()
+                        .find(|entry| super::super::path_list::identity(&entry.path) == key)
+                })
+                .map(|entry| entry.origin)
+                .unwrap_or(PathOrigin::Manual);
+            existing.retain(|entry| super::super::path_list::identity(&entry.path) != key);
+            additions.push(PathEntry::new(normalized, retained_origin));
         }
     }
 
-    let segments: Vec<String> = match request.position {
+    let segments: Vec<PathEntry> = match request.position {
         super::arguments::Position::Begin => additions.into_iter().chain(existing).collect(),
         super::arguments::Position::End => existing.into_iter().chain(additions).collect(),
     };
-    Ok(super::super::path_list::join(&segments))
+    Ok(segments)
 }
 
 async fn normalize_directory(raw: &str) -> crate::BuiltinResult<String> {

@@ -11,6 +11,8 @@ pub struct ChildStdio {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProcessExit {
     pub code: Option<i32>,
+    /// Unix signal termination is distinct from an ordinary exit code.
+    pub signal: Option<i32>,
     pub success: bool,
 }
 
@@ -60,6 +62,18 @@ impl ChildProcess {
             .ok_or_else(|| ProcessHostError::Protocol("child stdio has already been taken".into()))
     }
 
+    pub(crate) fn take_complete_output(&mut self) -> ProcessHostResult<(ChildStdout, ChildStderr)> {
+        if self.stdio.is_some() || self.child.stdout.is_none() || self.child.stderr.is_none() {
+            return Err(ProcessHostError::Protocol(
+                "complete child output pipes are unavailable".into(),
+            ));
+        }
+        Ok((
+            self.child.stdout.take().expect("checked stdout"),
+            self.child.stderr.take().expect("checked stderr"),
+        ))
+    }
+
     pub fn id(&self) -> Option<u32> {
         self.process_id
     }
@@ -70,21 +84,30 @@ impl ChildProcess {
 
     pub async fn wait(&mut self) -> ProcessHostResult<ProcessExit> {
         let status = self.child.wait().await?;
-        Ok(ProcessExit {
-            code: status.code(),
-            success: status.success(),
-        })
+        Ok(process_exit(status))
     }
 
     pub fn try_wait(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
-        Ok(self.child.try_wait()?.map(|status| ProcessExit {
-            code: status.code(),
-            success: status.success(),
-        }))
+        Ok(self.child.try_wait()?.map(process_exit))
     }
 
     pub async fn terminate_tree(&mut self) -> ProcessHostResult<()> {
         super::process_tree::terminate(&mut self.child, self.process_id).await?;
         Ok(())
+    }
+}
+
+fn process_exit(status: std::process::ExitStatus) -> ProcessExit {
+    #[cfg(unix)]
+    let signal = {
+        use std::os::unix::process::ExitStatusExt as _;
+        status.signal()
+    };
+    #[cfg(not(unix))]
+    let signal = None;
+    ProcessExit {
+        code: status.code(),
+        signal,
+        success: status.success(),
     }
 }
