@@ -194,6 +194,6 @@ pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes:
-            "Integer controls are exact; automatic resident controls gather from their exact owner.",
+            "Integer controls are exact; automatic resident controls gather from their exact owner. Offset and Repeat object properties use UInt64 when a count exceeds exact Double range.",
     },
 ];

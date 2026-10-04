@@ -39,7 +39,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
                 "`m = memmapfile(filename)` reads UInt8 data. Name/Value pairs configure Writable, Offset, Format, and Repeat; incomplete or unknown pairs are errors.",
                 "Format accepts a native type name or an n-by-3 cell table. Each table row gives a type, positive dimension vector, and unique field name. File records contain those fields in row order; Data is a structure array when more than one complete record is read.",
                 "Supported numeric names are int8/int16/int32/int64, uint8/uint16/uint32/uint64, single, double, and char. Native integer storage and Float32 bit patterns are read without a Double conversion.",
-                "Offset selects the starting byte. Repeat limits complete records. Checked record and Repeat geometry rejects overflow before reading the file.",
+                "The char format returns character Data. An unnamed cell Format retains its declared dimension vector in the returned Format property.",
+                "Offset selects the starting byte. Repeat limits complete records. Checked record and Repeat geometry rejects overflow before reading the file. Counts above 2^53 are presented as exact UInt64 properties rather than rounded doubles.",
             ],
         },
         BuiltinDocumentationSection {
