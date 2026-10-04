@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
+use std::sync::Arc;
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
@@ -722,6 +723,7 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         options.push((option, &pair[1]));
     }
+    let input = CapturedMemmapInput::capture(filename)?;
     let mut writable = false;
     let mut offset = 0usize;
     let mut format = MemmapFormat::default();
@@ -739,9 +741,12 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             }
         }
     }
-    let bytes = vfs::read_async(&filename)
-        .await
-        .map_err(|err| compat_error("memmapfile", format!("memmapfile: {err}")))?;
+    let bytes = input.read().await.map_err(|source| {
+        build_runtime_error(format!("memmapfile: {source}"))
+            .with_builtin("memmapfile")
+            .with_source(source)
+            .build()
+    })?;
     if offset > bytes.len() {
         return Err(compat_error(
             "memmapfile",
@@ -752,7 +757,7 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let mut object = ObjectInstance::new("memmapfile".to_string());
     object.properties.insert(
         "Filename".to_string(),
-        char_value(&path_to_string(&filename)),
+        char_value(&path_to_string(&input.path)),
     );
     object
         .properties
@@ -769,6 +774,57 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     );
     object.properties.insert("Data".to_string(), data_value);
     Ok(Value::Object(object))
+}
+
+struct CapturedMemmapInput {
+    provider: Arc<dyn vfs::FsProvider>,
+    path: PathBuf,
+    resource: Option<vfs::CapturedFsResourceLease>,
+}
+
+impl CapturedMemmapInput {
+    fn capture(path: PathBuf) -> BuiltinResult<Self> {
+        let (provider, path) = if path.is_absolute() {
+            (vfs::current_provider(), path)
+        } else {
+            let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|source| {
+                build_runtime_error(format!(
+                    "memmapfile: cannot resolve current folder: {source}"
+                ))
+                .with_builtin("memmapfile")
+                .with_source(source)
+                .build()
+            })?;
+            (provider, cwd.join(path))
+        };
+        let resource = vfs::capture_resource_lease(Arc::clone(&provider));
+        Ok(Self {
+            provider,
+            path,
+            resource,
+        })
+    }
+
+    async fn read(&self) -> std::io::Result<Vec<u8>> {
+        self.check_current()?;
+        let bytes = self.provider.read(&self.path).await?;
+        self.check_current()?;
+        Ok(bytes)
+    }
+
+    fn check_current(&self) -> std::io::Result<()> {
+        if self
+            .resource
+            .as_ref()
+            .is_some_and(|lease| !lease.is_valid())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "memmapfile captured filesystem authority was revoked",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1885,6 +1941,42 @@ mod tests {
         .expect_err("invalid known format is a preflight error");
         assert!(invalid.message().contains("unsupported Format type"));
         assert!(!invalid.message().to_ascii_lowercase().contains("provider"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn memmapfile_captured_input_retains_provider_and_cwd_after_ambient_swap() {
+        use runmat_filesystem::MemoryFsProvider;
+        use std::sync::Arc;
+
+        let _lock = vfs::provider_override_lock();
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected_dir = std::env::temp_dir().join("runmat-memmap-selected");
+        #[cfg(not(target_arch = "wasm32"))]
+        let other_dir = std::env::temp_dir().join("runmat-memmap-other");
+        #[cfg(target_arch = "wasm32")]
+        let selected_dir = PathBuf::from("/runmat-memmap-selected");
+        #[cfg(target_arch = "wasm32")]
+        let other_dir = PathBuf::from("/runmat-memmap-other");
+        let selected = Arc::new(MemoryFsProvider::with_current_dir(selected_dir.clone()));
+        let other = Arc::new(MemoryFsProvider::with_current_dir(other_dir.clone()));
+        selected
+            .write_project_path(selected_dir.join("source.bin"), b"selected")
+            .expect("selected source");
+        other
+            .write_project_path(selected_dir.join("source.bin"), b"wrong owner")
+            .expect("same path on foreign owner");
+        let _selected = vfs::replace_provider(selected);
+        vfs::set_current_dir(&selected_dir).expect("selected cwd");
+        let captured = CapturedMemmapInput::capture(PathBuf::from("source.bin"))
+            .expect("capture selected input");
+        let _other = vfs::replace_provider(other);
+        vfs::set_current_dir(&other_dir).expect("other cwd");
+        assert_eq!(captured.path, selected_dir.join("source.bin"));
+        assert_eq!(
+            futures::executor::block_on(captured.read()).expect("pinned read"),
+            b"selected"
+        );
     }
 
     #[test]
