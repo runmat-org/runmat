@@ -67,6 +67,11 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
     let nested =
         Value::Cell(CellArray::new(vec![Value::String("x".repeat(1_048_577))], 1, 1).unwrap());
     assert!(handle_admission::input(&nested).identity_digest.is_none());
+    let huge_chars =
+        Value::CharArray(runmat_value::CharArray::new(vec!['x'; 4_097], 1, 4_097).unwrap());
+    assert!(handle_admission::input(&huge_chars)
+        .identity_digest
+        .is_none());
 }
 
 #[test]
