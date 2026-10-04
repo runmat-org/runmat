@@ -694,22 +694,6 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "memmapfile",
         )?;
     }
-    for pair in args.get(1..).unwrap_or_default().chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0], "memmapfile", "option").ok() else {
-            continue;
-        };
-        if matches!(
-            name.to_ascii_lowercase().as_str(),
-            "writable" | "offset" | "repeat" | "format"
-        ) && crate::builtins::common::validation::value_contains_native_integer_class(&pair[1])
-        {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
-                "memmapfile",
-            )?;
-        }
-    }
-    let args = gather_args("memmapfile", &args).await?;
     if args.is_empty() {
         return Err(compat_error(
             "memmapfile",
@@ -717,27 +701,43 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let filename = value_to_path(&args[0], "memmapfile", "filename")?;
+    let option_args = &args[1..];
+    if option_args.len() % 2 != 0 {
+        return Err(compat_error(
+            "memmapfile",
+            "memmapfile: name-value options must be paired",
+        ));
+    }
+    let mut options = Vec::with_capacity(option_args.len() / 2);
+    for pair in option_args.chunks_exact(2) {
+        let option = MemmapOption::from_value(&pair[0])?;
+        if crate::builtins::common::validation::value_contains_native_integer_class(&pair[1]) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
+                "memmapfile",
+            )?;
+        }
+        if !value_contains_resident(&pair[1]) {
+            option.validate_host_value(&pair[1])?;
+        }
+        options.push((option, &pair[1]));
+    }
     let mut writable = false;
     let mut offset = 0usize;
     let mut format = MemmapFormat::default();
     let mut repeat: Option<usize> = None;
-    let mut idx = 1usize;
-    while idx < args.len() {
-        if idx + 1 >= args.len() {
-            return Err(compat_error(
-                "memmapfile",
-                "memmapfile: name-value options must be paired",
-            ));
+    for (option, value) in options {
+        let value = gather_if_needed_async(value)
+            .await
+            .map_err(|source| map_control_flow("memmapfile", source))?;
+        match option {
+            MemmapOption::Writable => writable = truthy(&value),
+            MemmapOption::Offset => offset = numeric_usize(&value, "memmapfile", "Offset")?,
+            MemmapOption::Format => format = MemmapFormat::from_value(&value)?,
+            MemmapOption::Repeat => {
+                repeat = Some(numeric_usize(&value, "memmapfile", "Repeat")?);
+            }
         }
-        let name = scalar_text(&args[idx], "memmapfile", "option")?;
-        match name.to_ascii_lowercase().as_str() {
-            "writable" => writable = truthy(&args[idx + 1]),
-            "offset" => offset = numeric_usize(&args[idx + 1], "memmapfile", "Offset")?,
-            "format" => format = MemmapFormat::from_value(&args[idx + 1])?,
-            "repeat" => repeat = Some(numeric_usize(&args[idx + 1], "memmapfile", "Repeat")?),
-            _ => {}
-        }
-        idx += 2;
     }
     let bytes = vfs::read_async(&filename)
         .await
@@ -769,6 +769,42 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     );
     object.properties.insert("Data".to_string(), data_value);
     Ok(Value::Object(object))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MemmapOption {
+    Writable,
+    Offset,
+    Format,
+    Repeat,
+}
+
+impl MemmapOption {
+    fn from_value(value: &Value) -> BuiltinResult<Self> {
+        let name = scalar_text(value, "memmapfile", "option")?;
+        match name.to_ascii_lowercase().as_str() {
+            "writable" => Ok(Self::Writable),
+            "offset" => Ok(Self::Offset),
+            "format" => Ok(Self::Format),
+            "repeat" => Ok(Self::Repeat),
+            _ => Err(compat_error(
+                "memmapfile",
+                format!("memmapfile: unsupported option '{name}'"),
+            )),
+        }
+    }
+
+    fn validate_host_value(self, value: &Value) -> BuiltinResult<()> {
+        match self {
+            Self::Writable => Ok(()),
+            Self::Offset => numeric_usize(value, "memmapfile", "Offset").map(|_| ()),
+            Self::Repeat => numeric_usize(value, "memmapfile", "Repeat").map(|_| ()),
+            Self::Format => {
+                let format = MemmapFormat::from_value(value)?;
+                dtype_size(&format.dtype).map(|_| ())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -856,13 +892,18 @@ impl MemmapFormat {
         let values_per_record = record_len.max(1);
         let available_values = bytes.len() / element_size;
         let total_values = repeat
-            .map(|count| count.saturating_mul(values_per_record))
+            .map(|count| {
+                count.checked_mul(values_per_record).ok_or_else(|| {
+                    compat_error("memmapfile", "memmapfile: Repeat exceeds addressable size")
+                })
+            })
+            .transpose()?
             .unwrap_or(available_values);
         let total_values = total_values.min(available_values);
         let mut shape = self.shape.clone();
         if let Some(repeat) = repeat.filter(|repeat| *repeat > 1) {
             shape.push(repeat);
-        } else if shape.iter().product::<usize>() != total_values {
+        } else if record_len != total_values {
             shape = vec![total_values, 1];
         }
         let tensor = if let Some(storage) = decode_integer_storage(&self.dtype, bytes, total_values)
@@ -1797,6 +1838,53 @@ mod tests {
         } else {
             assert!(maximum.is_err());
         }
+    }
+
+    #[test]
+    fn memmapfile_record_and_repeat_lengths_reject_overflow_without_allocation() {
+        let impossible_record = MemmapFormat {
+            dtype: "uint8".into(),
+            shape: vec![usize::MAX, 2],
+            field: None,
+        };
+        assert!(impossible_record.decode(&[], None).is_err());
+
+        let impossible_repeat = MemmapFormat {
+            dtype: "uint8".into(),
+            shape: vec![2, 1],
+            field: None,
+        };
+        let error = impossible_repeat
+            .decode(&[0], Some(usize::MAX))
+            .expect_err("requested records overflow before payload allocation");
+        assert!(error.message().contains("Repeat exceeds addressable size"));
+    }
+
+    #[test]
+    fn memmapfile_known_invalid_controls_reject_before_earlier_download_or_read() {
+        let filename = Value::String("definitely-missing-preflight.bin".into());
+        let earlier_resident = unregistered_resident_value();
+        let unknown = run(memmapfile_builtin(vec![
+            filename.clone(),
+            Value::String("Offset".into()),
+            earlier_resident.clone(),
+            Value::String("Unknown".into()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("unknown option is a preflight error");
+        assert!(unknown.message().contains("unsupported option"));
+        assert!(!unknown.message().to_ascii_lowercase().contains("provider"));
+
+        let invalid = run(memmapfile_builtin(vec![
+            filename,
+            Value::String("Offset".into()),
+            earlier_resident,
+            Value::String("Format".into()),
+            Value::String("not-a-supported-dtype".into()),
+        ]))
+        .expect_err("invalid known format is a preflight error");
+        assert!(invalid.message().contains("unsupported Format type"));
+        assert!(!invalid.message().to_ascii_lowercase().contains("provider"));
     }
 
     #[test]
