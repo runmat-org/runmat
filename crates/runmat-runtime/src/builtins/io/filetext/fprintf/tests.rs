@@ -1,3 +1,4 @@
+use super::admission::{preflight_fid, preflight_format};
 use super::*;
 use crate::builtins::common::test_support;
 use crate::builtins::io::filetext::{fclose, fopen, registry};
