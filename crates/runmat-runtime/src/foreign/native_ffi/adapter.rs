@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use runmat_builtins::NativeLoadOption;
+use runmat_builtins::{NativeFfiOperation, NativeLoadOption};
 use runmat_native_ffi::{
     artifact_identity, invoke_symbol_with_bindings, prepare_header_with_declarations_report,
     prepare_native_interface, CallbackBinding, HeaderPreparation, InvocationValue,
@@ -279,29 +279,29 @@ impl NativeFfiAdapter {
         call: ForeignCall,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         self.reap_released();
-        let operation = super::NativeFfiOperation::from_symbol(&call.symbol).ok_or_else(|| {
+        let operation = NativeFfiOperation::from_symbol(&call.symbol).ok_or_else(|| {
             invalid_call(format!("unknown native FFI operation `{}`", call.symbol))
         })?;
-        if operation == super::NativeFfiOperation::LoadReport {
+        if operation == NativeFfiOperation::LoadReport {
             return self.load_report(&call.arguments);
         }
-        if operation == super::NativeFfiOperation::Call {
+        if operation == NativeFfiOperation::Call {
             return self.call(context, &call.arguments, call.requested_outputs);
         }
         let value = match operation {
-            super::NativeFfiOperation::Load => self.load(&call.arguments),
-            super::NativeFfiOperation::LoadPrepared => self.load_prepared(&call.arguments),
-            super::NativeFfiOperation::Unload => self.unload(&call.arguments),
-            super::NativeFfiOperation::IsLoaded => self.is_loaded(&call.arguments),
-            super::NativeFfiOperation::Functions => self.functions(&call.arguments),
-            super::NativeFfiOperation::Pointer => self.pointer(&call.arguments),
-            super::NativeFfiOperation::Structure => self.structure(&call.arguments),
-            super::NativeFfiOperation::PointerValue => self.pointer_value(&call.arguments),
-            super::NativeFfiOperation::GetMember => self.get_member(&call.arguments),
-            super::NativeFfiOperation::SetMember => self.set_member(&call.arguments),
-            super::NativeFfiOperation::InvokeMember => self.invoke_member(&call.arguments),
-            super::NativeFfiOperation::BuildInterface => self.build_interface(&call.arguments),
-            super::NativeFfiOperation::LoadReport | super::NativeFfiOperation::Call => {
+            NativeFfiOperation::Load => self.load(&call.arguments),
+            NativeFfiOperation::LoadPrepared => self.load_prepared(&call.arguments),
+            NativeFfiOperation::Unload => self.unload(&call.arguments),
+            NativeFfiOperation::IsLoaded => self.is_loaded(&call.arguments),
+            NativeFfiOperation::Functions => self.functions(&call.arguments),
+            NativeFfiOperation::Pointer => self.pointer(&call.arguments),
+            NativeFfiOperation::Structure => self.structure(&call.arguments),
+            NativeFfiOperation::PointerValue => self.pointer_value(&call.arguments),
+            NativeFfiOperation::GetMember => self.get_member(&call.arguments),
+            NativeFfiOperation::SetMember => self.set_member(&call.arguments),
+            NativeFfiOperation::InvokeMember => self.invoke_member(&call.arguments),
+            NativeFfiOperation::BuildInterface => self.build_interface(&call.arguments),
+            NativeFfiOperation::LoadReport | NativeFfiOperation::Call => {
                 unreachable!()
             }
         }?;

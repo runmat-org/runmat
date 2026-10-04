@@ -1,6 +1,5 @@
 mod adapter;
 mod isolation;
-mod operation;
 mod request;
 mod session;
 
@@ -9,4 +8,3 @@ pub use adapter::{
     NativeFfiAdapter, NativeFfiCallbackRouter, NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION,
 };
 pub use isolation::*;
-pub(crate) use operation::NativeFfiOperation;

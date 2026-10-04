@@ -11,6 +11,7 @@ mod libisloaded;
 mod libpointer;
 mod libstruct;
 mod loadlibrary;
+mod operation;
 mod setdatatype;
 #[cfg(test)]
 mod tests;
@@ -29,6 +30,7 @@ pub use libisloaded::LIBISLOADED_CATALOG_ENTRY;
 pub use libpointer::LIBPOINTER_CATALOG_ENTRY;
 pub use libstruct::LIBSTRUCT_CATALOG_ENTRY;
 pub use loadlibrary::LOADLIBRARY_CATALOG_ENTRY;
+pub use operation::NativeFfiOperation;
 pub use setdatatype::SETDATATYPE_CATALOG_ENTRY;
 pub use unloadlibrary::UNLOADLIBRARY_CATALOG_ENTRY;
 

@@ -17,7 +17,7 @@ use crate::{build_runtime_error, BuiltinResult};
 
 async fn invoke_native(
     context: Option<crate::context::RuntimeContext>,
-    operation: crate::foreign::NativeFfiOperation,
+    operation: NativeFfiOperation,
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
@@ -145,13 +145,7 @@ async fn loadlibrary_builtin(
         arguments.push(Value::String(alias));
     }
     arguments.extend(preparation_options);
-    let report = invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::LoadReport,
-        arguments,
-        2,
-    )
-    .await?;
+    let report = invoke_native(context, NativeFfiOperation::LoadReport, arguments, 2).await?;
     let Value::OutputList(mut report) = report else {
         return Err(invalid_builtin_call(
             "native library loader returned an invalid preparation report",
@@ -190,13 +184,7 @@ async fn calllib_builtin(
     text_argument(&arguments[0], "calllib library alias")?;
     text_argument(&arguments[1], "calllib function name")?;
     let requested = requested_outputs.unwrap_or(1);
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::Call,
-        arguments,
-        requested,
-    )
-    .await
+    invoke_native(context, NativeFfiOperation::Call, arguments, requested).await
 }
 
 #[runtime_builtin(
@@ -213,13 +201,7 @@ async fn unloadlibrary_builtin(
 ) -> BuiltinResult<Value> {
     validate_output_count("unloadlibrary", requested_outputs, 0)?;
     text_argument(&alias, "unloadlibrary alias")?;
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::Unload,
-        vec![alias],
-        1,
-    )
-    .await?;
+    invoke_native(context, NativeFfiOperation::Unload, vec![alias], 1).await?;
     Ok(Value::OutputList(Vec::new()))
 }
 
@@ -237,13 +219,7 @@ async fn libisloaded_builtin(
 ) -> BuiltinResult<Value> {
     validate_output_count("libisloaded", requested_outputs, 1)?;
     text_argument(&alias, "libisloaded alias")?;
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::IsLoaded,
-        vec![alias],
-        1,
-    )
-    .await
+    invoke_native(context, NativeFfiOperation::IsLoaded, vec![alias], 1).await
 }
 
 #[runtime_builtin(
@@ -273,13 +249,7 @@ async fn libfunctions_builtin(
             )));
         }
     }
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::Functions,
-        arguments,
-        1,
-    )
-    .await
+    invoke_native(context, NativeFfiOperation::Functions, arguments, 1).await
 }
 
 #[runtime_builtin(
@@ -303,13 +273,7 @@ async fn libpointer_builtin(
     if let Some(pointer_type) = arguments.first() {
         text_argument(pointer_type, "libpointer type")?;
     }
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::Pointer,
-        arguments,
-        1,
-    )
-    .await
+    invoke_native(context, NativeFfiOperation::Pointer, arguments, 1).await
 }
 
 #[runtime_builtin(
@@ -337,13 +301,7 @@ async fn setdatatype_builtin(
     }
     text_argument(&arguments[1], "setdatatype pointer type")?;
     arguments.insert(1, Value::String("setdatatype".into()));
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::InvokeMember,
-        arguments,
-        1,
-    )
-    .await?;
+    invoke_native(context, NativeFfiOperation::InvokeMember, arguments, 1).await?;
     Ok(Value::OutputList(Vec::new()))
 }
 
@@ -374,13 +332,7 @@ async fn libstruct_builtin(
             "native structure initialization requires a scalar structure value",
         ));
     }
-    invoke_native(
-        context,
-        crate::foreign::NativeFfiOperation::Structure,
-        arguments,
-        1,
-    )
-    .await
+    invoke_native(context, NativeFfiOperation::Structure, arguments, 1).await
 }
 
 fn validate_output_count(

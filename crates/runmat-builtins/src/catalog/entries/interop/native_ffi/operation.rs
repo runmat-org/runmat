@@ -1,7 +1,7 @@
 //! Internal native-adapter operations; public C symbol names remain text.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NativeFfiOperation {
+pub enum NativeFfiOperation {
     Load,
     LoadReport,
     LoadPrepared,
@@ -19,7 +19,7 @@ pub(crate) enum NativeFfiOperation {
 }
 
 impl NativeFfiOperation {
-    pub(crate) const fn symbol(self) -> &'static str {
+    pub const fn symbol(self) -> &'static str {
         match self {
             Self::Load => "load",
             Self::LoadReport => "load_report",
@@ -38,7 +38,7 @@ impl NativeFfiOperation {
         }
     }
 
-    pub(crate) fn from_symbol(symbol: &str) -> Option<Self> {
+    pub fn from_symbol(symbol: &str) -> Option<Self> {
         Some(match symbol {
             "load" => Self::Load,
             "load_report" => Self::LoadReport,
