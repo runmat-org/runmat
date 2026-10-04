@@ -9,6 +9,18 @@ use crate::BuiltinResult;
 use runmat_builtins::{MEMMAPFILE_ERROR_READ_FAILED, MEMMAPFILE_ERROR_WRITE_FAILED};
 use runmat_value::MemmapReceiverState;
 
+async fn index_plan(
+    shape: &[usize],
+    step: &crate::object::indexing::ObjectSubscript,
+    assignment: bool,
+) -> BuiltinResult<crate::indexing::plan::IndexPlan> {
+    if assignment {
+        crate::object::indexing::plan_for_fixed_assignment(shape, step).await
+    } else {
+        crate::object::indexing::plan_for_shape(shape, step, false).await
+    }
+}
+
 pub(super) async fn plan(
     runtime: Option<&RuntimeContext>,
     budget: &mut Option<CpuCooperationBudget>,
@@ -57,8 +69,7 @@ pub(super) async fn plan(
             .first()
             .is_some_and(|step| step.kind() == ObjectIndexKind::Paren)
         {
-            let planning =
-                crate::object::indexing::plan_for_shape(&[records, 1], &steps[0], assignment);
+            let planning = index_plan(&[records, 1], &steps[0], assignment);
             let planned = if let Some(budget) = budget {
                 budget
                     .await_cancellable(planning)
@@ -164,7 +175,7 @@ pub(super) async fn plan(
                 "memmapfile: unsupported mapped field subscript path",
             ));
         }
-        let planning = crate::object::indexing::plan_for_shape(&shape, &steps[next], assignment);
+        let planning = index_plan(&shape, &steps[next], assignment);
         let planned = if let Some(budget) = budget {
             budget
                 .await_cancellable(planning)
@@ -202,7 +213,7 @@ pub(super) async fn plan(
         ));
     }
     let shape = base_shape(&format, records, state.repeat)?;
-    let planning = crate::object::indexing::plan_for_shape(&shape, &steps[0], assignment);
+    let planning = index_plan(&shape, &steps[0], assignment);
     let planned = if let Some(budget) = budget {
         budget
             .await_cancellable(planning)

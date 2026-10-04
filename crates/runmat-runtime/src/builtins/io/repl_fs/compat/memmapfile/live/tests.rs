@@ -236,6 +236,21 @@ fn indexed_named_field_write_preserves_other_fields_and_elements() {
     ))
     .unwrap();
     let selected = indexed_field(1, "second", 1);
+    for invalid in [indexed_field(1, "first", 3), indexed_field(2, "first", 1)] {
+        let error = futures::executor::block_on(subsasgn(
+            None,
+            mapped.clone(),
+            invalid,
+            Value::Int(IntValue::U8(99)),
+        ))
+        .expect_err("fixed mapped field and record cannot grow");
+        assert!(error.message().contains("index") || error.message().contains("Index"));
+        assert_eq!(
+            provider.read_project_path(root.join("record.bin")).unwrap(),
+            b"\x01\x02\x03\x04",
+            "invalid mapped selection must not change adjacent bytes"
+        );
+    }
     let updated = futures::executor::block_on(subsasgn(
         None,
         mapped,
