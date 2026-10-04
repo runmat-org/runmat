@@ -155,19 +155,9 @@ pub(super) fn is_delimiter_value(value: &Value) -> bool {
 
 pub(super) fn is_range_candidate(value: &Value) -> bool {
     match value {
-        Value::String(s) => looks_like_range_string(s),
-        Value::CharArray(ca) => {
-            if ca.rows != 1 {
-                return false;
-            }
-            let text: String = ca.data.iter().collect();
-            looks_like_range_string(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() != 1 {
-                return false;
-            }
-            looks_like_range_string(&sa.data[0])
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            crate::builtins::common::validation::value_text_scalar_string(value)
+                .is_some_and(|text| looks_like_range_string(&text))
         }
         Value::Tensor(t) => tensor_len(t) == 2 || tensor_len(t) == 4,
         _ => false,
@@ -187,22 +177,14 @@ pub(super) fn looks_like_range_string(text: &str) -> bool {
 }
 
 pub(super) fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return DelimiterSpec::new_from_string(&text);
+    }
     match value {
-        Value::String(s) => DelimiterSpec::new_from_string(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            DelimiterSpec::new_from_string(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                DelimiterSpec::new_from_string(&sa.data[0])
-            } else {
-                Err(dlmread_error_with(
-                    &DLMREAD_ERROR_DELIMITER,
-                    "dlmread: string array delimiters must be scalar",
-                ))
-            }
-        }
+        Value::StringArray(_) => Err(dlmread_error_with(
+            &DLMREAD_ERROR_DELIMITER,
+            "dlmread: string array delimiters must be scalar",
+        )),
         Value::Int(i) => {
             require_numeric_delimiter_extension()?;
             delimiter_from_integer(i)
@@ -335,22 +317,14 @@ pub(super) fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<u
 }
 
 pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return normalize_path(&text);
+    }
     match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                normalize_path(&sa.data[0])
-            } else {
-                Err(dlmread_error_with(
-                    &DLMREAD_ERROR_FILENAME,
-                    "dlmread: string array filename inputs must be scalar",
-                ))
-            }
-        }
+        Value::StringArray(_) => Err(dlmread_error_with(
+            &DLMREAD_ERROR_FILENAME,
+            "dlmread: string array filename inputs must be scalar",
+        )),
         Value::CharArray(_) => Err(dlmread_error_with(
             &DLMREAD_ERROR_FILENAME,
             "dlmread: expected a 1-by-N character vector for the file name",

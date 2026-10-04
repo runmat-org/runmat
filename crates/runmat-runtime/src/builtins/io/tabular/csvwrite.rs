@@ -280,15 +280,13 @@ impl CsvMatrix {
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let raw = match value {
-        Value::String(s) => s.clone(),
-        Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
-        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        _ => Err(csvwrite_error_with(
-            &CSVWRITE_ERROR_FILENAME,
-            "csvwrite: filename must be a string scalar or character vector",
-        ))?,
-    };
+    let raw =
+        crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+            csvwrite_error_with(
+                &CSVWRITE_ERROR_FILENAME,
+                "csvwrite: filename must be a string scalar or character vector",
+            )
+        })?;
 
     if raw.trim().is_empty() {
         return Err(csvwrite_error_with(

@@ -4,7 +4,7 @@
 //! its terse API for numeric CSV imports. This implementation mirrors MATLAB's
 //! zero-based range semantics while integrating with the modern builtin template.
 
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{
@@ -288,22 +288,14 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return normalize_path(&text);
+    }
     match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
-        }
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                normalize_path(&sa.data[0])
-            } else {
-                Err(csvread_error_with(
-                    &CSVREAD_ERROR_FILENAME,
-                    "csvread: string array inputs must be scalar",
-                ))
-            }
-        }
+        Value::StringArray(_) => Err(csvread_error_with(
+            &CSVREAD_ERROR_FILENAME,
+            "csvread: string array inputs must be scalar",
+        )),
         Value::CharArray(_) => Err(csvread_error_with(
             &CSVREAD_ERROR_FILENAME,
             "csvread: expected a 1-by-N character vector for the file name",

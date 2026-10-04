@@ -26,6 +26,16 @@ fn csvread_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"M = csvread(filename, row, col, range)"));
 }
 
+#[test]
+fn csvread_path_requires_effective_scalar_text_geometry() {
+    let paged =
+        Value::CharArray(CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).unwrap());
+    assert!(resolve_path(&paged).is_err());
+    let singleton =
+        Value::CharArray(CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1]).unwrap());
+    assert_eq!(resolve_path(&singleton).unwrap(), PathBuf::from("ab"));
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn csvread_expands_home_directory_without_file_access() {

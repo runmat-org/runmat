@@ -150,17 +150,8 @@ pub(super) fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> 
 }
 
 pub(super) fn is_append_flag(value: &Value) -> bool {
-    match value {
-        Value::String(s) => s.trim().eq_ignore_ascii_case("-append"),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            text.trim().eq_ignore_ascii_case("-append")
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            sa.data[0].trim().eq_ignore_ascii_case("-append")
-        }
-        _ => false,
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value)
+        .is_some_and(|text| text.trim().eq_ignore_ascii_case("-append"))
 }
 
 pub(super) fn is_positional_delimiter_candidate(value: &Value) -> bool {
@@ -180,18 +171,14 @@ pub(super) fn is_positional_delimiter_candidate(value: &Value) -> bool {
 }
 
 pub(super) fn parse_delimiter_value(value: &Value) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => interpret_delimiter_string(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            interpret_delimiter_string(&text)
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => interpret_delimiter_string(&sa.data[0]),
-        _ => Err(dlmwrite_error_with(
-            &DLMWRITE_ERROR_OPTION,
-            "dlmwrite: delimiter must be a string scalar or character vector",
-        )),
-    }
+    let text =
+        crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+            dlmwrite_error_with(
+                &DLMWRITE_ERROR_OPTION,
+                "dlmwrite: delimiter must be a string scalar or character vector",
+            )
+        })?;
+    interpret_delimiter_string(&text)
 }
 
 pub(super) fn interpret_delimiter_string(raw: &str) -> BuiltinResult<String> {
@@ -333,16 +320,14 @@ pub(super) fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpe
                 ))
             }
         }
-        Value::String(s) => parse_precision_format(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            parse_precision_format(&text)
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => parse_precision_format(&sa.data[0]),
-        _ => Err(dlmwrite_error_with(
-            &DLMWRITE_ERROR_OPTION,
-            "dlmwrite: precision must be numeric or a format string",
-        )),
+        _ => crate::builtins::common::validation::value_text_scalar_string(value)
+            .ok_or_else(|| {
+                dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
+                    "dlmwrite: precision must be numeric or a format string",
+                )
+            })
+            .and_then(|text| parse_precision_format(&text)),
     }
 }
 
@@ -395,16 +380,14 @@ pub(super) fn parse_append_value(value: &Value) -> BuiltinResult<bool> {
         Value::Bool(b) => Ok(*b),
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => Ok(*n != 0.0),
-        Value::String(s) => parse_bool_string(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            parse_bool_string(&text)
-        }
-        Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
-        _ => Err(dlmwrite_error_with(
-            &DLMWRITE_ERROR_OPTION,
-            "dlmwrite: append value must be logical",
-        )),
+        _ => crate::builtins::common::validation::value_text_scalar_string(value)
+            .ok_or_else(|| {
+                dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
+                    "dlmwrite: append value must be logical",
+                )
+            })
+            .and_then(|text| parse_bool_string(&text)),
     }
 }
 
@@ -437,21 +420,23 @@ pub(super) fn extract_scalar(value: &Value) -> BuiltinResult<f64> {
 }
 
 pub(super) fn value_to_lowercase_string(value: &Value) -> Option<String> {
-    tensor::value_to_string(value).map(|s| s.trim().to_ascii_lowercase())
+    let text = match value {
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            crate::builtins::common::validation::value_text_scalar_string(value)
+        }
+        _ => tensor::value_to_string(value),
+    }?;
+    Some(text.trim().to_ascii_lowercase())
 }
 
 pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let raw = match value {
-        Value::String(s) => s.clone(),
-        Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
-        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        _ => {
-            return Err(dlmwrite_error_with(
+    let raw =
+        crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+            dlmwrite_error_with(
                 &DLMWRITE_ERROR_FILENAME,
                 "dlmwrite: filename must be a string scalar or character vector",
-            ))
-        }
-    };
+            )
+        })?;
     if raw.trim().is_empty() {
         return Err(dlmwrite_error_with(
             &DLMWRITE_ERROR_FILENAME,

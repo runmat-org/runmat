@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::io::tabular::line_reader::{read_line_bytes, LineReadError};
 
 pub(super) async fn read_dlm_rows(
     runtime: Option<&crate::context::RuntimeContext>,
@@ -19,7 +20,7 @@ pub(super) async fn read_dlm_rows(
             )
         })?;
     let mut reader = BufReader::new(file);
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
     let mut rows = Vec::new();
     let mut max_cols = 0usize;
     let mut line_index = 0usize;
@@ -32,28 +33,39 @@ pub(super) async fn read_dlm_rows(
                 source,
             )
         })?;
-        buffer.clear();
-        let bytes = reader.read_line(&mut buffer).map_err(|err| {
-            dlmread_error_with_source(
-                &DLMREAD_ERROR_IO_READ,
-                format!("dlmread: failed to read '{}': {err}", path.display()),
-                err,
-            )
-        })?;
+        let bytes = read_line_bytes(&mut reader, &mut buffer, cooperation)
+            .await
+            .map_err(|error| match error {
+                LineReadError::Io(source) => dlmread_error_with_source(
+                    &DLMREAD_ERROR_IO_READ,
+                    format!("dlmread: failed to read '{}': {source}", path.display()),
+                    source,
+                ),
+                LineReadError::Cooperation(source) => source,
+            })?;
         if bytes == 0 {
             break;
         }
-        cooperation.completed(bytes).await?;
+        let text = std::str::from_utf8(&buffer).map_err(|source| {
+            dlmread_error_with_source(
+                &DLMREAD_ERROR_IO_READ,
+                format!(
+                    "dlmread: failed to read '{}' as UTF-8: {source}",
+                    path.display()
+                ),
+                source,
+            )
+        })?;
         // Trim standard newline endings.
-        if buffer.ends_with('\n') {
-            buffer.pop();
-            if buffer.ends_with('\r') {
-                buffer.pop();
+        let mut view = text;
+        if view.ends_with('\n') {
+            view = &view[..view.len() - 1];
+            if view.ends_with('\r') {
+                view = &view[..view.len() - 1];
             }
-        } else if buffer.ends_with('\r') {
-            buffer.pop();
+        } else if view.ends_with('\r') {
+            view = &view[..view.len() - 1];
         }
-        let mut view: &str = &buffer;
         if line_index == 0 && view.starts_with('\u{FEFF}') {
             view = &view['\u{FEFF}'.len_utf8()..];
         }

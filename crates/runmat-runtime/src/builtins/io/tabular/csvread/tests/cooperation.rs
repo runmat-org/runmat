@@ -147,3 +147,53 @@ fn actual_csvread_future_abandons_during_output_selection_without_publication() 
     };
     assert_eq!(matrix.shape, vec![1, 1000]);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn long_unterminated_csv_line_suspends_during_bounded_acquisition() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/tabular",
+    ));
+    let contents = "1,".repeat(6000);
+    provider
+        .write_project_path("/tabular/long.csv", contents.as_bytes())
+        .expect("long-line fixture");
+    let _guard = runmat_filesystem::replace_provider(provider);
+    runmat_filesystem::set_current_dir("/tabular").expect("cwd");
+    let turns = Rc::new(Cell::new(0));
+    let dropped = Rc::new(Cell::new(false));
+    let service = Rc::new(PendingOutputService {
+        turns: turns.clone(),
+        dropped: dropped.clone(),
+    });
+    let source = CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(service, source.token());
+    let mut call = Box::pin(super::super::csvread_builtin(
+        Some(runtime),
+        Value::from("long.csv"),
+        vec![],
+    ));
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert_eq!(
+        turns.get(),
+        1,
+        "first suspension is inside line acquisition"
+    );
+    drop(call);
+    assert!(dropped.get());
+    let value = futures::executor::block_on(super::super::csvread_builtin(
+        None,
+        Value::from("long.csv"),
+        vec![],
+    ))
+    .expect("subsequent full read");
+    let Value::Tensor(matrix) = value else {
+        panic!("matrix output")
+    };
+    assert_eq!(matrix.shape, vec![1, 6001]);
+}

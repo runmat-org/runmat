@@ -1,6 +1,7 @@
 //! Tabular data import builtins.
 
 mod cooperation;
+mod line_reader;
 mod path;
 mod write_owner;
 

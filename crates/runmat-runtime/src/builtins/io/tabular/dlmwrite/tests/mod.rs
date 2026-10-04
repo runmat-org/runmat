@@ -1,4 +1,16 @@
 use super::*;
+
+#[test]
+fn dlmwrite_path_requires_effective_scalar_text_geometry() {
+    let paged = Value::CharArray(
+        runmat_value::CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).unwrap(),
+    );
+    assert!(resolve_path(&paged).is_err());
+    let singleton = Value::CharArray(
+        runmat_value::CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1]).unwrap(),
+    );
+    assert_eq!(resolve_path(&singleton).unwrap(), PathBuf::from("ab"));
+}
 use crate::builtins::common::test_support;
 use runmat_time::unix_timestamp_ms;
 use std::fs;

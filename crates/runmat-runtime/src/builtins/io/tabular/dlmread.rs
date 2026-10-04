@@ -7,7 +7,7 @@
 //! available as an explicitly classified RunMat extension.
 
 use std::char;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use runmat_builtins::{

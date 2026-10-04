@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::io::tabular::line_reader::{read_line_bytes, LineReadError};
 
 pub(super) async fn read_csv_rows(
     runtime: Option<&crate::context::RuntimeContext>,
@@ -32,18 +33,19 @@ pub(super) async fn read_csv_rows(
                 source,
             )
         })?;
-        buffer.clear();
-        let bytes = reader.read_until(b'\n', &mut buffer).map_err(|err| {
-            csvread_error_with_source(
-                &CSVREAD_ERROR_IO_READ,
-                format!("csvread: failed to read '{}': {err}", path.display()),
-                err,
-            )
-        })?;
+        let bytes = read_line_bytes(&mut reader, &mut buffer, cooperation)
+            .await
+            .map_err(|error| match error {
+                LineReadError::Io(source) => csvread_error_with_source(
+                    &CSVREAD_ERROR_IO_READ,
+                    format!("csvread: failed to read '{}': {source}", path.display()),
+                    source,
+                ),
+                LineReadError::Cooperation(source) => source,
+            })?;
         if bytes == 0 {
             break;
         }
-        cooperation.completed(bytes).await?;
         line_index += 1;
         trim_line_ending(&mut buffer);
         if buffer.iter().all(u8::is_ascii_whitespace) {
