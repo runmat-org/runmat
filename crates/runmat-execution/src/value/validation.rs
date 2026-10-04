@@ -119,7 +119,11 @@ impl ValidationBudget<'_> {
             InlineValue::ComplexF64Bits { .. } => self.bytes(16)?,
             InlineValue::String(value) => self.text(value)?,
             InlineValue::Char { shape, code_points } => {
-                let elements = checked_product(shape)?;
+                let elements = if shape.is_empty() {
+                    0
+                } else {
+                    checked_product(shape)?
+                };
                 if elements != code_points.len() as u64 {
                     return Err(ContractError::invalid(
                         "char payload",

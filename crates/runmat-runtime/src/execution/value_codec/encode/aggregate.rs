@@ -97,6 +97,7 @@ pub(super) fn plain_object(
             }
             Ok(DurableDynamicProperty {
                 name: name.clone(),
+                definition_name: definition.name.clone(),
                 defining_class: definition.defining_class.clone(),
                 get_access: definition.get_access,
                 set_access: definition.set_access,

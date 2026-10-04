@@ -64,7 +64,7 @@ pub(super) fn plain_object(
     }
     for definition in &value.dynamic_properties {
         let property = DynamicPropertyDef {
-            name: definition.name.clone(),
+            name: definition.definition_name.clone(),
             defining_class: definition.defining_class.clone(),
             metadata_handle: None,
             get_access: definition.get_access,

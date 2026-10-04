@@ -70,12 +70,6 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
                 .map_err(|error| ValueCodecError::invalid(path, error))?,
         )),
         InlineValue::Char { shape, code_points } => {
-            if shape.len() < 2 {
-                return Err(ValueCodecError::invalid(
-                    path,
-                    "char arrays require at least two dimensions",
-                ));
-            }
             let shape = usize_shape(shape, path)?;
             let chars = code_points
                 .iter()

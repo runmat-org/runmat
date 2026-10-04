@@ -1,13 +1,33 @@
 //! Versioned preference document, independent of execution ValueRef V2.
 
 use super::PreferenceServiceError;
-use crate::execution::value_codec::decode_durable_value;
+use crate::execution::value_codec::{decode_durable_value, ValueCodecError};
 use runmat_execution::value::ValuePayload;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub(super) const PREFERENCE_DOCUMENT_VERSION: u32 = 1;
 pub(super) type EncodedGroups = BTreeMap<String, BTreeMap<String, ValuePayload>>;
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum PreferenceDocumentError {
+    #[error("unsupported preference document version {0}")]
+    Version(u32),
+    #[error("invalid preference document: {0}")]
+    Json(#[source] serde_json::Error),
+    #[error("invalid durable preference value: {0}")]
+    Value(#[source] ValueCodecError),
+}
+
+impl From<PreferenceDocumentError> for PreferenceServiceError {
+    fn from(error: PreferenceDocumentError) -> Self {
+        match error {
+            PreferenceDocumentError::Version(version) => Self::UnsupportedDocumentVersion(version),
+            PreferenceDocumentError::Json(source) => Self::Document(source),
+            PreferenceDocumentError::Value(source) => Self::ValueEncoding(source),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,29 +47,25 @@ impl PreferenceDocument {
     /// Unknown or old documents are rejected, never silently reset or
     /// reinterpreted as execution V2 values. Migration requires an explicit
     /// future versioned adapter owned by the host.
-    pub fn decode(bytes: &[u8]) -> Result<Self, PreferenceServiceError> {
+    pub fn decode(bytes: &[u8]) -> Result<Self, PreferenceDocumentError> {
         let document: Self =
-            serde_json::from_slice(bytes).map_err(PreferenceServiceError::Document)?;
+            serde_json::from_slice(bytes).map_err(PreferenceDocumentError::Json)?;
         if document.version != PREFERENCE_DOCUMENT_VERSION {
-            return Err(PreferenceServiceError::UnsupportedDocumentVersion(
-                document.version,
-            ));
+            return Err(PreferenceDocumentError::Version(document.version));
         }
         for values in document.groups.values() {
             for payload in values.values() {
-                decode_durable_value(payload)?;
+                decode_durable_value(payload).map_err(PreferenceDocumentError::Value)?;
             }
         }
         Ok(document)
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, PreferenceServiceError> {
+    pub fn encode(&self) -> Result<Vec<u8>, PreferenceDocumentError> {
         if self.version != PREFERENCE_DOCUMENT_VERSION {
-            return Err(PreferenceServiceError::UnsupportedDocumentVersion(
-                self.version,
-            ));
+            return Err(PreferenceDocumentError::Version(self.version));
         }
-        serde_json::to_vec(self).map_err(PreferenceServiceError::Document)
+        serde_json::to_vec(self).map_err(PreferenceDocumentError::Json)
     }
 }
 
@@ -80,7 +96,7 @@ mod tests {
         let bytes = serde_json::to_vec(&old).unwrap();
         assert!(matches!(
             PreferenceDocument::decode(&bytes),
-            Err(PreferenceServiceError::UnsupportedDocumentVersion(0))
+            Err(PreferenceDocumentError::Version(0))
         ));
     }
 }

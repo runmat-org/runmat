@@ -15,6 +15,7 @@ pub struct DurablePlainObject {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DurableDynamicProperty {
     pub name: String,
+    pub definition_name: String,
     pub defining_class: ClassIdentity,
     pub get_access: MemberAccess,
     pub set_access: MemberAccess,

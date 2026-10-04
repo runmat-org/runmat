@@ -55,6 +55,7 @@ impl ValidationBudget<'_> {
                 ));
             }
             previous = Some(&property.name);
+            self.text(&property.definition_name)?;
             self.class_identity(&property.defining_class)?;
             self.text(&property.description)?;
         }

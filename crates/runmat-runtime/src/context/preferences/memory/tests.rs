@@ -3,7 +3,9 @@ use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
-use runmat_value::{CellArray, IntValue, StructValue};
+use runmat_value::{
+    CellArray, CharArray, DynamicPropertyDef, IntValue, ObjectInstance, StructValue,
+};
 
 fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
@@ -147,4 +149,46 @@ fn cancelled_generation_cannot_publish_or_reuse_another_authority() {
     assert!(block_on(service.group_values(runtime(), "app".into()))
         .unwrap()
         .is_none());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn admitted_character_ranks_and_dynamic_definition_names_survive_reopen() {
+    let service = IsolatedMemoryPreferenceService::new();
+    let mut object = ObjectInstance::new("PreferencePayload");
+    let definition = DynamicPropertyDef::new(
+        "definition_name".into(),
+        runmat_types::ClassIdentity::new("PreferencePayload").unwrap(),
+    );
+    object.insert_dynamic_property("map_key".into(), definition);
+    let entries = vec![
+        (
+            "rank_one".into(),
+            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![2]).unwrap()),
+        ),
+        (
+            "empty_rank".into(),
+            Value::CharArray(CharArray::new_with_shape(Vec::new(), Vec::new()).unwrap()),
+        ),
+        (
+            "paged".into(),
+            Value::CharArray(CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap()),
+        ),
+        ("object".into(), Value::Object(object)),
+    ];
+    block_on(service.set_many(runtime(), "app".into(), entries.clone())).unwrap();
+    let current = block_on(service.group_values(runtime(), "app".into()))
+        .unwrap()
+        .unwrap();
+    let reopened = IsolatedMemoryPreferenceService::from_document_bytes(
+        &block_on(service.document_bytes()).unwrap(),
+    )
+    .unwrap();
+    let durable = block_on(reopened.group_values(runtime(), "app".into()))
+        .unwrap()
+        .unwrap();
+    for (name, value) in entries {
+        assert_eq!(current[&name], value);
+        assert_eq!(durable[&name], value);
+    }
 }
