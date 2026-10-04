@@ -255,6 +255,12 @@ async fn textscan_builtin(
     format_spec: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(textscan_error_with(
+            &TEXTSCAN_ERROR_ARGUMENT,
+            "textscan: at most one output is available",
+        ));
+    }
     if is_typed_integer_value(&input) || rest.iter().any(is_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &TEXTSCAN_TYPED_INTEGER_CONTROL_EXTENSION,
@@ -319,7 +325,7 @@ fn parse_registered_file(
             format!("textscan: invalid file identifier {fid}"),
         )
     })?;
-    if !permission_allows_read(&info.permission) {
+    if !info.access.read {
         return Err(textscan_error_with(
             &TEXTSCAN_ERROR_FILE,
             format!("textscan: file identifier {fid} is not open for reading"),
@@ -388,11 +394,6 @@ fn validate_fid(fid: i32) -> BuiltinResult<()> {
         ));
     }
     Ok(())
-}
-
-fn permission_allows_read(permission: &str) -> bool {
-    let lower = permission.to_ascii_lowercase();
-    lower.starts_with('r') || lower.contains('+')
 }
 
 struct DecodedFileText {
@@ -2373,6 +2374,20 @@ mod tests {
         ))
         .expect_err("standard stream rejected");
         assert!(err.message().contains("standard input/output"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn excessive_output_request_rejects_before_text_or_file_scan() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let err = block_on(textscan_builtin(
+            Value::from("not a file and not parsed"),
+            Value::from("%f"),
+            Vec::new(),
+        ))
+        .expect_err("fixed output count");
+        assert_eq!(err.identifier(), Some("RunMat:textscan:InvalidArgument"));
+        assert!(err.message().contains("at most one output"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
