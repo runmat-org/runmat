@@ -101,24 +101,38 @@ async fn evaluate_with_output(
             filesystem: &resolved.filesystem,
         },
     )?;
+    let resource_lease = receipt
+        .as_ref()
+        .map(|receipt| receipt.resource_liveness_lease());
     let execution = async {
-        if let Some(receipt) = receipt.as_ref() {
-            receipt.checkpoint()?;
-        }
+        check_resource_lease(&resource_lease)?;
         let filenames = match resolved.archive {
             ResolvedArchiveSource::Http(url) => {
-                extract_remote_archive(&url, &resolved.output_folder, runtime, resolved.filesystem)
-                    .await?
+                extract_remote_archive(
+                    &url,
+                    &resolved.output_folder,
+                    runtime,
+                    resolved.filesystem,
+                    &resource_lease,
+                )
+                .await?
             }
             ResolvedArchiveSource::LocalPath(path) => {
                 prepare_output_folder(
                     &resolved.output_folder,
                     runtime,
                     resolved.filesystem.as_ref(),
+                    &resource_lease,
                 )
                 .await?;
-                extract_local_archive(&path, &resolved.output_folder, runtime, resolved.filesystem)
-                    .await?
+                extract_local_archive(
+                    &path,
+                    &resolved.output_folder,
+                    runtime,
+                    resolved.filesystem,
+                    &resource_lease,
+                )
+                .await?
             }
         };
         check_cancelled(runtime)?;
@@ -180,8 +194,10 @@ async fn prepare_output_folder(
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
     provider: &dyn vfs::FsProvider,
+    resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<()> {
     check_cancelled(runtime)?;
+    check_resource_lease(resource_lease)?;
     provider
         .create_dir_all(output_folder)
         .await
@@ -195,8 +211,20 @@ async fn prepare_output_folder(
                 err,
             )
         })?;
-    reject_symlink_path(provider, output_folder).await?;
+    check_resource_lease(resource_lease)?;
+    reject_symlink_path(provider, output_folder, resource_lease).await?;
     check_cancelled(runtime)
+}
+
+type ArchiveResourceLease =
+    Option<std::sync::Arc<dyn crate::context::host_effect::HostEffectResourceLivenessLease>>;
+
+fn check_resource_lease(lease: &ArchiveResourceLease) -> BuiltinResult<()> {
+    if lease.as_ref().is_some_and(|lease| !lease.is_current()) {
+        Err(crate::context::host_effect::stale_resource())
+    } else {
+        Ok(())
+    }
 }
 
 fn check_cancelled(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {

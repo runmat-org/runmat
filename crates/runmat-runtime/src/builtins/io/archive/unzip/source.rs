@@ -13,13 +13,15 @@ pub(super) async fn extract_local_archive(
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
+    resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>> {
-    let temp = local_archive_to_temp_file(path, runtime, provider.as_ref()).await?;
+    let temp = local_archive_to_temp_file(path, runtime, provider.as_ref(), resource_lease).await?;
     extract_archive_file_on_worker(
         temp,
         output_folder.to_path_buf(),
         runtime.map(crate::context::RuntimeContext::cancellation),
         provider,
+        resource_lease.clone(),
     )
     .await
 }
@@ -30,7 +32,9 @@ pub(super) async fn extract_local_archive(
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
+    resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>> {
+    check_resource_lease(resource_lease)?;
     let file = File::open_on(provider.as_ref(), path).map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
@@ -38,7 +42,15 @@ pub(super) async fn extract_local_archive(
             err,
         )
     })?;
-    extract_archive(file, output_folder, runtime, provider).await
+    check_resource_lease(resource_lease)?;
+    extract_archive(
+        file,
+        output_folder,
+        runtime,
+        provider,
+        resource_lease.clone(),
+    )
+    .await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -46,7 +58,9 @@ async fn local_archive_to_temp_file(
     path: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
     provider: &dyn vfs::FsProvider,
+    resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<TempArchive> {
+    check_resource_lease(resource_lease)?;
     let mut input = File::open_async_on(provider, path).await.map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,
@@ -54,15 +68,19 @@ async fn local_archive_to_temp_file(
             err,
         )
     })?;
+    check_resource_lease(resource_lease)?;
     if let Ok(metadata) = input.metadata_async().await {
+        check_resource_lease(resource_lease)?;
         ensure_compressed_size_within_limit(metadata.len())?;
     }
 
+    check_resource_lease(resource_lease)?;
     let mut temp = TempArchive::create()?;
     let mut copied = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     loop {
         super::check_cancelled(runtime)?;
+        check_resource_lease(resource_lease)?;
         let read = input.read(&mut buffer).map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
@@ -77,6 +95,7 @@ async fn local_archive_to_temp_file(
             .checked_add(read as u64)
             .ok_or_else(|| unzip_error_with(&UNZIP_ERROR_IO, "unzip: archive is too large"))?;
         ensure_compressed_size_within_limit(copied)?;
+        check_resource_lease(resource_lease)?;
         temp.write_all(&buffer[..read]).map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
@@ -88,6 +107,7 @@ async fn local_archive_to_temp_file(
             )
         })?;
     }
+    check_resource_lease(resource_lease)?;
     temp.flush().map_err(|err| {
         unzip_error_with_source(
             &UNZIP_ERROR_IO,

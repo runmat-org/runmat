@@ -36,6 +36,7 @@ impl Drop for Abandonment {
 
 pub(super) struct ExtractionControl {
     cancellation: Option<CancellationToken>,
+    resource_lease: ArchiveResourceLease,
     #[cfg(not(target_arch = "wasm32"))]
     abandoned: Arc<AtomicBool>,
     #[cfg(target_arch = "wasm32")]
@@ -47,22 +48,29 @@ impl ExtractionControl {
     pub(super) fn native(
         cancellation: Option<CancellationToken>,
         abandoned: Arc<AtomicBool>,
+        resource_lease: ArchiveResourceLease,
     ) -> Self {
         Self {
             cancellation,
             abandoned,
+            resource_lease,
         }
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(super) fn browser(runtime: Option<&crate::context::RuntimeContext>) -> Self {
+    pub(super) fn browser(
+        runtime: Option<&crate::context::RuntimeContext>,
+        resource_lease: ArchiveResourceLease,
+    ) -> Self {
         Self {
             cancellation: runtime.map(crate::context::RuntimeContext::cancellation),
             budget: runtime.map(crate::context::RuntimeContext::cpu_cooperation),
+            resource_lease,
         }
     }
 
     pub(super) async fn completed(&mut self, work: u64) -> BuiltinResult<()> {
+        self.check_resource()?;
         if self
             .cancellation
             .as_ref()
@@ -83,7 +91,15 @@ impl ExtractionControl {
         }
         #[cfg(not(target_arch = "wasm32"))]
         let _ = work;
-        Ok(())
+        self.check_resource()
+    }
+
+    pub(super) fn check_resource(&self) -> BuiltinResult<()> {
+        check_resource_lease(&self.resource_lease)
+    }
+
+    pub(super) fn resource_lease(&self) -> &ArchiveResourceLease {
+        &self.resource_lease
     }
 }
 

@@ -46,7 +46,7 @@ fn captured_relative_input_and_default_output_survive_provider_and_cwd_swap() {
     let (resume, suspended) = futures::channel::oneshot::channel::<()>();
     let mut invocation = Box::pin(async move {
         suspended.await.expect("resume selected invocation");
-        extract_local_archive(&archive, &output, None, selected_provider).await
+        extract_local_archive(&archive, &output, None, selected_provider, &None).await
     });
     let waker = futures::task::noop_waker();
     let mut context = Context::from_waker(&waker);

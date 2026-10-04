@@ -15,6 +15,7 @@ pub(super) async fn extract_archive_file_on_worker(
     output_folder: PathBuf,
     cancellation: Option<runmat_execution::cancellation::CancellationToken>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
+    resource_lease: ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>> {
     let (tx, rx) = futures::channel::oneshot::channel();
     let abandonment = control::Abandonment::new();
@@ -30,7 +31,8 @@ pub(super) async fn extract_archive_file_on_worker(
                         err,
                     )
                 })?;
-                let control = ExtractionControl::native(cancellation, worker_abandonment);
+                let control =
+                    ExtractionControl::native(cancellation, worker_abandonment, resource_lease);
                 futures::executor::block_on(extract_archive_impl(
                     file,
                     &output_folder,
@@ -67,6 +69,7 @@ pub(super) async fn extract_archive<R>(
     output_folder: &Path,
     runtime: Option<&crate::context::RuntimeContext>,
     provider: std::sync::Arc<dyn vfs::FsProvider>,
+    resource_lease: ArchiveResourceLease,
 ) -> BuiltinResult<Vec<String>>
 where
     R: Read + Seek,
@@ -74,7 +77,7 @@ where
     extract_archive_impl(
         reader,
         output_folder,
-        ExtractionControl::browser(runtime),
+        ExtractionControl::browser(runtime, resource_lease),
         provider,
     )
     .await
@@ -101,9 +104,16 @@ where
             continue;
         }
         let output_path = output_folder.join(&relative);
-        reject_symlink_components(provider.as_ref(), output_folder, &relative).await?;
+        reject_symlink_components(
+            provider.as_ref(),
+            output_folder,
+            &relative,
+            control.resource_lease(),
+        )
+        .await?;
 
         if entry.is_dir() || entry.name().ends_with('/') || entry.name().ends_with('\\') {
+            control.check_resource()?;
             provider.create_dir_all(&output_path).await.map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
@@ -114,10 +124,12 @@ where
                     err,
                 )
             })?;
+            control.check_resource()?;
             continue;
         }
 
         if let Some(parent) = output_path.parent() {
+            control.check_resource()?;
             provider.create_dir_all(parent).await.map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
@@ -128,11 +140,20 @@ where
                     err,
                 )
             })?;
+            control.check_resource()?;
         }
-        reject_symlink_components(provider.as_ref(), output_folder, &relative).await?;
+        reject_symlink_components(
+            provider.as_ref(),
+            output_folder,
+            &relative,
+            control.resource_lease(),
+        )
+        .await?;
 
+        control.check_resource()?;
         let mut partial =
             PartialEntry::create(temporary_output_path(&output_path), provider.clone()).await?;
+        control.check_resource()?;
         let mut buffer = [0u8; 64 * 1024];
         loop {
             control.completed(0).await?;
@@ -158,6 +179,7 @@ where
                     "unzip: total extracted size exceeds RunMat safety limit",
                 ));
             }
+            control.check_resource()?;
             partial.write_all(&buffer[..read]).map_err(|err| {
                 unzip_error_with_source(
                     &UNZIP_ERROR_IO,
@@ -170,6 +192,7 @@ where
             })?;
             control.completed(read as u64).await?;
         }
+        control.check_resource()?;
         partial.flush().await.map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
@@ -180,6 +203,7 @@ where
                 err,
             )
         })?;
+        control.check_resource()?;
         partial.sync_all().await.map_err(|err| {
             unzip_error_with_source(
                 &UNZIP_ERROR_IO,
@@ -190,10 +214,19 @@ where
                 err,
             )
         })?;
+        control.check_resource()?;
         partial.close();
         control.completed(0).await?;
-        reject_symlink_components(provider.as_ref(), output_folder, &relative).await?;
+        reject_symlink_components(
+            provider.as_ref(),
+            output_folder,
+            &relative,
+            control.resource_lease(),
+        )
+        .await?;
+        control.check_resource()?;
         partial.commit_to(&output_path).await?;
+        control.check_resource()?;
         filenames.push(path_to_string(&output_path));
     }
 
@@ -221,14 +254,24 @@ fn temporary_output_path(path: &Path) -> PathBuf {
 pub(super) async fn reject_symlink_path(
     provider: &dyn vfs::FsProvider,
     path: &Path,
+    resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<()> {
-    match provider.symlink_metadata(path).await {
+    check_resource_lease(resource_lease)?;
+    let inspected = provider.symlink_metadata(path).await;
+    let metadata = match inspected {
+        Ok(metadata) => {
+            check_resource_lease(resource_lease)?;
+            Ok(metadata)
+        }
+        Err(err) => Err(err),
+    };
+    match metadata {
         Ok(metadata) if metadata.is_symlink() => Err(unzip_error_with(
             &UNZIP_ERROR_SECURITY,
             format!("unzip: output path '{}' is a symbolic link", path.display()),
         )),
         Ok(_) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => check_resource_lease(resource_lease),
         Err(err) => Err(unzip_error_with_source(
             &UNZIP_ERROR_IO,
             format!("unzip: unable to inspect '{}': {err}", path.display()),
@@ -241,12 +284,13 @@ async fn reject_symlink_components(
     provider: &dyn vfs::FsProvider,
     root: &Path,
     relative: &Path,
+    resource_lease: &ArchiveResourceLease,
 ) -> BuiltinResult<()> {
     let mut current = root.to_path_buf();
-    reject_symlink_path(provider, &current).await?;
+    reject_symlink_path(provider, &current, resource_lease).await?;
     for component in relative.components() {
         current.push(component.as_os_str());
-        reject_symlink_path(provider, &current).await?;
+        reject_symlink_path(provider, &current, resource_lease).await?;
     }
     Ok(())
 }

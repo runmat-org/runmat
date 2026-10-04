@@ -25,6 +25,7 @@ fn native_control() -> ExtractionControl {
     ExtractionControl::native(
         None,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        None,
     )
 }
 
@@ -71,7 +72,7 @@ fn abandonment_and_token_stop_before_publishing_an_entry() {
     let error = block_on(extract_archive_impl(
         Cursor::new(two_entry_archive()),
         output.path(),
-        ExtractionControl::native(None, worker_flag),
+        ExtractionControl::native(None, worker_flag, None),
         vfs::current_provider(),
     ))
     .expect_err("abandoned worker");
@@ -82,6 +83,7 @@ fn abandonment_and_token_stop_before_publishing_an_entry() {
     let control = ExtractionControl::native(
         Some(cancellation.token()),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        None,
     );
     cancellation.cancel(runmat_execution::CancellationReason::User);
     let error = block_on(extract_archive_impl(
@@ -138,6 +140,7 @@ fn worker_uses_captured_output_provider_not_thread_ambient_provider() {
         PathBuf::from("/captured-output"),
         None,
         provider.clone(),
+        None,
     ))
     .expect("worker extracts through captured memory provider");
     assert_eq!(names.len(), 2);
