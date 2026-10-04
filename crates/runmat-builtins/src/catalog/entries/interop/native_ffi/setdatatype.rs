@@ -32,7 +32,7 @@ pub const SETDATATYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: ERRORS,
 };
-const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "dimensions", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The admitted public form accepts exact scalar integer dimensions and integral-double dimensions; both are checked positive and converted to usize." }];
+const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "dimensions", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The compatibility reference specifies double dimensions. The current RunMat runtime also accepts exact integer-class dimensions, checked positive and converted to usize." }];
 const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "setdatatype(pointer, type, integer_dimensions...)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Dimension conversion and extent multiplication are checked before publishing the borrowed pointer view; this statement returns no public output." }];
 
 pub const SETDATATYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -110,7 +110,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     description: "`setdatatype(pointer, type, dimensions...)` records a typed view of an opaque pointer returned by a native library. It does not allocate or copy the pointee. It applies only to an opaque borrowed pointer, not caller-owned `libpointer` storage, and requires at least one checked dimension.",
     keywords: &["setdatatype", "native", "pointer", "C", "extent"],
     related: &["libpointer", "calllib", "loadlibrary"],
-    sections: &[BuiltinDocumentationSection { heading: "Borrowed memory", paragraphs: &["The foreign handle retains its original borrowed ownership, origin affinity, and session lifetime. Dimensions are validated with checked multiplication before the view is published; assigning a type does not authorize an unsafe copy from an unknown address."] }],
+    sections: &[BuiltinDocumentationSection { heading: "Borrowed memory", paragraphs: &["The foreign handle retains its original borrowed ownership, origin affinity, and session lifetime. Dimensions are validated with checked multiplication before the view is published; assigning a type does not authorize an unsafe copy from an unknown address.", "The compatibility reference specifies double-valued dimensions. This RunMat implementation also accepts exact integer-class scalar dimensions; that acceptance should not be assumed portable to MATLAB."] }],
     examples: &[BuiltinExample {
         id: "borrowed-int32", title: "Type an opaque pointer returned from C",
         program: "loadlibrary('fixture', 'fixture.h', 'Alias', 'fixture');\np = calllib('fixture', 'fixture_borrowed_value', int32(1));\nsetdatatype(p, 'int32Ptr', 1);\nassert(p.Value == int32(17));\nunloadlibrary('fixture');",
@@ -119,7 +119,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         fixture: NATIVE_FIXTURE, requirements: NATIVE_HOST,
         verification: BuiltinExampleVerification::Assertions { source: "assert(p.Value == int32(17));" },
     }],
-    example_exemption: None, faqs: &[], links: &[], media: &[],
+    example_exemption: None, faqs: &[], links: &[BuiltinDocumentationLink { label: "MATLAB setdatatype input types", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/lib.pointer.setdatatype.html") }], media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Borrowed pointer type and extent", location: "native_ffi_session::library_and_pointer_state_are_owned_by_one_runtime_session" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

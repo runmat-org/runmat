@@ -179,6 +179,25 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     manifest
         .validate_current_library(&std::fs::read(&library_path).unwrap())
         .expect("exact prepared library");
+    let missing_library = temporary.path().join("missing-prepared-library.so");
+    let missing = invoke_outputs(
+        &context,
+        "load_prepared",
+        vec![
+            Value::String(missing_library.display().to_string()),
+            Value::String(manifest_path.display().to_string()),
+            Value::String("missing_fixture".into()),
+        ],
+        1,
+    )
+    .expect_err("missing prepared library must retain the file I/O cause");
+    assert_eq!(missing.identifier(), Some("RunMat:Foreign:LoadFailed"));
+    let source = std::error::Error::source(missing.as_ref()).expect("path-qualified cause");
+    assert!(source.to_string().contains("missing-prepared-library.so"));
+    assert!(source
+        .source()
+        .and_then(|nested| nested.downcast_ref::<std::io::Error>())
+        .is_some());
     invoke(
         &context,
         "unload",
@@ -319,6 +338,26 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         1,
     )
     .unwrap();
+    assert_eq!(
+        invoke(
+            &context,
+            "get_member",
+            vec![pointer.clone(), Value::String("dAtAtYpE".into())],
+            1,
+        )
+        .unwrap(),
+        Value::String("int32Ptr".into())
+    );
+    assert_eq!(
+        invoke(
+            &context,
+            "invoke_member",
+            vec![pointer.clone(), Value::String("IsNuLl".into())],
+            1,
+        )
+        .unwrap(),
+        Value::Bool(false)
+    );
     let updated = invoke(
         &context,
         "call",

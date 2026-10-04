@@ -1,3 +1,4 @@
+use super::pointer_roles::{PointerMember, PointerMethod};
 use super::*;
 
 impl NativeFfiAdapter {
@@ -41,7 +42,7 @@ impl NativeFfiAdapter {
                 "native FFI get_member expects a foreign resource and member name",
             ));
         }
-        let member = string_argument(arguments, 1, "get_member")?;
+        let member = PointerMember::parse(string_argument(arguments, 1, "get_member")?);
         let Value::Foreign(reference) = &arguments[0] else {
             return Err(invalid_call(
                 "native FFI member access requires a foreign resource",
@@ -60,20 +61,20 @@ impl NativeFfiAdapter {
                     "native pointer resource has been released",
                 )
             })?;
-        match (member.to_ascii_lowercase().as_str(), entry) {
+        match (member, entry) {
             (
-                "value",
+                PointerMember::Value,
                 PointerEntry::CallerOwned {
                     pointer, metadata, ..
                 },
             ) => pointer
                 .value(&metadata)
                 .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
-            ("datatype", PointerEntry::CallerOwned { type_name, .. }) => {
+            (PointerMember::DataType, PointerEntry::CallerOwned { type_name, .. }) => {
                 Ok(Value::String(type_name))
             }
             (
-                "value",
+                PointerMember::Value,
                 PointerEntry::Opaque {
                     pointer,
                     view,
@@ -94,14 +95,16 @@ impl NativeFfiAdapter {
                 )
                 .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error))
             }
-            ("datatype", PointerEntry::Opaque { pointer, view, .. }) => Ok(Value::String(
-                view.borrow()
-                    .as_ref()
-                    .map(|view| view.type_name.clone())
-                    .unwrap_or_else(|| format!("{:?}Ptr", pointer.pointee)),
-            )),
+            (PointerMember::DataType, PointerEntry::Opaque { pointer, view, .. }) => {
+                Ok(Value::String(
+                    view.borrow()
+                        .as_ref()
+                        .map(|view| view.type_name.clone())
+                        .unwrap_or_else(|| format!("{:?}Ptr", pointer.pointee)),
+                ))
+            }
             (
-                _,
+                PointerMember::Field(member),
                 PointerEntry::CallerOwned {
                     pointer, metadata, ..
                 },
@@ -118,7 +121,7 @@ impl NativeFfiAdapter {
                     invalid_call(format!("native structure has no field `{member}`"))
                 })
             }
-            _ => Err(invalid_call(format!(
+            (PointerMember::Field(member), _) => Err(invalid_call(format!(
                 "native pointer has no member `{member}`"
             ))),
         }
@@ -130,7 +133,7 @@ impl NativeFfiAdapter {
                 "native FFI set_member expects a foreign resource, member name, and value",
             ));
         }
-        let member = string_argument(arguments, 1, "set_member")?;
+        let member = PointerMember::parse(string_argument(arguments, 1, "set_member")?);
         let Value::Foreign(reference) = &arguments[0] else {
             return Err(invalid_call(
                 "native FFI member assignment requires a foreign resource",
@@ -151,28 +154,28 @@ impl NativeFfiAdapter {
             })?;
         match entry {
             PointerEntry::CallerOwned { pointer, metadata, .. } => {
-                let replacement = if member.eq_ignore_ascii_case("Value") {
-                    arguments[2].clone()
-                } else if member.eq_ignore_ascii_case("DataType") {
-                    return Err(invalid_call(
+                let replacement = match member {
+                    PointerMember::Value => arguments[2].clone(),
+                    PointerMember::DataType => return Err(invalid_call(
                         "native pointer member `DataType` is read-only",
-                    ));
-                } else {
-                    let current = pointer.value(&metadata).map_err(|error| {
-                        foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
-                    })?;
-                    let Value::Struct(mut structure) = current else {
-                        return Err(invalid_call(format!(
-                            "native pointer member `{member}` is unavailable"
-                        )));
-                    };
-                    let Some(field) = structure.fields.get_mut(&member) else {
-                        return Err(invalid_call(format!(
-                            "native structure has no field `{member}`"
-                        )));
-                    };
-                    *field = arguments[2].clone();
-                    Value::Struct(structure)
+                    )),
+                    PointerMember::Field(member) => {
+                        let current = pointer.value(&metadata).map_err(|error| {
+                            foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
+                        })?;
+                        let Value::Struct(mut structure) = current else {
+                            return Err(invalid_call(format!(
+                                "native pointer member `{member}` is unavailable"
+                            )));
+                        };
+                        let Some(field) = structure.fields.get_mut(&member) else {
+                            return Err(invalid_call(format!(
+                                "native structure has no field `{member}`"
+                            )));
+                        };
+                        *field = arguments[2].clone();
+                        Value::Struct(structure)
+                    }
                 };
                 pointer.set_value(&replacement, &metadata).map_err(|error| {
                     foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
@@ -198,13 +201,12 @@ impl NativeFfiAdapter {
         };
         let method = string_argument(arguments, 1, "invoke_member")?;
         self.handles.resolve(reference, ForeignCapability::Write)?;
-        match method.to_ascii_lowercase().as_str() {
-            "setdatatype" => self.set_pointer_datatype(reference, &arguments[2..]),
-            "isnull" => self.pointer_is_null(reference, &arguments[2..]),
-            "reshape" => self.reshape_pointer(reference, &arguments[2..]),
-            _ => Err(invalid_call(format!(
-                "native pointer has no method `{method}`"
-            ))),
+        let role = PointerMethod::parse(&method)
+            .ok_or_else(|| invalid_call(format!("native pointer has no method `{method}`")))?;
+        match role {
+            PointerMethod::SetDataType => self.set_pointer_datatype(reference, &arguments[2..]),
+            PointerMethod::IsNull => self.pointer_is_null(reference, &arguments[2..]),
+            PointerMethod::Reshape => self.reshape_pointer(reference, &arguments[2..]),
         }
     }
 

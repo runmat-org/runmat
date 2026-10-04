@@ -97,7 +97,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("libpointer"), slug: Some("libpointer"),
     summary: "Create a typed, session-owned native pointer value.",
-    description: "`libpointer()` creates an opaque null pointer. `libpointer(type)` and `libpointer(type, value)` allocate storage for a normalized C pointer type and optionally initialize it from the value. The native adapter owns the allocation and tracks the pointer's origin-thread, session lifetime, and type metadata.",
+    description: "`libpointer()` creates a null `voidPtr` handle. `libpointer(type)` creates a null handle of the normalized C pointer type without allocating pointee storage. `libpointer(type, value)` allocates adapter-owned storage initialized from the value. The native adapter tracks origin-thread, session lifetime, and type metadata in every form.",
     keywords: &["libpointer", "native", "pointer", "C", "ownership"],
     related: &["calllib", "libstruct", "setdatatype", "loadlibrary"],
     sections: &[BuiltinDocumentationSection { heading: "Type and storage", paragraphs: &["Accepted scalar pointer spellings include signed and unsigned fixed-width integers, logical, single, and double types. The declared C ABI type controls range checks; integer payloads are not silently converted through double storage. A returned borrowed pointer from `calllib` remains borrowed rather than becoming caller-owned through `libpointer`."] }],

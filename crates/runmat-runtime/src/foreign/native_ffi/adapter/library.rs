@@ -1,5 +1,13 @@
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+#[error("could not read native library {path}: {source}")]
+struct PreparedLibraryReadError {
+    path: PathBuf,
+    #[source]
+    source: std::io::Error,
+}
+
 impl NativeFfiAdapter {
     pub(super) fn load(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
         self.load_legacy(arguments)
@@ -39,38 +47,7 @@ impl NativeFfiAdapter {
         let alias = optional_string_argument(arguments, 2, "load")?
             .map(Ok)
             .unwrap_or_else(|| default_alias(&library_path))?;
-        let mut include_directories = Vec::new();
-        let mut additional_headers = Vec::new();
-        let options = &arguments[3..];
-        if !options.is_empty()
-            && options.len().is_multiple_of(2)
-            && options.iter().step_by(2).all(|value| {
-                String::try_from(value).is_ok_and(|name| {
-                    matches!(
-                        NativeLoadOption::parse(&name),
-                        Some(NativeLoadOption::IncludePath | NativeLoadOption::AddHeader)
-                    )
-                })
-            })
-        {
-            for pair in options.chunks_exact(2) {
-                let name = String::try_from(&pair[0]).expect("validated option name");
-                let value = PathBuf::from(String::try_from(&pair[1]).map_err(|_| {
-                    invalid_call(format!("native FFI load option `{name}` must be text"))
-                })?);
-                match NativeLoadOption::parse(&name) {
-                    Some(NativeLoadOption::IncludePath) => include_directories.push(value),
-                    Some(NativeLoadOption::AddHeader) => additional_headers.push(value),
-                    _ => unreachable!("validated native FFI load option"),
-                }
-            }
-        } else {
-            include_directories = options
-                .iter()
-                .enumerate()
-                .map(|(index, _)| string_argument(arguments, index + 3, "load").map(PathBuf::from))
-                .collect::<Result<Vec<_>, _>>()?;
-        }
+        let (include_directories, additional_headers) = parse_load_trailer(arguments)?;
         self.validate_available_alias(&alias)?;
         let preparation = HeaderPreparation {
             header: PathBuf::from(header_path),
@@ -117,13 +94,13 @@ impl NativeFfiAdapter {
         manifest: NativeInterfaceArtifactManifest,
     ) -> Result<Value, RuntimeError> {
         self.validate_available_alias(alias)?;
-        let library_bytes = std::fs::read(library_path).map_err(|error| {
-            foreign_error(
+        let library_bytes = std::fs::read(library_path).map_err(|source| {
+            foreign_error_with_source(
                 ForeignErrorKind::LoadFailed,
-                format!(
-                    "could not read native library {}: {error}",
-                    library_path.display()
-                ),
+                PreparedLibraryReadError {
+                    path: library_path.to_path_buf(),
+                    source,
+                },
             )
         })?;
         manifest
@@ -326,6 +303,52 @@ impl NativeFfiAdapter {
         self.load_prepared_manifest(&alias, &library_path, manifest)
     }
 }
+/// The legacy adapter also accepts positional include directories. A trailer
+/// is treated as named options only when every name is an admitted preparation
+/// option; unknown or odd trailers retain the positional interpretation.
+fn parse_load_trailer(arguments: &[Value]) -> Result<(Vec<PathBuf>, Vec<PathBuf>), RuntimeError> {
+    let options = &arguments[3..];
+    let named = (!options.is_empty() && options.len().is_multiple_of(2))
+        .then(|| {
+            options
+                .chunks_exact(2)
+                .map(|pair| {
+                    let name = String::try_from(&pair[0]).ok()?;
+                    let kind = NativeLoadOption::parse(&name)?;
+                    matches!(
+                        kind,
+                        NativeLoadOption::IncludePath | NativeLoadOption::AddHeader
+                    )
+                    .then_some((kind, name, &pair[1]))
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .flatten();
+    if let Some(named) = named {
+        let mut includes = Vec::new();
+        let mut headers = Vec::new();
+        for (kind, name, source) in named {
+            let path = PathBuf::from(String::try_from(source).map_err(|_| {
+                invalid_call(format!("native FFI load option `{name}` must be text"))
+            })?);
+            match kind {
+                NativeLoadOption::IncludePath => includes.push(path),
+                NativeLoadOption::AddHeader => headers.push(path),
+                NativeLoadOption::Alias => {
+                    return Err(invalid_call("native FFI load Alias is positional"))
+                }
+            }
+        }
+        Ok((includes, headers))
+    } else {
+        let includes = options
+            .iter()
+            .enumerate()
+            .map(|(index, _)| string_argument(arguments, index + 3, "load").map(PathBuf::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((includes, Vec::new()))
+    }
+}
 pub(super) fn legacy_signature(symbol: &SymbolPrototype) -> String {
     let outputs = std::iter::once((&symbol.return_type, None))
         .filter(|(ty, _)| !matches!(ty, NativeType::Void))
@@ -383,5 +406,60 @@ pub(super) fn legacy_type_name(ty: &NativeType) -> String {
         NativeType::Array { element, .. } => format!("{}Ptr", legacy_type_name(element)),
         NativeType::Structure { name } | NativeType::Enumeration { name, .. } => name.clone(),
         NativeType::Callback { .. } => "FcnPtr".into(),
+    }
+}
+
+#[cfg(test)]
+mod load_trailer_tests {
+    use super::*;
+
+    fn prefix() -> Vec<Value> {
+        vec![
+            Value::String("library".into()),
+            Value::String("header".into()),
+            Value::String("alias".into()),
+        ]
+    }
+
+    #[test]
+    fn named_options_decode_once_and_positional_include_paths_remain_admitted() {
+        let mut named = prefix();
+        named.extend([
+            Value::String("includePATH".into()),
+            Value::String("inc".into()),
+            Value::String("AddHeader".into()),
+            Value::String("extra.h".into()),
+        ]);
+        let (includes, headers) = parse_load_trailer(&named).unwrap();
+        assert_eq!(includes, vec![PathBuf::from("inc")]);
+        assert_eq!(headers, vec![PathBuf::from("extra.h")]);
+
+        let mut positional = prefix();
+        positional.extend([
+            Value::String("IncludePath".into()),
+            Value::String("inc".into()),
+            Value::String("other".into()),
+        ]);
+        let (includes, headers) = parse_load_trailer(&positional).unwrap();
+        assert_eq!(
+            includes,
+            vec![
+                PathBuf::from("IncludePath"),
+                PathBuf::from("inc"),
+                PathBuf::from("other")
+            ]
+        );
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn admitted_named_option_with_invalid_value_keeps_invalid_call() {
+        let mut named = prefix();
+        named.extend([
+            Value::String("AddHeader".into()),
+            Value::OutputList(Vec::new()),
+        ]);
+        let error = parse_load_trailer(&named).expect_err("invalid named value");
+        assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));
     }
 }

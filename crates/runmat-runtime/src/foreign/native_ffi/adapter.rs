@@ -36,6 +36,7 @@ use crate::RuntimeError;
 mod call;
 mod library;
 mod pointer_storage;
+mod pointer_roles;
 mod pointer_view;
 
 #[cfg(test)]
