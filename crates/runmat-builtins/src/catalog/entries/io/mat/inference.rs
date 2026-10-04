@@ -121,7 +121,11 @@ pub(super) fn load(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
             0,
         ));
     }
-    finish_fixed(entry, request, loaded_struct(), diagnostics)
+    let mut result = finish_fixed(entry, request, loaded_struct(), diagnostics);
+    if request.outputs.requested.known_count() == Some(1) {
+        result.effects.0.remove(&EffectKind::WorkspaceWrite);
+    }
+    result
 }
 
 pub(super) fn save(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

@@ -59,6 +59,7 @@ fn load_zero_output_is_workspace_effect_and_one_output_is_host_struct() {
     assert!(one.diagnostics.is_empty());
     assert!(matches!(one.outputs[0].kind, ValueKindFact::Struct(_)));
     assert_eq!(one.outputs[0].residency, ResidencyFact::Host);
+    assert!(!one.effects.0.contains(&EffectKind::WorkspaceWrite));
     assert!(
         !inference::load(&request(vec![text()], 2), &LOAD_CATALOG_ENTRY)
             .diagnostics
