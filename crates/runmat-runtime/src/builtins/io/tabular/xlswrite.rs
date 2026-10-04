@@ -22,7 +22,7 @@ use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use super::cooperation::TabularCooperation;
+use super::cooperation::{await_io, TabularCooperation};
 use super::path::{TabularFsOwner, TabularFsPath};
 use super::write_owner;
 use super::writecell::{self, CellTable, CellValue, RangeStart};
@@ -42,10 +42,16 @@ const XLSWRITE_MARKER_TEXT: &str = "RunMat xlswrite";
 
 #[runtime_builtin(
     name = "xlswrite",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::tabular::xlswrite"
 )]
-async fn xlswrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn xlswrite_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
         return Err(xlswrite_error_with(
             &XLSWRITE_ERROR_OUTPUT_COUNT,
@@ -70,10 +76,28 @@ async fn xlswrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> Bui
         )?;
     }
 
-    match write_spreadsheet(filename, data, rest).await {
+    match write_spreadsheet(runtime.as_ref(), filename, data, rest).await {
         Ok(_) => Ok(status_outputs(true, None)),
-        Err(err) if captures_failure_as_outputs() => Ok(status_outputs(false, Some(&err))),
+        Err(err) if captures_failure_as_outputs() && !is_cancelled(&err) => {
+            Ok(status_outputs(false, Some(&err)))
+        }
         Err(err) => Err(err),
+    }
+}
+
+fn is_cancelled(error: &RuntimeError) -> bool {
+    let mut current: &(dyn std::error::Error + 'static) = error;
+    loop {
+        if matches!(
+            current.downcast_ref::<crate::execution::ExecutionServiceError>(),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ) {
+            return true;
+        }
+        let Some(source) = current.source() else {
+            return false;
+        };
+        current = source;
     }
 }
 
@@ -81,7 +105,13 @@ fn is_numeric_range_value(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
 }
 
-async fn write_spreadsheet(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<usize> {
+async fn write_spreadsheet(
+    runtime: Option<&crate::context::RuntimeContext>,
+    filename: Value,
+    data: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<usize> {
+    let mut cooperation = TabularCooperation::new(runtime, BUILTIN_NAME);
     let path = resolve_path(&filename)?;
     let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
         xlswrite_error_with_source(
@@ -97,27 +127,38 @@ async fn write_spreadsheet(filename: Value, data: Value, rest: Vec<Value>) -> Bu
             source,
         )
     })?;
-    let data_value = gather_if_needed_async(&data)
-        .await
+    let data_value = await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&data))
+        .await?
         .map_err(map_control_flow)?;
-    let args = gather_arguments(&rest).await?;
+    let args = gather_arguments(runtime, &mut cooperation, &rest).await?;
     let request = XlsWriteRequest::parse(&args)?;
-    let table = XlsTable::from_value(data_value).await?;
-    let lock = write_owner::write_lock_for_path(&selected)
-        .await
-        .map_err(|source| {
-            xlswrite_error_with_source(
-                &XLSWRITE_ERROR_IO,
-                "xlswrite: write authority unavailable",
-                source,
-            )
-        })?;
-    let _guard = lock.lock().await;
-    let mut workbook = load_workbook_or_new(&selected).await?;
+    let table = await_io(runtime, BUILTIN_NAME, XlsTable::from_value(data_value)).await??;
+    let lock = await_io(
+        runtime,
+        BUILTIN_NAME,
+        write_owner::write_lock_for_path(&selected),
+    )
+    .await?
+    .map_err(|source| {
+        xlswrite_error_with_source(
+            &XLSWRITE_ERROR_IO,
+            "xlswrite: write authority unavailable",
+            source,
+        )
+    })?;
+    let _guard = await_io(runtime, BUILTIN_NAME, lock.lock()).await?;
+    let mut workbook = await_io(runtime, BUILTIN_NAME, load_workbook_or_new(&selected)).await??;
+    cooperation.completed(0).await?;
+    selected.check().map_err(|source| {
+        xlswrite_error_with_source(
+            &XLSWRITE_ERROR_IO,
+            "xlswrite: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
     workbook.overlay(&request, table)?;
     let bytes = workbook.to_xlsx_bytes()?;
-    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
-    write_owner::safe_replace_file(None, &mut cooperation, BUILTIN_NAME, &selected, &bytes)
+    write_owner::safe_replace_file(runtime, &mut cooperation, BUILTIN_NAME, &selected, &bytes)
         .await
         .map_err(|source| match source {
             write_owner::StagedWriteError::Control(error) => error,
@@ -130,14 +171,19 @@ async fn write_spreadsheet(filename: Value, data: Value, rest: Vec<Value>) -> Bu
     Ok(bytes.len())
 }
 
-async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    args: &[Value],
+) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(args.len());
     for value in args {
         gathered.push(
-            gather_if_needed_async(value)
-                .await
+            await_io(runtime, BUILTIN_NAME, gather_if_needed_async(value))
+                .await?
                 .map_err(map_control_flow)?,
         );
+        cooperation.completed(0).await?;
     }
     Ok(gathered)
 }

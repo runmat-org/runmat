@@ -9,6 +9,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
+async fn xlswrite_call(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    xlswrite_builtin(None, filename, data, rest).await
+}
+
+#[test]
+fn cancellation_is_not_converted_to_spreadsheet_status() {
+    let cancelled = build_runtime_error("xlswrite: cancelled")
+        .with_builtin(BUILTIN_NAME)
+        .with_source(crate::execution::ExecutionServiceError::Cancelled)
+        .build();
+    assert!(is_cancelled(&cancelled));
+    assert!(!is_cancelled(&xlswrite_error_with(
+        &XLSWRITE_ERROR_IO,
+        "ordinary spreadsheet failure"
+    )));
+}
+
 fn temp_path(ext: &str) -> PathBuf {
     let millis = unix_timestamp_ms();
     let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -70,7 +87,7 @@ fn xlswrite_gates_numeric_range_before_file_access() {
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let range =
         Tensor::new_integer(IntegerStorage::U16(vec![1, 1]), vec![1, 2]).expect("numeric range");
-    let error = futures::executor::block_on(xlswrite_builtin(
+    let error = futures::executor::block_on(xlswrite_call(
         Value::from("definitely/missing/out.xlsx"),
         Value::Num(1.0),
         vec![Value::from("Sheet1"), Value::Tensor(range)],
@@ -89,7 +106,7 @@ fn xlswrite_writes_numeric_matrix_with_sheet_and_range() {
     let filename = path.to_string_lossy().into_owned();
     let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
 
-    let ok = block_on(xlswrite_builtin(
+    let ok = block_on(xlswrite_call(
         Value::from(filename),
         Value::Tensor(tensor),
         vec![Value::from("Data"), Value::from("B2")],
@@ -126,7 +143,7 @@ fn xlswrite_accepts_cell_strings_logicals_and_ints() {
         2,
     );
 
-    let _status = block_on(xlswrite_builtin(
+    let _status = block_on(xlswrite_call(
         Value::from(filename),
         values,
         vec![Value::from("A1")],
@@ -167,7 +184,7 @@ fn xlswrite_accepts_top_level_sparse_matrix() {
     let filename = path.to_string_lossy().into_owned();
     let sparse = SparseTensor::new(2, 2, vec![0, 1, 2], vec![1, 0], vec![9.0, 8.0]).unwrap();
 
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename),
         Value::SparseTensor(sparse),
         Vec::new(),
@@ -205,14 +222,14 @@ fn xlswrite_preserves_existing_cells_outside_overlay() {
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let initial = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename.clone()),
         Value::Tensor(initial),
         vec![Value::from("Sheet1"), Value::from("A1")],
     ))
     .expect("initial xlswrite");
 
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename),
         Value::Num(9.0),
         vec![Value::from("Sheet1"), Value::from("B2")],
@@ -232,13 +249,13 @@ fn xlswrite_preserves_existing_cells_outside_overlay() {
 fn xlswrite_preserves_other_sheets_and_uses_numeric_sheet_ordinal() {
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename.clone()),
         Value::Num(1.0),
         vec![Value::from("First"), Value::from("A1")],
     ))
     .expect("write first sheet");
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename),
         Value::Num(2.0),
         vec![Value::Num(2.0), Value::from("A1")],
@@ -272,19 +289,19 @@ fn xlswrite_preserves_other_sheets_and_uses_numeric_sheet_ordinal() {
 fn xlswrite_numeric_sheet_placeholders_avoid_name_collisions() {
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename.clone()),
         Value::Num(1.0),
         vec![Value::from("First"), Value::from("A1")],
     ))
     .expect("write first sheet");
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename.clone()),
         Value::Num(3.0),
         vec![Value::from("Sheet3"), Value::from("A1")],
     ))
     .expect("write named sheet3");
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename),
         Value::Num(2.0),
         vec![Value::Num(3.0), Value::from("B2")],
@@ -307,7 +324,7 @@ fn xlswrite_accepts_scalar_tensor_sheet_selector_and_absolute_range() {
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let sheet = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
-    block_on(xlswrite_builtin(
+    block_on(xlswrite_call(
         Value::from(filename),
         Value::Num(42.0),
         vec![Value::Tensor(sheet), Value::from("$B$2:$B$2")],
@@ -325,7 +342,7 @@ fn xlswrite_accepts_scalar_tensor_sheet_selector_and_absolute_range() {
 
 #[test]
 fn xlswrite_rejects_malformed_range_end() {
-    let err = block_on(xlswrite_builtin(
+    let err = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::Num(1.0),
         vec![Value::from("Sheet1"), Value::from("B2:not-a-cell")],
@@ -337,7 +354,7 @@ fn xlswrite_rejects_malformed_range_end() {
 #[test]
 fn xlswrite_rejects_sparse_inputs_that_would_densify_too_large() {
     let sparse = SparseTensor::zeros(MAX_XLSWRITE_CELLS + 1, 1);
-    let err = block_on(xlswrite_builtin(
+    let err = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::SparseTensor(sparse),
         Vec::new(),
@@ -354,7 +371,7 @@ fn xlswrite_rejects_unmarked_existing_workbook_instead_of_flattening_it() {
         .expect("workbook bytes");
     fs::write(&path, bytes).expect("write workbook");
 
-    let err = block_on(xlswrite_builtin(
+    let err = block_on(xlswrite_call(
         Value::from(path.to_string_lossy().into_owned()),
         Value::Num(2.0),
         vec![Value::from("External"), Value::from("A1")],
@@ -367,7 +384,7 @@ fn xlswrite_rejects_unmarked_existing_workbook_instead_of_flattening_it() {
 
 #[test]
 fn xlswrite_rejects_excessive_numeric_sheet_index() {
-    let err = block_on(xlswrite_builtin(
+    let err = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::Num(1.0),
         vec![
@@ -401,7 +418,7 @@ fn xlswrite_sheet_selector_preserves_typed_integer_tensor_bounds() {
 
 #[test]
 fn xlswrite_rejects_invalid_sheet_names_instead_of_rewriting_them() {
-    let err = block_on(xlswrite_builtin(
+    let err = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::Num(1.0),
         vec![Value::from("A/B"), Value::from("A1")],
@@ -415,7 +432,7 @@ fn xlswrite_returns_status_and_message_outputs() {
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
     let _guard = crate::output_count::push_output_count(Some(2));
-    let result = block_on(xlswrite_builtin(
+    let result = block_on(xlswrite_call(
         Value::from(filename),
         Value::Complex(1.0, 2.0),
         Vec::new(),
@@ -436,7 +453,7 @@ fn xlswrite_returns_status_and_message_outputs() {
 #[test]
 fn xlswrite_rejects_too_many_outputs() {
     let _guard = crate::output_count::push_output_count(Some(3));
-    let err = block_on(xlswrite_builtin(
+    let err = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::Num(1.0),
         Vec::new(),
