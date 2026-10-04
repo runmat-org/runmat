@@ -878,10 +878,13 @@ pub async fn dispatch_instruction(
                             DispatchDecision::FallThrough,
                         )));
                     }
-                    return Err(crate::interpreter::errors::mex(
+                    let mut error = crate::interpreter::errors::mex(
                         "UndefinedVariable",
                         &format!("Undefined variable: {slot_name}"),
-                    ));
+                    );
+                    error.failure_origin =
+                        runmat_runtime::runtime_error::RuntimeFailureOrigin::LanguageEvaluation;
+                    return Err(error);
                 }
             }
             let value = vars[*index].clone();

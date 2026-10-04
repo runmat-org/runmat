@@ -287,6 +287,7 @@ async fn call_builtin_async_impl(
             let resolved_name = ResolvedBuiltinName::resolve(name);
             build_runtime_error(format!("Undefined function: {}", resolved_name.requested))
                 .with_identifier("RunMat:UndefinedFunction")
+                .with_failure_origin(crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation)
                 .build()
         })
 }

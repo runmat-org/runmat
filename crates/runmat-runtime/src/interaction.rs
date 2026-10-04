@@ -337,11 +337,39 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
 // named constants like `pi`, arithmetic, etc.).
 // ---------------------------------------------------------------------------
 
-/// Future returned by the eval hook.
-pub type EvalHookFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>>;
+/// A language diagnostic is distinct from an operational evaluator failure.
+/// The host interaction consumer owns presentation and whether to ask again.
+#[derive(Debug)]
+pub enum EvalHookOutcome {
+    Value(Value),
+    InvalidExpression(RuntimeError),
+}
+
+impl EvalHookOutcome {
+    pub fn from_evaluation(result: Result<Value, RuntimeError>) -> Result<Self, RuntimeError> {
+        match result {
+            Ok(value) => Ok(Self::Value(value)),
+            Err(error)
+                if error.failure_origin()
+                    == crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation =>
+            {
+                Ok(Self::InvalidExpression(error))
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Future returned by the eval hook. Errors propagate without prompting again.
+pub type EvalHookFuture =
+    Pin<Box<dyn Future<Output = Result<EvalHookOutcome, RuntimeError>> + 'static>>;
 
 /// Function signature for the eval hook.
 pub type EvalHookFn = dyn Fn(String) -> EvalHookFuture + Send + Sync;
+
+#[cfg(test)]
+#[path = "interaction/eval_outcome_tests.rs"]
+mod eval_outcome_tests;
 
 static EVAL_HOOK: OnceCell<RwLock<Option<Arc<EvalHookFn>>>> = OnceCell::new();
 

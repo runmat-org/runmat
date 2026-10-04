@@ -655,8 +655,8 @@ impl RunMatSession {
                 .as_ref()
                 .and_then(|companion| companion.source_catalog.clone()),
         );
-        let _eval_hook_guard =
-            runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
+        let _eval_hook_guard = runmat_runtime::interaction::replace_eval_hook(Some(
+            std::sync::Arc::new(
                 move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
                     // Shared eval logic, used by both the WASM async path and the
                     // native thread path below.
@@ -671,6 +671,7 @@ impl RunMatSession {
                             .map_err(|e| {
                                 build_runtime_error(format!("input: parse error: {e}"))
                                     .with_identifier("RunMat:input:ParseError")
+                                    .with_failure_origin(runmat_runtime::runtime_error::RuntimeFailureOrigin::LanguageEvaluation)
                                     .build()
                             })?;
                         let known_project_symbols = source_catalog
@@ -693,6 +694,7 @@ impl RunMatSession {
                         if let Some(e) = frontend.lowering_failure {
                             return Err(build_runtime_error(format!("input: lowering error: {e}"))
                                 .with_identifier("RunMat:input:LowerError")
+                                .with_failure_origin(runmat_runtime::runtime_error::RuntimeFailureOrigin::LanguageEvaluation)
                                 .build());
                         }
                         if let Some(e) = frontend.compile_failure {
@@ -719,12 +721,12 @@ impl RunMatSession {
                     let source_catalog = Arc::clone(&source_catalog_for_eval_hook);
                     #[cfg(target_arch = "wasm32")]
                     {
-                        Box::pin(eval_expr(
-                            expr,
-                            compat,
-                            top_level_await_enabled,
-                            source_catalog,
-                        ))
+                        Box::pin(async move {
+                            runmat_runtime::interaction::EvalHookOutcome::from_evaluation(
+                                eval_expr(expr, compat, top_level_await_enabled, source_catalog)
+                                    .await,
+                            )
+                        })
                     }
                     #[cfg(not(target_arch = "wasm32"))]
                     {
@@ -739,12 +741,15 @@ impl RunMatSession {
                                     false,
                                     dynamic_eval_enabled,
                                 );
-                                eval_future.as_mut().poll(cx)
+                                eval_future.as_mut().poll(cx).map(
+                                    runmat_runtime::interaction::EvalHookOutcome::from_evaluation,
+                                )
                             })
                         }))
                     }
                 },
-            )));
+            ),
+        ));
 
         if self.verbose {
             debug!("Executing: {}", input.trim());

@@ -122,8 +122,18 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         if return_string {
             return Ok(Value::CharArray(CharArray::new_row(&line)));
         }
-        if let Ok(value) = parse_numeric_response(&line).await {
-            return Ok(value);
+        match parse_numeric_response(&line).await {
+            Ok(value) => return Ok(value),
+            Err(error)
+                if error.failure_origin()
+                    == crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation =>
+            {
+                crate::console::record_console_line(
+                    crate::console::ConsoleStream::Stderr,
+                    error.format_diagnostic(),
+                );
+            }
+            Err(error) => return Err(error),
         }
     }
 }
@@ -192,14 +202,18 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     // polls (e.g. the WASM async runtime). On native the fast paths above cover
     // the common cases; truly complex expressions fall back to str2double here.
     if let Some(hook) = interaction::current_eval_hook() {
-        return hook(trimmed.to_string()).await.map_err(|err| {
+        let outcome = hook(trimmed.to_string()).await.map_err(|err| {
             let message = err.message().to_string();
             input_error_with_source(
                 &INPUT_ERROR_EVAL_FAILED,
-                format!("input: invalid expression ({message})"),
+                format!("input: expression evaluation failed ({message})"),
                 err,
             )
-        });
+        })?;
+        return match outcome {
+            interaction::EvalHookOutcome::Value(value) => Ok(value),
+            interaction::EvalHookOutcome::InvalidExpression(error) => Err(error),
+        };
     }
 
     // Fallback when no eval hook is installed (unit tests, native REPL).
@@ -214,10 +228,12 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
             )
         })?;
     if matches!(parsed, Value::Num(value) if value.is_nan()) {
-        return Err(input_error_with(
+        let mut error = input_error_with(
             &INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
             INPUT_ERROR_INVALID_NUMERIC_EXPRESSION.message,
-        ));
+        );
+        error.failure_origin = crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation;
+        return Err(error);
     }
     Ok(parsed)
 }
