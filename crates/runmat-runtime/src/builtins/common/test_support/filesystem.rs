@@ -42,3 +42,13 @@ pub fn tempdir() -> io::Result<TestDirectory> {
 pub fn exists(path: &Path) -> bool {
     runmat_filesystem::metadata(path).is_ok()
 }
+
+#[cfg(target_arch = "wasm32")]
+pub fn unique_path(prefix: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_PATH: AtomicU64 = AtomicU64::new(0);
+    let sequence = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
+    runmat_filesystem::current_dir()
+        .expect("fixture working directory")
+        .join(format!("{prefix}_{sequence}.tmp"))
+}

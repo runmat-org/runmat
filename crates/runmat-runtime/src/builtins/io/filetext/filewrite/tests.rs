@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::common::test_support;
 use crate::RuntimeError;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::unix_timestamp_ms;
 use runmat_value::{CharArray, IntegerStorage, LogicalArray, StringArray, Tensor};
 use std::io::Read;
@@ -17,6 +18,7 @@ fn run_filewrite(path: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Va
 
 mod controls;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let millis = unix_timestamp_ms();
     let mut path = std::env::temp_dir();
@@ -24,9 +26,16 @@ fn unique_path(prefix: &str) -> PathBuf {
     path
 }
 
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_writes_text_content() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_text");
     let contents = "RunMat filewrite\nLine two\n";
 
@@ -51,6 +60,8 @@ fn filewrite_writes_text_content() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_appends_when_requested() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_append");
     test_support::fs::write(&path, "first\n").expect("write baseline");
 
@@ -70,6 +81,8 @@ fn filewrite_appends_when_requested() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_errors_on_invalid_ascii() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_ascii_error");
     let err = unwrap_error_message(
         run_filewrite(
@@ -89,6 +102,8 @@ fn filewrite_errors_on_invalid_ascii() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_writes_raw_bytes_from_tensor() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_raw_bytes");
     let tensor = Tensor::new(vec![0.0, 127.0, 255.0], vec![3, 1]).expect("tensor");
     run_filewrite(
@@ -111,6 +126,8 @@ fn filewrite_writes_raw_bytes_from_tensor() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_writes_raw_bytes_from_typed_integer_storage() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_typed_raw_bytes");
     let tensor = Tensor::new_integer(IntegerStorage::U8(vec![0, 127, 255]), vec![3, 1])
         .expect("typed byte tensor");
@@ -153,6 +170,8 @@ fn tensor_to_bytes_reads_each_integer_storage_class() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_typed_integer_tensor_range_errors_keep_exact_wide_values() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_typed_integer_range");
     let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
         .expect("typed integer tensor");
@@ -173,6 +192,8 @@ fn filewrite_typed_integer_tensor_range_errors_keep_exact_wide_values() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_numeric_scalar_writes_byte() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_numeric_scalar");
     run_filewrite(
         Value::from(path.to_string_lossy().to_string()),
@@ -190,6 +211,8 @@ fn filewrite_numeric_scalar_writes_byte() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_bool_scalar_writes_byte() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_bool_scalar");
     run_filewrite(
         Value::from(path.to_string_lossy().to_string()),
@@ -207,6 +230,8 @@ fn filewrite_bool_scalar_writes_byte() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_writes_logical_array_bytes() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_logical_array");
     let logical = LogicalArray::new(vec![0, 1, 2], vec![3]).expect("logical array");
     run_filewrite(
@@ -225,6 +250,8 @@ fn filewrite_writes_logical_array_bytes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_errors_on_numeric_out_of_range() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_out_of_range");
     let err = unwrap_error_message(
         run_filewrite(
@@ -244,6 +271,8 @@ fn filewrite_errors_on_numeric_out_of_range() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_errors_on_non_integer_numeric() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_non_integer");
     let err = unwrap_error_message(
         run_filewrite(
@@ -263,6 +292,8 @@ fn filewrite_errors_on_non_integer_numeric() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_rejects_ascii_numeric_bytes_above_range() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_ascii_bytes");
     let tensor = Tensor::new(vec![255.0], vec![1, 1]).expect("tensor");
     let err = unwrap_error_message(
@@ -283,6 +314,8 @@ fn filewrite_rejects_ascii_numeric_bytes_above_range() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_positional_encoding_argument() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_positional_encoding");
     run_filewrite(
         Value::from(path.to_string_lossy().to_string()),
@@ -300,6 +333,8 @@ fn filewrite_positional_encoding_argument() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_utf8_encoding_allows_arbitrary_bytes() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_utf8_numeric");
     let tensor = Tensor::new(vec![0.0, 255.0], vec![2, 1]).expect("tensor");
     run_filewrite(
@@ -318,6 +353,8 @@ fn filewrite_utf8_encoding_allows_arbitrary_bytes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_rejects_unknown_option() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_unknown_option");
     let err = unwrap_error_message(
         run_filewrite(
@@ -337,6 +374,8 @@ fn filewrite_rejects_unknown_option() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_rejects_duplicate_encoding() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_duplicate_encoding");
     let err = unwrap_error_message(
         run_filewrite(
@@ -360,6 +399,8 @@ fn filewrite_rejects_duplicate_encoding() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_rejects_duplicate_writemode() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_duplicate_writemode");
     let err = unwrap_error_message(
         run_filewrite(
@@ -384,6 +425,8 @@ fn filewrite_rejects_duplicate_writemode() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_rejects_invalid_writemode_value() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_invalid_writemode");
     let err = unwrap_error_message(
         run_filewrite(
@@ -403,6 +446,8 @@ fn filewrite_rejects_invalid_writemode_value() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_rejects_invalid_encoding_value() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_invalid_encoding");
     let err = unwrap_error_message(
         run_filewrite(
@@ -422,6 +467,8 @@ fn filewrite_rejects_invalid_encoding_value() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_accepts_char_array_filename() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_char_path");
     let path_str = path.to_string_lossy();
     let chars: Vec<char> = path_str.chars().collect();
@@ -443,6 +490,8 @@ fn filewrite_accepts_char_array_filename() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filewrite_string_array_stores_newlines() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("filewrite_string_array");
     let array = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1])
         .expect("string array");

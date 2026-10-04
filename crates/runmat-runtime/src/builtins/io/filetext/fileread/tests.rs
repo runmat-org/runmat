@@ -1,5 +1,6 @@
 use super::*;
 use crate::builtins::common::test_support;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::unix_timestamp_ms;
 use std::io::Write;
 
@@ -36,6 +37,8 @@ fn fileread_descriptor_is_integer_inapplicable() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_descriptor_signatures_cover_core_forms() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let labels: Vec<&str> = FILEREAD_DESCRIPTOR
         .signatures
         .iter()
@@ -77,6 +80,7 @@ fn fileread_rejects_numeric_and_resident_encoding_inputs_before_provider_access(
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let millis = unix_timestamp_ms();
     let mut path = std::env::temp_dir();
@@ -84,9 +88,16 @@ fn unique_path(prefix: &str) -> PathBuf {
     path
 }
 
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_reads_text_file() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_text");
     let contents = "RunMat fileread\nLine two\n";
     test_support::fs::write(&path, contents).expect("write sample file");
@@ -110,6 +121,8 @@ fn fileread_reads_text_file() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_accepts_char_array_input() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_char_input");
     test_support::fs::write(&path, "abc").expect("write sample file");
 
@@ -134,6 +147,8 @@ fn fileread_accepts_char_array_input() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_accepts_string_array_scalar() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_string_scalar");
     test_support::fs::write(&path, "xyz").expect("write sample file");
 
@@ -157,6 +172,8 @@ fn fileread_accepts_string_array_scalar() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_returns_empty_for_empty_file() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_empty");
     fs::File::create(&path).expect("create empty file");
 
@@ -177,6 +194,8 @@ fn fileread_returns_empty_for_empty_file() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_errors_when_file_missing() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_missing");
     let err = unwrap_error_message(
         run_fileread(Value::from(path.to_string_lossy().to_string()), Vec::new()).unwrap_err(),
@@ -190,6 +209,8 @@ fn fileread_errors_when_file_missing() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_preserves_non_utf8_bytes() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_raw_bytes");
     let mut file = fs::File::create(&path).expect("create file");
     file.write_all(&[0xFF, 0x61, 0x00]).expect("write bytes");
@@ -211,6 +232,8 @@ fn fileread_preserves_non_utf8_bytes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_supports_encoding_keyword() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_utf8_keyword");
     let contents = "UTF-8 ✓";
     test_support::fs::write(&path, contents).expect("write sample file");
@@ -234,6 +257,8 @@ fn fileread_supports_encoding_keyword() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_supports_single_encoding_argument() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_latin1");
     let bytes = [0xC0u8, 0x20, 0x41];
     test_support::fs::write(&path, bytes).expect("write latin1 data");
@@ -257,6 +282,8 @@ fn fileread_supports_single_encoding_argument() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_raw_encoding_returns_bytes() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_raw_encoding");
     let bytes = [0x01u8, 0xFF, 0x7F];
     test_support::fs::write(&path, bytes).expect("write raw bytes");
@@ -280,6 +307,8 @@ fn fileread_raw_encoding_returns_bytes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_ascii_encoding_errors_on_invalid_bytes() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_ascii_error");
     test_support::fs::write(&path, [0x41, 0x80]).expect("write bytes");
 
@@ -301,6 +330,8 @@ fn fileread_ascii_encoding_errors_on_invalid_bytes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_encoding_keyword_missing_value_errors() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_encoding_missing");
     test_support::fs::write(&path, "abc").expect("write file");
 
@@ -322,6 +353,8 @@ fn fileread_encoding_keyword_missing_value_errors() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fileread_too_many_arguments_errors() {
+    #[cfg(target_arch = "wasm32")]
+    let _filesystem = test_support::filesystem::tempdir().expect("browser fixture");
     let path = unique_path("fileread_too_many");
     test_support::fs::write(&path, "abc").expect("write file");
 

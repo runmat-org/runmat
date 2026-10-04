@@ -3,10 +3,12 @@ use crate::builtins::common::test_support;
 use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
 use crate::RuntimeError;
 use runmat_filesystem::File;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::system_time_now;
 use runmat_value::{IntValue, IntegerStorage, Tensor};
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 
 fn unwrap_error_message(err: RuntimeError) -> String {
@@ -51,7 +53,7 @@ fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
     futures::executor::block_on(fclose::evaluate(args))
 }
 
-fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+fn registry_guard() -> registry::RegistryTestGuard {
     registry::test_guard()
 }
 
@@ -225,6 +227,7 @@ fn frewind_rejects_non_numeric_input() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let now = system_time_now()
         .duration_since(UNIX_EPOCH)
@@ -232,4 +235,9 @@ fn unique_path(prefix: &str) -> PathBuf {
         .as_nanos();
     let filename = format!("{prefix}_{now}.tmp");
     std::env::temp_dir().join(filename)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
 }

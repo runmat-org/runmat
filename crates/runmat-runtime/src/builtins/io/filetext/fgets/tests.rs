@@ -3,9 +3,11 @@ use crate::builtins::common::test_support;
 use crate::builtins::io::filetext::{fopen, registry};
 use crate::RuntimeError;
 use runmat_accelerate_api::HostTensorView;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::system_time_now;
 use runmat_value::IntValue;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 
 fn unwrap_error_message(err: RuntimeError) -> String {
@@ -20,18 +22,24 @@ fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
     futures::executor::block_on(fopen::evaluate(args))
 }
 
-fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+fn registry_guard() -> registry::RegistryTestGuard {
     registry::test_guard()
 }
 
 mod controls;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let now = system_time_now()
         .duration_since(UNIX_EPOCH)
         .expect("time went backwards");
     let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());
     std::env::temp_dir().join(filename)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
 }
 
 fn fopen_path(path: &Path) -> FopenHandle {

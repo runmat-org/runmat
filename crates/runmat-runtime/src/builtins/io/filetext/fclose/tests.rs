@@ -1,12 +1,14 @@
 use super::*;
 use crate::builtins::common::test_support;
 use crate::builtins::io::filetext::{fopen, registry};
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::system_time_now;
 use runmat_value::{CellArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, MutexGuard};
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 
 mod support;
@@ -24,7 +26,7 @@ fn run_fopen(args: &[Value]) -> BuiltinResult<fopen::FopenEval> {
     futures::executor::block_on(fopen::evaluate(args))
 }
 
-fn registry_guard() -> MutexGuard<'static, ()> {
+fn registry_guard() -> registry::RegistryTestGuard {
     registry::test_guard()
 }
 
@@ -78,12 +80,18 @@ fn fclose_typed_identifier_tensors_ignore_poisoned_f64_mirrors() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let now = system_time_now()
         .duration_since(UNIX_EPOCH)
         .expect("time went backwards");
     let filename = format!("{}_{}_{}.tmp", prefix, now.as_secs(), now.subsec_nanos());
     std::env::temp_dir().join(filename)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
 }
 
 fn open_temp_file(prefix: &str) -> (f64, PathBuf) {

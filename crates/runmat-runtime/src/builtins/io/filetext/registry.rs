@@ -474,10 +474,36 @@ pub(crate) fn reset_for_tests() {
 }
 
 #[cfg(test)]
-pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-    TEST_REGISTRY_LOCK
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type RegistryTestGuard = std::sync::MutexGuard<'static, ()>;
+
+#[cfg(all(test, target_arch = "wasm32"))]
+// The locked wasm-bindgen-test runner schedules one test at a time. Native
+// tests retain their original locking below. Do not acquire the filesystem
+// override lock here: provider-specific fixtures acquire it after this guard.
+// A concurrent browser harness must replace this ambient fixture strategy.
+pub(crate) struct RegistryTestGuard {
+    _filesystem: crate::builtins::common::test_support::filesystem::TestDirectory,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+pub(crate) fn test_guard() -> RegistryTestGuard {
+    let lock = TEST_REGISTRY_LOCK
         .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
+        .unwrap_or_else(|poison| poison.into_inner());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        lock
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        RegistryTestGuard {
+            _filesystem: crate::builtins::common::test_support::filesystem::tempdir()
+                .expect("isolated browser file registry fixture"),
+            _lock: lock,
+        }
+    }
 }
 
 #[cfg(test)]

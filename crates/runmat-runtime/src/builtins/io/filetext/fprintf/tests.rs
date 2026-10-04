@@ -8,10 +8,12 @@ use crate::RuntimeError;
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::FPRINTF_ERROR_INVALID_IDENTIFIER;
 use runmat_filesystem::File;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::system_time_now;
 use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor};
 use std::io::Read;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 
 mod admission;
@@ -32,7 +34,7 @@ fn run_fclose(args: &[Value]) -> BuiltinResult<fclose::FcloseEval> {
     futures::executor::block_on(fclose::evaluate(args))
 }
 
-fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+fn registry_guard() -> registry::RegistryTestGuard {
     registry::test_guard()
 }
 
@@ -396,6 +398,7 @@ fn fprintf_windows1252_reports_unencodable_characters() {
     assert!(err.contains("cannot be encoded"), "{err}");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let nanos = system_time_now()
         .duration_since(UNIX_EPOCH)
@@ -403,4 +406,9 @@ fn unique_path(prefix: &str) -> PathBuf {
         .as_nanos();
     let filename = format!("runmat_{prefix}_{nanos}.txt");
     std::env::temp_dir().join(filename)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
 }

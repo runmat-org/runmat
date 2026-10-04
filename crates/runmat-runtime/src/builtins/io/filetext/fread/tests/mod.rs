@@ -40,9 +40,11 @@ use crate::builtins::io::filetext::{fclose, fopen};
 use crate::RuntimeError;
 use runmat_accelerate_api::AccelProvider as _;
 use runmat_filesystem::File;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_time::system_time_now;
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::UNIX_EPOCH;
 
 struct FreadOwnerProvider {
@@ -139,10 +141,11 @@ fn run_call_builtin(name: &str, args: &[Value]) -> BuiltinResult<Value> {
     crate::call_builtin(name, args)
 }
 
-fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
+fn registry_guard() -> registry::RegistryTestGuard {
     registry::test_guard()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_path(prefix: &str) -> PathBuf {
     let now = system_time_now()
         .duration_since(UNIX_EPOCH)
@@ -153,6 +156,11 @@ fn unique_path(prefix: &str) -> PathBuf {
         now.subsec_nanos()
     );
     std::env::temp_dir().join(filename)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unique_path(prefix: &str) -> PathBuf {
+    test_support::filesystem::unique_path(prefix)
 }
 mod resident;
 mod admission;
