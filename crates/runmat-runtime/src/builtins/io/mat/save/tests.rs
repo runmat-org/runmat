@@ -2,6 +2,10 @@ use super::*;
 use runmat_builtins::SAVE_DESCRIPTOR;
 use std::path::Path;
 
+async fn save_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    super::save_builtin(None, args).await
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn known_invalid_option_rejects_before_resident_preparation() {

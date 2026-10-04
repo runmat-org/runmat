@@ -9,7 +9,8 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
-use super::load::read_mat_file_on;
+use super::cooperation::MatCodecCooperation;
+use super::load::read_mat_file_on_with_context;
 
 use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
 use crate::workspace;
@@ -23,9 +24,13 @@ use runmat_builtins::{
 #[runtime_builtin(
     name = "save",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::mat::save"
 )]
-async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn save_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let requested_outputs = match crate::output_count::current_output_scope() {
         crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
         crate::output_count::InvocationOutputScope::Implicit => None,
@@ -40,9 +45,16 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         )?;
     }
     preflight_known_options(&args)?;
+    let mut preparation =
+        MatCodecCooperation::new(runtime.as_ref(), None, BUILTIN_NAME, &SAVE_ERROR_IO);
+    preparation.completed(0).await?;
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
-        host_args.push(gather_if_needed_async(value).await?);
+        host_args.push(
+            preparation
+                .await_io(gather_if_needed_async(value))
+                .await??,
+        );
     }
 
     let default_path = Value::from("matlab.mat");
@@ -67,6 +79,13 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             err,
         )
     })?;
+    let mut cooperation = MatCodecCooperation::new(
+        runtime.as_ref(),
+        Some(&destination),
+        BUILTIN_NAME,
+        &SAVE_ERROR_IO,
+    );
+    cooperation.completed(0).await?;
 
     let mut workspace_entries: Option<Vec<(String, Value)>> = None;
     let mut entries: Vec<(String, Value)> = Vec::new();
@@ -156,19 +175,28 @@ async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut unique_entries = deduplicate_entries(entries);
     if request.append {
-        unique_entries = append_existing_entries(&destination, unique_entries).await?;
+        unique_entries = append_existing_entries(
+            &destination,
+            unique_entries,
+            runtime.as_ref(),
+            &mut cooperation,
+        )
+        .await?;
     }
 
     let mut mat_vars = Vec::with_capacity(unique_entries.len());
     for (name, value) in unique_entries {
+        cooperation.completed(0).await?;
         let value = prepare_value_for_mat_save(value).await?;
+        cooperation.completed(0).await?;
         mat_vars.push(MatVar {
             name,
             array: convert_value(value).await?,
         });
+        cooperation.completed(0).await?;
     }
 
-    write_mat_file(&destination, &mat_vars).await?;
+    write_mat_file(&destination, &mat_vars, &mut cooperation).await?;
 
     Ok(Value::Num(0.0))
 }
@@ -399,14 +427,20 @@ fn deduplicate_entries(entries: Vec<(String, Value)>) -> Vec<(String, Value)> {
 async fn append_existing_entries(
     path: &MatFsPath,
     new_entries: Vec<(String, Value)>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    let mut entries = read_existing_entries_for_append(path).await?;
+    let mut entries = read_existing_entries_for_append(path, runtime, cooperation).await?;
     entries.extend(new_entries);
     Ok(deduplicate_entries(entries))
 }
 
-async fn read_existing_entries_for_append(path: &MatFsPath) -> BuiltinResult<Vec<(String, Value)>> {
-    match path.metadata().await {
+async fn read_existing_entries_for_append(
+    path: &MatFsPath,
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut MatCodecCooperation<'_>,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    match cooperation.await_io(path.metadata()).await? {
         Ok(_) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => {
@@ -420,7 +454,7 @@ async fn read_existing_entries_for_append(path: &MatFsPath) -> BuiltinResult<Vec
             ));
         }
     }
-    match read_mat_file_on(path).await {
+    match read_mat_file_on_with_context(path, runtime).await {
         Ok(entries) => Ok(entries),
         Err(err) => Err(save_error_with_source(
             &SAVE_ERROR_IO,

@@ -1,6 +1,7 @@
 //! Serialized Level-5 subelements and filesystem publication.
 
 use super::super::super::authority::MatFsPath;
+use super::super::super::cooperation::MatCodecCooperation;
 use super::super::super::format::{
     MatArray, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MAT_HEADER_LEN, MI_DOUBLE, MI_INT16, MI_INT32,
     MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8,
@@ -14,15 +15,21 @@ use std::io::{BufWriter, Cursor, Write};
 pub(in super::super) async fn write_mat_file(
     path: &MatFsPath,
     vars: &[MatVar],
+    cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<()> {
+    cooperation.completed(0).await?;
     let bytes = write_mat_bytes(vars)?;
-    path.write(&bytes).await.map_err(|e| {
-        save_error_with_source(
-            &SAVE_ERROR_IO,
-            format!("save: failed to write '{}': {e}", path.path().display()),
-            e,
-        )
-    })
+    cooperation.completed(bytes.len()).await?;
+    cooperation
+        .await_io(path.write(&bytes))
+        .await?
+        .map_err(|e| {
+            save_error_with_source(
+                &SAVE_ERROR_IO,
+                format!("save: failed to write '{}': {e}", path.path().display()),
+                e,
+            )
+        })
 }
 
 pub(super) fn write_mat_bytes(vars: &[MatVar]) -> BuiltinResult<Vec<u8>> {
@@ -329,6 +336,13 @@ fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) -> BuiltinRe
 mod tests {
     use super::super::super::super::format::MatClass;
     use super::*;
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use futures::executor::block_on;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_filesystem::FsProvider;
+    use std::num::NonZeroU64;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -345,5 +359,47 @@ mod tests {
             build_matrix_bytes(&array, Some("x")).expect_err("MAT dimensions are signed 32-bit");
         assert_eq!(error.identifier(), Some("RunMat:save:Io"));
         assert!(error.message().contains("int32 range"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cancelled_encoding_never_publishes_to_captured_owner() {
+        let _lock = runmat_filesystem::provider_override_lock();
+        let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+            "/mat",
+        ));
+        let _selected = runmat_filesystem::replace_provider(provider.clone());
+        let path = MatFsPath::capture(PathBuf::from("cancelled.mat")).expect("capture owner");
+        let cancellation = CancellationSource::new();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            cancellation.token(),
+            || Box::pin(async { Err(ExecutionServiceError::Cancelled) }),
+        );
+        let mut cooperation =
+            MatCodecCooperation::with_budget(budget, "save", &runmat_builtins::SAVE_ERROR_IO);
+        let vars = [MatVar {
+            name: "x".into(),
+            array: MatArray {
+                class: MatClass::Double,
+                dims: vec![1, 1],
+                data: MatData::Numeric {
+                    real: NumericStorage::F64(vec![42.0]),
+                    imag: None,
+                },
+            },
+        }];
+        let error = block_on(write_mat_file(&path, &vars, &mut cooperation))
+            .expect_err("cancel before publication");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(
+            error
+                .source
+                .as_deref()
+                .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+            Some(&ExecutionServiceError::Cancelled)
+        );
+        let error = block_on(provider.read(path.path())).expect_err("no published MAT file");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     }
 }
