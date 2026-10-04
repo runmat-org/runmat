@@ -13,6 +13,13 @@ mod aggregate;
 enum CodecPurpose {
     ExecutionV2,
     DurablePreference,
+    DurablePreferencePreparing,
+}
+
+impl CodecPurpose {
+    fn durable(self) -> bool {
+        self != Self::ExecutionV2
+    }
 }
 
 pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
@@ -21,6 +28,14 @@ pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecErro
 
 pub(super) fn encode_durable_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
     encode(value, "$", CodecPurpose::DurablePreference)
+}
+
+/// Apply the same durable grammar before resident leaves are downloaded. The
+/// placeholder is never persisted; the prepared host value is encoded again.
+pub(super) fn encode_durable_preparation_value(
+    value: &Value,
+) -> Result<ValuePayload, ValueCodecError> {
+    encode(value, "$", CodecPurpose::DurablePreferencePreparing)
 }
 
 fn encode(
@@ -86,14 +101,14 @@ fn encode(
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
-            if purpose == CodecPurpose::DurablePreference {
+            if purpose.durable() {
                 InlineValue::DurableOrderedStruct(fields)
             } else {
                 fields.sort_by(|left, right| left.name.cmp(&right.name));
                 InlineValue::Struct(fields)
             }
         }
-        Value::StructArray(value) if purpose == CodecPurpose::DurablePreference => {
+        Value::StructArray(value) if purpose.durable() => {
             InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose)?)
         }
         Value::StructArray(_) => {
@@ -102,16 +117,19 @@ fn encode(
                 "structure arrays require the versioned aggregate-value transport",
             ))
         }
+        Value::GpuTensor(_) if purpose == CodecPurpose::DurablePreferencePreparing => {
+            InlineValue::Logical(false)
+        }
         Value::GpuTensor(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
                 "GPU buffers require an object reference fenced to a worker and device",
             ))
         }
-        Value::Object(value) if purpose == CodecPurpose::DurablePreference => {
+        Value::Object(value) if purpose.durable() => {
             InlineValue::DurablePlainObject(aggregate::plain_object(value, path, purpose)?)
         }
-        Value::ObjectArray(value) if purpose == CodecPurpose::DurablePreference => {
+        Value::ObjectArray(value) if purpose.durable() => {
             InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose)?)
         }
         Value::Object(value)

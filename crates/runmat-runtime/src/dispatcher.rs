@@ -187,6 +187,23 @@ fn gather_if_needed_async_impl<'a>(
                 }
                 Ok(Value::Object(cloned))
             }
+            Value::ObjectArray(array) => {
+                let mut gathered = Vec::with_capacity(array.len());
+                for value in array.data() {
+                    gathered.push(gather_if_needed_async_impl(value).await?);
+                }
+                let array = runmat_value::ObjectArray::new(
+                    array.class_name().clone(),
+                    gathered,
+                    array.shape().to_vec(),
+                )
+                .map_err(|error| {
+                    build_runtime_error(format!("gather: {error}"))
+                        .with_identifier("RunMat:gather:ObjectArrayShapeError")
+                        .build()
+                })?;
+                Ok(Value::ObjectArray(array))
+            }
             Value::Closure(closure) => {
                 let mut cloned = closure.clone();
                 for value in &mut cloned.captures {

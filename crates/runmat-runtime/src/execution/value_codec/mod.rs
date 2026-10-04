@@ -5,7 +5,7 @@ mod error;
 mod path;
 
 pub use decode::decode_inline_value;
-pub use durable::{decode_durable_value, encode_durable_value};
+pub use durable::{decode_durable_value, encode_durable_value, validate_durable_preparation};
 pub use encode::encode_inline_value;
 pub use error::ValueCodecError;
 

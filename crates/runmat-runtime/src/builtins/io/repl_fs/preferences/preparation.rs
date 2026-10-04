@@ -1,7 +1,8 @@
 use runmat_value::Value;
 
 use crate::context::{PreferenceServiceError, RuntimeContext};
-use crate::execution::value_codec::encode_durable_value;
+use crate::execution::value_codec::{encode_durable_value, validate_durable_preparation};
+use crate::execution::RootedValueHandles;
 use crate::BuiltinResult;
 
 /// Finish all public value preparation before an application-store mutation.
@@ -10,17 +11,24 @@ pub(super) async fn durable_values(
     builtin: &'static str,
     values: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
+    // Direct runtime embedding has no VM frame roots. Keep caller-managed
+    // identities alive across every preparation await, including abandonment.
+    let _roots = RootedValueHandles::for_values(values.iter()).map_err(|source| {
+        super::service::service_error(
+            builtin,
+            PreferenceServiceError::Storage(
+                crate::build_runtime_error("could not retain preference input")
+                    .with_source(source)
+                    .build(),
+            ),
+        )
+    })?;
     // Reject known-invalid host values throughout the batch before a resident
     // sibling can cause a provider download.
     for value in &values {
-        if !crate::dispatcher::value_contains_gpu(value) {
-            encode_durable_value(value).map_err(|source| {
-                super::service::service_error(
-                    builtin,
-                    PreferenceServiceError::ValueEncoding(source),
-                )
-            })?;
-        }
+        validate_durable_preparation(value).map_err(|source| {
+            super::service::service_error(builtin, PreferenceServiceError::ValueEncoding(source))
+        })?;
     }
     let mut cooperation = runtime.cpu_cooperation();
     cooperation

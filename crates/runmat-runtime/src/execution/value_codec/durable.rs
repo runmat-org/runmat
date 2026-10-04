@@ -7,8 +7,20 @@ use runmat_execution::value::{InlineValue, ValuePayload};
 use runmat_value::Value;
 
 use super::{
-    decode::decode_durable_inline_value, encode::encode_durable_inline_value, ValueCodecError,
+    decode::decode_durable_inline_value,
+    encode::{encode_durable_inline_value, encode_durable_preparation_value},
+    ValueCodecError,
 };
+
+/// Reject known-invalid host siblings before a resident preference leaf has
+/// any provider effect. Final payload eligibility is checked after gathering.
+pub fn validate_durable_preparation(value: &Value) -> Result<(), ValueCodecError> {
+    let payload = encode_durable_preparation_value(value)?;
+    require_durable(&payload, "$")?;
+    payload
+        .validate_for_durable_storage(runmat_execution::value::ValueLimits::default())
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))
+}
 
 pub fn encode_durable_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
     let payload = encode_durable_inline_value(value)?;
