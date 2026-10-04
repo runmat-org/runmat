@@ -6,6 +6,50 @@ use std::sync::Arc;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn cancelled_assignment_does_not_open_or_publish_mat_bytes() {
+    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+    use std::rc::Rc;
+
+    let _lock = fs::provider_override_lock();
+    let (directory, filename) = if cfg!(windows) {
+        (r"C:\selected", r"C:\selected\cancelled.mat")
+    } else {
+        ("/selected", "/selected/cancelled.mat")
+    };
+    let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
+    let _selected = fs::replace_provider(provider.clone());
+    let object = block_on(matfile_builtin(
+        Value::from(filename),
+        vec![Value::from("Writable"), Value::Bool(true)],
+    ))
+    .expect("writable receiver");
+    let cancellation = CancellationSource::new();
+    cancellation.cancel(CancellationReason::User);
+    let context = crate::context::RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let subscript =
+        crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("answer"))
+            .expect("member selector");
+    let error = block_on(super::matfile_subsasgn(
+        Some(context),
+        object,
+        subscript,
+        Value::Num(42.0),
+    ))
+    .expect_err("cancel before metadata and write");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(
+        block_on(provider.read(Path::new(filename)))
+            .expect_err("no partial MAT publication")
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn known_invalid_writable_pair_does_not_download_resident_filename() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));

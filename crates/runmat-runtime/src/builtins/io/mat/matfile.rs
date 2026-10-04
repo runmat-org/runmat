@@ -9,6 +9,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
 use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
+use super::cooperation::MatCodecCooperation;
 use super::load::read_mat_file_for_builtin_on_with_context;
 use super::save::encode_workspace_to_mat_bytes;
 use crate::{
@@ -193,23 +194,39 @@ async fn matfile_write_step(
         ));
     }
 
-    let mut entries = read_existing_entries_for_assignment(runtime, &object, &owner.source).await?;
+    let mut cooperation = MatCodecCooperation::new(
+        runtime,
+        Some(&owner.source),
+        BUILTIN_NAME,
+        &MATFILE_ERROR_IO,
+    );
+    cooperation.completed(0).await?;
+
+    let mut entries =
+        read_existing_entries_for_assignment(runtime, &object, &owner.source, &mut cooperation)
+            .await?;
     resolve_matfile(runtime, &object)?;
-    let value = gather_if_needed_async(&rhs).await?;
+    let value = cooperation.await_io(gather_if_needed_async(&rhs)).await??;
     resolve_matfile(runtime, &object)?;
     replace_or_append(&mut entries, field, value);
-    let bytes = encode_workspace_to_mat_bytes(&entries).await?;
+    let bytes = cooperation
+        .await_io(encode_workspace_to_mat_bytes(&entries))
+        .await??;
+    cooperation.completed(bytes.len()).await?;
     resolve_matfile(runtime, &object)?;
-    owner.source.write(&bytes).await.map_err(|err| {
-        matfile_error_with_source(
-            &MATFILE_ERROR_IO,
-            format!(
-                "matfile: failed to write '{}': {err}",
-                owner.source.path().display()
-            ),
-            err,
-        )
-    })?;
+    cooperation
+        .await_io(owner.source.write(&bytes))
+        .await?
+        .map_err(|err| {
+            matfile_error_with_source(
+                &MATFILE_ERROR_IO,
+                format!(
+                    "matfile: failed to write '{}': {err}",
+                    owner.source.path().display()
+                ),
+                err,
+            )
+        })?;
     resolve_matfile(runtime, &object)?;
     Ok(Value::Object(object))
 }
@@ -299,8 +316,9 @@ async fn read_existing_entries_for_assignment(
     runtime: Option<&crate::context::RuntimeContext>,
     object: &ObjectInstance,
     path: &MatFsPath,
+    cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    match path.metadata().await {
+    match cooperation.await_io(path.metadata()).await? {
         Ok(_) => {
             resolve_matfile(runtime, object)?;
             let entries =
