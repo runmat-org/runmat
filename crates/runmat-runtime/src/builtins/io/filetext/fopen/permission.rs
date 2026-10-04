@@ -16,6 +16,12 @@ pub(super) struct Permission {
 }
 
 impl Permission {
+    pub(super) fn access(&self) -> super::super::registry::FileAccess {
+        super::super::registry::FileAccess {
+            read: self.read,
+            write: self.write,
+        }
+    }
     pub(super) fn parse(value: Option<&Value>) -> BuiltinResult<Self> {
         let raw = match value {
             Some(v) => {

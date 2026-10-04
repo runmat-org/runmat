@@ -112,6 +112,45 @@ pub fn format_variadic_with_cursor(
     format_once(fmt, cursor)
 }
 
+/// Validate only the format grammar, without consuming or materializing values.
+/// A sink can call this before reading a resident formatting argument.
+pub fn validate_format_syntax(fmt: &str) -> BuiltinResult<()> {
+    let mut chars = fmt.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            continue;
+        }
+        if chars.peek() == Some(&'%') {
+            chars.next();
+        } else {
+            let spec = parse_format_spec(&mut chars)?;
+            if !matches!(
+                spec.conversion,
+                'd' | 'i'
+                    | 'u'
+                    | 'o'
+                    | 'x'
+                    | 'X'
+                    | 'b'
+                    | 'f'
+                    | 'F'
+                    | 'e'
+                    | 'E'
+                    | 'g'
+                    | 'G'
+                    | 's'
+                    | 'c'
+            ) {
+                return Err(format_error_with_identifier(
+                    format!("sprintf: unsupported format %{}", spec.conversion),
+                    FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn format_once(fmt: &str, cursor: &mut ArgCursor<'_>) -> BuiltinResult<FormatStepResult> {
     let mut chars = fmt.chars().peekable();
     let mut out = String::with_capacity(fmt.len());
@@ -208,7 +247,6 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> BuiltinResult<FormatSpe
     let conversion = chars
         .next()
         .ok_or_else(|| format_error("sprintf: incomplete format specifier"))?;
-
     Ok(FormatSpec {
         flags,
         width,

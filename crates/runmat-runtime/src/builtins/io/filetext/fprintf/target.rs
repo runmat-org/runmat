@@ -1,4 +1,11 @@
 use super::*;
+use crate::builtins::common::tensor;
+use crate::builtins::io::filetext::registry::{self, FileInfo, SharedFileHandle};
+use crate::console::{record_console_output, ConsoleStream};
+use runmat_builtins::{
+    FPRINTF_ERROR_INVALID_IDENTIFIER, FPRINTF_ERROR_INVALID_INPUT, FPRINTF_ERROR_IO,
+};
+use std::io::Write;
 #[derive(Clone, Copy)]
 pub(super) enum SpecialStream {
     Stdout,
@@ -139,8 +146,7 @@ pub(super) fn parse_fid(value: &Value) -> Result<i32, String> {
 }
 
 fn ensure_writable(info: &FileInfo) -> BuiltinResult<()> {
-    let permission = info.permission.to_ascii_lowercase();
-    if permission.contains('w') || permission.contains('a') || permission.contains('+') {
+    if info.access.write {
         Ok(())
     } else {
         Err(fprintf_error_with_detail(

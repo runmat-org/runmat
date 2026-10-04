@@ -14,6 +14,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         .arguments
         .first()
         .is_some_and(definitely_console_target)
+        || request
+            .literals
+            .literal_args
+            .first()
+            .is_some_and(definitely_standard_stream_id)
     {
         result.effects.0.remove(&EffectKind::FilesystemWrite);
         result
@@ -38,6 +43,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     result
+}
+
+fn definitely_standard_stream_id(value: &LiteralValue) -> bool {
+    match value {
+        LiteralValue::Number(value) => *value == 1.0 || *value == 2.0,
+        LiteralValue::Real { text, .. } => text
+            .parse::<f64>()
+            .is_ok_and(|value| value == 1.0 || value == 2.0),
+        LiteralValue::Integer { .. } => matches!(value.integer_value_i128(), Some(1 | 2)),
+        _ => false,
+    }
 }
 
 fn definitely_console_target(value: &ValueFact) -> bool {

@@ -6,6 +6,23 @@ use std::sync::{Arc, Mutex, Mutex as StdMutex};
 
 pub(crate) type SharedFileHandle = Arc<StdMutex<Option<File>>>;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FileAccess {
+    pub read: bool,
+    pub write: bool,
+}
+
+impl FileAccess {
+    pub const READ: Self = Self {
+        read: true,
+        write: false,
+    };
+    pub const WRITE: Self = Self {
+        read: false,
+        write: true,
+    };
+}
+
 #[derive(Clone)]
 pub(crate) enum StandardStream {
     Stdin,
@@ -53,6 +70,7 @@ struct Entry {
     name: String,
     path: Option<PathBuf>,
     permission: String,
+    access: FileAccess,
     machinefmt: String,
     encoding: String,
     resource: Resource,
@@ -74,6 +92,10 @@ impl Entry {
                 StandardStream::Stdin => "r".to_string(),
                 StandardStream::Stdout | StandardStream::Stderr => "w".to_string(),
             },
+            access: match stream {
+                StandardStream::Stdin => FileAccess::READ,
+                StandardStream::Stdout | StandardStream::Stderr => FileAccess::WRITE,
+            },
             machinefmt: "native".to_string(),
             encoding: "UTF-8".to_string(),
             resource: Resource::Standard,
@@ -87,6 +109,7 @@ impl Entry {
             name: self.name.clone(),
             path: self.path.clone(),
             permission: self.permission.clone(),
+            access: self.access,
             machinefmt: self.machinefmt.clone(),
             encoding: self.encoding.clone(),
         }
@@ -106,6 +129,7 @@ pub(crate) struct FileInfo {
     pub name: String,
     pub path: Option<PathBuf>,
     pub permission: String,
+    pub access: FileAccess,
     pub machinefmt: String,
     pub encoding: String,
 }
@@ -113,6 +137,7 @@ pub(crate) struct FileInfo {
 pub(crate) struct RegisteredFile {
     pub path: PathBuf,
     pub permission: String,
+    pub access: FileAccess,
     pub machinefmt: String,
     pub encoding: String,
     pub handle: SharedFileHandle,
@@ -126,6 +151,7 @@ impl RegisteredFile {
             name: display_name,
             path: Some(self.path),
             permission: self.permission,
+            access: self.access,
             machinefmt: self.machinefmt,
             encoding: self.encoding,
             resource: Resource::File(self.handle),

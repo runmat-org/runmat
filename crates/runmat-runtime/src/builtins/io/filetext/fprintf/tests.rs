@@ -1,4 +1,7 @@
-use super::admission::{preflight_fid, preflight_format};
+use super::admission::{
+    coerce_to_format_string, preflight_fid, preflight_format, preflight_special_roles,
+};
+use super::target::parse_fid;
 use super::*;
 use crate::builtins::common::test_support;
 use crate::builtins::io::filetext::{fclose, fopen, registry};
@@ -10,6 +13,8 @@ use runmat_value::{IntValue, IntegerStorage, Tensor};
 use std::io::Read;
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
+
+mod admission;
 
 fn unwrap_error_message(err: RuntimeError) -> String {
     err.message().to_string()

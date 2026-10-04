@@ -54,6 +54,26 @@ fn formatted_write_has_double_byte_count_and_transitive_effects() {
 }
 
 #[test]
+fn literal_standard_stream_ids_do_not_require_filesystem() {
+    for id in [1.0, 2.0] {
+        let mut request = request(vec![
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+            ValueFact::scalar(ValueKindFact::String),
+        ]);
+        request.literals.literal_args = vec![LiteralValue::Number(id), LiteralValue::Unknown];
+        let inferred = inference::infer(&request, &FPRINTF_CATALOG_ENTRY);
+        assert!(!inferred.effects.0.contains(&EffectKind::FilesystemWrite));
+        assert!(!inferred
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem));
+    }
+}
+
+#[test]
 fn absent_or_definitely_unformattable_arguments_are_diagnosed() {
     assert!(
         !inference::infer(&request(Vec::new()), &FPRINTF_CATALOG_ENTRY)

@@ -193,6 +193,7 @@ async fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenE
             let registered = RegisteredFile {
                 path: path.clone(),
                 permission: permission.canonical.clone(),
+                access: permission.access(),
                 machinefmt: machinefmt.clone(),
                 encoding: encoding.clone(),
                 handle,

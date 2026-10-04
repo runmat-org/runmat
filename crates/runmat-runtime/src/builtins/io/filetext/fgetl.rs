@@ -121,7 +121,7 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
 
     let info =
         registry::info_for(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
-    if !permission_allows_read(&info.permission) {
+    if !info.access.read {
         return Err(fgetl_error_with_detail(
             &FGETL_ERROR_INVALID_IDENTIFIER,
             "file identifier is not open for reading",
@@ -290,11 +290,6 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
             "file identifier must be a numeric scalar",
         )),
     }
-}
-
-fn permission_allows_read(permission: &str) -> bool {
-    let lower = permission.to_ascii_lowercase();
-    lower.starts_with('r') || lower.contains('+')
 }
 
 #[cfg(test)]

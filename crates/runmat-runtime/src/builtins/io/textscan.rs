@@ -2252,6 +2252,7 @@ mod tests {
         let fid = registry::register_file(RegisteredFile {
             path: path.clone(),
             permission: "r".to_string(),
+            access: registry::FileAccess::READ,
             machinefmt: "native".to_string(),
             encoding: "UTF-8".to_string(),
             handle: handle.clone(),
@@ -2336,6 +2337,7 @@ mod tests {
         let fid = registry::register_file(RegisteredFile {
             path: path.clone(),
             permission: "r".to_string(),
+            access: registry::FileAccess::READ,
             machinefmt: "native".to_string(),
             encoding: encoding.to_string(),
             handle: handle.clone(),
@@ -2389,6 +2391,7 @@ mod tests {
         let fid = registry::register_file(RegisteredFile {
             path: path.clone(),
             permission: "r".to_string(),
+            access: registry::FileAccess::READ,
             machinefmt: "native".to_string(),
             encoding: "UTF-8".to_string(),
             handle,
