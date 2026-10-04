@@ -76,8 +76,10 @@ fn gpu_zeros_lowers_to_canonical_constructor_with_typed_class_selector() {
             matches!(&call.args.last().unwrap().kind, HirExprKind::String(value) if value.0 == "gpuArray")
         );
         if source.contains("single") {
+            // Source literals retain their quotes in HIR; only the appended
+            // declaration selector is synthesized without source delimiters.
             assert!(
-                matches!(&call.args[call.args.len() - 2].kind, HirExprKind::String(value) if value.0 == "single")
+                matches!(&call.args[call.args.len() - 2].kind, HirExprKind::String(value) if value.0 == "'single'")
             );
         }
     }
