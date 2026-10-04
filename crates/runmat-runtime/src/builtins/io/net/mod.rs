@@ -10,3 +10,6 @@ pub(crate) mod server_state;
 pub mod tcpclient;
 pub mod tcpserver;
 pub mod write;
+
+#[cfg(test)]
+pub(crate) mod test_support;
