@@ -18,7 +18,6 @@ use runmat_builtins::{
     LOAD_ERROR_OUTPUT_COUNT, LOAD_ERROR_SELECTION, LOAD_ERROR_WORKSPACE,
 };
 
-
 #[runtime_builtin(
     name = "load",
     binding_variant = "default",
