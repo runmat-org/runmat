@@ -28,6 +28,7 @@ fn regexp_followed_by_another_option_has_no_pattern() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let folder = tempdir().expect("MAT fixture folder");
     let path = folder.path().join("nested-output.mat");
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
@@ -51,6 +52,7 @@ fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let _workspace = workspace_guard();
     ensure_test_resolver();
     set_workspace(&[]);
