@@ -1013,11 +1013,23 @@ fn split_file_inputs(arguments: Vec<Value>) -> Result<(Vec<String>, Vec<Value>),
 fn python_index(value: Option<Value>) -> Result<PythonValue, RuntimeError> {
     let value = value.ok_or_else(|| invalid_call("Python index is required"))?;
     let one_based = match value {
-        Value::Int(value) => value.to_f64(),
+        Value::Int(value) => {
+            let index = value
+                .try_to_u64()
+                .and_then(|value| value.checked_sub(1))
+                .ok_or_else(|| {
+                    invalid_call("Python positional indices must be positive integers")
+                })?;
+            return Ok(PythonValue::Unsigned(index));
+        }
         Value::Num(value) => value,
         _ => return value_to_python(value),
     };
-    if !one_based.is_finite() || one_based.fract() != 0.0 || one_based < 1.0 {
+    if !one_based.is_finite()
+        || one_based.fract() != 0.0
+        || one_based < 1.0
+        || one_based >= u64::MAX as f64
+    {
         return Err(invalid_call(
             "Python positional indices must be positive integers",
         ));

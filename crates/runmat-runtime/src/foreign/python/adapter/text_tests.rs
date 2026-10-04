@@ -1,6 +1,32 @@
 use super::*;
 use runmat_value::{CellArray, CharArray, IntValue, StringArray};
 
+#[test]
+fn positional_integer_indices_keep_exact_wide_bits() {
+    for one_based in [1, (1_u64 << 53) + 1, u64::MAX] {
+        assert!(matches!(
+            python_index(Some(Value::Int(IntValue::U64(one_based)))).unwrap(),
+            PythonValue::Unsigned(index) if index == one_based - 1
+        ));
+    }
+    assert!(matches!(
+        python_index(Some(Value::Int(IntValue::I64(i64::MAX)))).unwrap(),
+        PythonValue::Unsigned(index) if index == i64::MAX as u64 - 1
+    ));
+    for invalid in [
+        Value::Int(IntValue::I64(-1)),
+        Value::Int(IntValue::U64(0)),
+        Value::Num(u64::MAX as f64),
+        Value::Num(f64::INFINITY),
+        Value::Num(1.5),
+    ] {
+        assert_eq!(
+            python_index(Some(invalid)).unwrap_err().identifier(),
+            Some("RunMat:Foreign:InvalidCall")
+        );
+    }
+}
+
 fn row(text: &str) -> Value {
     Value::CharArray(
         CharArray::new_with_shape(text.chars().collect(), vec![1, text.chars().count(), 1])
