@@ -14,6 +14,12 @@ pub enum PreferenceServiceError {
     Missing { group: String, name: String },
     #[error("invalid preference transaction: {0}")]
     InvalidTransaction(String),
+    #[error("preference value encoding failed: {0}")]
+    ValueEncoding(
+        #[from]
+        #[source]
+        crate::execution::value_codec::ValueCodecError,
+    ),
     #[error("preference storage failed: {0}")]
     Storage(#[source] RuntimeError),
 }
@@ -58,6 +64,8 @@ pub trait RuntimePreferenceService {
     /// Reads every name from one consistent transaction. Defaults, if present,
     /// have exactly the same cardinality as names and are inserted only for
     /// missing entries. A missing name without a default leaves storage intact.
+    /// When a missing name is repeated, its first default is inserted and every
+    /// occurrence reads that same value, even if later defaults differ.
     /// Output order matches names; an empty request must not create a group.
     fn read_or_create_many(
         &self,
