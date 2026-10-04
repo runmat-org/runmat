@@ -40,6 +40,16 @@ async fn completed(
     Ok(())
 }
 
+async fn gather_with_cooperation(
+    value: &Value,
+    cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
+) -> BuiltinResult<Value> {
+    match cooperation.as_deref_mut() {
+        Some(cooperation) => cooperation.await_io(gather_if_needed_async(value)).await?,
+        None => gather_if_needed_async(value).await,
+    }
+}
+
 pub(super) fn convert_value_with_cooperation<'a, 'b>(
     value: Value,
     owner: MatEncodingOwner,
@@ -216,7 +226,7 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 let mut elements = Vec::with_capacity(cell.data.len());
                 for element in cell.iter_column_major() {
                     completed(&mut cooperation, 1).await?;
-                    let gathered = gather_if_needed_async(element).await?;
+                    let gathered = gather_with_cooperation(element, &mut cooperation).await?;
                     completed(&mut cooperation, 0).await?;
                     elements.push(
                         convert_value_with_cooperation(gathered, owner, cooperation.as_deref_mut())
@@ -240,7 +250,7 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                             format!("missing struct field '{field}'"),
                         )
                     })?;
-                    let gathered = gather_if_needed_async(val).await?;
+                    let gathered = gather_with_cooperation(val, &mut cooperation).await?;
                     completed(&mut cooperation, 0).await?;
                     field_values.push(
                         convert_value_with_cooperation(gathered, owner, cooperation.as_deref_mut())
@@ -275,7 +285,7 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                     })?;
                     for value in column {
                         completed(&mut cooperation, 1).await?;
-                        let gathered = gather_if_needed_async(value).await?;
+                        let gathered = gather_with_cooperation(value, &mut cooperation).await?;
                         completed(&mut cooperation, 0).await?;
                         field_values.push(
                             convert_value_with_cooperation(
@@ -297,7 +307,8 @@ pub(super) fn convert_value_with_cooperation<'a, 'b>(
                 })
             }
             Value::GpuTensor(handle) => {
-                let gathered = gather_if_needed_async(&Value::GpuTensor(handle)).await?;
+                let gathered =
+                    gather_with_cooperation(&Value::GpuTensor(handle), &mut cooperation).await?;
                 completed(&mut cooperation, 0).await?;
                 convert_value_with_cooperation(gathered, owner, cooperation.as_deref_mut()).await
             }
@@ -595,5 +606,42 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(turns.load(Ordering::SeqCst), 2);
         assert!(!cancellation.token().is_cancelled());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn nested_resident_gather_is_cancelled_while_provider_download_is_pending() {
+        use crate::builtins::io::mat::tests::pending_provider::PendingDownloadProvider;
+        use runmat_execution::cancellation::CancellationReason;
+
+        let _accel = crate::builtins::common::test_support::accel_test_lock();
+        let owner = Box::leak(Box::new(PendingDownloadProvider::new()));
+        let _gpu = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+        let value = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::GpuTensor(owner.resident())], 1, 1)
+                .expect("nested resident payload"),
+        );
+        let cancellation = CancellationSource::new();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(4096).unwrap()),
+            cancellation.token(),
+            || Box::pin(async { Ok(()) }),
+        );
+        let mut cooperation =
+            MatCodecCooperation::with_budget(budget, "save", &runmat_builtins::SAVE_ERROR_IO);
+        let mut future = Box::pin(convert_value_with_cooperation(
+            value,
+            MatEncodingOwner::Save,
+            Some(&mut cooperation),
+        ));
+        assert!(matches!(
+            futures::poll!(future.as_mut()),
+            std::task::Poll::Pending
+        ));
+        assert_eq!(owner.requests(), 1);
+        cancellation.cancel(CancellationReason::User);
+        let error = block_on(future).expect_err("nested provider gather must cancel");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(owner.abandoned(), 1);
     }
 }

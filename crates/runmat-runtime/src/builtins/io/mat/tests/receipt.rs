@@ -4,7 +4,7 @@
 
 use crate::context::host_effect::{
     HostEffectRequest, HostEffectResourceAdmission, HostEffectResourceEvidence,
-    HostEffectResourceLivenessLease,
+    HostEffectResourceLivenessLease, HostEffectWorkload,
 };
 use crate::context::{
     RuntimeContext, RuntimeHostEffectResourceService, RuntimePlacementService, RuntimeServicePorts,
@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 mod fs;
-pub(super) use fs::PendingWriteFs;
+pub(in crate::builtins::io::mat) use fs::{GatedOpenFs, PendingWriteFs};
 
 struct Live(Arc<AtomicBool>);
 impl HostEffectResourceLivenessLease for Live {
@@ -45,8 +45,10 @@ impl RuntimeHostEffectResourceService for Resources {
         if !Arc::ptr_eq(request.filesystem, &self.filesystem)
             || request.domain_facts != Digest::sha256(request.workload.identity_bytes())
             || !matches!(
-                request.operation,
-                "save" | "matfile" | "matlab.io.MatFile.subsref" | "matlab.io.MatFile.subsasgn"
+                request.workload,
+                HostEffectWorkload::MatDecode { .. }
+                    | HostEffectWorkload::MatEncode { .. }
+                    | HostEffectWorkload::MatHandle { .. }
             )
         {
             return None;
@@ -137,14 +139,14 @@ impl RuntimePlacementService for Placement {
     fn invalidate(&self, _: PlacementInvalidation) {}
 }
 
-pub(super) struct Witness {
-    pub(super) runtime: RuntimeContext,
+pub(in crate::builtins::io::mat) struct Witness {
+    pub(in crate::builtins::io::mat) runtime: RuntimeContext,
     placement: Rc<Placement>,
     live: Arc<AtomicBool>,
 }
 
 impl Witness {
-    pub(super) fn new(filesystem: Arc<dyn FsProvider>) -> Self {
+    pub(in crate::builtins::io::mat) fn new(filesystem: Arc<dyn FsProvider>) -> Self {
         let placement = Rc::new(Placement::default());
         let live = Arc::new(AtomicBool::new(true));
         let runtime =
@@ -164,19 +166,23 @@ impl Witness {
         }
     }
 
-    pub(super) fn revoke(&self) {
+    pub(in crate::builtins::io::mat) fn revoke(&self) {
         self.live.store(false, Ordering::SeqCst);
     }
 
-    pub(super) fn selections(&self) -> usize {
+    pub(in crate::builtins::io::mat) fn revocation_flag(&self) -> Arc<AtomicBool> {
+        self.live.clone()
+    }
+
+    pub(in crate::builtins::io::mat) fn selections(&self) -> usize {
         self.placement.selections.get()
     }
 
-    pub(super) fn probes(&self) -> usize {
+    pub(in crate::builtins::io::mat) fn probes(&self) -> usize {
         self.placement.probes.load(Ordering::SeqCst)
     }
 
-    pub(super) fn outcomes(&self) -> Vec<WholeWorkObservationOutcome> {
+    pub(in crate::builtins::io::mat) fn outcomes(&self) -> Vec<WholeWorkObservationOutcome> {
         self.placement.observations.borrow().clone()
     }
 }

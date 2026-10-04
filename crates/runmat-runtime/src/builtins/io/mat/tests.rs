@@ -8,6 +8,7 @@ use runmat_accelerate_api::{
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(super) mod receipt;
+pub(super) mod pending_provider;
 
 pub(super) struct CountingProvider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,

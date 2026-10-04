@@ -4,7 +4,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub(super) struct PendingWriteFs {
+mod open;
+pub(in crate::builtins::io::mat) use open::GatedOpenFs;
+
+pub(in crate::builtins::io::mat) struct PendingWriteFs {
     inner: runmat_filesystem::MemoryFsProvider,
     writes: AtomicUsize,
     abandoned: AtomicUsize,
@@ -12,7 +15,7 @@ pub(super) struct PendingWriteFs {
 }
 
 impl PendingWriteFs {
-    pub(super) fn new(cwd: &str) -> Self {
+    pub(in crate::builtins::io::mat) fn new(cwd: &str) -> Self {
         Self {
             inner: runmat_filesystem::MemoryFsProvider::with_current_dir(cwd),
             writes: AtomicUsize::new(0),
@@ -21,11 +24,11 @@ impl PendingWriteFs {
         }
     }
 
-    pub(super) fn writes(&self) -> usize {
+    pub(in crate::builtins::io::mat) fn writes(&self) -> usize {
         self.writes.load(Ordering::SeqCst)
     }
 
-    pub(super) fn abandoned(&self) -> usize {
+    pub(in crate::builtins::io::mat) fn abandoned(&self) -> usize {
         self.abandoned.load(Ordering::SeqCst)
     }
 }

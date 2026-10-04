@@ -213,7 +213,14 @@ async fn evaluate_with_context(
     })?;
     let receipt = admission::select(runtime, &source, &request, output)?;
     let result = async {
-        let entries = read_mat_file_on_with_context(&source, runtime).await?;
+        let entries = read_mat_file_on_with_resource_liveness(
+            &source,
+            runtime,
+            receipt
+                .as_ref()
+                .map(|selected| selected.resource_liveness_lease()),
+        )
+        .await?;
         let selected = select_variables(&entries, &request)?;
         Ok(LoadEval {
             variables: selected,

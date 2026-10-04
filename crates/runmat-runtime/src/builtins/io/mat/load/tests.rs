@@ -18,6 +18,94 @@ fn numeric_resident_text_control_rejects_without_download() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn selected_outer_load_revoked_during_pending_open_never_reads_or_publishes() {
+    use super::super::tests::receipt::{GatedOpenFs, Witness};
+
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\gated.mat"
+    } else {
+        "/mat/gated.mat"
+    };
+    let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+        "answer".to_string(),
+        Value::Num(42.0),
+    )]))
+    .expect("valid MAT input");
+    let (provider, release) = GatedOpenFs::new(directory, filename, &bytes);
+    let provider = std::sync::Arc::new(provider);
+    let _selected = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(provider.clone());
+    let mut future = Box::pin(super::load_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename)],
+    ));
+    assert!(matches!(
+        futures::poll!(future.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 1);
+    assert_eq!(provider.opens(), 1);
+    assert_eq!(provider.reads(), 0);
+    witness.revoke();
+    release.send(()).expect("release pending open");
+    let error = block_on(future).expect_err("revoked source cannot enter decoder");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert_eq!(provider.reads(), 0);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn selected_outer_load_revoked_by_first_read_stops_decode_before_more_reads() {
+    use super::super::tests::receipt::{GatedOpenFs, Witness};
+
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\read-revoked.mat"
+    } else {
+        "/mat/read-revoked.mat"
+    };
+    let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+        "answer".to_string(),
+        Value::Num(42.0),
+    )]))
+    .expect("valid MAT input");
+    let (provider, release) = GatedOpenFs::new(directory, filename, &bytes);
+    let provider = std::sync::Arc::new(provider);
+    let _selected = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(provider.clone());
+    provider.revoke_on_read(witness.revocation_flag());
+    release
+        .send(())
+        .expect("open immediately for first-read revocation");
+    let error = block_on(super::load_builtin(
+        Some(witness.runtime.clone()),
+        vec![Value::from(filename)],
+    ))
+    .expect_err("first read revokes codec continuation");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert_eq!(provider.opens(), 1);
+    assert_eq!(provider.reads(), 1);
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn known_invalid_option_rejects_before_resident_preparation() {
     let args = [Value::from("case.mat"), Value::from("-unsupported")];
     let error = preflight_known_options(&args).expect_err("unsupported flag");

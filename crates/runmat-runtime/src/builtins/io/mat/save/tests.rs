@@ -307,6 +307,75 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
+    use super::super::tests::pending_provider::PendingDownloadProvider;
+    use super::super::tests::receipt::Witness;
+    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+
+    let _accel = test_support::accel_test_lock();
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _workspace = workspace_guard();
+    ensure_test_resolver();
+    let owner = Box::leak(Box::new(PendingDownloadProvider::new()));
+    let _gpu = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    let nested = Value::Cell(
+        runmat_value::CellArray::new(vec![Value::GpuTensor(owner.resident())], 1, 1)
+            .expect("nested resident payload"),
+    );
+    set_workspace(&[("nested", nested)]);
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\nested.mat"
+    } else {
+        "/mat/nested.mat"
+    };
+    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        directory,
+    ));
+    let _selected = runmat_filesystem::replace_provider(filesystem.clone());
+    runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
+    let witness = Witness::new(filesystem.clone());
+    let cancellation = CancellationSource::new();
+    let runtime = witness
+        .runtime
+        .with_cancellation_token(cancellation.token());
+    let mut abandoned = Box::pin(super::save_builtin(
+        Some(runtime.clone()),
+        vec![Value::from(filename), Value::from("nested")],
+    ));
+    assert!(matches!(
+        futures::poll!(abandoned.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(owner.requests(), 1);
+    assert_eq!(witness.selections(), 1);
+    assert_eq!(witness.probes(), 1);
+    drop(abandoned);
+    assert_eq!(owner.abandoned(), 1);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+    let mut future = Box::pin(super::save_builtin(
+        Some(runtime),
+        vec![Value::from(filename), Value::from("nested")],
+    ));
+    assert!(matches!(
+        futures::poll!(future.as_mut()),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(owner.requests(), 2);
+    assert_eq!(witness.selections(), 2);
+    assert_eq!(witness.probes(), 1);
+    cancellation.cancel(CancellationReason::User);
+    let error = block_on(future).expect_err("pending nested provider readback cancels");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(owner.abandoned(), 2);
+    assert_eq!(witness.probes(), 0);
+    assert!(witness.outcomes().is_empty());
+    assert!(block_on(filesystem.read(std::path::Path::new(filename))).is_err());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn invalid_regexp_rejects_before_workspace_gather() {
     let _lock = test_support::accel_test_lock();
     let _workspace = workspace_guard();

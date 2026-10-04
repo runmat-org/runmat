@@ -679,7 +679,7 @@ fn matfile_error_with(
     builder.build()
 }
 
-fn matfile_error_with_source(
+pub(in crate::builtins::io::mat) fn matfile_error_with_source(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
     source: impl crate::runtime_error::RuntimeErrorSourceBound,

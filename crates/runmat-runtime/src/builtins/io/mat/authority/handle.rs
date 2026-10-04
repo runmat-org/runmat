@@ -11,8 +11,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use super::super::matfile::{
-    matfile_error, MATFILE_CLASS, PROPERTIES_FIELD, SOURCE_FIELD, WRITABLE_FIELD,
+    matfile_error, matfile_error_with_source, MATFILE_CLASS, PROPERTIES_FIELD, SOURCE_FIELD,
+    WRITABLE_FIELD,
 };
+use runmat_builtins::MATFILE_ERROR_IO;
 
 pub(crate) struct AuthorizedMatFile {
     pub(crate) source: Arc<MatFsPath>,
@@ -209,9 +211,11 @@ pub(crate) fn resolve_matfile(
         ));
     }
     record.source.check_current().map_err(|err| {
-        matfile_error(format!(
-            "matfile filesystem authority is no longer current: {err}"
-        ))
+        matfile_error_with_source(
+            &MATFILE_ERROR_IO,
+            format!("matfile filesystem authority is no longer current: {err}"),
+            err,
+        )
     })?;
     Ok(AuthorizedMatFile {
         source: record.source.clone(),

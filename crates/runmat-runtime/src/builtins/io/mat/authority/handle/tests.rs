@@ -53,6 +53,41 @@ fn managed_matfile_clone_is_valid_but_public_fields_cannot_retarget_it() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn revoked_captured_filesystem_keeps_typed_io_cause_on_receiver_resolution() {
+    use crate::builtins::io::mat::tests::receipt::GatedOpenFs;
+    use runmat_filesystem as fs;
+
+    let _lock = fs::provider_override_lock();
+    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let filename = if cfg!(windows) {
+        r"C:\mat\revoked.mat"
+    } else {
+        "/mat/revoked.mat"
+    };
+    let (provider, _release) = GatedOpenFs::new(directory, filename, b"unused");
+    let provider = std::sync::Arc::new(provider);
+    let _selected = fs::replace_provider(provider.clone());
+    fs::set_current_dir(directory).expect("virtual cwd");
+    let issued = block_on(crate::builtins::io::mat::matfile::matfile_builtin(
+        None,
+        Value::from(filename),
+        vec![],
+    ))
+    .expect("context-free MAT receiver");
+    let Value::Object(issued) = issued else {
+        panic!("MAT receiver must be an object")
+    };
+    provider.revoke_fs();
+    let error = resolve_matfile(None, &issued)
+        .err()
+        .expect("revoked owner must reject");
+    assert_eq!(error.identifier(), Some("RunMat:matfile:Io"));
+    let source = std::error::Error::source(&error).expect("typed filesystem cause");
+    assert!(source.downcast_ref::<std::io::Error>().is_some());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn detached_cross_session_and_ended_session_receivers_reject() {
     let runtime = context();
     let foreign = context();
