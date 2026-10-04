@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "This is not a full Java DOM implementation. It does not validate schemas or preserve original formatting after object mutation.",
         ] },
         BuiltinDocumentationSection { heading: "Execution and ownership", paragraphs: &[
-            "The one-argument serialization form is host-only and does not access the filesystem. The two-argument form writes through the active filesystem provider. Resident arguments are materialized on the host before serialization. There is no GPU kernel, fusion route, or certified finite complete-call memory bound for the current serializer.",
+            "The one-argument serialization form is host-only and does not access the filesystem. The two-argument form writes through the active filesystem provider. Resident arguments are materialized on the host before serialization. Serialization builds host text; there is no GPU kernel or fusion route.",
         ] },
     ],
     examples: &[BuiltinExample {

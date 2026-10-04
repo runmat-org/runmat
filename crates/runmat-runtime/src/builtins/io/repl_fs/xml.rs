@@ -200,6 +200,7 @@ async fn xmlread_builtin(
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let path = value_to_path(&args[0], "xmlread", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
+    let filename = path_to_string(&path);
     let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
     let text = cooperation
         .await_io(source.read_to_string())
@@ -210,7 +211,7 @@ async fn xmlread_builtin(
     let mut object = ObjectInstance::new(XML_DOCUMENT_CLASS.display_name().to_string());
     object
         .properties
-        .insert("Filename".to_string(), char_value(&path_to_string(&path)));
+        .insert("Filename".to_string(), char_value(&filename));
     object
         .properties
         .insert("Text".to_string(), Value::String(text));
@@ -311,7 +312,6 @@ async fn xmlwrite_builtin(
     }
 }
 
-#[derive(Debug)]
 #[path = "xml/parser.rs"]
 mod parser;
 use parser::{parse_xml_document_with_context, xml_node_to_struct, ReadStructOptions};

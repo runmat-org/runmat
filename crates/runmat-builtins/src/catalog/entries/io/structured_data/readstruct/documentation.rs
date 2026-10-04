@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Name-value controls are `FileType` (only `xml`), `AttributeSuffix`, and `TextNodeName`. HDF5, Parquet, JSON, schema-aware import, and full XML DOM behavior are not provided by this form.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The input path is resolved by the installed filesystem provider. Resident inputs are gathered to the host before parsing; the result is a host struct, not a GPU kernel or fusion result. The current reader materializes the XML text and parsed tree, so a finite complete-call memory bound is not yet certified.",
+            "The input path is resolved by the installed filesystem provider. Resident inputs are gathered to the host before parsing; the result is a host struct, not a GPU kernel or fusion result. The reader materializes the XML text and parsed tree in host memory.",
         ] },
     ],
     examples: &[BuiltinExample {

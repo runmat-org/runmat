@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Mismatched, unterminated, multiple, or missing root tags are rejected. This lightweight representation does not implement Java method dispatch or the full W3C DOM interface.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
-            "The input is gathered to the host when resident; the filesystem service supplies the file. Parsing materializes text and an object tree on the host. There is no GPU kernel or fusion route and no certified finite complete-call peak yet.",
+            "The input is gathered to the host when resident; the filesystem service supplies the file. Parsing materializes text and an object tree on the host. There is no GPU kernel or fusion route.",
         ] },
     ],
     examples: &[BuiltinExample {
