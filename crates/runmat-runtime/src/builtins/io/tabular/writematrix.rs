@@ -23,6 +23,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+use super::cooperation::{await_io, TabularCooperation};
+use super::path::{TabularFsOwner, TabularFsPath};
+
 const BUILTIN_NAME: &str = "writematrix";
 
 const WRITEMATRIX_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
@@ -287,6 +290,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "writematrix",
+    context = true,
     category = "io/tabular",
     summary = "Write numeric or string matrices to delimited text files.",
     keywords = "writematrix,csv,delimited text,write,append,quote strings",
@@ -299,27 +303,95 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     ),
     builtin_path = "crate::builtins::io::tabular::writematrix"
 )]
-async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn writematrix_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    data: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if rest.is_empty() {
         return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
     }
     preflight_extensions(&data, &rest)?;
-
-    let filename_value = gather_if_needed_async(&rest[0])
-        .await
-        .map_err(map_control_flow)?;
-    let path = resolve_path(&filename_value)?;
-
-    let options = parse_options(&rest[1..]).await?;
-
-    let gathered = gather_if_needed_async(&data)
-        .await
-        .map_err(map_control_flow)?;
+    preflight_data(&data)?;
+    let path = resolve_path(&rest[0])?;
+    let options_args = &rest[1..];
+    if !options_args.len().is_multiple_of(2) {
+        return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
+    }
+    preflight_host_options(options_args)?;
+    let host_options = if options_args
+        .iter()
+        .all(|value| !matches!(value, Value::GpuTensor(_)))
+    {
+        Some(parse_options(options_args)?)
+    } else {
+        None
+    };
+    let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
+        writematrix_error_with_source(
+            &WRITEMATRIX_ERROR_IO,
+            "writematrix: unable to capture filesystem authority",
+            source,
+        )
+    })?;
+    let selected = owner.path(path).map_err(|source| {
+        writematrix_error_with_source(
+            &WRITEMATRIX_ERROR_IO,
+            "writematrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    let options = match host_options {
+        Some(options) => options,
+        None => {
+            let mut gathered_options = Vec::with_capacity(options_args.len());
+            for value in options_args {
+                gathered_options.push(
+                    await_io(
+                        runtime.as_ref(),
+                        BUILTIN_NAME,
+                        gather_if_needed_async(value),
+                    )
+                    .await?
+                    .map_err(map_control_flow)?,
+                );
+                cooperation.completed(0).await?;
+            }
+            parse_options(&gathered_options)?
+        }
+    };
+    let gathered = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        gather_if_needed_async(&data),
+    )
+    .await?
+    .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
     let matrix = MatrixData::from_value(gathered)?;
-
-    let bytes_written = write_matrix(&path, &matrix, &options).await?;
-
-    Ok(Value::Num(bytes_written as f64))
+    let bytes_written = write_matrix(
+        runtime.as_ref(),
+        &mut cooperation,
+        &selected,
+        &matrix,
+        &options,
+    )
+    .await?;
+    cooperation.completed(0).await?;
+    selected.check().map_err(|source| {
+        writematrix_error_with_source(
+            &WRITEMATRIX_ERROR_IO,
+            "writematrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes_written as f64)])),
+        Some(_) => Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG)),
+        None => Ok(Value::Num(bytes_written as f64)),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -382,7 +454,7 @@ enum FileType {
     Text,
 }
 
-async fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
+fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
     if args.is_empty() {
         return Ok(WriteMatrixOptions::default());
     }
@@ -393,17 +465,28 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
     let mut options = WriteMatrixOptions::default();
     let mut index = 0usize;
     while index < args.len() {
-        let name_value = gather_if_needed_async(&args[index])
-            .await
-            .map_err(map_control_flow)?;
-        let name = option_name_from_value(&name_value)?;
-        let value = gather_if_needed_async(&args[index + 1])
-            .await
-            .map_err(map_control_flow)?;
-        apply_option(&mut options, &name, &value)?;
+        let name = option_name_from_value(&args[index])?;
+        apply_option(&mut options, &name, &args[index + 1])?;
         index += 2;
     }
     Ok(options)
+}
+
+fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
+    let mut checked = WriteMatrixOptions::default();
+    for pair in args.chunks_exact(2) {
+        if matches!(pair[0], Value::GpuTensor(_)) {
+            return Err(writematrix_error_with(
+                &WRITEMATRIX_ERROR_OPTION,
+                "writematrix: option name must be scalar text",
+            ));
+        }
+        let name = option_name_from_value(&pair[0])?;
+        if !matches!(pair[1], Value::GpuTensor(_)) {
+            apply_option(&mut checked, &name, &pair[1])?;
+        }
+    }
+    Ok(())
 }
 
 fn apply_option(options: &mut WriteMatrixOptions, name: &str, value: &Value) -> BuiltinResult<()> {
@@ -692,6 +775,39 @@ impl MatrixData {
     }
 }
 
+fn preflight_data(value: &Value) -> BuiltinResult<()> {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(()),
+        Value::Tensor(tensor) => ensure_matrix_shape(&tensor.shape, "numeric"),
+        Value::LogicalArray(array) => ensure_matrix_shape(&array.shape, "logical"),
+        Value::StringArray(array) => ensure_matrix_shape(&array.shape, "string"),
+        Value::GpuTensor(handle) => {
+            if handle.physical().storage()
+                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            {
+                return Err(writematrix_error_with(
+                    &WRITEMATRIX_ERROR_DATA,
+                    "writematrix: complex values are not supported; write real and imaginary parts separately",
+                ));
+            }
+            ensure_matrix_shape(handle.shape(), "numeric")
+        }
+        Value::CharArray(_) => Err(writematrix_error_with(
+            &WRITEMATRIX_ERROR_DATA,
+            "writematrix: character arrays are not supported; convert to string arrays or use writecell",
+        )),
+        Value::Cell(_) => Err(writematrix_error_with(
+            &WRITEMATRIX_ERROR_DATA,
+            "writematrix: cell arrays are not supported; use writecell for heterogeneous content",
+        )),
+        Value::ComplexTensor(_) | Value::Complex(_, _) => Err(writematrix_error_with(
+            &WRITEMATRIX_ERROR_DATA,
+            "writematrix: complex values are not supported; write real and imaginary parts separately",
+        )),
+        _ => Err(writematrix_error(&WRITEMATRIX_ERROR_DATA)),
+    }
+}
+
 fn ensure_matrix_shape(shape: &[usize], context: &str) -> BuiltinResult<()> {
     if shape.len() <= 2 {
         return Ok(());
@@ -709,10 +825,13 @@ fn ensure_matrix_shape(shape: &[usize], context: &str) -> BuiltinResult<()> {
 }
 
 async fn write_matrix(
-    path: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
     matrix: &MatrixData,
     options: &WriteMatrixOptions,
 ) -> BuiltinResult<usize> {
+    let path = selected.path();
     let delimiter = options.resolve_delimiter(path);
     let line_ending = options.line_ending.as_str();
 
@@ -727,16 +846,18 @@ async fn write_matrix(
         }
     }
 
-    let mut file = open_options.open_async(path).await.map_err(|err| {
-        writematrix_error_with_source(
-            &WRITEMATRIX_ERROR_IO,
-            format!(
-                "writematrix: unable to open \"{}\" for writing ({err})",
-                path.display()
-            ),
-            err,
-        )
-    })?;
+    let mut file = await_io(runtime, BUILTIN_NAME, selected.open_with(&open_options))
+        .await?
+        .map_err(|err| {
+            writematrix_error_with_source(
+                &WRITEMATRIX_ERROR_IO,
+                format!(
+                    "writematrix: unable to open \"{}\" for writing ({err})",
+                    path.display()
+                ),
+                err,
+            )
+        })?;
 
     let mut bytes_written = 0usize;
     let rows = matrix.rows();
@@ -744,17 +865,33 @@ async fn write_matrix(
 
     if rows == 0 {
         // Nothing else to do; file was truncated or created above.
-        file.flush_async().await.map_err(|err| {
+        await_io(runtime, BUILTIN_NAME, file.flush_async())
+            .await?
+            .map_err(|err| {
+                writematrix_error_with_source(
+                    &WRITEMATRIX_ERROR_IO,
+                    format!("writematrix: failed to flush output ({err})"),
+                    err,
+                )
+            })?;
+        selected.check().map_err(|source| {
             writematrix_error_with_source(
                 &WRITEMATRIX_ERROR_IO,
-                format!("writematrix: failed to flush output ({err})"),
-                err,
+                "writematrix: captured filesystem authority was revoked",
+                source,
             )
         })?;
         return Ok(0);
     }
 
     for row in 0..rows {
+        selected.check().map_err(|source| {
+            writematrix_error_with_source(
+                &WRITEMATRIX_ERROR_IO,
+                "writematrix: captured filesystem authority was revoked",
+                source,
+            )
+        })?;
         for col in 0..cols {
             if col > 0 {
                 file.write_all(delimiter.as_bytes()).map_err(|err| {
@@ -765,6 +902,7 @@ async fn write_matrix(
                     )
                 })?;
                 bytes_written += delimiter.len();
+                cooperation.completed(delimiter.len()).await?;
             }
             let cell = matrix.format_cell(row, col, options, &delimiter);
             if !cell.is_empty() {
@@ -776,6 +914,7 @@ async fn write_matrix(
                     )
                 })?;
                 bytes_written += cell.len();
+                cooperation.completed(cell.len()).await?;
             }
         }
         file.write_all(line_ending.as_bytes()).map_err(|err| {
@@ -786,13 +925,24 @@ async fn write_matrix(
             )
         })?;
         bytes_written += line_ending.len();
+        cooperation.completed(line_ending.len()).await?;
     }
 
-    file.flush_async().await.map_err(|err| {
+    await_io(runtime, BUILTIN_NAME, file.flush_async())
+        .await?
+        .map_err(|err| {
+            writematrix_error_with_source(
+                &WRITEMATRIX_ERROR_IO,
+                format!("writematrix: failed to flush output ({err})"),
+                err,
+            )
+        })?;
+
+    selected.check().map_err(|source| {
         writematrix_error_with_source(
             &WRITEMATRIX_ERROR_IO,
-            format!("writematrix: failed to flush output ({err})"),
-            err,
+            "writematrix: captured filesystem authority was revoked",
+            source,
         )
     })?;
 
@@ -1009,6 +1159,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{IntegerStorage, StringArray, Tensor};
+
+    async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::writematrix_builtin(None, data, rest).await
+    }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
