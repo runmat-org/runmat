@@ -15,6 +15,11 @@ mod document;
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativePreferenceService;
+#[cfg(target_arch = "wasm32")]
+#[path = "preferences/browser.rs"]
+mod browser;
+#[cfg(target_arch = "wasm32")]
+pub use browser::BrowserPreferenceService;
 
 pub type PreferenceValues = BTreeMap<String, Value>;
 pub type PreferenceGroups = BTreeMap<String, PreferenceValues>;

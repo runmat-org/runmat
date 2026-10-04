@@ -88,6 +88,12 @@ impl PreferenceDocument {
     }
 }
 
+impl Default for PreferenceDocument {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

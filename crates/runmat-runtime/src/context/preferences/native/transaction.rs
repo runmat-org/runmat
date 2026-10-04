@@ -23,7 +23,9 @@ pub(super) fn worker(
     finished: oneshot::Sender<Result<(), NativeStoreError>>,
 ) {
     let preparation = (|| {
-        let prepared = apply_mutation(&mut write.document, mutation)?;
+        let document = std::mem::take(&mut write.document);
+        let (updated, prepared) = apply_mutation(document, mutation)?;
+        write.document = updated;
         let stage = if prepared.changed {
             Some(write.stage()?)
         } else {

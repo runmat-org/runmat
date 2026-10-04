@@ -32,9 +32,9 @@ pub(super) enum DocumentMutationError {
 }
 
 pub(super) fn apply(
-    document: &mut PreferenceDocument,
+    mut document: PreferenceDocument,
     mutation: DocumentMutation,
-) -> Result<DocumentPrepared, DocumentMutationError> {
+) -> Result<(PreferenceDocument, DocumentPrepared), DocumentMutationError> {
     let mut values = Vec::new();
     let mut changed = false;
     let mut return_user_path = false;
@@ -82,14 +82,15 @@ pub(super) fn apply(
             return_user_path = true;
         }
     }
-    Ok(DocumentPrepared {
+    let prepared = DocumentPrepared {
         values,
         user_path: return_user_path.then(|| UserPathSnapshot {
             setting: document.user_path.clone(),
             revision: document.user_path_revision,
         }),
         changed,
-    })
+    };
+    Ok((document, prepared))
 }
 
 #[cfg(test)]
@@ -103,8 +104,8 @@ mod tests {
         let mut document = PreferenceDocument::empty();
         let first = encode_durable_value(&Value::Num(1.0)).unwrap();
         let later = encode_durable_value(&Value::Num(2.0)).unwrap();
-        let result = apply(
-            &mut document,
+        let (updated, result) = apply(
+            document,
             DocumentMutation::ReadOrCreate {
                 group: "app".into(),
                 names: vec!["same".into(), "same".into()],
@@ -114,8 +115,8 @@ mod tests {
         .unwrap();
         assert!(result.changed);
         assert_eq!(result.values, vec![first.clone(), first]);
-        let setting = apply(
-            &mut document,
+        let (document, setting) = apply(
+            updated,
             DocumentMutation::UserPath(UserPathSetting::Custom("Rel/Exact".into())),
         )
         .unwrap();
