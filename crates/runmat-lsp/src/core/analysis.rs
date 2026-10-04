@@ -2902,7 +2902,7 @@ mod tests {
             ),
             (
                 "DataTransaction.write(tx, \"A\", [1 3], [1 2 3]);",
-                "tf = DataTransaction.write(tx, arrayName, sliceSpec, values, Name, Value, ...)",
+                "tf = DataTransaction.write(tx, arrayName, sliceSpec, values)",
             ),
             (
                 "DataTransaction.commit(tx);",
