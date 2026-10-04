@@ -92,48 +92,66 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn absolute_path_does_not_require_working_directory() {
-        let provider = Arc::new(fs::MemoryFsProvider::new());
-        provider
-            .write_project_path("/data/source.data/manifest.json", b"captured")
-            .expect("fixture manifest");
-        let authority = DataPathAuthority::capture_with(
-            &["/data/source.data", "/data/target.data"],
-            || provider,
-            || Err(std::io::Error::other("cwd unavailable")),
-        )
-        .expect("absolute-only authority");
-        assert_eq!(
-            authority.resolve("/data/source.data").unwrap(),
-            PathBuf::from("/data/source.data")
-        );
-        assert_eq!(
-            authority.resolve("/data/target.data").unwrap(),
-            PathBuf::from("/data/target.data")
-        );
-        let bytes = futures::executor::block_on(
-            authority.provider().read(
-                &authority
-                    .resolve("/data/source.data/manifest.json")
-                    .unwrap(),
-            ),
-        )
-        .expect("read through the captured provider without cwd");
-        assert_eq!(bytes, b"captured");
-        assert!(authority.resolve("relative.data").is_err());
+        fn verify(provider: Arc<dyn FsProvider>, source: &Path, target: &Path) {
+            assert!(source.is_absolute());
+            assert!(target.is_absolute());
+            let source_text = source.to_str().expect("fixture path is Unicode");
+            let target_text = target.to_str().expect("fixture path is Unicode");
+            let authority = DataPathAuthority::capture_with(
+                &[source_text, target_text],
+                || provider,
+                || Err(std::io::Error::other("cwd unavailable")),
+            )
+            .expect("absolute-only authority");
+            assert_eq!(authority.resolve(source_text).unwrap(), source);
+            assert_eq!(authority.resolve(target_text).unwrap(), target);
+            let bytes = futures::executor::block_on(authority.provider().read(source))
+                .expect("read through captured provider without cwd");
+            assert_eq!(bytes, b"captured");
+            assert!(authority.resolve("relative.data").is_err());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let fixture = tempfile::tempdir().expect("temporary native root");
+            let source = fixture.path().join("source.data");
+            let target = fixture.path().join("target.data");
+            std::fs::write(&source, b"captured").expect("fixture source");
+            verify(Arc::new(fs::NativeFsProvider), &source, &target);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let provider = Arc::new(fs::MemoryFsProvider::new());
+            provider
+                .write_project_path("/data/source.data", b"captured")
+                .expect("browser fixture source");
+            verify(
+                provider,
+                Path::new("/data/source.data"),
+                Path::new("/data/target.data"),
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn relative_path_requires_captured_directory_and_retains_source() {
+        #[cfg(windows)]
+        const ABSOLUTE: &str = "C:\\data\\source.data";
+        #[cfg(not(windows))]
+        const ABSOLUTE: &str = "/data/source.data";
+        assert!(Path::new(ABSOLUTE).is_absolute());
         let provider: Arc<dyn FsProvider> = Arc::new(fs::MemoryFsProvider::new());
-        let error = DataPathAuthority::capture_with(
-            &["/data/source.data", "target.data"],
-            || provider,
-            || Err(std::io::Error::other("cwd unavailable")),
-        )
-        .err()
-        .expect("relative path must fail before effects");
-        assert!(error.to_string().contains("cwd unavailable"));
-        assert!(std::error::Error::source(&error).is_some());
+        for paths in [[ABSOLUTE, "target.data"], ["source.data", "target.data"]] {
+            let error = DataPathAuthority::capture_with(
+                &paths,
+                || provider.clone(),
+                || Err(std::io::Error::other("cwd unavailable")),
+            )
+            .err()
+            .expect("relative path must fail before effects");
+            assert!(error.to_string().contains("cwd unavailable"));
+            assert!(std::error::Error::source(&error).is_some());
+        }
     }
 }
