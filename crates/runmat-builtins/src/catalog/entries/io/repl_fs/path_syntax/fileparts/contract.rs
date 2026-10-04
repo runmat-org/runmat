@@ -43,11 +43,21 @@ pub const FILEPARTS_ERROR_ARITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "fileparts: expected exactly one input argument",
 };
 pub const FILEPARTS_ERROR_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor { code: "RM.FILEPARTS.TYPE", identifier: Some("RunMat:fileparts:InvalidFilename"), when: "The input is not an admitted text container.", message: "fileparts: filename must be a character vector, string array, or cell array of character vectors" };
+pub const FILEPARTS_ERROR_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEPARTS.OUTPUTS",
+    identifier: Some("RunMat:fileparts:TooManyOutputs"),
+    when: "More than three outputs are requested.",
+    message: "fileparts: too many output arguments",
+};
 pub const FILEPARTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[FILEPARTS_ERROR_ARITY, FILEPARTS_ERROR_TYPE],
+    errors: &[
+        FILEPARTS_ERROR_ARITY,
+        FILEPARTS_ERROR_TYPE,
+        FILEPARTS_ERROR_OUTPUTS,
+    ],
 };
 pub const FILEPARTS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,

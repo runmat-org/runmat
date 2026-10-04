@@ -87,6 +87,30 @@ fn fullfile_and_fileparts_preserve_container_shape() {
 }
 
 #[test]
+fn fileparts_output_projection_matches_three_output_runtime_contract() {
+    let entry = crate::builtin_catalog_entry_by_name("fileparts").expect("fileparts");
+    for count in 0..=3 {
+        let result = crate::infer_catalog_call(
+            entry,
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String)],
+                RequestedOutputCount::Exactly(count),
+            ),
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs.len(), count);
+    }
+    let invalid = crate::infer_catalog_call(
+        entry,
+        &request(
+            vec![ValueFact::scalar(ValueKindFact::String)],
+            RequestedOutputCount::Exactly(4),
+        ),
+    );
+    assert!(!invalid.diagnostics.is_empty());
+}
+
+#[test]
 fn fullfile_diagnoses_known_container_shape_mismatch() {
     let shaped = |rows, cols| {
         ValueFact::proven(

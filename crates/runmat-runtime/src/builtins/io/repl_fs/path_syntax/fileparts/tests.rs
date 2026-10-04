@@ -68,3 +68,25 @@ fn rejects_nontext_without_provider_access() {
     let error = run(Value::Num(1.0)).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:fileparts:InvalidFilename"));
 }
+
+#[test]
+fn requested_outputs_zero_through_three_project_without_padding() {
+    for count in 0..=3 {
+        let _scope = crate::output_count::push_output_count(Some(count));
+        let Value::OutputList(outputs) = run(Value::String("folder/name.ext".into())).unwrap()
+        else {
+            panic!("expected output list");
+        };
+        assert_eq!(outputs.len(), count);
+        for (actual, expected) in outputs.iter().zip(["folder", "name", ".ext"]) {
+            assert_eq!(actual, &Value::String(expected.into()));
+        }
+    }
+}
+
+#[test]
+fn fourth_output_rejects_before_input_decoding() {
+    let _scope = crate::output_count::push_output_count(Some(4));
+    let error = run(Value::Num(42.0)).expect_err("unsupported fourth output");
+    assert_eq!(error.identifier(), Some("RunMat:fileparts:TooManyOutputs"));
+}
