@@ -136,10 +136,10 @@ async fn observe_mutation(
     let mut values = Vec::with_capacity(prepared.values.len());
     for payload in &prepared.values {
         values.push(decode_durable_value(payload)?);
-        checkpoint(&mut budget, 1).await?;
+        checkpoint(budget, 1).await?;
     }
     if prepared.changed {
-        checkpoint(&mut budget, 0).await?;
+        checkpoint(budget, 0).await?;
         authorized_tx.send(()).map_err(|_| {
             operational(
                 "preference authorization owner ended",
