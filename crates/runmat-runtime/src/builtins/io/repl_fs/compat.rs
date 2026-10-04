@@ -92,22 +92,6 @@ const OUTPUT_STATUS_MESSAGE: [BuiltinParamDescriptor; 2] = [
         description: "Command output or diagnostic text.",
     },
 ];
-const OUTPUT_STATUS_ATTRIB: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "status",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "1 when attributes were read, otherwise 0.",
-    },
-    BuiltinParamDescriptor {
-        name: "attributes",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Attribute struct or diagnostic struct.",
-    },
-];
 
 macro_rules! simple_descriptor {
     ($sig:ident, $desc:ident, $label:expr, $inputs:expr, $outputs:expr, $mode:expr) => {
@@ -171,21 +155,6 @@ pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
     canonical_builtin: None,
     notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
 };
-simple_descriptor!(
-    FILEATTRIB_SIGNATURES,
-    FILEATTRIB_DESCRIPTOR,
-    "[status, attributes] = fileattrib(path)",
-    &INPUTS_ONE,
-    &OUTPUT_STATUS_ATTRIB,
-    BuiltinOutputMode::ByRequestedOutputCount
-);
-
-pub const FILEATTRIB_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "fileattrib accepts host-text paths and textual controls; numeric and provider-resident values are rejected before any gather, provider access, or filesystem operation, while numeric status and attribute fields are outputs only.",
-    };
 simple_descriptor!(
     REHASH_SIGNATURES,
     REHASH_DESCRIPTOR,
@@ -409,14 +378,7 @@ fn cellstr(values: Vec<String>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fileattrib",
-    category = "io/repl_fs",
-    summary = "Return file attribute metadata.",
-    keywords = "fileattrib,file,folder,attributes,metadata",
-    accel = "cpu",
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::fileattrib_type),
-    descriptor(crate::builtins::io::repl_fs::compat::FILEATTRIB_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::FILEATTRIB_INTEGER_AUDIT),
+    binding_variant = "Default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -859,8 +821,8 @@ mod tests {
     };
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{
-        GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
-        MEMMAPFILE_INTEGER_CAPABILITIES,
+        FILEATTRIB_INTEGER_AUDIT, GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION,
+        GETPREF_INTEGER_CAPABILITIES, MEMMAPFILE_INTEGER_CAPABILITIES,
     };
     use runmat_filesystem::FsProvider;
     use runmat_value::{IntegerStorage, Tensor};
