@@ -33,6 +33,29 @@ fn webread_rejects_known_invalid_timeout_before_resident_readback() {
     assert!(!error.message().contains("provider"));
     assert_eq!(allocation.probe.retirements(), 0);
 }
+
+#[test]
+fn webread_rejects_non_http_url_before_resident_query_readback() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident query value");
+    let error = futures::executor::block_on(webread_builtin(
+        None,
+        Value::from("mailto:alice@example.test"),
+        vec![
+            Value::from("q"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ],
+    ))
+    .expect_err("non-HTTP URL must fail before readback");
+    assert_eq!(error.identifier(), Some("RunMat:webread:InvalidUrl"));
+    assert!(error.message().contains("unsupported URL scheme"));
+    assert_eq!(allocation.probe.retirements(), 0);
+}
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;

@@ -14,11 +14,11 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode, WEBREAD_DESCRIPTOR,
-    WEBREAD_ERROR_FLOW, WEBREAD_ERROR_INVALID_ARGUMENT, WEBREAD_ERROR_INVALID_CREDENTIALS,
-    WEBREAD_ERROR_INVALID_OPTION_VALUE, WEBREAD_ERROR_INVALID_URL,
-    WEBREAD_ERROR_MISSING_OPTION_VALUE, WEBREAD_ERROR_OUTPUT, WEBREAD_ERROR_OUTPUTS,
-    WEBREAD_ERROR_RESPONSE_JSON, WEBREAD_ERROR_TRANSPORT,
+    parse_http_url, BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode,
+    WEBREAD_DESCRIPTOR, WEBREAD_ERROR_FLOW, WEBREAD_ERROR_INVALID_ARGUMENT,
+    WEBREAD_ERROR_INVALID_CREDENTIALS, WEBREAD_ERROR_INVALID_OPTION_VALUE,
+    WEBREAD_ERROR_INVALID_URL, WEBREAD_ERROR_MISSING_OPTION_VALUE, WEBREAD_ERROR_OUTPUT,
+    WEBREAD_ERROR_OUTPUTS, WEBREAD_ERROR_RESPONSE_JSON, WEBREAD_ERROR_TRANSPORT,
     WEBREAD_EXPLICIT_GPU_EXTENSION as EXPLICIT_GPU_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
@@ -129,9 +129,16 @@ async fn webread_builtin(
         ));
     }
     preflight_host_arguments(&rest)?;
+    let parsed_url = parse_http_url(&url_text).map_err(|err| {
+        webread_error_with_source(
+            &WEBREAD_ERROR_INVALID_URL,
+            format!("webread: invalid URL: {err}"),
+            err,
+        )
+    })?;
     let gathered_args = gather_arguments(rest).await?;
     let (options, query_params) = parse_arguments(gathered_args)?;
-    execute_request(&url_text, options, &query_params, context.as_ref()).await
+    execute_request(parsed_url, options, &query_params, context.as_ref()).await
 }
 
 async fn gather_arguments(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -299,7 +306,7 @@ fn append_query_from_cell(
 }
 
 async fn execute_request(
-    url_text: &str,
+    mut url: Url,
     options: WebReadOptions,
     query_params: &[(String, String)],
     context: Option<&crate::context::RuntimeContext>,
@@ -321,13 +328,6 @@ async fn execute_request(
         ));
     }
 
-    let mut url = Url::parse(url_text).map_err(|err| {
-        webread_error_with_source(
-            &WEBREAD_ERROR_INVALID_URL,
-            format!("webread: invalid URL '{url_text}': {err}"),
-            err,
-        )
-    })?;
     if !query_params.is_empty() {
         {
             let mut pairs = url.query_pairs_mut();

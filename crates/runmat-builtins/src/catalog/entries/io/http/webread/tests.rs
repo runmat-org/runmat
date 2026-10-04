@@ -1,6 +1,23 @@
 use super::*;
 use runmat_types::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn known_unsupported_url_scheme_is_rejected_by_shared_http_decoder() {
+    let request = CallRequest {
+        arguments: vec![ValueFact::scalar(ValueKindFact::String)],
+        literals: LiteralContext::new(vec![LiteralValue::String(
+            "mailto:alice@example.test".into(),
+        )]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let result = inference::infer(&request, &WEBREAD_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-WEBREAD-URL"));
+}
+
 fn call(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallInference {
     inference::infer(
         &CallRequest {

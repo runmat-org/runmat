@@ -1,6 +1,27 @@
 use super::*;
 use runmat_types::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn known_unsupported_url_scheme_is_rejected_by_shared_http_decoder() {
+    let request = CallRequest {
+        arguments: vec![
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::String("ftp://example.test/item".into()),
+            LiteralValue::Unknown,
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let result = inference::infer(&request, &WEBWRITE_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-WEBWRITE-URL"));
+}
+
 #[test]
 fn webwrite_requires_url_and_data_without_guessing_response_class() {
     let request = CallRequest {

@@ -32,6 +32,26 @@ fn webwrite_rejects_known_invalid_timeout_before_resident_body_readback() {
     assert!(!error.message().contains("provider"));
     assert_eq!(allocation.probe.retirements(), 0);
 }
+
+#[test]
+fn webwrite_rejects_non_http_url_before_resident_body_readback() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident request body");
+    let error = futures::executor::block_on(webwrite_builtin(
+        None,
+        Value::from("ftp://example.test/item"),
+        vec![Value::GpuTensor(allocation.handle.clone())],
+    ))
+    .expect_err("non-HTTP URL must fail before body readback");
+    assert_eq!(error.identifier(), Some("RunMat:webwrite:InvalidUrl"));
+    assert!(error.message().contains("unsupported URL scheme"));
+    assert_eq!(allocation.probe.retirements(), 0);
+}
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;

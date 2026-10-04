@@ -1,5 +1,6 @@
 use super::super::response_mode::{literal_response_mode, HttpResponseDialect, HttpResponseMode};
 use crate::catalog::inference::{argument_error, finish_fixed};
+use crate::parse_http_url;
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
 
@@ -33,6 +34,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             "URL must not be empty",
             0,
         ));
+    }
+    if let Some(url) = request.literals.literal_string_at(0) {
+        if !url.trim().is_empty() && parse_http_url(&url).is_err() {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-WEBREAD-URL",
+                "URL must be an absolute HTTP or HTTPS URL",
+                0,
+            ));
+        }
     }
     let mut output = match literal_response_mode(request, 1, HttpResponseDialect::WebRead) {
         Some(HttpResponseMode::Text) => ValueFact::proven(

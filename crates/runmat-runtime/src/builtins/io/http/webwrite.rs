@@ -20,11 +20,12 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode, WEBWRITE_DESCRIPTOR,
-    WEBWRITE_ERROR_FLOW, WEBWRITE_ERROR_INVALID_ARGUMENT, WEBWRITE_ERROR_INVALID_CREDENTIALS,
-    WEBWRITE_ERROR_INVALID_URL, WEBWRITE_ERROR_MISSING_DATA, WEBWRITE_ERROR_MISSING_OPTION_VALUE,
-    WEBWRITE_ERROR_OUTPUT, WEBWRITE_ERROR_OUTPUTS, WEBWRITE_ERROR_RESPONSE_JSON,
-    WEBWRITE_ERROR_TRANSPORT, WEBWRITE_EXPLICIT_GPU_EXTENSION as EXPLICIT_GPU_EXTENSION,
+    parse_http_url, BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode,
+    WEBWRITE_DESCRIPTOR, WEBWRITE_ERROR_FLOW, WEBWRITE_ERROR_INVALID_ARGUMENT,
+    WEBWRITE_ERROR_INVALID_CREDENTIALS, WEBWRITE_ERROR_INVALID_URL, WEBWRITE_ERROR_MISSING_DATA,
+    WEBWRITE_ERROR_MISSING_OPTION_VALUE, WEBWRITE_ERROR_OUTPUT, WEBWRITE_ERROR_OUTPUTS,
+    WEBWRITE_ERROR_RESPONSE_JSON, WEBWRITE_ERROR_TRANSPORT,
+    WEBWRITE_EXPLICIT_GPU_EXTENSION as EXPLICIT_GPU_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StructValue, Tensor, Value};
@@ -141,6 +142,13 @@ async fn webwrite_builtin(
         ));
     }
     preflight_host_arguments(&rest[1..])?;
+    let parsed_url = parse_http_url(&url_text).map_err(|err| {
+        webwrite_error_with_source(
+            &WEBWRITE_ERROR_INVALID_URL,
+            format!("webwrite: invalid URL: {err}"),
+            err,
+        )
+    })?;
 
     let mut gathered = Vec::with_capacity(rest.len());
     for value in rest {
@@ -160,7 +168,7 @@ async fn webwrite_builtin(
 
     let (options, query_params) = parse_arguments(queue)?;
     let body = prepare_request_body(data_value, &options).await?;
-    execute_request(&url_text, options, &query_params, body, context.as_ref()).await
+    execute_request(parsed_url, options, &query_params, body, context.as_ref()).await
 }
 
 fn parse_arguments(
@@ -281,7 +289,7 @@ fn process_name_value_pair(
 }
 
 async fn execute_request(
-    url_text: &str,
+    mut url: Url,
     options: WebWriteOptions,
     query_params: &[(String, String)],
     body: PreparedBody,
@@ -304,13 +312,6 @@ async fn execute_request(
         ));
     }
 
-    let mut url = Url::parse(url_text).map_err(|err| {
-        webwrite_error_with_source(
-            &WEBWRITE_ERROR_INVALID_URL,
-            format!("webwrite: invalid URL '{url_text}': {err}"),
-            err,
-        )
-    })?;
     if !query_params.is_empty() {
         {
             let mut pairs = url.query_pairs_mut();
