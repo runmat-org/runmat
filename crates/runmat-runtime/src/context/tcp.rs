@@ -65,6 +65,7 @@ pub struct RuntimeTcpConnect {
 pub struct RuntimeTcpBind {
     pub address: String,
     pub port: u16,
+    pub io_timeout: Option<Duration>,
     pub byte_order: RuntimeTcpByteOrder,
 }
 
@@ -73,12 +74,21 @@ pub struct RuntimeTcpClient {
     pub authority: ForeignRef,
     pub local_addr: SocketAddr,
     pub peer_addr: SocketAddr,
+    pub byte_order: RuntimeTcpByteOrder,
 }
 
 #[derive(Debug, Clone)]
 pub struct RuntimeTcpServer {
     pub authority: ForeignRef,
     pub local_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeTcpClientStatus {
+    pub connected: bool,
+    pub bytes_available: usize,
+    pub byte_order: RuntimeTcpByteOrder,
+    pub timeout: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,10 +98,49 @@ pub enum RuntimeTcpReadMode {
     Line,
 }
 
-#[derive(Debug)]
 pub struct RuntimeTcpReadResult {
-    pub bytes: Vec<u8>,
-    pub connection_closed: bool,
+    bytes: Vec<u8>,
+    connection_closed: bool,
+    publication: Option<Box<dyn RuntimeTcpReadPublication>>,
+}
+
+pub trait RuntimeTcpReadPublication: Send {
+    fn rollback(self: Box<Self>, bytes: Vec<u8>);
+}
+
+impl RuntimeTcpReadResult {
+    pub fn new(
+        bytes: Vec<u8>,
+        connection_closed: bool,
+        publication: Box<dyn RuntimeTcpReadPublication>,
+    ) -> Self {
+        Self {
+            bytes,
+            connection_closed,
+            publication: Some(publication),
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn connection_closed(&self) -> bool {
+        self.connection_closed
+    }
+
+    pub fn publish(mut self) -> Vec<u8> {
+        self.publication.take();
+        std::mem::take(&mut self.bytes)
+    }
+}
+
+impl Drop for RuntimeTcpReadResult {
+    fn drop(&mut self) {
+        if let Some(publication) = self.publication.take() {
+            publication.rollback(std::mem::take(&mut self.bytes));
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,8 +152,16 @@ pub enum RuntimeTcpCloseScope {
 
 /// The port owns all socket state. Dropping an uncompleted future must stop
 /// further I/O; a write may already have sent a prefix and is never replayed.
-/// Reads retain unpublished bytes in the service across cancellation/drop.
+/// Reads retain unpublished bytes through outer decode and the final
+/// cancellation checkpoint; only `RuntimeTcpReadResult::publish` consumes the
+/// exclusive receipt.
 pub trait RuntimeTcpService {
+    fn describe_client(
+        &self,
+        issuer: RuntimeTcpIssuer,
+        client: ForeignRef,
+    ) -> RuntimeServiceFuture<Result<RuntimeTcpClientStatus, crate::tcp::TcpTransportError>>;
+
     fn connect(
         &self,
         issuer: RuntimeTcpIssuer,
@@ -129,7 +186,6 @@ pub trait RuntimeTcpService {
         issuer: RuntimeTcpIssuer,
         client: ForeignRef,
         mode: RuntimeTcpReadMode,
-        timeout: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<RuntimeTcpReadResult, crate::tcp::TcpTransportError>>;
 
     fn write(
@@ -137,7 +193,6 @@ pub trait RuntimeTcpService {
         issuer: RuntimeTcpIssuer,
         client: ForeignRef,
         bytes: Vec<u8>,
-        timeout: Option<Duration>,
     ) -> RuntimeServiceFuture<Result<usize, crate::tcp::TcpTransportError>>;
 
     fn close(

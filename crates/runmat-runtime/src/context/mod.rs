@@ -62,9 +62,9 @@ pub use services::{
 };
 pub(crate) use state::RuntimeContextState;
 pub use tcp::{
-    RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpClient, RuntimeTcpCloseScope, RuntimeTcpConnect,
-    RuntimeTcpIssuer, RuntimeTcpReadMode, RuntimeTcpReadResult, RuntimeTcpServer,
-    RuntimeTcpService,
+    RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpClient, RuntimeTcpClientStatus,
+    RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpIssuer, RuntimeTcpReadMode,
+    RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
 };
 pub use user_path::{
     RuntimeUserPathService, UserPathMutation, UserPathServiceError, UserPathSetting,

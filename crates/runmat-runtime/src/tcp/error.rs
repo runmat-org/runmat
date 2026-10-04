@@ -1,3 +1,4 @@
+use runmat_async::runtime_error::{RuntimeErrorSource, RuntimeErrorSourceBound};
 use std::error::Error;
 use std::fmt;
 
@@ -10,11 +11,19 @@ pub enum TcpTransportErrorKind {
     Unsupported,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TcpWriteProgress {
+    NoBytesSent,
+    PrefixSent(usize),
+    Indeterminate,
+}
+
 #[derive(Debug)]
 pub struct TcpTransportError {
     kind: TcpTransportErrorKind,
     message: String,
-    source: Option<Box<dyn Error + Send + Sync>>,
+    source: Option<Box<RuntimeErrorSource>>,
+    write_progress: Option<TcpWriteProgress>,
 }
 
 impl TcpTransportError {
@@ -23,23 +32,34 @@ impl TcpTransportError {
             kind,
             message: message.into(),
             source: None,
+            write_progress: None,
         }
     }
 
     pub fn with_source(
         kind: TcpTransportErrorKind,
         message: impl Into<String>,
-        source: impl Error + Send + Sync + 'static,
+        source: impl RuntimeErrorSourceBound,
     ) -> Self {
         Self {
             kind,
             message: message.into(),
             source: Some(Box::new(source)),
+            write_progress: None,
         }
     }
 
     pub fn kind(&self) -> TcpTransportErrorKind {
         self.kind
+    }
+
+    pub fn with_write_progress(mut self, progress: TcpWriteProgress) -> Self {
+        self.write_progress = Some(progress);
+        self
+    }
+
+    pub fn write_progress(&self) -> Option<TcpWriteProgress> {
+        self.write_progress
     }
 }
 
