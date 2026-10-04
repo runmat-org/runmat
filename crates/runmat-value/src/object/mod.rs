@@ -15,4 +15,7 @@ pub use dynamic_property::DynamicPropertyDef;
 pub use handle::HandleRef;
 pub use instance::{ObjectInstance, ObjectPersistencePayloadKind};
 pub use listener::Listener;
-pub use memmap::{MemmapElementType, MemmapFieldState, MemmapReceiverState};
+pub use memmap::{
+    MemmapElementType, MemmapFieldState, MemmapFormatPresentationState, MemmapReceiverAuthority,
+    MemmapReceiverState,
+};

@@ -1,4 +1,6 @@
-use super::{ContainersMapStorage, DynamicPropertyDef, MemmapReceiverState};
+use super::{
+    ContainersMapStorage, DynamicPropertyDef, MemmapReceiverAuthority, MemmapReceiverState,
+};
 use crate::{ForeignRef, Value};
 use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
@@ -42,7 +44,11 @@ impl Trace for NativeObjectPayload {
             Self::ForeignHostControl(_) => {}
             Self::DatasetAuthority(_) => {}
             Self::MatFileAuthority(_) => {}
-            Self::MemmapReceiver(_) => {}
+            Self::MemmapReceiver(receiver) => {
+                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
+                    snapshot.trace(tracer);
+                }
+            }
         }
     }
 }
@@ -200,8 +206,12 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
-            | Some(NativeObjectPayload::MemmapReceiver(_))
             | None => {}
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
+                if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
+                    visitor(snapshot);
+                }
+            }
         }
     }
 
