@@ -50,10 +50,8 @@ impl FileCooperation {
         let Some(budget) = self.budget.as_mut() else {
             return Ok(());
         };
-        budget
-            .checkpoint(units as u64)
-            .await
-            .map_err(|source| self.execution_error(source))
+        let outcome = budget.checkpoint(units as u64).await;
+        outcome.map_err(|source| self.execution_error(source))
     }
 
     fn execution_error(&self, source: ExecutionServiceError) -> crate::RuntimeError {
