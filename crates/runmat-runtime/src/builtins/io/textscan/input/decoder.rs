@@ -113,7 +113,6 @@ impl DecodedFileText {
         }
         match self.text_offsets.binary_search(&text_pos) {
             Ok(idx) => Ok(self.byte_offsets[idx]),
-            Err(idx) if idx == self.text_offsets.len() => Ok(self.byte_len),
             Err(_) => Err(textscan_error_with(
                 &TEXTSCAN_ERROR_FILE,
                 "textscan: parsed position did not fall on a decoded character boundary",

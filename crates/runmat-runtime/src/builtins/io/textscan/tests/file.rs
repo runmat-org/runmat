@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "file/cooperation.rs"]
+mod cooperation;
 use crate::builtins::io::filetext::registry::RegisteredFile;
 use futures::executor::block_on;
 use runmat_filesystem::OpenOptions;
@@ -126,77 +129,6 @@ fn checked_out_file_is_busy_not_closed_and_drop_restores_exact_cursor() {
     registry::reset_for_tests();
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn abandoned_cooperative_file_read_restores_registered_owner_and_cursor() {
-    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
-    use runmat_execution::cancellation::CancellationSource;
-    use std::future::Future;
-    use std::num::NonZeroU64;
-    use std::task::{Context, Poll};
-
-    let _guard = registry::test_guard();
-    registry::reset_for_tests();
-    let path = file_fixture("abandoned.txt", b"12\n34\n");
-    let mut options = OpenOptions::new();
-    options.read(true);
-    let mut file = block_on(options.open_async(&path)).expect("open file");
-    std::io::Read::read_exact(&mut file, &mut [0; 3]).expect("advance cursor");
-    let handle = Arc::new(StdMutex::new(Some(file)));
-    let fid = registry::register_file(RegisteredFile {
-        path: path.to_path_buf(),
-        permission: "r".to_string(),
-        access: registry::FileAccess::READ,
-        machinefmt: "native".to_string(),
-        encoding: "UTF-8".to_string(),
-        handle: handle.clone(),
-    });
-    let source = CancellationSource::new();
-    let budget = CpuCooperationBudget::with_test_turn(
-        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).expect("quantum")),
-        source.token(),
-        || Box::pin(std::future::pending::<Result<(), ExecutionServiceError>>()),
-    );
-    let mut cooperation = TextscanCooperation::with_budget(budget);
-    let format = parse_format_spec("%f").expect("format");
-    let scan_options = TextscanOptions::default();
-    let mut call = Box::pin(input::parse_registered_file(
-        fid,
-        &format,
-        None,
-        &scan_options,
-        &mut cooperation,
-    ));
-    let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-    assert!(matches!(
-        Future::poll(call.as_mut(), &mut cx),
-        Poll::Pending
-    ));
-    assert!(matches!(
-        registry::acquire_file(fid),
-        Err(registry::FileOperationError::Busy)
-    ));
-    assert_eq!(
-        block_on(registry::close_async(fid))
-            .expect_err("pending reader blocks close")
-            .kind(),
-        std::io::ErrorKind::WouldBlock
-    );
-    drop(call);
-    let mut resumed = registry::acquire_file(fid).expect("restored operation");
-    assert_eq!(
-        std::io::Seek::stream_position(resumed.file_mut()).expect("position"),
-        3
-    );
-    let mut tail = String::new();
-    std::io::Read::read_to_string(resumed.file_mut(), &mut tail).expect("tail");
-    assert_eq!(tail, "34\n");
-    drop(resumed);
-    block_on(registry::close_async(fid))
-        .expect("close")
-        .expect("entry");
-    registry::reset_for_tests();
-}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn textscan_repeated_file_read_preserves_next_record_position() {

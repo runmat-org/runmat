@@ -94,10 +94,17 @@ async fn textscan_builtin(
     };
     let mut cooperation = TextscanCooperation::new(runtime.as_ref());
     cooperation.completed(0).await?;
-    let parsed = parse_input(&input, &parsed_format, repeat, &options, &mut cooperation).await?;
+    let mut parsed =
+        parse_input(&input, &parsed_format, repeat, &options, &mut cooperation).await?;
     cooperation.completed(0).await?;
-    let output = build_output(parsed, &options, &mut cooperation).await?;
+    let output = build_output(
+        std::mem::take(&mut parsed.columns),
+        &options,
+        &mut cooperation,
+    )
+    .await?;
     cooperation.completed(0).await?;
+    parsed.commit_file_position();
     Ok(output)
 }
 

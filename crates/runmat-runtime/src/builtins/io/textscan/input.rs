@@ -3,22 +3,37 @@ use super::*;
 mod decoder;
 use decoder::DecodedFileText;
 
+/// Keeps the exact registered file checked out through output publication.
+/// Dropping this before `commit_file_position` restores its entry cursor.
+pub(super) struct ParsedInput {
+    pub(super) columns: Vec<ColumnData>,
+    file_operation: Option<registry::FileOperation>,
+}
+
+impl ParsedInput {
+    pub(super) fn commit_file_position(&mut self) {
+        if let Some(operation) = self.file_operation.as_mut() {
+            operation.commit_cursor();
+        }
+    }
+}
+
 pub(super) async fn parse_input(
     value: &Value,
     format_spec: &[FormatElement],
     repeat: Option<usize>,
     options: &TextscanOptions,
     cooperation: &mut TextscanCooperation,
-) -> BuiltinResult<Vec<ColumnData>> {
+) -> BuiltinResult<ParsedInput> {
     if let Some(fid) = numeric_fid(value) {
-        return parse_registered_file(fid, format_spec, repeat, options, cooperation)
-            .await
-            .map(|parsed| parsed.columns);
+        return parse_registered_file(fid, format_spec, repeat, options, cooperation).await;
     }
     let text = string_scalar(value, "textOrFileID")?;
-    parse_textscan(&text, format_spec, repeat, options, cooperation)
-        .await
-        .map(|parsed| parsed.columns)
+    let parsed = parse_textscan(&text, format_spec, repeat, options, cooperation).await?;
+    Ok(ParsedInput {
+        columns: parsed.columns,
+        file_operation: None,
+    })
 }
 
 pub(super) async fn parse_registered_file(
@@ -27,7 +42,7 @@ pub(super) async fn parse_registered_file(
     repeat: Option<usize>,
     options: &TextscanOptions,
     cooperation: &mut TextscanCooperation,
-) -> BuiltinResult<ParsedTextscan> {
+) -> BuiltinResult<ParsedInput> {
     validate_fid(fid)?;
     let mut operation = registry::acquire_file(fid).map_err(|error| match error {
         registry::FileOperationError::InvalidIdentifier => textscan_error_with(
@@ -102,8 +117,10 @@ pub(super) async fn parse_registered_file(
             )
         })?;
     cooperation.completed(0).await?;
-    operation.commit_cursor();
-    Ok(parsed)
+    Ok(ParsedInput {
+        columns: parsed.columns,
+        file_operation: Some(operation),
+    })
 }
 
 fn checked_source_position(start: u64, consumed_bytes: usize) -> BuiltinResult<u64> {
@@ -175,6 +192,30 @@ mod position_tests {
         assert!(decoded.text.ends_with("😀z"));
         assert_eq!(decoded.byte_offset_for_text_pos(4095).expect("emoji"), 4095);
         assert_eq!(decoded.byte_offset_for_text_pos(4099).expect("z"), 4099);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn decoded_position_requires_exact_character_boundary_or_endpoint() {
+        let mut cooperation = TextscanCooperation::new(None);
+        let decoded = block_on(DecodedFileText::decode(
+            "éz".as_bytes(),
+            "UTF-8",
+            &mut cooperation,
+        ))
+        .expect("decode");
+        assert_eq!(decoded.byte_offset_for_text_pos(0).expect("first"), 0);
+        assert_eq!(decoded.byte_offset_for_text_pos(2).expect("second"), 2);
+        assert_eq!(decoded.byte_offset_for_text_pos(3).expect("endpoint"), 3);
+        for invalid in [1, 4, usize::MAX] {
+            assert_eq!(
+                decoded
+                    .byte_offset_for_text_pos(invalid)
+                    .expect_err("invalid position")
+                    .identifier(),
+                TEXTSCAN_ERROR_FILE.identifier,
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
