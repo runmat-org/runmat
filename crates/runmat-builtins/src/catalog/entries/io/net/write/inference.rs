@@ -52,7 +52,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(input) = request.arguments.get(2) {
-        if input.shape.is_definitely_nonscalar()
+        if crate::catalog::inference::known_invalid_text_scalar(input)
             || !matches!(
                 input.kind,
                 ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown

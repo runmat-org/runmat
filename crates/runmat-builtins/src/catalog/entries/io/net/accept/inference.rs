@@ -8,7 +8,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     fields.insert(
         "Port".into(),
         ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
+            class: NumericClass::UInt16,
             domain: NumericDomain::Real,
         })),
     );
@@ -42,7 +42,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     for index in (1..request.arguments.len()).step_by(2) {
         let name = &request.arguments[index];
-        if name.shape.is_definitely_nonscalar()
+        if crate::catalog::inference::known_invalid_text_scalar(name)
             || !matches!(
                 name.kind,
                 ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown

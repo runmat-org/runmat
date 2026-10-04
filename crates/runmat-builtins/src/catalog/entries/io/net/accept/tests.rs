@@ -17,6 +17,40 @@ fn double() -> ValueFact {
 }
 
 #[test]
+fn accepted_client_port_is_uint16_and_option_accepts_character_row() {
+    let mut option = ValueFact::scalar(ValueKindFact::Character);
+    option.shape = ShapeFact::from(vec![Some(1), Some(7)]);
+    let request = |name: ValueFact| CallRequest {
+        arguments: vec![server(), name, double()],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("Timeout".into()),
+            LiteralValue::Number(1.0),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let inferred = inference::infer(&request(option.clone()), &ACCEPT_CATALOG_ENTRY);
+    assert!(inferred.diagnostics.is_empty());
+    let ValueKindFact::Struct(fields) = &inferred.outputs[0].kind else {
+        panic!("accepted client has struct facts");
+    };
+    assert_eq!(
+        fields
+            .fields
+            .get("Port")
+            .and_then(ValueFact::numeric)
+            .map(|n| n.class),
+        Some(NumericClass::UInt16)
+    );
+    option.shape = ShapeFact::from(vec![Some(2), Some(7)]);
+    let invalid = inference::infer(&request(option), &ACCEPT_CATALOG_ENTRY);
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-NET-ACCEPT-OPTION"));
+}
+
+#[test]
 fn accepted_client_fields_and_timeout_controls_are_sound() {
     let valid = CallRequest {
         arguments: vec![server(), text(), double()],

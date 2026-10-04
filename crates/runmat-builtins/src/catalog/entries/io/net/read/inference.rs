@@ -74,13 +74,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let Some(input) = request.arguments.get(2) {
-        if !matches!(
-            input.kind,
-            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
-        ) || request
-            .literals
-            .literal_string_at(2)
-            .is_some_and(|text| NetDataType::parse(&text).is_none())
+        if crate::catalog::inference::known_invalid_text_scalar(input)
+            || !matches!(
+                input.kind,
+                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+            )
+            || request
+                .literals
+                .literal_string_at(2)
+                .is_some_and(|text| NetDataType::parse(&text).is_none())
         {
             result.diagnostics.push(argument_error(
                 "RM-CATALOG-NET-READ-DATATYPE",

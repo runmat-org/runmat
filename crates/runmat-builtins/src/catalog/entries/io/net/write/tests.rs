@@ -1,6 +1,39 @@
 use super::*;
 use runmat_types::*;
 
+#[test]
+fn datatype_character_row_is_admitted_and_multiline_character_is_rejected() {
+    let mut datatype = ValueFact::scalar(ValueKindFact::Character);
+    datatype.shape = ShapeFact::from(vec![Some(1), Some(6)]);
+    let request = |datatype: ValueFact| CallRequest {
+        arguments: vec![
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+            datatype,
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Number(1.0),
+            LiteralValue::String("single".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    assert!(
+        inference::infer(&request(datatype.clone()), &WRITE_CATALOG_ENTRY)
+            .diagnostics
+            .is_empty()
+    );
+    datatype.shape = ShapeFact::from(vec![Some(2), Some(6)]);
+    let invalid = inference::infer(&request(datatype), &WRITE_CATALOG_ENTRY);
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-NET-WRITE-DATATYPE"));
+}
+
 fn request(arguments: Vec<ValueFact>, literal_args: Vec<LiteralValue>) -> CallRequest {
     CallRequest {
         arguments,

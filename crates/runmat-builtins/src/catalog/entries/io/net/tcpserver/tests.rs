@@ -1,6 +1,52 @@
 use super::*;
 use runmat_types::*;
 
+#[test]
+fn address_and_option_admit_character_rows_not_matrices() {
+    let mut address = ValueFact::scalar(ValueKindFact::Character);
+    address.shape = ShapeFact::from(vec![Some(1), Some(9)]);
+    let mut option = ValueFact::scalar(ValueKindFact::Character);
+    option.shape = ShapeFact::from(vec![Some(1), Some(7)]);
+    let request = |address: ValueFact, option: ValueFact| CallRequest {
+        arguments: vec![
+            address,
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+            option,
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::String("localhost".into()),
+            LiteralValue::Number(80.0),
+            LiteralValue::String("Timeout".into()),
+            LiteralValue::Number(5.0),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    assert!(inference::infer(
+        &request(address.clone(), option.clone()),
+        &TCPSERVER_CATALOG_ENTRY
+    )
+    .diagnostics
+    .is_empty());
+    address.shape = ShapeFact::from(vec![Some(2), Some(9)]);
+    option.shape = ShapeFact::from(vec![Some(2), Some(7)]);
+    let invalid = inference::infer(&request(address, option), &TCPSERVER_CATALOG_ENTRY);
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-TCPSERVER-ADDRESS"));
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-TCPSERVER-OPTION"));
+}
+
 fn text() -> ValueFact {
     ValueFact::scalar(ValueKindFact::String)
 }

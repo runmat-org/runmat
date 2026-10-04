@@ -27,7 +27,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if request.arguments.first().is_some_and(|arg| {
-        arg.shape.is_definitely_nonscalar()
+        crate::catalog::inference::known_invalid_text_scalar(arg)
             || !matches!(
                 arg.kind,
                 ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
@@ -62,7 +62,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     for index in (2..request.arguments.len()).step_by(2) {
         let name = &request.arguments[index];
-        if name.shape.is_definitely_nonscalar()
+        if crate::catalog::inference::known_invalid_text_scalar(name)
             || !matches!(
                 name.kind,
                 ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
