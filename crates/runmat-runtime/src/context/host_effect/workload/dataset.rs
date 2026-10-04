@@ -3,7 +3,7 @@
 use runmat_execution::Digest;
 use runmat_types::ValueFact;
 
-/// Full typed value fact plus an exact scalar-control digest. `None` means the
+/// Full typed value fact plus an exact bounded-control digest. `None` means the
 /// input's semantic identity is not proven at this boundary; a finite route
 /// cannot be certified from shape/class alone.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]

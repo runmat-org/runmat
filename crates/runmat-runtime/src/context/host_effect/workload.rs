@@ -123,7 +123,7 @@ struct DatasetHandleFacts<'a> {
 }
 
 impl HostEffectWorkload<'_> {
-    /// An absent scalar digest is not a fabricated reusable identity.
+    /// An absent control digest is not a fabricated reusable identity.
     pub fn identity_complete(self) -> bool {
         match self {
             Self::DatasetHandle { inputs, .. } => {
