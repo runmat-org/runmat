@@ -8,7 +8,7 @@ use runmat_value::{
     ForeignRef, ForeignResourceKey, ForeignResourceRelease, MemmapReceiverAuthority,
     MemmapReceiverState, WeakForeignRef,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use super::format_error;
@@ -64,6 +64,7 @@ impl Issuer {
 struct Registry {
     next_handle: u64,
     records: BTreeMap<u64, Record>,
+    cleanup_registered: HashSet<RuntimeContextLocalId>,
 }
 
 const HOST: &str = "runmat.memmapfile.authority";
@@ -72,6 +73,30 @@ static REGISTRY: OnceLock<Arc<Mutex<Registry>>> = OnceLock::new();
 
 fn registry() -> &'static Arc<Mutex<Registry>> {
     REGISTRY.get_or_init(|| Arc::new(Mutex::new(Registry::default())))
+}
+
+fn retire_session(identity: RuntimeContextLocalId) {
+    let removed = {
+        let mut state = registry()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        state.cleanup_registered.remove(&identity);
+        let handles: Vec<_> = state
+            .records
+            .iter()
+            .filter_map(|(handle, record)| {
+                matches!(&record.issuer, Issuer::Session { identity: owner, .. } if *owner == identity)
+                    .then_some(*handle)
+            })
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|handle| state.records.remove(&handle))
+            .collect::<Vec<_>>()
+    };
+    // Provider-owned resources may run cleanup on drop. Never retain the
+    // registry lock while releasing those owners.
+    drop(removed);
 }
 
 struct Release(Weak<Mutex<Registry>>);
@@ -88,9 +113,11 @@ impl ForeignResourceRelease for Release {
             return;
         }
         if let Some(registry) = self.0.upgrade() {
-            if let Ok(mut state) = registry.lock() {
-                state.records.remove(&key.handle);
-            }
+            let removed = registry
+                .lock()
+                .ok()
+                .and_then(|mut state| state.records.remove(&key.handle));
+            drop(removed);
         }
     }
 }
@@ -135,6 +162,14 @@ pub(super) fn issue(
             issuer,
         },
     );
+    let register_cleanup =
+        runtime.is_some_and(|runtime| state.cleanup_registered.insert(runtime.local_identity()));
+    drop(state);
+    if register_cleanup {
+        let runtime = runtime.expect("session cleanup requires its issuer");
+        let identity = runtime.local_identity();
+        runtime.register_session_resource_cleanup(move || retire_session(identity));
+    }
     Ok(reference)
 }
 
@@ -184,3 +219,7 @@ pub(super) fn resolve(
     }
     Ok(record.backing.clone())
 }
+
+#[cfg(test)]
+#[path = "authority/tests.rs"]
+mod tests;
