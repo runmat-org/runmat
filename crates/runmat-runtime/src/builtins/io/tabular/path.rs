@@ -104,6 +104,13 @@ impl TabularFsPath {
         self.check()?;
         Ok(file)
     }
+
+    pub(super) async fn metadata(&self) -> io::Result<fs::FsMetadata> {
+        self.check()?;
+        let result = self.provider.metadata(&self.path).await;
+        self.check()?;
+        result
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +156,10 @@ mod tests {
         fs::set_current_dir(replacement_directory()).expect("replacement cwd");
         let path = owner.path(PathBuf::from("a.csv")).expect("selected path");
         assert_eq!(path.path(), Path::new(selected_directory()).join("a.csv"));
+        assert_eq!(
+            block_on(path.metadata()).expect("selected metadata").len(),
+            4
+        );
         let mut opened = block_on(path.open_read()).expect("original owner");
         let mut content = Vec::new();
         opened
