@@ -198,7 +198,8 @@ fn measure_physical_recovery(
 ) -> (u64, u64) {
     let mesh = physical_fixture_mesh(&model, mesh_kind);
     let workload = StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps.last().unwrap().step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

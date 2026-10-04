@@ -27,7 +27,8 @@ fn cold_parity(quadratic: bool, damped: bool) {
     let mesh = mesh(quadratic, 1);
     let model = forced_model(&mesh, damped);
     let workload = StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

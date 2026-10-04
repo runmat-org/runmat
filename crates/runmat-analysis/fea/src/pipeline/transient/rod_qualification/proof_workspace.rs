@@ -22,7 +22,8 @@ fn direct_block_workspace_covers_actual_mass_and_newmark_proofs_for_both_orders(
             let mesh = mesh(quadratic, cells);
             let model = model(&mesh, true);
             let workload = StructuralTransientWorkload {
-                schema_version: 1,
+                schema_version: 2,
+                initial_fields: Vec::new(),
                 step_id: model.sequence.steps[0].step_id.clone(),
                 model,
                 backend: ComputeBackend::Cpu,

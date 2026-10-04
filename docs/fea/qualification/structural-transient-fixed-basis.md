@@ -121,3 +121,24 @@ spatial initial-state discrepancy before time integration. It does not remove th
 sample, project an eigenmode, prescribe a different initial field, relax a history
 bound or replace any of the three original failing continuum gates. Full-history
 accuracy and independent temporal convergence remain open.
+
+## Immutable initial displacement and velocity fields
+
+The current draft accepts explicitly closed `InitialFieldBinding` inputs for direct
+and modal transient workloads. Workload/template schema 2 requires the complete
+binding inventory; no missing source becomes an implicit zero state. Shared field
+admission validates exact source content, selected quantity, global frame, canonical
+node inventory and topology before physical assembly. Initial-state realization reads
+original nodal components by canonical index without interpolation or numerical
+recovery. Uniform and signal inputs retain their original realization evidence;
+nonuniform fields carry their immutable reference rather than invented uniform bits.
+
+Canonical workload materialization includes the complete original field closure in
+scope/block inputs. Source residency is checked against the unchanged authored
+ceiling; source identity and cold continuation bind the selected content. These are
+analytical resource reservations, not measured peak memory.
+
+This is an explicit portable-input/API capability. The runtime authored preparation
+adapter still supplies an empty binding inventory and therefore rejects unresolved
+field references; automatic artifact lookup and end-user authored field loading are
+not qualified. Original rod continuum failures remain mandatory and unchanged.

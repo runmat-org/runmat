@@ -69,7 +69,8 @@ pub(super) fn preparation(
     })
     .unwrap();
     let transient = StructuralModalTransientTemplate {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model,
         step_id: transient_step.step_id.clone(),
         backend: ComputeBackend::Cpu,

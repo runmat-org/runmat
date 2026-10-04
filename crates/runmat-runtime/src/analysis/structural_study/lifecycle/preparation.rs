@@ -1,4 +1,6 @@
 use super::*;
+mod errors;
+use errors::{portable_study_contract_error, portable_study_kind_error};
 
 pub(in crate::analysis) fn complete_response_spectrum_modal_options(
     model: &runmat_analysis_core::AnalysisModel,
@@ -129,7 +131,8 @@ pub fn analysis_prepare_structural_study_intent_op(
                 );
                 transient_workload = Some(
                     runmat_analysis_fea::execution::StructuralTransientWorkload {
-                        schema_version: 1,
+                        schema_version: 2,
+                        initial_fields: Vec::new(),
                         model: study.model.clone(),
                         step_id: step.procedure_step.step_id.clone(),
                         backend: step.authored_execution.backend,
@@ -528,7 +531,8 @@ pub(in crate::analysis) fn prepare_structural_modal_transient_template(
 ) -> Result<runmat_analysis_fea::execution::StructuralModalTransientTemplate, OperationErrorEnvelope>
 {
     let template = runmat_analysis_fea::execution::StructuralModalTransientTemplate {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
@@ -719,48 +723,4 @@ fn prepare_structural_frequency_plan(
         &[],
     )
     .map_err(|error| portable_study_contract_error(study, error.to_string()))
-}
-
-fn portable_study_kind_error(
-    study: &super::super::PreparedStudySequence,
-    step: &super::super::PreparedStudyStep,
-) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &study.context,
-        OperationErrorSpec {
-            error_code: "RM.FEA.RUN_STUDY.PORTABLE_FAMILY_UNSUPPORTED",
-            error_type: OperationErrorType::Validation,
-            retryable: false,
-            severity: OperationErrorSeverity::Error,
-        },
-        "portable structural studies require a structural-linear sequence, direct transient or harmonic response, modal extraction, or an authored modal-to-transient sequence",
-        BTreeMap::from([
-            ("study_id".to_string(), study.spec.study_id.clone()),
-            (
-                "step_id".to_string(),
-                step.procedure_step.step_id.as_str().to_string(),
-            ),
-        ]),
-    )
-}
-
-fn portable_study_contract_error(
-    study: &super::super::PreparedStudySequence,
-    message: String,
-) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &study.context,
-        OperationErrorSpec {
-            error_code: "RM.FEA.RUN_STUDY.INVALID_PORTABLE_INTENT",
-            error_type: OperationErrorType::Contract,
-            retryable: false,
-            severity: OperationErrorSeverity::Fatal,
-        },
-        message,
-        BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
-    )
 }

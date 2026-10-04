@@ -20,7 +20,8 @@ fn transient_rod_cold_blocks_and_recovered_history_retain_independent_continuum_
         let mesh = mesh(quadratic, if quadratic { 4 } else { 8 });
         let model = model(&mesh, true);
         let workload = StructuralTransientWorkload {
-            schema_version: 1,
+            schema_version: 2,
+            initial_fields: Vec::new(),
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
             backend: ComputeBackend::Cpu,

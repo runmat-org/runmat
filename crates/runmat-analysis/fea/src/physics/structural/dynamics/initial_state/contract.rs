@@ -85,6 +85,11 @@ pub(crate) enum StructuralInitialStateError {
         initial_condition_id: String,
         artifact_id: String,
     },
+    #[error("structural initial condition `{initial_condition_id}` has invalid field artifact: {detail}")]
+    InvalidFieldArtifact {
+        initial_condition_id: String,
+        detail: String,
+    },
     #[error("structural initial condition `{initial_condition_id}` references missing signal `{signal_id}`")]
     MissingSignal {
         initial_condition_id: String,

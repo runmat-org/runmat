@@ -20,7 +20,7 @@ use crate::{
         StructuralTransientWorkload,
     },
     physics::structural::dynamics::initial_state::{
-        realize as realize_structural_initial_state, RealizedStructuralInitialState,
+        realize_with_fields as realize_structural_initial_state, RealizedStructuralInitialState,
         StructuralInitialConstraintView, StructuralInitialStateRealizationBasis,
     },
     pipeline::electro_thermal::recover_realized_electro_thermal_fields,
@@ -40,6 +40,7 @@ use crate::{
 mod assembly;
 mod constraint_admission;
 mod finalization;
+mod initial_fields;
 mod modal_motion;
 mod motion;
 mod preassembly;
@@ -99,6 +100,7 @@ fn realize_transient_initial_state(
     solver_mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
     motions: &StructuralMotionSet,
     initial_time_s: f64,
+    initial_fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<RealizedStructuralInitialState, FeaRunError> {
     let initial_state_basis = match initial_assembly.structural_formulations.as_slice() {
         [realization]
@@ -146,6 +148,7 @@ fn realize_transient_initial_state(
             direct_prescribed_displacement: initial_assembly.operator.load(),
         },
         execution_step.step_id.as_str(),
+        initial_fields,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))
 }
@@ -299,6 +302,7 @@ pub fn run_transient_block(
         Some(input.solver_mesh),
         &basis.motions,
         basis.schedule.points[0].time_s,
+        &input.workload.initial_fields,
     )?;
     let initial_conditions =
         input
@@ -393,6 +397,16 @@ pub fn run_transient_with_options(
     backend: ComputeBackend,
     options: TransientSolveOptions,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
+    run_transient_with_fields(model, backend, options, &[])
+}
+
+/// Execute dynamics from explicitly bound original nodal displacement/velocity fields.
+pub fn run_transient_with_fields(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: TransientSolveOptions,
+    initial_fields: &[crate::execution::InitialFieldBinding],
+) -> Result<FeaTransientRunResult, FeaRunError> {
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::RegionResolution,
@@ -409,6 +423,12 @@ pub fn run_transient_with_options(
         schedule,
         step_boundaries,
     } = prepare_transient_preassembly(model, (&options).into())?;
+    initial_fields::validate(
+        &active_model,
+        &execution_step,
+        options.solver_mesh.as_ref(),
+        initial_fields,
+    )?;
     let execution_step = &execution_step;
     let start_time_s = schedule.points[0].time_s;
     let end_time_s = schedule
@@ -459,6 +479,7 @@ pub fn run_transient_with_options(
         options.solver_mesh.as_ref(),
         &structural_motions,
         start_time_s,
+        initial_fields,
     )?;
     let initial_state_evidence = initial_state.evidence.clone();
     emit_phase(

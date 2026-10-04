@@ -16,10 +16,8 @@
   "crates/runmat-analysis/fea/src/execution/transient_result.rs": 833,
   "crates/runmat-analysis/core/src/study/sequence.rs": 726,
   "crates/runmat-analysis/fea/src/planning/resource/post_process.rs": 697,
-  "crates/runmat-analysis/fea/src/execution/transient_workload.rs": 787,
-  "crates/runmat-runtime/src/analysis/structural_study/lifecycle/preparation.rs": 766,
+  "crates/runmat-runtime/src/analysis/structural_study/lifecycle/preparation.rs": 726,
   "crates/runmat-analysis/fea/src/constraints/result.rs": 763,
-  "crates/runmat-analysis/fea/src/execution/study_workloads.rs": 746,
   "crates/runmat-analysis/fea/src/pipeline/structural_frequency.rs": 691,
   "crates/runmat-analysis/fea/src/constraints/algebra.rs": 738
 }

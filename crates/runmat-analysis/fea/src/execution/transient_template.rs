@@ -12,7 +12,7 @@ use super::{
     StructuralTransientSolverPlan, StructuralTransientWorkload,
 };
 
-const TEMPLATE_PREFIX: &[u8] = b"runmat-structural-modal-transient-template/v1\0";
+const TEMPLATE_PREFIX: &[u8] = b"runmat-structural-modal-transient-template/v2\0";
 const TEMPLATE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
@@ -25,6 +25,7 @@ const TEMPLATE_LIMITS: CanonicalLimits =
 #[serde(deny_unknown_fields)]
 pub struct StructuralModalTransientTemplate {
     pub schema_version: u16,
+    pub initial_fields: Vec<super::InitialFieldBinding>,
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
@@ -35,7 +36,7 @@ pub struct StructuralModalTransientTemplate {
 
 impl StructuralModalTransientTemplate {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.backend != ComputeBackend::Cpu
             || !self.residual_target.is_finite()
             || self.residual_target <= 0.0
@@ -48,6 +49,13 @@ impl StructuralModalTransientTemplate {
         validate_model_sequence(&self.model)
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let step = self.procedure_step()?;
+        crate::planning::resource::require_initial_field_ceiling(
+            &self.initial_fields,
+            TEMPLATE_LIMITS,
+            step.accuracy.resources.maximum_resident_bytes,
+        )
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        super::validate_initial_field_declarations(&self.model, step, &self.initial_fields)?;
         if step.procedure != AnalysisProcedure::TransientResponse
             || step.solution_space != SolutionSpace::ModalReduced
             || step.family != PhysicsFamily::Structural
@@ -96,6 +104,7 @@ impl StructuralModalTransientTemplate {
         self.validate()?;
         let workload = StructuralTransientWorkload {
             schema_version: self.schema_version,
+            initial_fields: self.initial_fields,
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,

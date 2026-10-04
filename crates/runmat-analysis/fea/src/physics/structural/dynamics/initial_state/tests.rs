@@ -586,3 +586,5 @@ fn signal_references_fail_closed_for_missing_and_incompatible_quantities() {
     ));
 }
 mod constraints;
+
+mod fields;

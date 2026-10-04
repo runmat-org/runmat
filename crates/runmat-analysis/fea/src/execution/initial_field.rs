@@ -13,6 +13,11 @@ use crate::results::field::{
 };
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
+mod selection;
+pub(crate) use selection::{
+    validate_declarations as validate_initial_field_declarations,
+    validate_selection as validate_initial_field_selection,
+};
 
 /// A closed source artifact, not permission to execute a consuming initial condition.
 /// The consumer must additionally admit its quantity, frame and target topology.

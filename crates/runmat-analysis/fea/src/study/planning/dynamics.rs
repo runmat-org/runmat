@@ -62,7 +62,8 @@ fn plan_direct_transient(
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     let (interval_count, block_plan) = transient_schedule(step, policy)?;
     let workload = StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
@@ -159,7 +160,8 @@ fn plan_heterogeneous(
                 let (interval_count, block_plan) = transient_schedule(step, policy)?;
                 StructuralStepWorkload::ModalTransient {
                     template: Box::new(StructuralModalTransientTemplate {
-                        schema_version: 1,
+                        schema_version: 2,
+                        initial_fields: Vec::new(),
                         model: study.model.clone(),
                         step_id: step.step_id.clone(),
                         backend: policy.backend,

@@ -1,7 +1,6 @@
 //! Binding selection and borrowed nodal values; no numerical field fabrication.
 use runmat_analysis_core::{
-    AnalysisModel, InitialCondition, InitialConditionValue, InitialValue, ProcedureStep,
-    Temperature,
+    AnalysisModel, InitialConditionValue, InitialValue, ProcedureStep, Temperature,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -14,37 +13,14 @@ pub(crate) fn validate_selected(
     mesh: &SolverMeshArtifact,
     fields: &[InitialFieldBinding],
 ) -> Result<(), FeaRunError> {
-    let invalid =
-        |message: &str| FeaRunError::InvalidModel(format!("thermal initial fields: {message}"));
-    for (index, binding) in fields.iter().enumerate() {
-        if fields[..index]
-            .iter()
-            .any(|other| other.reference() == binding.reference())
-        {
-            return Err(invalid("duplicate binding"));
-        }
-        if !model.initial_conditions.iter().any(|condition| {
-            condition.applies_to_step(step)
-                && matches!(condition,
-                InitialCondition::Temperature(value) if matches!(&value.value,
-                    InitialValue::FieldArtifact(reference) if reference == binding.reference()))
-        }) {
-            return Err(invalid(
-                "binding is not selected by the consuming temperature step",
-            ));
-        }
-    }
-    let topology = Digest::from_bytes(*mesh.canonical_digest.bytes());
-    for condition in model
-        .initial_conditions
-        .iter()
-        .filter(|condition| condition.applies_to_step(step))
-    {
-        if let InitialCondition::Temperature(value) = condition {
-            values(model, value, topology, mesh.topology.nodes.len(), fields)?;
-        }
-    }
-    Ok(())
+    crate::execution::validate_initial_field_selection(
+        model,
+        step,
+        Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        mesh.topology.nodes.len(),
+        fields,
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))
 }
 
 pub(crate) fn values<'a>(

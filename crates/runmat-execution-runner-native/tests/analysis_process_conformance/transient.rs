@@ -65,7 +65,8 @@ pub(super) fn preparation_with_encryption(
 ) -> StructuralTransientSequencePlan {
     let (model, mesh) = structural_transient_fixture();
     let workload = StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

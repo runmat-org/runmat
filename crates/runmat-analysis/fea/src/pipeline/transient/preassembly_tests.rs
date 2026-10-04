@@ -8,7 +8,8 @@ fn direct_scope_case() -> (
     let model = fixture_model(FixtureId::StructuralTransientTet4Reference);
     let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
     let workload = crate::execution::StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model,
         step_id: runmat_analysis_core::ProcedureStepId("transient".into()),
         backend: ComputeBackend::Cpu,

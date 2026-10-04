@@ -1,5 +1,6 @@
 mod assignment;
 mod contract;
+mod fields;
 mod reconcile;
 mod sampling;
 mod target;
@@ -28,6 +29,7 @@ pub(crate) use contract::{
 };
 use reconcile::{reconcile_constraints, ConstraintReconciliationEvidence};
 
+#[cfg(test)]
 pub(crate) fn realize(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
@@ -35,6 +37,26 @@ pub(crate) fn realize(
     basis: StructuralInitialStateRealizationBasis,
     constraints: StructuralInitialConstraintView<'_>,
     procedure_step_id: &str,
+) -> Result<RealizedStructuralInitialState, StructuralInitialStateError> {
+    realize_with_fields(
+        model,
+        mesh,
+        layout,
+        basis,
+        constraints,
+        procedure_step_id,
+        &[],
+    )
+}
+
+pub(crate) fn realize_with_fields(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    layout: &StructuralDofLayout,
+    basis: StructuralInitialStateRealizationBasis,
+    constraints: StructuralInitialConstraintView<'_>,
+    procedure_step_id: &str,
+    fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<RealizedStructuralInitialState, StructuralInitialStateError> {
     let step = unique_step(model, procedure_step_id)?;
     let applicable_conditions = model
@@ -115,6 +137,18 @@ pub(crate) fn realize(
         _ => topology.identity,
     };
 
+    if !fields.is_empty() {
+        crate::execution::validate_initial_field_selection(
+            model,
+            step,
+            topology_identity.discretization_digest(),
+            topology.nodes.len(),
+            fields,
+        )
+        .map_err(|error| StructuralInitialStateError::InvalidTopology {
+            detail: error.to_string(),
+        })?;
+    }
     let mut displacement = vec![None; layout.total_dof_count()];
     let mut velocity = vec![None; layout.total_dof_count()];
     let mut applied_conditions = Vec::new();
@@ -124,6 +158,8 @@ pub(crate) fn realize(
         structural,
         topology: &topology,
         layout,
+        fields,
+        topology_digest: topology_identity.discretization_digest(),
     };
     for condition in applicable_conditions {
         match condition {

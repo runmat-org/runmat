@@ -358,7 +358,8 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         )],
     );
     StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

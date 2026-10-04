@@ -124,6 +124,15 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         CanonicalStructuralConstraintPlan::compile_for_model(&prepared.active_model, Some(mesh))
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let facts = derive_structural_resource_facts(&prepared.active_model, Some(mesh), &constraints)?;
+    crate::execution::validate_initial_field_selection(
+        &prepared.active_model,
+        &prepared.execution_step,
+        facts.topology_digest,
+        usize::try_from(facts.topology.nodes.0)
+            .map_err(|_| ResourcePlanningError::Overflow("initial-field node count"))?,
+        &workload.initial_fields,
+    )
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let dofs = facts.sparse.rows.0;
     let operator_nonzeros = facts
         .sparse

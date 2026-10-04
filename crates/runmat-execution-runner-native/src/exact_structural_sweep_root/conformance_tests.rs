@@ -1301,7 +1301,8 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         )],
     );
     StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -1429,7 +1430,8 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
     })
     .unwrap();
     let transient = StructuralModalTransientTemplate {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,

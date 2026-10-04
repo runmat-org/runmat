@@ -246,7 +246,8 @@ fn transient_workload(
 ) -> crate::execution::StructuralTransientWorkload {
     let step = &model.sequence.steps[0];
     crate::execution::StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model: model.clone(),
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
@@ -349,7 +350,8 @@ fn modal_support_motion_workloads(
     )
     .unwrap();
     let direct = crate::execution::StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model: direct_model,
         step_id: ProcedureStepId("transient".into()),
         backend: ComputeBackend::Cpu,
@@ -359,7 +361,8 @@ fn modal_support_motion_workloads(
         residual_target: 1.0e-11,
     };
     let reduced = crate::execution::StructuralTransientWorkload {
-        schema_version: 1,
+        schema_version: 2,
+        initial_fields: Vec::new(),
         model: model.clone(),
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,

@@ -44,6 +44,8 @@ pub(super) struct RealizationContext<'a> {
     pub structural: &'a StructuralModel,
     pub topology: &'a CanonicalStructuralNodeSpace,
     pub layout: &'a StructuralDofLayout,
+    pub fields: &'a [crate::execution::InitialFieldBinding],
+    pub topology_digest: runmat_execution::Digest,
 }
 
 #[derive(Clone, Copy)]
@@ -67,7 +69,17 @@ pub(super) fn apply_condition<Q>(
             frame: condition.frame.context_label(),
         });
     }
-    let (components, source) = realize_value(context.model, condition, typed_signal, component)?;
+    let value = super::fields::field_values(context, condition)?;
+    let uniform = if value.is_none() {
+        Some(realize_value(
+            context.model,
+            condition,
+            typed_signal,
+            component,
+        )?)
+    } else {
+        None
+    };
     let nodes = target_nodes(
         context.mesh,
         context.structural,
@@ -86,7 +98,10 @@ pub(super) fn apply_condition<Q>(
             assign(
                 assignments,
                 row,
-                components[component_index],
+                match &value {
+                    Some(field) => field.values()[node * 3 + component_index],
+                    None => uniform.as_ref().unwrap().0[component_index],
+                },
                 &condition.initial_condition_id,
             )?;
         }
@@ -99,8 +114,13 @@ pub(super) fn apply_condition<Q>(
             .iter()
             .map(|&node| context.topology.nodes[node].identity)
             .collect(),
-        source,
-        realized_component_bits: components.map(f64::to_bits),
+        source: match &value {
+            Some(field) => super::StructuralInitialValueSourceEvidence::FieldArtifact {
+                reference: field.binding().reference().clone(),
+            },
+            None => uniform.as_ref().unwrap().1.clone(),
+        },
+        realized_component_bits: uniform.map(|(components, _)| components.map(f64::to_bits)),
     });
     Ok(())
 }

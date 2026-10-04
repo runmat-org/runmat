@@ -64,7 +64,9 @@ pub use pipeline::structural_response_spectrum::{
     PreparedStructuralModalResponseSpectrum,
 };
 pub use pipeline::thermal::run_thermal_with_options;
-pub use pipeline::transient::{run_transient, run_transient_with_options};
+pub use pipeline::transient::{
+    run_transient, run_transient_with_fields, run_transient_with_options,
+};
 pub use progress::{
     check_cancelled as check_fea_cancelled, emit_phase as emit_fea_progress_phase,
     emit_progress as emit_fea_progress, is_cancelled as is_fea_cancelled,

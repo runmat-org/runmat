@@ -94,8 +94,8 @@ fn model(mesh: &SolverMeshArtifact, damped: bool) -> AnalysisModel {
             kind: FixtureExcitationKind::Traction([0.0; 3]),
         }],
     );
-    // Per-node typed initial values are admitted today. This does not claim support for the
-    // currently unmaterialized InitialValue::FieldArtifact path or generated spatial inputs.
+    // This original continuum fixture retains per-node typed inputs. Separate field-input
+    // tests verify immutable nodal transport without replacing these accuracy gates.
     model.initial_conditions = mesh
         .topology
         .nodes
@@ -139,3 +139,5 @@ fn run(mesh: &SolverMeshArtifact, damped: bool, intervals: usize) -> FeaTransien
     )
     .unwrap()
 }
+
+mod field_inputs;

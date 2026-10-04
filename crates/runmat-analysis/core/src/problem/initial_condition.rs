@@ -25,6 +25,26 @@ pub enum InitialCondition {
 }
 
 impl InitialCondition {
+    pub fn field_artifact_ref(&self) -> Option<&InitialFieldArtifactRef> {
+        fn field<Q>(value: &InitialConditionValue<Q>) -> Option<&InitialFieldArtifactRef> {
+            match &value.value {
+                InitialValue::FieldArtifact(reference) => Some(reference),
+                _ => None,
+            }
+        }
+        match self {
+            Self::Displacement(value) => field(value),
+            Self::Velocity(value) => field(value),
+            Self::AngularVelocity(value) => field(value),
+            Self::Temperature(value) => field(value),
+            Self::ElectricPotential(value) => field(value),
+            Self::MagneticVectorPotential(value) => field(value),
+            Self::AcousticPressure(value) => field(value),
+            Self::FluidPressure(value) => field(value),
+            Self::FluidVelocity(value) => field(value),
+        }
+    }
+
     pub fn initial_condition_id(&self) -> &str {
         match self {
             Self::Displacement(value) => &value.initial_condition_id,

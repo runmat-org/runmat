@@ -102,6 +102,7 @@ pub fn recover_completed_transient_run(
         Some(input.solver_mesh),
         &basis.motions,
         basis.schedule.points[0].time_s,
+        &input.workload.initial_fields,
     )?;
     let initial_sample =
         input.result.samples().first().ok_or_else(|| {
