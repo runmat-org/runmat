@@ -6,13 +6,13 @@ use std::process::Command;
 use std::sync::Arc;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinExtensionMode,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
+    BuiltinIntegerComputationDomain, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
+    BuiltinIntegerOverloadKind, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, MEMMAPFILE_CLASS, MEMMAPFILE_DESCRIPTOR,
+    MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+    MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
@@ -126,77 +126,6 @@ macro_rules! simple_descriptor {
     };
 }
 
-const MEMMAPFILE_INTEGER_CONTROLS_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "memmapfile-integer-property-controls",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "typed-integer Writable, Offset, Repeat, or Format-shape property values for memmapfile are a RunMat extension; the public MATLAB page specifies logical/double controls and does not establish typed-integer Format dimensions",
-        error_identifier: Some("RunMat:compatibility:MemmapfileIntegerControlsExtension"),
-    };
-
-const MEMMAPFILE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "memmapfile-explicit-gpu-argument",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "passing an explicit gpuArray argument to host-only memmapfile is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:MemmapfileExplicitGpuExtension"),
-};
-
-pub const MEMMAPFILE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
-    MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
-];
-
-const MEMMAPFILE_INTEGER_SHAPE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Format.shape",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat permits a typed-integer shape vector inside a Format cell and parses it from authoritative storage as positive platform dimensions without binary64 conversion; current public evidence does not establish that typed form.",
-    }];
-
-const MEMMAPFILE_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Writable, Offset, or Repeat",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat accepts exact typed-integer property controls, but compatibility mode retains the public logical/double property types.",
-    }];
-
-pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "m.Data = memmapfile(..., 'Format', integer_typename)",
-        inputs: &[],
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The documented int8/int16/int32/int64/uint8/uint16/uint32/uint64 formats decode file bytes directly into matching integer classes without a numeric cast.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "m = memmapfile(..., 'Format', {type, integer_shape, field})",
-        inputs: &MEMMAPFILE_INTEGER_SHAPE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "This compatibility-gated typed-shape extension checks dimensions exactly before byte-count arithmetic; the mapped Data class is selected independently by the textual type name.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "m = memmapfile(..., integer_property_control)",
-        inputs: &MEMMAPFILE_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access.",
-    },
-];
 const SYSTEM_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "command",
     ty: BuiltinParamType::StringScalar,
@@ -284,14 +213,6 @@ simple_descriptor!(
     RESTOREDEFAULTPATH_DESCRIPTOR,
     "path = restoredefaultpath()",
     &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    MEMMAPFILE_SIGNATURES,
-    MEMMAPFILE_DESCRIPTOR,
-    "m = memmapfile(filename, Name, Value)",
-    &INPUTS_THREE,
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
@@ -672,17 +593,15 @@ async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "memmapfile",
-    category = "io/repl_fs",
-    summary = "Map a file into a MATLAB-compatible memmapfile object.",
-    keywords = "memmapfile,memory map,file,binary",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::io::repl_fs::compat::MEMMAPFILE_DESCRIPTOR),
-    extensions(crate::builtins::io::repl_fs::compat::MEMMAPFILE_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::MEMMAPFILE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
 async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    output_count::validate_fixed_outputs(
+        &MEMMAPFILE_DESCRIPTOR,
+        &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
+        "memmapfile",
+    )?;
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -752,7 +671,7 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let data_value = format.decode(&bytes[offset..], repeat)?;
-    let mut object = ObjectInstance::new("memmapfile".to_string());
+    let mut object = ObjectInstance::new(MEMMAPFILE_CLASS.owned());
     object.properties.insert(
         "Filename".to_string(),
         char_value(&path_to_string(&input.path)),
@@ -983,6 +902,7 @@ mod tests {
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
     use runmat_builtins::{
         GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
+        MEMMAPFILE_INTEGER_CAPABILITIES,
     };
     use runmat_value::{IntegerStorage, Tensor};
 
@@ -1503,6 +1423,19 @@ mod tests {
             MEMMAPFILE_INTEGER_CONTROLS_EXTENSION.error_identifier
         );
         drop(strict);
+    }
+
+    #[test]
+    fn memmapfile_rejects_excess_requested_outputs_before_file_access() {
+        let _requested = output_count::push_output_count(Some(2));
+        let error = run(memmapfile_builtin(vec![Value::String(
+            "definitely-missing-output-count.bin".into(),
+        )]))
+        .expect_err("fixed single result");
+        assert_eq!(
+            error.identifier(),
+            MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
     }
 
     #[test]
