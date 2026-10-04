@@ -9,7 +9,8 @@ use runmat_builtins::{
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, RehashMode, FILEATTRIB_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_CLASS,
+    BuiltinSignatureDescriptor, FileAttributeControl, FileAttributeControlError, RehashMode,
+    FILEATTRIB_ERROR_TOO_MANY_OUTPUTS, FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION, MEMMAPFILE_CLASS,
     MEMMAPFILE_DESCRIPTOR, MEMMAPFILE_ERROR_INVALID_CALL, MEMMAPFILE_ERROR_INVALID_CONTROL,
     MEMMAPFILE_ERROR_INVALID_FILENAME, MEMMAPFILE_ERROR_READ_FAILED,
     MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
@@ -335,18 +336,18 @@ fn parse_fileattrib_flags(flags: &[Value]) -> BuiltinResult<Option<bool>> {
     let mut readonly = None;
     for flag_value in flags {
         let flag = scalar_text(flag_value, "fileattrib", "attribute")?;
-        match flag.to_ascii_lowercase().as_str() {
-            "+w" | "w" => readonly = Some(false),
-            "-w" => readonly = Some(true),
-            "+r" | "r" | "-r" => {
-                return Err(build_runtime_error(
-                    "fileattrib: read permission changes require provider permission support",
-                )
-                .with_builtin("fileattrib")
-                .with_identifier("RunMat:fileattrib:UnsupportedPermission")
-                .build());
+        match FileAttributeControl::parse(&flag) {
+            Ok(FileAttributeControl::SetReadOnly(value)) => readonly = Some(value),
+            Err(FileAttributeControlError::ReadPermissionUnavailable) => {
+                let mut failure =
+                    build_runtime_error(FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION.message)
+                        .with_builtin("fileattrib");
+                if let Some(identifier) = FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION.identifier {
+                    failure = failure.with_identifier(identifier);
+                }
+                return Err(failure.build());
             }
-            other => {
+            Err(FileAttributeControlError::UnsupportedFlag(other)) => {
                 return Err(compat_error(
                     "fileattrib",
                     format!("fileattrib: unsupported attribute flag '{other}'"),

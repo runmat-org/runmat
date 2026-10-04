@@ -19,7 +19,7 @@ pub const GETPREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
             IoReplFsInferenceRule::Preference(PreferenceInferenceRule::Read),
         )),
-        compatibility: BuiltinCompatibility::RunMat,
+        compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,

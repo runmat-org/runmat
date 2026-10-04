@@ -16,6 +16,25 @@ fn preference_context() -> RuntimeContext {
 }
 
 #[test]
+fn preference_base_forms_use_matlab_identity_with_explicit_runmat_extensions() {
+    for name in ["getpref", "ispref", "setpref"] {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(name).expect("catalog entry");
+        assert_eq!(
+            entry.contract.compatibility,
+            runmat_builtins::BuiltinCompatibility::Matlab
+        );
+    }
+    assert_eq!(
+        runmat_builtins::GETPREF_GROUP_QUERY_EXTENSION.mode,
+        runmat_builtins::BuiltinExtensionMode::RunMatOnly
+    );
+    assert_eq!(
+        runmat_builtins::SETPREF_STATUS_EXTENSION.mode,
+        runmat_builtins::BuiltinExtensionMode::RunMatOnly
+    );
+}
+
+#[test]
 fn ispref_rejects_integer_and_resident_controls_without_gather() {
     let runtime = preference_context();
     for integer in [

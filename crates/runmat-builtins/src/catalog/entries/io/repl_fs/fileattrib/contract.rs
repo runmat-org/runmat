@@ -49,13 +49,37 @@ pub const FILEATTRIB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[FILEATTRIB_ERROR_TOO_MANY_OUTPUTS],
+    errors: &[
+        FILEATTRIB_ERROR_TOO_MANY_OUTPUTS,
+        FILEATTRIB_ERROR_INVALID_CONTROL,
+        FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION,
+        FILEATTRIB_ERROR_PROVIDER,
+    ],
 };
 pub const FILEATTRIB_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FILEATTRIB.TOO_MANY_OUTPUTS",
     identifier: Some("RunMat:fileattrib:TooManyOutputs"),
     when: "More than two outputs are requested.",
     message: "fileattrib: too many output arguments",
+};
+pub const FILEATTRIB_ERROR_INVALID_CONTROL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEATTRIB.INVALID_CONTROL",
+    identifier: None,
+    when: "The path or an attribute flag has an unsupported host type, geometry, or spelling.",
+    message: "fileattrib: invalid path or attribute flag",
+};
+pub const FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.FILEATTRIB.UNSUPPORTED_PERMISSION",
+        identifier: Some("RunMat:fileattrib:UnsupportedPermission"),
+        when: "A read-permission mutation is requested without provider permission support.",
+        message: "fileattrib: read permission changes require provider permission support",
+    };
+pub const FILEATTRIB_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEATTRIB.PROVIDER",
+    identifier: None,
+    when: "The selected filesystem owner cannot resolve, mutate, or authenticate the path.",
+    message: "fileattrib: filesystem operation failed",
 };
 pub const FILEATTRIB_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {

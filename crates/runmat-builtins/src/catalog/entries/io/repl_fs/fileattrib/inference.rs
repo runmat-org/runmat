@@ -29,19 +29,22 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     for index in 1..request.arguments.len() {
         if let Some(flag) = request.literals.literal_string_at(index) {
-            let normalized = flag.to_ascii_lowercase();
-            if matches!(normalized.as_str(), "+r" | "r" | "-r") {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-FILEATTRIB-PERMISSION-UNAVAILABLE",
-                    "read permission changes require filesystem provider permission support",
-                    index,
-                ));
-            } else if !matches!(normalized.as_str(), "+w" | "w" | "-w") {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-FILEATTRIB-FLAG",
-                    "unsupported fileattrib attribute flag",
-                    index,
-                ));
+            match super::FileAttributeControl::parse(&flag) {
+                Ok(_) => {}
+                Err(super::FileAttributeControlError::ReadPermissionUnavailable) => {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FILEATTRIB-PERMISSION-UNAVAILABLE",
+                        "read permission changes require filesystem provider permission support",
+                        index,
+                    ));
+                }
+                Err(super::FileAttributeControlError::UnsupportedFlag(_)) => {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-FILEATTRIB-FLAG",
+                        "unsupported fileattrib attribute flag",
+                        index,
+                    ));
+                }
             }
         }
     }
