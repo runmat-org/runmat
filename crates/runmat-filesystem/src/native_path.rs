@@ -1,17 +1,10 @@
 //! Provider-issued direct OS-path authority for native libraries that cannot
 //! consume a [`crate::FileHandle`]. This is not a memory-resource certificate.
 
-use crate::{current_provider_with_current_dir, FsProvider};
+use crate::{current_provider_with_current_dir, FsProvider, NativePathIntent};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NativePathIntent {
-    Read,
-    /// The consumer may open an existing file for mutation or create it.
-    ReadWriteCreate,
-}
 
 /// Provider-owned guard for an exported native path. While retained, the
 /// provider must keep the mapping and permissions for the issued path/intent

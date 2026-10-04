@@ -12,6 +12,7 @@ mod dialog;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_path;
+mod native_path_intent;
 mod resource;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -28,8 +29,9 @@ pub use memory::MemoryFsProvider;
 pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_path::{
-    capture_native_path, CapturedNativePath, NativePathAuthority, NativePathGrant, NativePathIntent,
+    capture_native_path, CapturedNativePath, NativePathAuthority, NativePathGrant,
 };
+pub use native_path_intent::NativePathIntent;
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
