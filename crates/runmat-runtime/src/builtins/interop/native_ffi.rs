@@ -225,14 +225,7 @@ async fn invoke_native(
 
 #[runtime_builtin(
     name = "loadlibrary",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Load a C shared library and prepare its declared interface.",
-    keywords = "loadlibrary,shared library,c,ffi,native",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::interop::native_ffi::LOAD_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -340,14 +333,7 @@ async fn calllib_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "unloadlibrary",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Unload a named C shared library from the current session.",
-    keywords = "unloadlibrary,shared library,c,ffi,native",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::interop::native_ffi::ONE_TEXT_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn unloadlibrary_builtin(alias: Value) -> BuiltinResult<Value> {
