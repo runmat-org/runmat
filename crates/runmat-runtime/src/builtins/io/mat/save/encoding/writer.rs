@@ -77,7 +77,12 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             values, logical, ..
         } => (
             array.class.class_code() | if *logical { FLAG_LOGICAL } else { 0 },
-            values.len() as u32,
+            u32::try_from(values.len()).map_err(|_| {
+                save_error_with(
+                    &SAVE_ERROR_IO,
+                    "save: sparse value count exceeds MAT-file limits",
+                )
+            })?,
         ),
         _ => (array.class.class_code(), 0u32),
     };
@@ -85,16 +90,35 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
     let mut flags = Vec::with_capacity(8);
     flags.extend_from_slice(&flags0.to_le_bytes());
     flags.extend_from_slice(&flags1.to_le_bytes());
-    write_subelement(&mut buf, MI_UINT32, &flags);
+    write_subelement(&mut buf, MI_UINT32, &flags)?;
 
-    let mut dims_bytes = Vec::with_capacity(array.dims.len() * 4);
+    let dims_len = array.dims.len().checked_mul(4).ok_or_else(|| {
+        save_error_with(
+            &SAVE_ERROR_IO,
+            "save: MAT dimensions exceed platform limits",
+        )
+    })?;
+    let mut dims_bytes = Vec::new();
+    dims_bytes.try_reserve_exact(dims_len).map_err(|error| {
+        save_error_with_source(
+            &SAVE_ERROR_IO,
+            "save: MAT dimensions cannot be allocated",
+            error,
+        )
+    })?;
     for &dim in &array.dims {
-        dims_bytes.extend_from_slice(&((dim as i32).max(0)).to_le_bytes());
+        let dim = i32::try_from(dim).map_err(|_| {
+            save_error_with(
+                &SAVE_ERROR_IO,
+                "save: dimension exceeds MAT-file int32 range",
+            )
+        })?;
+        dims_bytes.extend_from_slice(&dim.to_le_bytes());
     }
-    write_subelement(&mut buf, MI_INT32, &dims_bytes);
+    write_subelement(&mut buf, MI_INT32, &dims_bytes)?;
 
     let name_bytes = name.unwrap_or("").as_bytes();
-    write_subelement(&mut buf, MI_INT8, name_bytes);
+    write_subelement(&mut buf, MI_INT8, name_bytes)?;
 
     match &array.data {
         MatData::Numeric { real, imag } => {
@@ -105,7 +129,7 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
                 ));
             }
             let (data_type, real_bytes) = encode_numeric_storage(real)?;
-            write_subelement(&mut buf, data_type, &real_bytes);
+            write_subelement(&mut buf, data_type, &real_bytes)?;
             if let Some(imag) = imag {
                 if imag.numeric_dtype() != real.numeric_dtype() || imag.len() != real.len() {
                     return Err(save_error_with(
@@ -114,23 +138,23 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
                     ));
                 }
                 let (imag_type, imag_bytes) = encode_numeric_storage(imag)?;
-                write_subelement(&mut buf, imag_type, &imag_bytes);
+                write_subelement(&mut buf, imag_type, &imag_bytes)?;
             }
         }
         MatData::Logical { data } => {
-            write_subelement(&mut buf, MI_UINT8, data);
+            write_subelement(&mut buf, MI_UINT8, data)?;
         }
         MatData::Char { data } => {
             let mut bytes = Vec::with_capacity(data.len() * 2);
             for code in data {
                 bytes.extend_from_slice(&code.to_le_bytes());
             }
-            write_subelement(&mut buf, MI_UINT16, &bytes);
+            write_subelement(&mut buf, MI_UINT16, &bytes)?;
         }
         MatData::Cell { elements } => {
             for elem in elements {
                 let elem_bytes = build_matrix_bytes(elem, None)?;
-                write_subelement(&mut buf, MI_MATRIX, &elem_bytes);
+                write_subelement(&mut buf, MI_MATRIX, &elem_bytes)?;
             }
         }
         MatData::Struct {
@@ -143,9 +167,28 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
                 .max()
                 .unwrap_or(0)
                 .max(1);
-            let len_bytes = (max_len as i32).to_le_bytes();
-            write_subelement(&mut buf, MI_INT32, &len_bytes);
-            let mut names_bytes = Vec::with_capacity(max_len * field_names.len());
+            let field_width = i32::try_from(max_len).map_err(|_| {
+                save_error_with(
+                    &SAVE_ERROR_IO,
+                    "save: MAT field name width exceeds int32 range",
+                )
+            })?;
+            let len_bytes = field_width.to_le_bytes();
+            write_subelement(&mut buf, MI_INT32, &len_bytes)?;
+            let names_len = max_len.checked_mul(field_names.len()).ok_or_else(|| {
+                save_error_with(
+                    &SAVE_ERROR_IO,
+                    "save: MAT field name table exceeds platform limits",
+                )
+            })?;
+            let mut names_bytes = Vec::new();
+            names_bytes.try_reserve_exact(names_len).map_err(|error| {
+                save_error_with_source(
+                    &SAVE_ERROR_IO,
+                    "save: MAT field names cannot be allocated",
+                    error,
+                )
+            })?;
             for name in field_names {
                 let bytes = name.as_bytes();
                 for i in 0..max_len {
@@ -153,10 +196,10 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
                     names_bytes.push(b);
                 }
             }
-            write_subelement(&mut buf, MI_INT8, &names_bytes);
+            write_subelement(&mut buf, MI_INT8, &names_bytes)?;
             for value in field_values {
                 let value_bytes = build_matrix_bytes(value, None)?;
-                write_subelement(&mut buf, MI_MATRIX, &value_bytes);
+                write_subelement(&mut buf, MI_MATRIX, &value_bytes)?;
             }
         }
         MatData::Sparse {
@@ -166,11 +209,11 @@ fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec
             ..
         } => {
             let ir_bytes = encode_usize_i32_payload(row_indices, "sparse row index")?;
-            write_subelement(&mut buf, MI_INT32, &ir_bytes);
+            write_subelement(&mut buf, MI_INT32, &ir_bytes)?;
             let jc_bytes = encode_usize_i32_payload(col_ptrs, "sparse column pointer")?;
-            write_subelement(&mut buf, MI_INT32, &jc_bytes);
+            write_subelement(&mut buf, MI_INT32, &jc_bytes)?;
             let (value_type, value_bytes) = encode_numeric_storage(values)?;
-            write_subelement(&mut buf, value_type, &value_bytes);
+            write_subelement(&mut buf, value_type, &value_bytes)?;
         }
     }
 
@@ -258,12 +301,50 @@ fn write_tagged<W: Write>(writer: &mut W, data_type: u32, data: &[u8]) -> Builti
     Ok(())
 }
 
-fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) {
-    buf.extend_from_slice(&data_type.to_le_bytes());
-    buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    buf.extend_from_slice(data);
+fn write_subelement(buf: &mut Vec<u8>, data_type: u32, data: &[u8]) -> BuiltinResult<()> {
+    let length = u32::try_from(data.len()).map_err(|_| {
+        save_error_with(
+            &SAVE_ERROR_IO,
+            "save: MAT subelement exceeds its uint32 length",
+        )
+    })?;
     let padding = (8 - (data.len() % 8)) % 8;
+    let additional = 8usize
+        .checked_add(data.len())
+        .and_then(|size| size.checked_add(padding))
+        .ok_or_else(|| save_error_with(&SAVE_ERROR_IO, "save: MAT bytes exceed platform limits"))?;
+    buf.try_reserve(additional).map_err(|error| {
+        save_error_with_source(&SAVE_ERROR_IO, "save: MAT bytes cannot be allocated", error)
+    })?;
+    buf.extend_from_slice(&data_type.to_le_bytes());
+    buf.extend_from_slice(&length.to_le_bytes());
+    buf.extend_from_slice(data);
     if padding != 0 {
         buf.extend(std::iter::repeat_n(0u8, padding));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::super::format::MatClass;
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn a_large_dimension_rejects_instead_of_wrapping_its_mat_tag() {
+        let array = MatArray {
+            class: MatClass::Double,
+            dims: vec![i32::MAX as usize + 1, 1],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(Vec::new()),
+                imag: None,
+            },
+        };
+        let error = build_matrix_bytes(&array, Some("x"))
+            .err()
+            .expect("MAT dimensions are signed 32-bit");
+        assert_eq!(error.identifier(), Some("RunMat:save:Io"));
+        assert!(error.message().contains("int32 range"));
     }
 }
