@@ -32,7 +32,7 @@ pub const SETDATATYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: ERRORS,
 };
-const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "dimensions", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Current runtime accepts exact scalar integer dimensions and integral-double dimensions; both are checked positive and converted to usize." }];
+const INTEGER_INPUTS: &[BuiltinIntegerInputCapability] = &[BuiltinIntegerInputCapability { name: "dimensions", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The admitted public form accepts exact scalar integer dimensions and integral-double dimensions; both are checked positive and converted to usize." }];
 const INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] = &[BuiltinIntegerCapabilityDescriptor { form: "setdatatype(pointer, type, integer_dimensions...)", inputs: INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Dimension conversion and extent multiplication are checked before publishing the borrowed pointer view; this statement returns no public output." }];
 
 pub const SETDATATYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
