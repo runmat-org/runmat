@@ -5,7 +5,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Files and patterns",
         paragraphs: &[
             "`delete(filename)` removes one file without a MATLAB-facing output. Filenames may be text scalars, string arrays, character matrices, or cells of path text. Each target is processed in order; a later failure does not restore earlier deletions.",
-            "Patterns accept `*` and `?` and must match existing files. Directories are rejected; use `rmdir` for a folder. Direct paths use the active filesystem provider; wildcard expansion currently uses the process filesystem, so patterns in a virtual provider may not be visible. A leading `~` expands to the user's home directory; for example, `delete('~/runmat/build/*.o')` cleans matching build artifacts when that directory exists.",
+            "Patterns accept `*` and `?` and must match existing files. Directories are rejected; use `rmdir` for a folder. Direct paths and wildcard enumeration use the same captured filesystem provider and working directory. A leading `~` expands to the user's home directory; for example, `delete('~/runmat/build/*.o')` cleans matching build artifacts when that directory exists.",
             "An empty string scalar or empty character row is invalid. Empty string arrays and cells perform no deletions.",
         ],
     },
@@ -98,7 +98,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "What message IDs does delete produce?", answer: "Missing files use `RunMat:DELETE:FileNotFound`; directories use `RunMat:DELETE:Directories`; invalid wildcard patterns use `RunMat:DELETE:InvalidPattern`; filesystem failures use `RunMat:DELETE:PermissionDenied`; invalid handle inputs use `RunMat:DELETE:InvalidHandle`." },
     BuiltinDocumentationFaq { question: "Can I delete folders?", answer: "No. Use `rmdir`; `delete` raises `RunMat:DELETE:Directories` for a directory." },
     BuiltinDocumentationFaq { question: "Can I delete several files?", answer: "Yes. Pass several path arguments, a string array, a cell of path text, or a character matrix. Targets are processed sequentially." },
-    BuiltinDocumentationFaq { question: "How do wildcard patterns work?", answer: "`*` and `?` match process-filesystem paths relative to the process working directory unless the path is absolute. An unmatched pattern raises `RunMat:DELETE:FileNotFound`. Direct non-pattern paths use the active filesystem provider." },
+    BuiltinDocumentationFaq { question: "How do wildcard patterns work?", answer: "`*` and `?` match paths relative to the captured filesystem provider's working directory unless the path is absolute. An unmatched pattern raises `RunMat:DELETE:FileNotFound`." },
     BuiltinDocumentationFaq { question: "Do empty arrays raise errors?", answer: "Empty string arrays and cells do nothing; an empty string scalar is invalid." },
     BuiltinDocumentationFaq { question: "Are resident arguments downloaded?", answer: "No. Resident values are rejected before provider access, including when nested in an argument." },
     BuiltinDocumentationFaq { question: "Does delete preserve symbolic links?", answer: "By default it removes the link itself. Set `ResolveSymbolicLinks` to true or exact one to remove its resolved target instead." },

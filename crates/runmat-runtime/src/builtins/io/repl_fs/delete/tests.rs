@@ -2,6 +2,7 @@ use super::super::REPL_FS_TEST_LOCK;
 use super::*;
 use runmat_value::{CharArray, IntegerStorage, StringArray, Tensor, Value};
 use std::fs::File;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 fn delete_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -318,7 +319,8 @@ fn delete_errors_on_char_array_blank_row() {
 #[test]
 fn delete_errors_on_invalid_pattern() {
     let pattern = "{invalid*";
-    let err = futures::executor::block_on(delete_target(pattern, false))
+    let fs = DeleteFilesystem::capture().expect("filesystem");
+    let err = futures::executor::block_on(delete_target(&fs, pattern, false))
         .expect_err("invalid pattern should error");
     assert_eq!(err.identifier(), ident(&DELETE_ERROR_INVALID_PATTERN));
 }
@@ -333,7 +335,9 @@ fn delete_errors_on_missing_file() {
     let temp = tempdir().expect("temp dir");
     let missing = temp.path().join("missing.txt");
     let missing_str = missing.to_string_lossy().to_string();
-    let err = futures::executor::block_on(delete_target(&missing_str, false)).expect_err("error");
+    let fs = DeleteFilesystem::capture().expect("filesystem");
+    let err =
+        futures::executor::block_on(delete_target(&fs, &missing_str, false)).expect_err("error");
     assert_eq!(err.identifier(), ident(&DELETE_ERROR_FILE_NOT_FOUND));
 }
 
@@ -350,6 +354,39 @@ fn delete_errors_on_directory() {
     let dir_display = dir.to_string_lossy().to_string();
     let err = delete_single_path(&dir, &dir_display).expect_err("error");
     assert_eq!(err.identifier(), ident(&DELETE_ERROR_IS_DIRECTORY));
+}
+
+#[test]
+fn captured_virtual_provider_and_cwd_govern_wildcard_after_provider_swap() {
+    use runmat_filesystem::MemoryFsProvider;
+
+    let _lock = REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let memory = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
+    memory
+        .write_project_path("/workspace/log-01.txt", b"first")
+        .expect("first virtual file");
+    memory
+        .write_project_path("/workspace/log-02.txt", b"second")
+        .expect("second virtual file");
+    memory
+        .write_project_path("/workspace/keep.bin", b"keep")
+        .expect("unmatched virtual file");
+
+    let captured = runmat_filesystem::with_provider_override(memory.clone(), || {
+        DeleteFilesystem::capture().expect("capture exact provider and virtual cwd")
+    });
+    // The global provider has been restored. The retained operation must not
+    // enumerate or remove from the newly active process filesystem.
+    futures::executor::block_on(delete_target(&captured, "log-*.txt", false))
+        .expect("delete the captured provider's two matching files");
+    assert!(memory.read_project_path("/workspace/log-01.txt").is_err());
+    assert!(memory.read_project_path("/workspace/log-02.txt").is_err());
+    assert_eq!(
+        memory.read_project_path("/workspace/keep.bin").unwrap(),
+        b"keep"
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

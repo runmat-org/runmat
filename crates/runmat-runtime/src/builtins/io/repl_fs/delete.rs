@@ -79,8 +79,9 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Ok(Value::Num(0.0));
     }
 
+    let filesystem = DeleteFilesystem::capture()?;
     for raw in raw_targets {
-        delete_target(&raw, resolve_symbolic_links.unwrap_or(false)).await?;
+        delete_target(&filesystem, &raw, resolve_symbolic_links.unwrap_or(false)).await?;
     }
 
     Ok(Value::Num(0.0))

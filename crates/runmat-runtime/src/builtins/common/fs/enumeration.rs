@@ -1,5 +1,5 @@
 use glob::Pattern;
-use runmat_filesystem::{self as vfs, FsMetadata};
+use runmat_filesystem::{self as vfs, FsMetadata, FsProvider};
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io;
@@ -12,13 +12,26 @@ pub(crate) struct ListedEntry {
 }
 
 pub(crate) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
+    let (provider, cwd) = vfs::current_provider_with_current_dir()?;
+    directory_in(provider.as_ref(), &cwd, path).await
+}
+
+pub(crate) async fn directory_in(
+    provider: &dyn FsProvider,
+    cwd: &Path,
+    path: &Path,
+) -> io::Result<Vec<ListedEntry>> {
     let mut listed = Vec::new();
-    for entry in vfs::read_dir_async(path).await? {
+    for entry in provider.read_dir(&resolve(cwd, path)).await? {
         let entry_path = entry.path().to_path_buf();
         let recursable = entry.is_dir();
-        let metadata = match vfs::metadata_async(&entry_path).await {
+        let metadata = match provider.metadata(&resolve(cwd, &entry_path)).await {
             Ok(metadata) => metadata,
-            Err(_) => vfs::symlink_metadata_async(&entry_path).await?,
+            Err(_) => {
+                provider
+                    .symlink_metadata(&resolve(cwd, &entry_path))
+                    .await?
+            }
         };
         listed.push(ListedEntry {
             path: entry_path,
@@ -31,9 +44,13 @@ pub(crate) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
 
 // Wildcards do not match missing or non-directory literal prefixes. Inspect
 // metadata first because providers need not classify read_dir(file) identically.
-async fn matching_directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
-    match vfs::metadata_async(path).await {
-        Ok(metadata) if metadata.is_dir() => directory(path).await,
+async fn matching_directory(
+    provider: &dyn FsProvider,
+    cwd: &Path,
+    path: &Path,
+) -> io::Result<Vec<ListedEntry>> {
+    match provider.metadata(&resolve(cwd, path)).await {
+        Ok(metadata) if metadata.is_dir() => directory_in(provider, cwd, path).await,
         Ok(_) => Ok(Vec::new()),
         Err(error)
             if matches!(
@@ -48,6 +65,15 @@ async fn matching_directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
 }
 
 pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
+    let (provider, cwd) = vfs::current_provider_with_current_dir()?;
+    matching_in(provider.as_ref(), &cwd, pattern).await
+}
+
+pub(crate) async fn matching_in(
+    provider: &dyn FsProvider,
+    cwd: &Path,
+    pattern: &Path,
+) -> io::Result<Vec<ListedEntry>> {
     let (base, components) = split_pattern(pattern)?;
     let mut pending = vec![(base, 0usize)];
     let mut paths = HashSet::new();
@@ -59,7 +85,7 @@ pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
         }
         let component = &components[index];
         if component == "**" {
-            let entries = matching_directory(&folder).await?;
+            let entries = matching_directory(provider, cwd, &folder).await?;
             if index + 1 == components.len() {
                 for entry in entries {
                     let path = child_path(&folder, &entry.path);
@@ -80,7 +106,7 @@ pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
         }
 
         let matcher = Pattern::new(component).map_err(invalid_pattern)?;
-        for entry in matching_directory(&folder).await? {
+        for entry in matching_directory(provider, cwd, &folder).await? {
             let name = entry.path.file_name().and_then(|name| name.to_str());
             if !name.is_some_and(|name| matcher.matches(name)) {
                 continue;
@@ -96,9 +122,9 @@ pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
 
     let mut listed = Vec::with_capacity(paths.len());
     for path in paths {
-        let metadata = match vfs::metadata_async(&path).await {
+        let metadata = match provider.metadata(&resolve(cwd, &path)).await {
             Ok(metadata) => metadata,
-            Err(_) => vfs::symlink_metadata_async(&path).await?,
+            Err(_) => provider.symlink_metadata(&resolve(cwd, &path)).await?,
         };
         listed.push(ListedEntry {
             path,
@@ -107,6 +133,14 @@ pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
         });
     }
     Ok(listed)
+}
+
+fn resolve(cwd: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
 }
 
 fn child_path(folder: &Path, provider_path: &Path) -> PathBuf {

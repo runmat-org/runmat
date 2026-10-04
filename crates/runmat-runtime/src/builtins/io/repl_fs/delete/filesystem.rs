@@ -1,6 +1,57 @@
 use super::*;
+use std::sync::Arc;
 
-pub(super) async fn delete_target(raw: &str, resolve_symbolic_links: bool) -> BuiltinResult<()> {
+pub(super) struct DeleteFilesystem {
+    provider: Arc<dyn vfs::FsProvider>,
+    cwd: PathBuf,
+    resource_lease: Option<vfs::CapturedFsResourceLease>,
+}
+
+impl DeleteFilesystem {
+    pub(super) fn capture() -> BuiltinResult<Self> {
+        let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|error| {
+            delete_error_with(
+                &DELETE_ERROR_OS_ERROR,
+                format!("delete: unable to determine current directory ({error})"),
+            )
+        })?;
+        let resource_lease = vfs::capture_resource_lease(provider.clone());
+        Ok(Self {
+            provider,
+            cwd,
+            resource_lease,
+        })
+    }
+
+    fn resolved(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.cwd.join(path)
+        }
+    }
+
+    fn checkpoint(&self) -> BuiltinResult<()> {
+        if self
+            .resource_lease
+            .as_ref()
+            .is_some_and(|lease| !lease.is_valid())
+        {
+            Err(delete_error_with(
+                &DELETE_ERROR_OS_ERROR,
+                "delete: filesystem resource authority changed during operation",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub(super) async fn delete_target(
+    fs: &DeleteFilesystem,
+    raw: &str,
+    resolve_symbolic_links: bool,
+) -> BuiltinResult<()> {
     let expanded = expand_user_path(raw, "delete")
         .map_err(|msg| delete_error_with(&DELETE_ERROR_INVALID_INPUT, msg))?;
     if expanded.is_empty() {
@@ -11,13 +62,14 @@ pub(super) async fn delete_target(raw: &str, resolve_symbolic_links: bool) -> Bu
     }
 
     if contains_wildcards(&expanded) {
-        delete_with_pattern(&expanded, raw, resolve_symbolic_links).await
+        delete_with_pattern(fs, &expanded, raw, resolve_symbolic_links).await
     } else {
-        delete_single_path_async(&PathBuf::from(&expanded), raw, resolve_symbolic_links).await
+        delete_single_path_async(fs, &PathBuf::from(&expanded), raw, resolve_symbolic_links).await
     }
 }
 
 async fn delete_with_pattern(
+    fs: &DeleteFilesystem,
     pattern: &str,
     display: &str,
     resolve_symbolic_links: bool,
@@ -31,33 +83,24 @@ async fn delete_with_pattern(
         ));
     }
 
-    let paths = match glob::glob(pattern) {
-        Ok(iter) => iter,
-        Err(PatternError { msg, .. }) => {
-            return Err(delete_error_with(
-                &DELETE_ERROR_INVALID_PATTERN,
-                format!("delete: invalid wildcard pattern '{display}' ({msg})"),
-            ))
-        }
-    };
-
-    let mut matches = Vec::new();
-    for entry in paths {
-        match entry {
-            Ok(path) => matches.push(path),
-            Err(err) => {
-                let problem_path = path_to_string(err.path());
-                return Err(delete_error_with(
-                    &DELETE_ERROR_OS_ERROR,
-                    format!(
-                        "delete: unable to delete '{}' ({})",
-                        problem_path,
-                        err.error()
-                    ),
-                ));
-            }
-        }
-    }
+    fs.checkpoint()?;
+    let mut matches: Vec<PathBuf> = crate::builtins::common::fs::enumeration::matching_in(
+        fs.provider.as_ref(),
+        &fs.cwd,
+        Path::new(pattern),
+    )
+    .await
+    .map_err(|error| {
+        delete_error_with(
+            &DELETE_ERROR_OS_ERROR,
+            format!("delete: unable to enumerate matches for '{display}' ({error})"),
+        )
+    })?
+    .into_iter()
+    .map(|entry| entry.path)
+    .collect();
+    fs.checkpoint()?;
+    matches.sort();
 
     if matches.is_empty() {
         return Err(delete_error_with(
@@ -71,23 +114,27 @@ async fn delete_with_pattern(
 
     for path in matches {
         let display_path = path_to_string(&path);
-        delete_single_path_async(&path, &display_path, resolve_symbolic_links).await?;
+        delete_single_path_async(fs, &path, &display_path, resolve_symbolic_links).await?;
     }
     Ok(())
 }
 
 async fn delete_single_path_async(
+    fs: &DeleteFilesystem,
     path: &Path,
     display: &str,
     resolve_symbolic_links: bool,
 ) -> BuiltinResult<()> {
-    let link_metadata = vfs::symlink_metadata_async(path).await;
+    let path = fs.resolved(path);
+    fs.checkpoint()?;
+    let link_metadata = fs.provider.symlink_metadata(&path).await;
+    fs.checkpoint()?;
     if resolve_symbolic_links
         && link_metadata
             .as_ref()
             .is_ok_and(runmat_filesystem::FsMetadata::is_symlink)
     {
-        let target = vfs::canonicalize_async(path).await.map_err(|err| {
+        let target = fs.provider.canonicalize(&path).await.map_err(|err| {
             delete_error_with(
                 &DELETE_ERROR_OS_ERROR,
                 format!(
@@ -96,7 +143,8 @@ async fn delete_single_path_async(
                 ),
             )
         })?;
-        let metadata = vfs::metadata_async(&target).await.map_err(|err| {
+        fs.checkpoint()?;
+        let metadata = fs.provider.metadata(&target).await.map_err(|err| {
             delete_error_with(
                 &DELETE_ERROR_OS_ERROR,
                 format!(
@@ -105,10 +153,11 @@ async fn delete_single_path_async(
                 ),
             )
         })?;
-        return if metadata.is_dir() {
-            vfs::remove_dir_async(&target).await
+        fs.checkpoint()?;
+        if metadata.is_dir() {
+            fs.provider.remove_dir(&target).await
         } else {
-            vfs::remove_file_async(&target).await
+            fs.provider.remove_file(&target).await
         }
         .map_err(|err| {
             delete_error_with(
@@ -118,7 +167,8 @@ async fn delete_single_path_async(
                     display
                 ),
             )
-        });
+        })?;
+        return fs.checkpoint();
     }
     match link_metadata {
         Ok(meta) => {
@@ -131,12 +181,14 @@ async fn delete_single_path_async(
                     ),
                 ));
             }
-            vfs::remove_file_async(path).await.map_err(|err| {
+            fs.checkpoint()?;
+            fs.provider.remove_file(&path).await.map_err(|err| {
                 delete_error_with(
                     &DELETE_ERROR_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
                 )
-            })
+            })?;
+            fs.checkpoint()
         }
         Err(err) => {
             if err.kind() == io::ErrorKind::NotFound {
@@ -159,7 +211,8 @@ async fn delete_single_path_async(
 
 #[cfg(test)]
 pub(super) fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
-    futures::executor::block_on(delete_single_path_async(path, display, false))
+    let fs = DeleteFilesystem::capture()?;
+    futures::executor::block_on(delete_single_path_async(&fs, path, display, false))
 }
 
 fn validate_wildcard_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
