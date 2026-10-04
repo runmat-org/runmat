@@ -1291,7 +1291,7 @@ mod tests {
         ))
         .with_service_ports(ports);
         let _scope = runtime.enter();
-        let error = block_on(call_builtin_async_in_context(
+        let error = block_on(super::call_builtin_async_in_context(
             &runtime,
             "full",
             &[Value::Num(7.0)],
