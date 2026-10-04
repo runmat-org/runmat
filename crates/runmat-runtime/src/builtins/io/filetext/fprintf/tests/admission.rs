@@ -149,6 +149,45 @@ fn known_invalid_character_matrix_format_precedes_resident_data() {
 }
 
 #[test]
+fn unambiguous_invalid_fid_never_falls_back_to_stdout_or_downloads_data() {
+    crate::console::reset_thread_buffer();
+    let provider = Box::leak(Box::new(PendingDataProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident data");
+    for invalid in [
+        Value::Num(f64::NAN),
+        Value::Num(f64::INFINITY),
+        Value::Num(2.5),
+    ] {
+        let args = [
+            invalid,
+            Value::from("%d"),
+            Value::GpuTensor(resident.handle.clone()),
+        ];
+        let mut call = Box::pin(evaluate(&args));
+        let error = match futures::poll!(call.as_mut()) {
+            std::task::Poll::Ready(Err(error)) => error,
+            other => panic!("invalid fid must precede resident data: {other:?}"),
+        };
+        assert_eq!(error.identifier(), Some("RunMat:fprintf:InvalidInput"));
+        drop(call);
+    }
+    let exact_overflow = Value::Int(runmat_value::IntValue::U64(u64::MAX));
+    let error = evaluate(&[exact_overflow, Value::from("%d")]);
+    let error = futures::executor::block_on(error).expect_err("wide fid invalid");
+    assert_eq!(error.identifier(), Some("RunMat:fprintf:InvalidInput"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(resident.probe.retirements(), 0);
+    assert!(crate::console::take_thread_buffer().is_empty());
+}
+
+#[test]
 fn known_malformed_format_fails_before_pending_data_download() {
     let provider = Box::leak(Box::new(PendingDataProvider {
         owner: TestAllocationOwner::new(),

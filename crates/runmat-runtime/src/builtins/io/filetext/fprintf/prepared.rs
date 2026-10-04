@@ -72,7 +72,13 @@ fn validate_unambiguous_host_target(args: &[Value], format_index: usize) -> Buil
         if !is_fid_candidate(value) || matches!(value, Value::GpuTensor(_)) {
             continue;
         }
-        if let Ok(fid) = parse_fid(value) {
+        let parsed = parse_fid(value);
+        if format_index == 1 {
+            let fid = map_string_result(parsed, &FPRINTF_ERROR_INVALID_INPUT)?;
+            target_from_fid(fid)?;
+            break;
+        }
+        if let Ok(fid) = parsed {
             target_from_fid(fid)?;
             break;
         }
@@ -133,7 +139,12 @@ async fn select_target(
             }
             None => value.clone(),
         };
-        if let Ok(fid) = parse_fid(&host) {
+        let parsed = parse_fid(&host);
+        if format_index == 1 && index == 0 {
+            let fid = map_string_result(parsed, &FPRINTF_ERROR_INVALID_INPUT)?;
+            return Ok((Some(index), target_from_fid(fid)?));
+        }
+        if let Ok(fid) = parsed {
             return Ok((Some(index), target_from_fid(fid)?));
         }
     }

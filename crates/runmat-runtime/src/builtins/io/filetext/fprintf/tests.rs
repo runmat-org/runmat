@@ -202,6 +202,15 @@ fn fprintf_fid_parser_reads_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn fprintf_fid_parser_accepts_canonical_singleton_geometry() {
+    for shape in [vec![1], vec![1, 1], vec![1, 1, 1]] {
+        let fid = Tensor::new(vec![1.0], shape).expect("singleton tensor");
+        assert_eq!(parse_fid(&Value::Tensor(fid.clone())).unwrap(), 1);
+        assert!(super::admission::is_fid_candidate(&Value::Tensor(fid)));
+    }
+}
+
+#[test]
 fn fprintf_fid_parser_ignores_poisoned_mirrors_for_every_integer_class() {
     let classes = [
         IntegerStorage::I8(vec![7]),

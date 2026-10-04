@@ -120,7 +120,7 @@ pub(super) fn parse_fid(value: &Value) -> Result<i32, String> {
                 .ok_or_else(|| "fprintf: file identifier is out of range".to_string());
         }
         Value::Tensor(t) => {
-            if t.shape == vec![1, 1] && tensor::is_scalar_tensor(t) {
+            if tensor::is_scalar_tensor(t) {
                 if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                     return int
                         .try_to_i32()
