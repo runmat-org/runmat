@@ -162,6 +162,12 @@ pub async fn capture_mapped_backing_on(
     path: PathBuf,
     writable: bool,
 ) -> io::Result<Option<CapturedMappedBacking>> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "mapped backing requires a captured absolute path",
+        ));
+    }
     let resource = capture_resource_lease_for_effect(Arc::clone(&provider))?;
     let Some(backing) = provider.open_mapped_backing(&path, writable).await? else {
         return Ok(None);

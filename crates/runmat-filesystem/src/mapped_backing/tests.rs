@@ -1,12 +1,114 @@
 use super::*;
-use crate::{FsProvider, MemoryFsProvider, OpenFlags};
+use crate::{
+    DirEntry, FileHandle, FsFilePayloadContract, FsMetadata, FsProvider, FsResourceContract,
+    FsResourceLease, FsResourceRevision, MemoryFsProvider, OpenFlags,
+};
 use async_trait::async_trait;
 use futures::executor::block_on;
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+
+struct RevokedLease;
+
+impl FsResourceLease for RevokedLease {
+    fn contract(&self) -> FsResourceContract {
+        FsResourceContract {
+            revision: FsResourceRevision::for_provider("test.mapped", b"revoked"),
+            opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
+            opened_output_handle: None,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        false
+    }
+}
+
+struct CountedOpenProvider(AtomicUsize);
+
+#[async_trait(?Send)]
+impl FsProvider for CountedOpenProvider {
+    async fn open_mapped_backing(
+        &self,
+        _: &Path,
+        _: bool,
+    ) -> io::Result<Option<Box<dyn FsMappedBacking>>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(None)
+    }
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        Some(Arc::new(RevokedLease))
+    }
+    fn open(&self, _: &Path, _: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+        unreachable!()
+    }
+    async fn read(&self, _: &Path) -> io::Result<Vec<u8>> {
+        unreachable!()
+    }
+    async fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn remove_file(&self, _: &Path) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn metadata(&self, _: &Path) -> io::Result<FsMetadata> {
+        unreachable!()
+    }
+    async fn symlink_metadata(&self, _: &Path) -> io::Result<FsMetadata> {
+        unreachable!()
+    }
+    async fn read_dir(&self, _: &Path) -> io::Result<Vec<DirEntry>> {
+        unreachable!()
+    }
+    async fn canonicalize(&self, _: &Path) -> io::Result<PathBuf> {
+        unreachable!()
+    }
+    async fn create_dir(&self, _: &Path) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn create_dir_all(&self, _: &Path) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn remove_dir(&self, _: &Path) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn remove_dir_all(&self, _: &Path) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+        unreachable!()
+    }
+    async fn set_readonly(&self, _: &Path, _: bool) -> io::Result<()> {
+        unreachable!()
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn invalid_path_or_revoked_lease_does_not_call_provider_open() {
+    let provider = Arc::new(CountedOpenProvider(AtomicUsize::new(0)));
+    let erased: Arc<dyn FsProvider> = provider.clone();
+    let relative = block_on(capture_mapped_backing_on(
+        erased.clone(),
+        PathBuf::from("relative"),
+        false,
+    ))
+    .err()
+    .expect("relative path rejected");
+    assert_eq!(relative.kind(), ErrorKind::InvalidInput);
+    let revoked = block_on(capture_mapped_backing_on(
+        erased,
+        std::env::temp_dir().join("mapped-file"),
+        false,
+    ))
+    .err()
+    .expect("revoked lease rejected");
+    assert_eq!(revoked.kind(), ErrorKind::PermissionDenied);
+    assert_eq!(provider.0.load(Ordering::SeqCst), 0);
+}
 
 struct RevokedAfterWrite {
     current: Arc<AtomicBool>,
