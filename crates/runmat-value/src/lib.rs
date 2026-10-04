@@ -17,10 +17,11 @@ pub use aggregate::{
 };
 pub use array::{
     host_copy_metrics, record_host_copy, AdoptedHostAllocation, CharArray, ComplexElement,
-    ComplexStorage, ComplexTensor, HostAllocationProvenance, HostAllocationRelease,
-    HostComplexBuffer, HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer,
-    HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseTensor, StringArray,
-    SymbolicArray, Tensor,
+    ComplexStorage, ComplexTensor, ExactHostAllocationPermit, ExactHostAllocationReservation,
+    ExactHostNumericAllocation, ExactHostNumericAllocationError, HostAllocationProvenance,
+    HostAllocationRelease, HostComplexBuffer, HostCopyMetrics, HostCopyReason, HostIndexBuffer,
+    HostLogicalBuffer, HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseTensor,
+    StringArray, SymbolicArray, Tensor,
 };
 pub use callable::Closure;
 pub use display::{format_number, get_display_format, set_display_format, FormatMode};

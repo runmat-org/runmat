@@ -9,6 +9,7 @@ mod complex;
 mod conversion;
 mod copy_accounting;
 mod dense;
+mod exact_host_numeric;
 mod format;
 mod host_allocation;
 mod host_buffer;
@@ -25,6 +26,10 @@ pub use character::CharArray;
 pub use complex::{ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage};
 pub use copy_accounting::{host_copy_metrics, record_host_copy, HostCopyMetrics, HostCopyReason};
 pub use dense::Tensor;
+pub use exact_host_numeric::{
+    ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocation,
+    ExactHostNumericAllocationError,
+};
 pub(crate) use format::{format_integer_complex_value, should_expand_nd_display, write_nd_pages};
 pub use host_allocation::{AdoptedHostAllocation, HostAllocationProvenance, HostAllocationRelease};
 pub use host_complex_buffer::HostComplexBuffer;
