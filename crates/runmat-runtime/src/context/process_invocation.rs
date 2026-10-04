@@ -7,8 +7,10 @@ use futures::future::{select, Either};
 use runmat_filesystem::{NativePathIntent, NativeProcessRevocation};
 use runmat_process_host::{CompleteProcessOutput, HostCommand, ProcessHostError};
 
-use super::services::complete_process_output_requires_evidence;
-use super::{RuntimeCapability, RuntimeCapabilityError, RuntimeContext};
+use super::{
+    complete_process_output_requires_evidence, RuntimeCapability, RuntimeCapabilityError,
+    RuntimeContext,
+};
 use crate::execution::ExecutionServiceError;
 
 #[derive(Debug, thiserror::Error)]
@@ -41,11 +43,6 @@ pub(crate) async fn output_complete(
     if complete_process_output_requires_evidence(runtime) {
         return Err(ProcessInvocationError::ResourceEvidence);
     }
-    let runtime = runtime.ok_or_else(missing_service)?;
-    let process = runtime
-        .service_ports()
-        .require_process("execute complete native process call")
-        .map_err(ProcessInvocationError::Capability)?;
     let cwd =
         runmat_filesystem::capture_native_path(".", NativePathIntent::ProcessWorkingDirectory)
             .map_err(ProcessInvocationError::DirectoryCapture)?
@@ -59,6 +56,13 @@ pub(crate) async fn output_complete(
     cwd.check_current()
         .map_err(ProcessInvocationError::StaleDirectory)?;
     command.working_directory = Some(cwd.path().to_path_buf());
+    // Keep the prior system admission order: the selected filesystem route
+    // is resolved before an absent process port is reported.
+    let runtime = runtime.ok_or_else(missing_service)?;
+    let process = runtime
+        .service_ports()
+        .require_process("execute complete native process call")
+        .map_err(ProcessInvocationError::Capability)?;
 
     let execute = async {
         let request = match input {
@@ -95,3 +99,7 @@ fn missing_service() -> ProcessInvocationError {
         "execute complete native process call",
     ))
 }
+
+#[cfg(test)]
+#[path = "process_invocation/tests.rs"]
+mod tests;

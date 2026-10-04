@@ -143,6 +143,38 @@ impl crate::context::RuntimeProcessService for DirectProcess {
     }
 }
 
+#[test]
+fn pre_revoked_directory_grant_rejects_shared_process_call_before_spawn() {
+    let _serial = runmat_filesystem::provider_override_lock();
+    let selected = Arc::new(RevocableDirectory::new());
+    let _selected = runmat_filesystem::replace_provider(selected.clone());
+    selected.revoke();
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default().with_process(Rc::new(DirectProcess)),
+        );
+    let directory = tempfile::tempdir().expect("marker directory");
+    let marker = directory.path().join("must-not-spawn");
+    let mut child = runmat_process_host::HostCommand::new("/bin/sh");
+    child.arguments = vec![
+        "-c".into(),
+        "printf started > \"$1\"".into(),
+        "sh".into(),
+        marker.to_string_lossy().into_owned(),
+    ];
+    let error = futures::executor::block_on(crate::context::process_invocation::output_complete(
+        Some(&runtime),
+        child,
+        None,
+    ))
+    .expect_err("revoked issuer cannot authorize a child");
+    assert!(matches!(
+        error,
+        crate::context::process_invocation::ProcessInvocationError::DirectoryCapture(_)
+    ));
+    assert!(!marker.exists());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn pending_process_stops_when_selected_directory_grant_revokes_after_provider_swap() {

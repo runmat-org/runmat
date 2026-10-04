@@ -34,10 +34,11 @@ fn process_error(source: ProcessInvocationError) -> crate::RuntimeError {
         .with_builtin("system")
         .with_source(source)
         .build(),
-        ProcessInvocationError::Capability(_) => {
+        ProcessInvocationError::Capability(source) => {
             build_runtime_error("system: no native process service is installed")
                 .with_identifier("RunMat:RuntimeContext:CapabilityUnavailable")
                 .with_builtin("system")
+                .with_source(source)
                 .build()
         }
         ProcessInvocationError::Host(source) => build_runtime_error(format!("system: {source}"))
