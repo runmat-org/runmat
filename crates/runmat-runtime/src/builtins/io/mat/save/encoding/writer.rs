@@ -341,9 +341,8 @@ mod tests {
                 imag: None,
             },
         };
-        let error = build_matrix_bytes(&array, Some("x"))
-            .err()
-            .expect("MAT dimensions are signed 32-bit");
+        let error =
+            build_matrix_bytes(&array, Some("x")).expect_err("MAT dimensions are signed 32-bit");
         assert_eq!(error.identifier(), Some("RunMat:save:Io"));
         assert!(error.message().contains("int32 range"));
     }

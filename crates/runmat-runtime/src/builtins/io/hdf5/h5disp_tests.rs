@@ -107,7 +107,7 @@ fn dispatcher_statement_h5disp_prints_under_suppressed_expression_without_replay
     let printed = crate::console::begin_capture();
     block_on(crate::call_builtin_async_with_outputs(
         "h5disp",
-        &[filename.clone()],
+        std::slice::from_ref(&filename),
         0,
     ))
     .expect("statement display");
