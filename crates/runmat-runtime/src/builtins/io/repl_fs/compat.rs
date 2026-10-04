@@ -15,7 +15,9 @@ use runmat_builtins::{
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, ObjectInstance, StructValue, Value};
+#[cfg(any(test, windows))]
+use runmat_value::CellArray;
+use runmat_value::{CharArray, ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::output_count;
