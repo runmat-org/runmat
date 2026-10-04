@@ -61,7 +61,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
         text_at(request, index, &mut diagnostics);
         text_at(request, index + 1, &mut diagnostics);
         if let Some(name) = request.literals.literal_string_at(index) {
-            if NativeLoadOption::parse(name).is_none() {
+            if NativeLoadOption::parse(&name).is_none() {
                 diagnostics.push(catalog::inference::argument_error(
                     "RM-NATIVE-FFI-OPTION",
                     "loadlibrary supports Alias, IncludePath, and AddHeader",
