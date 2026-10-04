@@ -396,6 +396,9 @@ fn parse_struct(
 }
 
 fn shape_elements(dims: &[usize]) -> BuiltinResult<usize> {
+    if dims.contains(&0) {
+        return Ok(0);
+    }
     dims.iter()
         .try_fold(1usize, |product, extent| product.checked_mul(*extent))
         .ok_or_else(|| load_error("load: MAT array shape exceeds platform limits"))
@@ -437,6 +440,7 @@ mod geometry_tests {
     #[test]
     fn oversized_or_unbacked_cell_geometry_rejects_before_allocation() {
         assert!(shape_elements(&[usize::MAX, 2]).is_err());
+        assert_eq!(shape_elements(&[usize::MAX, usize::MAX, 0]), Ok(0));
         let mut payload = Cursor::new(&[][..]);
         let error = parse_cell_array(&mut payload, vec![1_000_000], Endian::Little)
             .err()
