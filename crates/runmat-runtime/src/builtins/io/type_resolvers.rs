@@ -32,9 +32,6 @@ pub fn tcpserver_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
 
-pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
 
 pub fn data_unknown_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
@@ -74,5 +71,4 @@ mod tests {
         &[],
         Type::Struct { known_fields: None }
     );
-    assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 }

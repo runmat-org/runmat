@@ -1,13 +1,11 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
-use runmat_builtins::NetDataType as DataType;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, NetDataType as DataType, WRITE_ERROR_CONNECTION_CLOSED,
+    WRITE_ERROR_INTERNAL, WRITE_ERROR_INVALID_CLIENT, WRITE_ERROR_INVALID_DATA,
+    WRITE_ERROR_INVALID_DATATYPE, WRITE_ERROR_INVALID_INPUT, WRITE_ERROR_NOT_CONNECTED,
+    WRITE_ERROR_TIMEOUT, WRITE_EXPLICIT_GPU_EXTENSION, WRITE_LOGICAL_EXTENSION,
+    WRITE_NONVECTOR_EXTENSION, WRITE_SPARSE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericDType;
@@ -15,262 +13,12 @@ use runmat_value::{IntValue, StructValue, Value};
 use std::io::{self, Write};
 use std::net::TcpStream;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::client_state::{client_handle, CLIENT_HANDLE_FIELD};
 use super::control::configure_stream;
 
 const BUILTIN_NAME: &str = "write";
-
-const WRITE_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "count",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of elements written to the socket.",
-}];
-const WRITE_INPUTS_CLIENT_DATA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "client",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tcpclient handle struct.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Payload to send.",
-    },
-];
-const WRITE_INPUTS_CLIENT_DATA_DATATYPE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "client",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tcpclient handle struct.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Payload to send.",
-    },
-    BuiltinParamDescriptor {
-        name: "datatype",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("class(data)"),
-        description: "Data type label (for example \"uint8\", \"double\", \"char\", \"string\").",
-    },
-];
-const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "count = write(client, data)",
-        inputs: &WRITE_INPUTS_CLIENT_DATA,
-        outputs: &WRITE_OUTPUT_COUNT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "count = write(client, data, datatype)",
-        inputs: &WRITE_INPUTS_CLIENT_DATA_DATATYPE,
-        outputs: &WRITE_OUTPUT_COUNT,
-    },
-];
-
-const WRITE_ERROR_INVALID_CLIENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.INVALID_CLIENT",
-    identifier: Some("RunMat:write:InvalidTcpClient"),
-    when: "Client handle is missing, malformed, invalid, or disconnected.",
-    message: "write: invalid tcpclient handle",
-};
-const WRITE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.INVALID_INPUT",
-    identifier: Some("RunMat:write:InvalidInput"),
-    when: "Argument list shape is unsupported for write.",
-    message: "write: invalid argument list",
-};
-const WRITE_ERROR_INVALID_DATA: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.INVALID_DATA",
-    identifier: Some("RunMat:write:InvalidData"),
-    when: "Payload cannot be converted to the requested datatype.",
-    message: "write: invalid data payload",
-};
-const WRITE_ERROR_INVALID_DATATYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.INVALID_DATATYPE",
-    identifier: Some("RunMat:write:InvalidDataType"),
-    when: "Datatype argument is not a supported scalar text label.",
-    message: "write: invalid datatype argument",
-};
-const WRITE_ERROR_NOT_CONNECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.NOT_CONNECTED",
-    identifier: Some("RunMat:write:NotConnected"),
-    when: "Client has no active socket connection.",
-    message: "write: tcpclient is disconnected",
-};
-const WRITE_ERROR_TIMEOUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.TIMEOUT",
-    identifier: Some("RunMat:write:Timeout"),
-    when: "Socket write exceeds configured timeout.",
-    message: "write: timed out while sending data",
-};
-const WRITE_ERROR_CONNECTION_CLOSED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.CONNECTION_CLOSED",
-    identifier: Some("RunMat:write:ConnectionClosed"),
-    when: "Peer closes socket before payload is fully written.",
-    message: "write: connection closed before all data was sent",
-};
-const WRITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITE.INTERNAL",
-    identifier: Some("RunMat:write:InternalError"),
-    when: "Internal socket/control-flow conversion fails.",
-    message: "write: internal socket error",
-};
-const WRITE_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    WRITE_ERROR_INVALID_CLIENT,
-    WRITE_ERROR_INVALID_INPUT,
-    WRITE_ERROR_INVALID_DATA,
-    WRITE_ERROR_INVALID_DATATYPE,
-    WRITE_ERROR_NOT_CONNECTED,
-    WRITE_ERROR_TIMEOUT,
-    WRITE_ERROR_CONNECTION_CLOSED,
-    WRITE_ERROR_INTERNAL,
-];
-pub const WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WRITE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WRITE_ERRORS,
-};
-
-const WRITE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "write-explicit-gpu-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "write with explicit gpuArray data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WriteExplicitGpuDataExtension"),
-};
-const WRITE_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "write-nonvector-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "write with matrix or multidimensional numeric data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WriteNonvectorDataExtension"),
-};
-const WRITE_SPARSE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "write-sparse-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "write with sparse numeric data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WriteSparseDataExtension"),
-};
-const WRITE_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "write-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "write with logical data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:WriteLogicalDataExtension"),
-};
-pub const WRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    WRITE_EXPLICIT_GPU_EXTENSION,
-    WRITE_NONVECTOR_EXTENSION,
-    WRITE_SPARSE_EXTENSION,
-    WRITE_LOGICAL_EXTENSION,
-];
-
-const WRITE_INTEGER_VECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public datatype table explicitly lists all eight integer classes for real row or column vectors. Without a datatype override, the native input datatype selects the wire representation.",
-    }];
-const WRITE_INTEGER_NONVECTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "matrix or multidimensional data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat can serialize nonvector integer arrays in column-major order, but the public interactive contract documents row or column vectors.",
-    }];
-const WRITE_INTEGER_SPARSE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sparse data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Sparse payloads are a RunMat-only host convenience and are densified from authoritative integer CSC storage before byte encoding.",
-    }];
-const WRITE_INTEGER_GPU_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "explicit gpuArray data",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public page lists GPU code generation rather than interactive gpuArray input. RunMat gates explicit device intent before gather while leaving automatic residency transparent.",
-    }];
-pub const WRITE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "write(client, integer_vector, datatype?)",
-        inputs: &WRITE_INTEGER_VECTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Same-class writes emit exact native bytes with client byte order. An explicit integer datatype performs one exact saturating cast; single/double overrides are deliberate floating wire boundaries.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "write(client, integer_matrix, datatype?)",
-        inputs: &WRITE_INTEGER_NONVECTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat mode traverses nonvector payloads in column-major storage order after the independent shape gate.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "write(client, sparse_integer_data, datatype?)",
-        inputs: &WRITE_INTEGER_SPARSE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat mode expands sparse integer storage exactly before the selected wire cast; the sparse extension gate precedes socket access.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "write(client, explicit_gpu_integer_data, datatype?)",
-        inputs: &WRITE_INTEGER_GPU_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Explicit gpuArray data is available only in RunMat mode and gathers through its owner before host socket encoding.",
-    },
-];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "write",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Socket writes execute on the host CPU. Resident payloads gather through their owning provider before byte encoding; no provider compute kernel is launched.",
-};
 
 fn write_error_with_message(
     message: impl Into<String>,
@@ -310,26 +58,9 @@ fn map_write_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> 
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::write")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "write",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
-
 #[runtime_builtin(
     name = "write",
-    category = "io/net",
-    summary = "Write numeric or text payloads to TCP client connections.",
-    keywords = "write,tcpclient,networking",
-    type_resolver(crate::builtins::io::type_resolvers::write_type),
-    descriptor(crate::builtins::io::net::write::WRITE_DESCRIPTOR),
-    extensions(crate::builtins::io::net::write::WRITE_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::net::write::WRITE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::net::write"
 )]
 async fn write_builtin(
@@ -1178,6 +909,7 @@ pub(crate) mod tests {
     use crate::builtins::io::net::client_state::{insert_client, remove_client_for_test};
     use crate::builtins::io::net::control::configure_stream;
     use crate::builtins::io::net::test_support::CountingDownloadProvider;
+    use runmat_builtins::WRITE_DESCRIPTOR;
     use runmat_value::{CharArray, IntValue, IntegerStorage, SparseTensor, StructValue, Tensor};
     use std::io::Read;
     use std::net::{TcpListener, TcpStream};

@@ -3,10 +3,15 @@
 mod datatype;
 mod read;
 mod readline;
+mod write;
 
 pub use datatype::NetDataType;
 pub use read::*;
 pub use readline::*;
+pub use write::*;
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] =
-    &[&READ_CATALOG_ENTRY, &READLINE_CATALOG_ENTRY];
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &READ_CATALOG_ENTRY,
+    &READLINE_CATALOG_ENTRY,
+    &WRITE_CATALOG_ENTRY,
+];
