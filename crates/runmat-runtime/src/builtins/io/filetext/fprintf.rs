@@ -115,7 +115,6 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     })
 }
 
-// kind_of was used for debugging logs; removed to avoid dead code in release builds.
 
 #[runtime_builtin(
     name = "fprintf",
