@@ -299,11 +299,16 @@ pub fn info(
 pub fn disp(
     builtin: &'static str,
     lease: &Hdf5PathLease,
-    location: String,
+    controls: H5DispControls,
 ) -> BuiltinResult<String> {
     let path = lease.path();
     let file = open_file_read(builtin, &path)?;
     let mut out = String::new();
+    let location = controls.location;
+    let mode = controls.mode;
+    // hdf5-metno exposes names as Unicode strings in both cases. Explicit
+    // UTF-8 selects that existing decoder rather than recoding names here.
+    let _text_encoding = controls.text_encoding;
     out.push_str(&format!("HDF5 {location}\n"));
     if location == "/" {
         let group = file.group("/").map_err(|err| {
@@ -313,9 +318,9 @@ pub fn disp(
                 err,
             )
         })?;
-        render_group(builtin, &group, "/", 0, &mut out)?;
+        render_group(builtin, &group, "/", 0, mode, &mut out)?;
     } else if let Ok(ds) = file.dataset(&location) {
-        render_dataset(builtin, &ds, &location, 0, &mut out)?;
+        render_dataset(builtin, &ds, &location, 0, mode, &mut out)?;
     } else {
         let group = file.group(&location).map_err(|err| {
             io_error(
@@ -324,7 +329,7 @@ pub fn disp(
                 err,
             )
         })?;
-        render_group(builtin, &group, &location, 0, &mut out)?;
+        render_group(builtin, &group, &location, 0, mode, &mut out)?;
     }
     Ok(out)
 }

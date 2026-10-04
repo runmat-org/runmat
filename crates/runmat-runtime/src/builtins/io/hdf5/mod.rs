@@ -27,6 +27,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 mod path;
 use path::Hdf5PathLease;
+mod h5disp_controls;
+use h5disp_controls::H5DispControls;
 
 const H5READ_NAME: &str = "h5read";
 const H5WRITE_NAME: &str = "h5write";
@@ -329,10 +331,10 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         )?;
     }
     let path = resolve_path(&filename, H5DISP_NAME)?;
-    let location = optional_location(&rest, H5DISP_NAME)?;
+    let controls = h5disp_controls::parse(&rest)?;
     let path = path::capture(path, NativePathIntent::Read, H5DISP_NAME)?;
     path::check(&path, H5DISP_NAME)?;
-    let result = imp::disp(H5DISP_NAME, &path, location)?;
+    let result = imp::disp(H5DISP_NAME, &path, controls)?;
     path::check(&path, H5DISP_NAME)?;
     Ok(Value::String(result))
 }
@@ -396,7 +398,7 @@ mod imp {
     pub fn disp(
         builtin: &'static str,
         _path: &Hdf5PathLease,
-        _location: String,
+        _controls: H5DispControls,
     ) -> BuiltinResult<String> {
         Err(hdf5_error(builtin, &ERR_WASM, ERR_WASM.message))
     }
@@ -409,6 +411,8 @@ use native as imp;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod h5disp_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod path_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]

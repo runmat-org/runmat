@@ -59,3 +59,63 @@ fn malformed_arity_and_text_are_diagnosed_without_guessing_output() {
     );
     assert!(!wrong_filename.diagnostics.is_empty());
 }
+
+#[test]
+fn documented_mode_and_utf8_forms_keep_known_controls_useful() {
+    for literals in [
+        vec![
+            LiteralValue::String("sample.h5".into()),
+            LiteralValue::String("/data".into()),
+            LiteralValue::String("min".into()),
+        ],
+        vec![
+            LiteralValue::String("sample.h5".into()),
+            LiteralValue::String("TextEncoding".into()),
+            LiteralValue::String("UTF-8".into()),
+        ],
+        vec![
+            LiteralValue::String("sample.h5".into()),
+            LiteralValue::String("/data".into()),
+            LiteralValue::String("simple".into()),
+            LiteralValue::String("TextEncoding".into()),
+            LiteralValue::String("UTF-8".into()),
+        ],
+    ] {
+        let inferred = inference::infer(
+            &request(vec![text(); literals.len()], literals, 1),
+            &H5DISP_CATALOG_ENTRY,
+        );
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::String);
+    }
+    for literals in [
+        vec![
+            LiteralValue::String("sample.h5".into()),
+            LiteralValue::String("/data".into()),
+            LiteralValue::String("full".into()),
+        ],
+        vec![
+            LiteralValue::String("sample.h5".into()),
+            LiteralValue::String("TextEncoding".into()),
+            LiteralValue::String("Latin-1".into()),
+        ],
+    ] {
+        let inferred = inference::infer(
+            &request(vec![text(); literals.len()], literals, 1),
+            &H5DISP_CATALOG_ENTRY,
+        );
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-HDF5-DISPLAY"));
+    }
+    let unknown = inference::infer(
+        &request(vec![text(); 3], vec![LiteralValue::Unknown; 3], 1),
+        &H5DISP_CATALOG_ENTRY,
+    );
+    assert!(unknown.diagnostics.is_empty());
+}

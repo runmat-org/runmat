@@ -182,6 +182,33 @@ fn captured_h5disp_text_is_gated_before_native_file_access() {
     assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn h5disp_invalid_mode_and_encoding_precede_native_path_capture() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _captured = crate::output_count::push_output_count(Some(1));
+    for rest in [
+        vec![Value::String("/data".into()), Value::String("full".into())],
+        vec![
+            Value::String("/data".into()),
+            Value::String("TextEncoding".into()),
+            Value::String("Latin-1".into()),
+        ],
+        vec![
+            Value::String("/data".into()),
+            Value::String("Other".into()),
+            Value::String("UTF-8".into()),
+        ],
+    ] {
+        let error = block_on(h5disp_builtin(
+            Value::String("never-opened-display.h5".into()),
+            rest,
+        ))
+        .expect_err("invalid controls before native path capture");
+        assert_eq!(error.identifier(), ERR_ARGUMENT.identifier);
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen_test::wasm_bindgen_test]
 fn supported_hdf5_forms_report_native_target_unavailability_in_browser() {

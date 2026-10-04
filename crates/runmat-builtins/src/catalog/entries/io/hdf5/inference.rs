@@ -22,7 +22,8 @@ pub(super) fn infer(
 ) -> CallInference {
     let count = request.arguments.len();
     let valid_arity = match form {
-        Hdf5Form::Display | Hdf5Form::Info => matches!(count, 1 | 2),
+        Hdf5Form::Display => (1..=5).contains(&count),
+        Hdf5Form::Info => matches!(count, 1 | 2),
         Hdf5Form::Read => matches!(count, 2 | 4 | 5),
         Hdf5Form::Write => matches!(count, 3 | 5 | 6),
         Hdf5Form::Attribute => count == 4,
@@ -56,6 +57,9 @@ pub(super) fn infer(
                 ));
             }
         }
+    }
+    if form == Hdf5Form::Display && valid_arity {
+        validate_display_literals(request, &mut diagnostics);
     }
     if let Some(index) = data_position(form) {
         if let Some(value) = request.arguments.get(index) {
@@ -104,9 +108,49 @@ pub(super) fn infer(
 
 fn text_positions(form: Hdf5Form, count: usize) -> Vec<usize> {
     match form {
-        Hdf5Form::Display | Hdf5Form::Info => (0..count.min(2)).collect(),
+        Hdf5Form::Display => (0..count).collect(),
+        Hdf5Form::Info => (0..count.min(2)).collect(),
         Hdf5Form::Read | Hdf5Form::Write => (0..count.min(2)).collect(),
         Hdf5Form::Attribute => (0..count.min(3)).collect(),
+    }
+}
+
+fn validate_display_literals(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) {
+    let count = request.arguments.len();
+    let token = |index| request.literals.literal_string_at(index);
+    let mut require = |index, accepted: &[&str]| {
+        if token(index).is_some_and(|value| {
+            !accepted
+                .iter()
+                .any(|candidate| value.eq_ignore_ascii_case(candidate))
+        }) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-HDF5-DISPLAY",
+                "h5disp mode must be 'simple' or 'min'; TextEncoding accepts only 'UTF-8'",
+                index,
+            ));
+        }
+    };
+    match count {
+        3 => {
+            if token(1).is_some_and(|value| value.eq_ignore_ascii_case("TextEncoding")) {
+                require(2, &["UTF-8"]);
+            } else if token(1).is_none() {
+                require(2, &["simple", "min", "UTF-8"]);
+            } else {
+                require(2, &["simple", "min"]);
+            }
+        }
+        4 => {
+            require(2, &["TextEncoding"]);
+            require(3, &["UTF-8"]);
+        }
+        5 => {
+            require(2, &["simple", "min"]);
+            require(3, &["TextEncoding"]);
+            require(4, &["UTF-8"]);
+        }
+        _ => {}
     }
 }
 

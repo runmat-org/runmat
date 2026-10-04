@@ -14,7 +14,79 @@ pub const H5DISP_CAPTURE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensio
     error_identifier: Some("RunMat:compatibility:H5dispCapturedTextExtension"),
 };
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const FILENAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "HDF5 file name.",
+};
+const LOCATION: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "location",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Group or dataset path.",
+};
+const MODE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "'simple' or 'min' display mode.",
+};
+const TEXT_ENCODING: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "TextEncoding",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "TextEncoding option name.",
+};
+const UTF8: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "UTF-8",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "UTF-8 name decoding.",
+};
+const IN_FILE_LOCATION_MODE: [BuiltinParamDescriptor; 3] = [FILENAME, LOCATION, MODE];
+const IN_FILE_ENCODING: [BuiltinParamDescriptor; 3] = [FILENAME, TEXT_ENCODING, UTF8];
+const IN_FILE_LOCATION_ENCODING: [BuiltinParamDescriptor; 4] =
+    [FILENAME, LOCATION, TEXT_ENCODING, UTF8];
+const IN_FILE_LOCATION_MODE_ENCODING: [BuiltinParamDescriptor; 5] =
+    [FILENAME, LOCATION, MODE, TEXT_ENCODING, UTF8];
+
+const SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
+    BuiltinSignatureDescriptor {
+        label: "h5disp(filename)",
+        inputs: &IN_FILE_ONLY,
+        outputs: &OUT_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h5disp(filename, location)",
+        inputs: &IN_FILE_OPTIONAL_LOCATION,
+        outputs: &OUT_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h5disp(filename, location, mode)",
+        inputs: &IN_FILE_LOCATION_MODE,
+        outputs: &OUT_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h5disp(filename, 'TextEncoding', 'UTF-8')",
+        inputs: &IN_FILE_ENCODING,
+        outputs: &OUT_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h5disp(filename, location, 'TextEncoding', 'UTF-8')",
+        inputs: &IN_FILE_LOCATION_ENCODING,
+        outputs: &OUT_NONE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h5disp(filename, location, mode, 'TextEncoding', 'UTF-8')",
+        inputs: &IN_FILE_LOCATION_MODE_ENCODING,
+        outputs: &OUT_NONE,
+    },
     BuiltinSignatureDescriptor {
         label: "text = h5disp(filename)",
         inputs: &IN_FILE_ONLY,
@@ -23,6 +95,26 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "text = h5disp(filename, location)",
         inputs: &IN_FILE_OPTIONAL_LOCATION,
+        outputs: &OUT_TEXT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "text = h5disp(filename, location, mode)",
+        inputs: &IN_FILE_LOCATION_MODE,
+        outputs: &OUT_TEXT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "text = h5disp(filename, 'TextEncoding', 'UTF-8')",
+        inputs: &IN_FILE_ENCODING,
+        outputs: &OUT_TEXT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "text = h5disp(filename, location, 'TextEncoding', 'UTF-8')",
+        inputs: &IN_FILE_LOCATION_ENCODING,
+        outputs: &OUT_TEXT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "text = h5disp(filename, location, mode, 'TextEncoding', 'UTF-8')",
+        inputs: &IN_FILE_LOCATION_MODE_ENCODING,
         outputs: &OUT_TEXT,
     },
 ];

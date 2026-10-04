@@ -119,10 +119,13 @@ pub(super) fn render_group(
     group: &Group,
     name: &str,
     indent: usize,
+    mode: h5disp_controls::H5DispMode,
     out: &mut String,
 ) -> BuiltinResult<()> {
     out.push_str(&format!("{}Group: {name}\n", " ".repeat(indent)));
-    render_attributes(builtin, group, indent + 2, out)?;
+    if mode == h5disp_controls::H5DispMode::Simple {
+        render_attributes(builtin, group, indent + 2, out)?;
+    }
     for member in group.member_names().map_err(|err| {
         io_error(
             builtin,
@@ -132,9 +135,9 @@ pub(super) fn render_group(
     })? {
         let child_path = join_hdf5_path(name, &member);
         if let Ok(child) = group.group(&member) {
-            render_group(builtin, &child, &child_path, indent + 2, out)?;
+            render_group(builtin, &child, &child_path, indent + 2, mode, out)?;
         } else if let Ok(ds) = group.dataset(&member) {
-            render_dataset(builtin, &ds, &child_path, indent + 2, out)?;
+            render_dataset(builtin, &ds, &child_path, indent + 2, mode, out)?;
         }
     }
     Ok(())
@@ -145,8 +148,13 @@ pub(super) fn render_dataset(
     ds: &Dataset,
     name: &str,
     indent: usize,
+    mode: h5disp_controls::H5DispMode,
     out: &mut String,
 ) -> BuiltinResult<()> {
+    if mode == h5disp_controls::H5DispMode::Min {
+        out.push_str(&format!("{}Dataset: {name}\n", " ".repeat(indent)));
+        return Ok(());
+    }
     let dtype = ds
         .dtype()
         .and_then(|dt| dt.to_descriptor())
