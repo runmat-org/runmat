@@ -2,6 +2,7 @@
 
 mod cooperation;
 mod path;
+mod write_owner;
 
 pub mod csvread;
 pub mod csvwrite;

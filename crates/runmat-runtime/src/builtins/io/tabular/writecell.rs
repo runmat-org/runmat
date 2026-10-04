@@ -1,11 +1,8 @@
 //! MATLAB-compatible `writecell` builtin for heterogeneous cell-array export.
 
-use std::collections::HashMap;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
+use std::path::{Path, PathBuf};
 
-use futures::lock::Mutex as AsyncMutex;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -14,7 +11,7 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_filesystem::{File, OpenOptions};
+use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, IntValue, Value};
 
@@ -26,12 +23,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+use super::path::{TabularFsOwner, TabularFsPath};
+use super::write_owner;
+
 const BUILTIN_NAME: &str = "writecell";
 const MAX_EXCEL_ROW_INDEX: usize = 1_048_575;
 const MAX_EXCEL_COLUMN_INDEX: usize = 16_383;
-pub(super) type WriteLock = Arc<AsyncMutex<()>>;
-type WeakWriteLock = Weak<AsyncMutex<()>>;
-static WRITE_LOCKS: OnceLock<StdMutex<HashMap<String, WeakWriteLock>>> = OnceLock::new();
 
 const WRITECELL_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 const WRITECELL_INPUTS_CELL_FILENAME: [BuiltinParamDescriptor; 2] = [
@@ -340,10 +337,21 @@ async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResul
         )?;
     }
 
-    let filename_value = gather_if_needed_async(&rest[0])
-        .await
-        .map_err(map_control_flow)?;
-    let path = resolve_path(&filename_value)?;
+    let path = resolve_path(&rest[0])?;
+    let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            "writecell: unable to capture filesystem authority",
+            source,
+        )
+    })?;
+    let selected = owner.path(path).map_err(|source| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            "writecell: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
     let options = parse_options(&rest[1..]).await?;
 
     let gathered = gather_if_needed_async(&data)
@@ -351,9 +359,9 @@ async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResul
         .map_err(map_control_flow)?;
     let table = CellTable::from_value(gathered).await?;
 
-    let bytes_written = match options.resolve_file_type(&path)? {
-        OutputFileType::DelimitedText => write_delimited_cells(&path, &table, &options).await?,
-        OutputFileType::Spreadsheet => write_spreadsheet_cells(&path, &table, &options).await?,
+    let bytes_written = match options.resolve_file_type(selected.path())? {
+        OutputFileType::DelimitedText => write_delimited_cells(&selected, &table, &options).await?,
+        OutputFileType::Spreadsheet => write_spreadsheet_cells(&selected, &table, &options).await?,
     };
 
     Ok(Value::Num(bytes_written as f64))
@@ -844,25 +852,42 @@ pub(super) fn scalar_tensor_cell_value(tensor: &runmat_value::Tensor) -> Builtin
 }
 
 async fn write_delimited_cells(
-    path: &Path,
+    selected: &TabularFsPath,
     table: &CellTable,
     options: &WriteCellOptions,
 ) -> BuiltinResult<usize> {
+    let path = selected.path();
     let delimiter = options.resolve_delimiter(path);
     let line_ending = options.line_ending.as_str();
     let payload = build_delimited_payload(table, options, &delimiter, line_ending);
-    let write_lock = write_lock_for_path(path).await;
+    let write_lock = write_owner::write_lock_for_path(selected)
+        .await
+        .map_err(|source| {
+            writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                "writecell: write authority unavailable",
+                source,
+            )
+        })?;
     let _write_guard = write_lock.lock().await;
 
     if options.write_mode == WriteMode::Overwrite {
-        safe_replace_file(path, &payload, "delimited text").await?;
+        write_owner::safe_replace_file(selected, &payload)
+            .await
+            .map_err(|source| {
+                writecell_error_with_source(
+                    &WRITECELL_ERROR_IO,
+                    "writecell: failed to replace delimited text file",
+                    source,
+                )
+            })?;
         return Ok(payload.len());
     }
 
     let mut open_options = OpenOptions::new();
     open_options.create(true).write(true).append(true);
 
-    let mut file = open_options.open_async(path).await.map_err(|err| {
+    let mut file = selected.open_with(&open_options).await.map_err(|err| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
             format!(
@@ -874,7 +899,7 @@ async fn write_delimited_cells(
     })?;
 
     let mut bytes_written = 0usize;
-    if append_needs_line_ending(path).await? {
+    if append_needs_line_ending(selected).await? {
         file.write_all(line_ending.as_bytes()).map_err(|err| {
             writecell_error_with_source(
                 &WRITECELL_ERROR_IO,
@@ -902,85 +927,6 @@ async fn write_delimited_cells(
     Ok(bytes_written)
 }
 
-pub(super) async fn write_lock_for_path(path: &Path) -> WriteLock {
-    let key = write_lock_key(path).await;
-    let locks = WRITE_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
-    let mut locks = locks
-        .lock()
-        .expect("writecell write lock registry poisoned");
-    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
-        return lock;
-    }
-    locks.retain(|_, lock| lock.strong_count() > 0);
-    let lock = Arc::new(AsyncMutex::new(()));
-    locks.insert(key, Arc::downgrade(&lock));
-    lock
-}
-
-async fn write_lock_key(path: &Path) -> String {
-    if let Ok(canonical) = runmat_filesystem::canonicalize_async(path).await {
-        return canonical.to_string_lossy().into_owned();
-    }
-
-    let absolute = lexical_absolute_path(path);
-    let mut candidate = absolute.as_path();
-    let mut suffix = PathBuf::new();
-    loop {
-        if let Ok(canonical) = runmat_filesystem::canonicalize_async(candidate).await {
-            let keyed = if suffix.as_os_str().is_empty() {
-                canonical
-            } else {
-                canonical.join(&suffix)
-            };
-            return keyed.to_string_lossy().into_owned();
-        }
-        let Some(name) = candidate.file_name() else {
-            break;
-        };
-        let mut next_suffix = PathBuf::from(name);
-        if !suffix.as_os_str().is_empty() {
-            next_suffix.push(&suffix);
-        }
-        suffix = next_suffix;
-        let Some(parent) = candidate.parent() else {
-            break;
-        };
-        if parent == candidate {
-            break;
-        }
-        candidate = parent;
-    }
-
-    lexical_normalize_path(absolute)
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn lexical_absolute_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        runmat_filesystem::current_dir()
-            .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
-    };
-    lexical_normalize_path(absolute)
-}
-
-fn lexical_normalize_path(path: PathBuf) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
-}
-
 fn build_delimited_payload(
     table: &CellTable,
     options: &WriteCellOptions,
@@ -1003,8 +949,9 @@ fn build_delimited_payload(
     payload
 }
 
-async fn append_needs_line_ending(path: &Path) -> BuiltinResult<bool> {
-    let metadata = match runmat_filesystem::metadata_async(path).await {
+async fn append_needs_line_ending(selected: &TabularFsPath) -> BuiltinResult<bool> {
+    let path = selected.path();
+    let metadata = match selected.metadata().await {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(err) => {
@@ -1021,7 +968,7 @@ async fn append_needs_line_ending(path: &Path) -> BuiltinResult<bool> {
     if metadata.is_empty() {
         return Ok(false);
     }
-    let mut file = File::open_async(path).await.map_err(|err| {
+    let mut file = selected.open_read().await.map_err(|err| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
             format!(
@@ -1050,7 +997,7 @@ async fn append_needs_line_ending(path: &Path) -> BuiltinResult<bool> {
 }
 
 async fn write_spreadsheet_cells(
-    path: &Path,
+    selected: &TabularFsPath,
     table: &CellTable,
     options: &WriteCellOptions,
 ) -> BuiltinResult<usize> {
@@ -1075,71 +1022,16 @@ async fn write_spreadsheet_cells(
     }
 
     let bytes = build_xlsx_workbook(table, &options.sheet_name(), range_start)?;
-    safe_replace_file(path, &bytes, "spreadsheet").await?;
+    write_owner::safe_replace_file(selected, &bytes)
+        .await
+        .map_err(|source| {
+            writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                "writecell: failed to replace spreadsheet file",
+                source,
+            )
+        })?;
     Ok(bytes.len())
-}
-
-pub(super) async fn safe_replace_file(path: &Path, bytes: &[u8], label: &str) -> BuiltinResult<()> {
-    let temp_path = temporary_sibling_path(path);
-    let mut open_options = OpenOptions::new();
-    open_options.write(true).create_new(true);
-    let mut file = open_options.open_async(&temp_path).await.map_err(|err| {
-        writecell_error_with_source(
-            &WRITECELL_ERROR_IO,
-            format!(
-                "writecell: unable to create temporary {label} file \"{}\" ({err})",
-                temp_path.display()
-            ),
-            err,
-        )
-    })?;
-    file.write_all(bytes).map_err(|err| {
-        writecell_error_with_source(
-            &WRITECELL_ERROR_IO,
-            format!("writecell: failed to write spreadsheet ({err})"),
-            err,
-        )
-    })?;
-    file.flush_async().await.map_err(|err| {
-        writecell_error_with_source(
-            &WRITECELL_ERROR_IO,
-            format!("writecell: failed to flush temporary {label} file ({err})"),
-            err,
-        )
-    })?;
-    file.sync_all_async().await.map_err(|err| {
-        writecell_error_with_source(
-            &WRITECELL_ERROR_IO,
-            format!("writecell: failed to sync temporary {label} file ({err})"),
-            err,
-        )
-    })?;
-    drop(file);
-    if let Err(err) = runmat_filesystem::rename_async(&temp_path, path).await {
-        let _ = runmat_filesystem::remove_file_async(&temp_path).await;
-        return Err(writecell_error_with_source(
-            &WRITECELL_ERROR_IO,
-            format!(
-                "writecell: failed to replace \"{}\" with temporary {label} file ({err})",
-                path.display()
-            ),
-            err,
-        ));
-    }
-    Ok(())
-}
-
-fn temporary_sibling_path(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("writecell");
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    parent.join(format!(".{name}.runmat-tmp-{}-{nanos}", std::process::id()))
 }
 
 pub(super) fn build_xlsx_workbook(
@@ -1507,11 +1399,21 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::sync::mpsc;
     #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::Arc;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::Barrier;
     #[cfg(not(target_arch = "wasm32"))]
     use std::thread;
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::Duration;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn selected_path(path: &Path) -> TabularFsPath {
+        TabularFsOwner::capture(Some(path))
+            .expect("captured provider")
+            .path(path.to_path_buf())
+            .expect("selected path")
+    }
 
     use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
 
@@ -1692,7 +1594,8 @@ mod tests {
         let path = temp_path("txt");
         fs::write(&path, "existing\n").expect("seed");
         let filename = path.to_string_lossy().into_owned();
-        let lock = block_on(write_lock_for_path(&path));
+        let lock = block_on(write_owner::write_lock_for_path(&selected_path(&path)))
+            .expect("selected write lock");
         let guard = block_on(lock.lock());
         let (tx, rx) = mpsc::channel();
 
@@ -1724,8 +1627,10 @@ mod tests {
         link.set_extension("link.txt");
         std::os::unix::fs::symlink(&path, &link).expect("symlink");
 
-        let direct = block_on(write_lock_for_path(&path));
-        let alias = block_on(write_lock_for_path(&link));
+        let direct = block_on(write_owner::write_lock_for_path(&selected_path(&path)))
+            .expect("direct write lock");
+        let alias = block_on(write_owner::write_lock_for_path(&selected_path(&link)))
+            .expect("alias write lock");
         assert!(Arc::ptr_eq(&direct, &alias));
 
         let _ = fs::remove_file(link);

@@ -12,7 +12,6 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
@@ -27,6 +26,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+use super::path::{TabularFsOwner, TabularFsPath};
+use super::write_owner;
 use super::writecell::{self, CellTable, CellValue, RangeStart};
 
 const BUILTIN_NAME: &str = "xlswrite";
@@ -391,24 +392,49 @@ fn is_numeric_range_value(value: &Value) -> bool {
 }
 
 async fn write_spreadsheet(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<usize> {
-    let path_value = gather_if_needed_async(&filename)
-        .await
-        .map_err(map_control_flow)?;
+    let path = resolve_path(&filename)?;
+    let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
+        xlswrite_error_with_source(
+            &XLSWRITE_ERROR_IO,
+            "xlswrite: unable to capture filesystem authority",
+            source,
+        )
+    })?;
+    let selected = owner.path(path).map_err(|source| {
+        xlswrite_error_with_source(
+            &XLSWRITE_ERROR_IO,
+            "xlswrite: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
     let data_value = gather_if_needed_async(&data)
         .await
         .map_err(map_control_flow)?;
     let args = gather_arguments(&rest).await?;
     let request = XlsWriteRequest::parse(&args)?;
-    let path = resolve_path(&path_value)?;
     let table = XlsTable::from_value(data_value).await?;
-    let lock = writecell::write_lock_for_path(&path).await;
+    let lock = write_owner::write_lock_for_path(&selected)
+        .await
+        .map_err(|source| {
+            xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                "xlswrite: write authority unavailable",
+                source,
+            )
+        })?;
     let _guard = lock.lock().await;
-    let mut workbook = load_workbook_or_new(&path).await?;
+    let mut workbook = load_workbook_or_new(&selected).await?;
     workbook.overlay(&request, table)?;
     let bytes = workbook.to_xlsx_bytes()?;
-    writecell::safe_replace_file(&path, &bytes, "spreadsheet")
+    write_owner::safe_replace_file(&selected, &bytes)
         .await
-        .map_err(map_writecell_error)?;
+        .map_err(|source| {
+            xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                "xlswrite: failed to replace spreadsheet file",
+                source,
+            )
+        })?;
     Ok(bytes.len())
 }
 
@@ -1055,15 +1081,16 @@ fn workbook_relationships_xml(sheet_count: usize) -> String {
     xml
 }
 
-async fn load_workbook_or_new(path: &Path) -> BuiltinResult<XlsWorkbook> {
-    match read_existing_workbook_bytes(path).await? {
-        Some(bytes) => workbook_from_bytes(path, bytes),
+async fn load_workbook_or_new(selected: &TabularFsPath) -> BuiltinResult<XlsWorkbook> {
+    match read_existing_workbook_bytes(selected).await? {
+        Some(bytes) => workbook_from_bytes(selected.path(), bytes),
         None => Ok(XlsWorkbook::new()),
     }
 }
 
-async fn read_existing_workbook_bytes(path: &Path) -> BuiltinResult<Option<Vec<u8>>> {
-    let file = match File::open_async(path).await {
+async fn read_existing_workbook_bytes(selected: &TabularFsPath) -> BuiltinResult<Option<Vec<u8>>> {
+    let path = selected.path();
+    let file = match selected.open_read().await {
         Ok(file) => file,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => {
@@ -1087,6 +1114,13 @@ async fn read_existing_workbook_bytes(path: &Path) -> BuiltinResult<Option<Vec<u
                 path.display()
             ),
             err,
+        )
+    })?;
+    selected.check().map_err(|source| {
+        xlswrite_error_with_source(
+            &XLSWRITE_ERROR_IO,
+            "xlswrite: captured filesystem authority was revoked",
+            source,
         )
     })?;
     if bytes.len() as u64 > MAX_XLSWRITE_WORKBOOK_BYTES {
