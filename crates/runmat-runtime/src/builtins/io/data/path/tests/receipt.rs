@@ -95,7 +95,7 @@ impl RuntimePlacementService for SwappingPlacement {
         request.validate().expect("typed selected host effect");
         self.selected.set(self.selected.get() + 1);
         *self.guard.borrow_mut() = Some(fs::replace_provider(self.replacement.clone()));
-        fs::set_current_dir("/replacement").expect("replacement provider cwd fixture");
+        assert_eq!(fs::current_dir().unwrap(), Path::new("/replacement"));
         let candidate = &request.candidates[0];
         Ok(RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
@@ -186,7 +186,7 @@ fn selected_open_keeps_original_provider_and_cwd_through_await_and_publication()
 }
 
 #[test]
-fn typed_cooperation_cancellation_reports_cancelled_receipt_without_token_mark() {
+fn typed_cooperation_cancellation_aborts_without_operational_failure_feedback() {
     use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
     use runmat_execution::cancellation::CancellationSource;
     use std::num::NonZeroU64;
@@ -233,11 +233,20 @@ fn typed_cooperation_cancellation_reports_cancelled_receipt_without_token_mark()
     }))
     .expect_err("typed cancellation must abort publication");
     assert_eq!(error.identifier.as_deref(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<ExecutionServiceError>()),
+        Some(ExecutionServiceError::Cancelled)
+    ));
     assert!(
         !runtime.is_cancelled(),
         "the test isolates typed error provenance"
     );
     let observed = placement.observations.borrow();
-    assert_eq!(observed.len(), 1);
-    assert_eq!(observed[0].outcome, WholeWorkObservationOutcome::Cancelled);
+    assert!(
+        observed.is_empty(),
+        "cancelled work must not publish a cost/failure observation"
+    );
 }

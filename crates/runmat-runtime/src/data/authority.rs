@@ -287,7 +287,7 @@ fn resolve_any_object(
     value: &Value,
 ) -> BuiltinResult<AuthorizedHandle> {
     let Value::Object(object) = value else {
-        return Err(data_error("Dataset family receiver must be an object"));
+        return Err(data_error("expected object receiver for Dataset family"));
     };
     let reference = object
         .dataset_authority()
