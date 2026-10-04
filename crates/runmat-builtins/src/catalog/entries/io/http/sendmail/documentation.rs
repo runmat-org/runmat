@@ -49,5 +49,5 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         notes: &[],
     },
     introduced: None,
-    status: Some(BuiltinDocumentationStatus::Stable),
+    status: Some(BuiltinDocumentationStatus::Partial),
 };
