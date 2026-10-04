@@ -24,7 +24,8 @@ pub use stage::{
     HostEffectStageReservation,
 };
 pub use workload::{
-    AudioDecodeOutput, AudioFrameRange, HostEffectOutput, HostEffectSource, HostEffectWorkload,
+    AudioDecodeOutput, AudioFrameRange, DatasetPathOperation, HostEffectOutput, HostEffectSource,
+    HostEffectWorkload,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]

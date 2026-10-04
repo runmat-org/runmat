@@ -3,6 +3,9 @@
 use runmat_builtins::AudioReadDataType;
 use std::path::Path;
 
+mod dataset;
+pub use dataset::DatasetPathOperation;
+
 /// The requested result is distinct from the committed side effects. No
 /// output still needs a bound for temporary codec and result storage.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -62,6 +65,12 @@ pub enum HostEffectWorkload<'a> {
         datatype: AudioReadDataType,
         output: AudioDecodeOutput,
     },
+    DatasetPath {
+        operation: DatasetPathOperation,
+        source: &'a Path,
+        destination: Option<&'a Path>,
+        output: HostEffectOutput,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -84,10 +93,20 @@ enum AudioWorkloadFacts<'a> {
     },
 }
 
+#[derive(serde::Serialize)]
+struct DatasetPathFacts<'a> {
+    operation: DatasetPathOperation,
+    source: &'a [u8],
+    destination: Option<&'a [u8]>,
+    output: HostEffectOutput,
+}
+
 impl HostEffectWorkload<'_> {
     pub const fn output(self) -> HostEffectOutput {
         match self {
-            Self::ArchiveExtract { output, .. } | Self::AudioMetadata { output, .. } => output,
+            Self::ArchiveExtract { output, .. }
+            | Self::AudioMetadata { output, .. }
+            | Self::DatasetPath { output, .. } => output,
             Self::AudioDecode { output, .. } => output.host_effect_output(),
         }
     }
@@ -134,6 +153,18 @@ impl HostEffectWorkload<'_> {
                 output,
             })
             .expect("typed audio decode facts serialize"),
+            Self::DatasetPath {
+                operation,
+                source,
+                destination,
+                output,
+            } => serde_json::to_vec(&DatasetPathFacts {
+                operation,
+                source: source.as_os_str().as_encoded_bytes(),
+                destination: destination.map(|path| path.as_os_str().as_encoded_bytes()),
+                output,
+            })
+            .expect("typed dataset path facts serialize"),
         }
     }
 }
