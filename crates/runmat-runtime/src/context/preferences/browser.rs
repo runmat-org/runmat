@@ -210,7 +210,12 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                     },
                 )
                 .await?;
-            Ok(prepared.values)
+            prepared
+                .values
+                .iter()
+                .map(decode_durable_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(PreferenceServiceError::ValueEncoding)
         })
     }
 
@@ -297,8 +302,6 @@ enum BrowserPreferenceError {
     Document(#[from] PreferenceDocumentError),
     #[error(transparent)]
     Mutation(#[from] DocumentMutationError),
-    #[error("application settings value decoding failed: {0}")]
-    ValueCodec(#[source] crate::execution::value_codec::ValueCodecError),
 }
 
 #[derive(Debug)]
@@ -319,7 +322,6 @@ fn browser_error(source: JsValue) -> BrowserPreferenceError {
 fn read_error(error: BrowserPreferenceError) -> PreferenceServiceError {
     match error {
         BrowserPreferenceError::Document(source) => source.into(),
-        BrowserPreferenceError::ValueCodec(source) => PreferenceServiceError::ValueEncoding(source),
         BrowserPreferenceError::Mutation(DocumentMutationError::Missing { group, name }) => {
             PreferenceServiceError::Missing { group, name }
         }

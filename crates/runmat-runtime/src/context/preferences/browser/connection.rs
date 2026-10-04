@@ -30,12 +30,13 @@ impl Drop for OwnedDatabase {
 }
 
 pub(super) async fn open(namespace: &str) -> Result<OwnedDatabase, BrowserPreferenceError> {
-    open_version(namespace, 1).await
+    open_version(namespace, 1, None).await
 }
 
 pub(super) async fn open_version(
     namespace: &str,
     version: u32,
+    blocked: Option<oneshot::Sender<()>>,
 ) -> Result<OwnedDatabase, BrowserPreferenceError> {
     let request = factory()?
         .open_with_u32(namespace, version)
@@ -45,10 +46,12 @@ pub(super) async fn open_version(
     let owner = Rc::new(RefCell::new(OpenOwner {
         request,
         completion_sender: Some(completion_sender),
+        blocked,
         upgrade_error: None,
         on_upgrade: None,
         on_success: None,
         on_error: None,
+        on_blocked: None,
     }));
     install(&owner);
     // IndexedDB does not expose cancellation of an open request. A dropped
@@ -72,6 +75,8 @@ fn install(owner: &Rc<RefCell<OpenOwner>>) {
     let on_success = Closure::<dyn FnMut(Event)>::new(move |_| success(&weak));
     let weak = Rc::downgrade(owner);
     let on_error = Closure::<dyn FnMut(Event)>::new(move |_| failed(&weak));
+    let weak = Rc::downgrade(owner);
+    let on_blocked = Closure::<dyn FnMut(Event)>::new(move |_| blocked(&weak));
     let mut state = owner.borrow_mut();
     state
         .request
@@ -82,9 +87,21 @@ fn install(owner: &Rc<RefCell<OpenOwner>>) {
     state
         .request
         .set_onerror(Some(on_error.as_ref().unchecked_ref()));
+    state
+        .request
+        .set_onblocked(Some(on_blocked.as_ref().unchecked_ref()));
     state.on_upgrade = Some(on_upgrade);
     state.on_success = Some(on_success);
     state.on_error = Some(on_error);
+    state.on_blocked = Some(on_blocked);
+}
+
+fn blocked(weak: &Weak<RefCell<OpenOwner>>) {
+    if let Some(owner) = weak.upgrade() {
+        if let Some(sender) = owner.borrow_mut().blocked.take() {
+            let _ = sender.send(());
+        }
+    }
 }
 
 fn upgrade(weak: &Weak<RefCell<OpenOwner>>) {
@@ -170,10 +187,12 @@ fn request_error(request: &IdbOpenDbRequest) -> BrowserPreferenceError {
 struct OpenOwner {
     request: IdbOpenDbRequest,
     completion_sender: Option<oneshot::Sender<Result<OwnedDatabase, BrowserPreferenceError>>>,
+    blocked: Option<oneshot::Sender<()>>,
     upgrade_error: Option<BrowserPreferenceError>,
     on_upgrade: Option<Closure<dyn FnMut(Event)>>,
     on_success: Option<Closure<dyn FnMut(Event)>>,
     on_error: Option<Closure<dyn FnMut(Event)>>,
+    on_blocked: Option<Closure<dyn FnMut(Event)>>,
 }
 
 impl OpenOwner {
@@ -181,9 +200,11 @@ impl OpenOwner {
         self.request.set_onupgradeneeded(None);
         self.request.set_onsuccess(None);
         self.request.set_onerror(None);
+        self.request.set_onblocked(None);
         self.on_upgrade = None;
         self.on_success = None;
         self.on_error = None;
+        self.on_blocked = None;
     }
 }
 

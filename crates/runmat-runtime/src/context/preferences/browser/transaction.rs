@@ -5,11 +5,10 @@ use super::store::{decode_document, request_error, transaction_error};
 use super::{browser_error, BrowserPreferenceError};
 use crate::context::preferences::document::{apply_mutation, DocumentMutation};
 use crate::context::UserPathSnapshot;
-use crate::execution::value_codec::decode_durable_value;
 use futures::channel::oneshot;
 use futures::lock::OwnedMutexGuard;
 use js_sys::Uint8Array;
-use runmat_value::Value;
+use runmat_execution::value::ValuePayload;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use wasm_bindgen::closure::Closure;
@@ -18,7 +17,7 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event, IdbObjectStore, IdbRequest, IdbTransaction, IdbTransactionMode};
 
 pub(super) struct BrowserPrepared {
-    pub values: Vec<Value>,
+    pub values: Vec<ValuePayload>,
     pub user_path: Option<UserPathSnapshot>,
 }
 
@@ -103,11 +102,6 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
             .ok_or(BrowserPreferenceError::LostObservation)?;
         let (document, prepared) =
             apply_mutation(document, mutation).map_err(BrowserPreferenceError::Mutation)?;
-        let mut decoded = Vec::with_capacity(prepared.values.len());
-        for payload in &prepared.values {
-            decoded
-                .push(decode_durable_value(payload).map_err(BrowserPreferenceError::ValueCodec)?);
-        }
         if prepared.changed {
             let bytes = document
                 .encode()
@@ -119,7 +113,7 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 .map_err(browser_error)?;
         }
         Ok(BrowserPrepared {
-            values: decoded,
+            values: prepared.values,
             user_path: prepared.user_path,
         })
     })();

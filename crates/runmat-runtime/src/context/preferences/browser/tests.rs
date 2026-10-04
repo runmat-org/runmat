@@ -1,6 +1,7 @@
 use super::*;
 use crate::execution::RuntimeExecutionService;
 use futures::channel::oneshot;
+use js_sys::Uint8Array;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use runmat_value::IntValue;
@@ -8,9 +9,9 @@ use std::cell::RefCell;
 use std::future::Future;
 use std::task::{Context, Poll};
 use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_sys::Event;
+use web_sys::{Event, IdbTransactionMode};
 
 fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
@@ -52,6 +53,30 @@ async fn delete_namespace(service: &BrowserPreferenceService) {
     request.set_onsuccess(None);
     request.set_onerror(None);
     request.set_onblocked(None);
+}
+
+async fn store_invalid_document(service: &BrowserPreferenceService) {
+    let database = connection::open(&service.namespace).await.unwrap();
+    let transaction = database
+        .transaction_with_str_and_mode(connection::DOCUMENT_STORE, IdbTransactionMode::Readwrite)
+        .unwrap();
+    let store = transaction
+        .object_store(connection::DOCUMENT_STORE)
+        .unwrap();
+    let bytes = Uint8Array::from(b"{invalid".as_slice());
+    store
+        .put_with_key(&bytes.into(), &JsValue::from_str(connection::DOCUMENT_KEY))
+        .unwrap();
+    let (sender, receiver) = oneshot::channel();
+    let sender = Rc::new(RefCell::new(Some(sender)));
+    let on_complete = Closure::<dyn FnMut(Event)>::new(move |_| {
+        if let Some(sender) = sender.borrow_mut().take() {
+            let _ = sender.send(());
+        }
+    });
+    transaction.set_oncomplete(Some(on_complete.as_ref().unchecked_ref()));
+    receiver.await.unwrap();
+    transaction.set_oncomplete(None);
 }
 
 #[wasm_bindgen_test(async)]
@@ -139,7 +164,12 @@ async fn unpolled_invalid_and_cancelled_calls_cannot_publish() {
 async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
     let resumed = unique_service();
     let held = connection::open(&resumed.namespace).await.unwrap();
-    let mut upgrade = Box::pin(connection::open_version(&resumed.namespace, 2));
+    let (blocked_tx, blocked_rx) = oneshot::channel();
+    let mut upgrade = Box::pin(connection::open_version(
+        &resumed.namespace,
+        2,
+        Some(blocked_tx),
+    ));
     assert!(matches!(
         Future::poll(
             upgrade.as_mut(),
@@ -147,6 +177,9 @@ async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
         ),
         Poll::Pending
     ));
+    blocked_rx
+        .await
+        .expect("the held version-one connection blocks upgrade");
     drop(held);
     let upgraded = upgrade.await.unwrap();
     drop(upgraded);
@@ -154,7 +187,12 @@ async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
 
     let abandoned = unique_service();
     let held = connection::open(&abandoned.namespace).await.unwrap();
-    let mut upgrade = Box::pin(connection::open_version(&abandoned.namespace, 2));
+    let (blocked_tx, blocked_rx) = oneshot::channel();
+    let mut upgrade = Box::pin(connection::open_version(
+        &abandoned.namespace,
+        2,
+        Some(blocked_tx),
+    ));
     assert!(matches!(
         Future::poll(
             upgrade.as_mut(),
@@ -162,6 +200,9 @@ async fn blocked_upgrade_resumes_and_dropped_open_closes_late_success() {
         ),
         Poll::Pending
     ));
+    blocked_rx
+        .await
+        .expect("the abandoned upgrade was actually blocked");
     drop(upgrade);
     drop(held);
     // The host-owned observer must close a successful request whose caller
@@ -226,4 +267,42 @@ async fn late_missing_name_aborts_private_document_without_partial_publication()
     ));
     assert!(service.all_groups(runtime()).await.unwrap().is_empty());
     delete_namespace(&service).await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn cancelled_blocked_open_and_corrupt_read_release_exact_connection() {
+    let cancelled = unique_service();
+    let held = connection::open(&cancelled.namespace).await.unwrap();
+    let (blocked_tx, blocked_rx) = oneshot::channel();
+    let cancellation = CancellationSource::new();
+    let cancelled_runtime = runtime().with_cancellation_token(cancellation.token());
+    let mut budget = cancelled_runtime.cpu_cooperation();
+    let mut pending = Box::pin(budget.await_cancellable(connection::open_version(
+        &cancelled.namespace,
+        2,
+        Some(blocked_tx),
+    )));
+    assert!(matches!(
+        Future::poll(
+            pending.as_mut(),
+            &mut Context::from_waker(futures::task::noop_waker_ref())
+        ),
+        Poll::Pending
+    ));
+    blocked_rx.await.expect("upgrade reached blocked event");
+    cancellation.cancel(CancellationReason::User);
+    assert!(matches!(
+        pending.await,
+        Err(crate::execution::ExecutionServiceError::Cancelled)
+    ));
+    drop(held);
+    delete_namespace(&cancelled).await;
+
+    let corrupt = unique_service();
+    store_invalid_document(&corrupt).await;
+    assert!(matches!(
+        corrupt.all_groups(runtime()).await,
+        Err(PreferenceServiceError::Document(_))
+    ));
+    delete_namespace(&corrupt).await;
 }
