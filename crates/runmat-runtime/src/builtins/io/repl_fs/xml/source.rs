@@ -37,14 +37,11 @@ impl XmlFsPath {
         Ok(())
     }
 
-    pub(super) async fn read_to_string(&self) -> io::Result<String> {
+    pub(super) async fn read_bytes(&self) -> io::Result<Vec<u8>> {
         self.check_current()?;
         let bytes = self.provider.read(&self.path).await?;
         self.check_current()?;
-        let text = String::from_utf8(bytes)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        self.check_current()?;
-        Ok(text)
+        Ok(bytes)
     }
 
     pub(super) async fn write(&self, bytes: &[u8]) -> io::Result<()> {
@@ -76,8 +73,8 @@ mod tests {
         let _replacement = fs::replace_provider(replacement.clone());
         fs::set_current_dir("/replacement").expect("replacement cwd");
         assert_eq!(
-            futures::executor::block_on(captured.read_to_string()).unwrap(),
-            "<selected/>"
+            futures::executor::block_on(captured.read_bytes()).unwrap(),
+            b"<selected/>"
         );
         futures::executor::block_on(captured.write(b"<changed/>")).expect("selected write");
         assert_eq!(
@@ -92,5 +89,36 @@ mod tests {
             .unwrap(),
             b"<replacement/>"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn encoded_xml_uses_the_captured_provider_after_ambient_swap() {
+        let _lock = fs::provider_override_lock();
+        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
+        selected
+            .write_project_path(
+                "/selected/encoded.xml",
+                b"<?xml version='1.0' encoding='windows-1252'?><root>caf\xE9</root>",
+            )
+            .expect("encoded fixture");
+        replacement
+            .write_project_path("/replacement/encoded.xml", b"<wrong/>")
+            .expect("replacement fixture");
+        let _selected = fs::replace_provider(selected);
+        fs::set_current_dir("/selected").expect("selected cwd");
+        let captured = XmlFsPath::capture(PathBuf::from("encoded.xml")).expect("capture");
+        let _replacement = fs::replace_provider(replacement);
+        fs::set_current_dir("/replacement").expect("replacement cwd");
+        let bytes = futures::executor::block_on(captured.read_bytes()).expect("captured read");
+        let mut cooperation = XmlCooperation::new(None, XmlOperation::XmlRead);
+        let text = futures::executor::block_on(super::super::parser::decode_document_bytes(
+            &bytes,
+            &mut cooperation,
+        ))
+        .expect("declared source decoding");
+        assert!(text.contains("café"));
+        assert!(!text.contains("wrong"));
     }
 }

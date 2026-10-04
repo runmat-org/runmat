@@ -11,8 +11,10 @@ pub(super) async fn name(raw: &[u8], cooperation: &mut XmlCooperation) -> Builti
     let mut position = 0usize;
     while position < raw.len() {
         let mut end = position.saturating_add(4096).min(raw.len());
-        while end < raw.len() && raw[end] & 0b1100_0000 == 0b1000_0000 {
+        let mut continuation = 0;
+        while end < raw.len() && raw[end] & 0b1100_0000 == 0b1000_0000 && continuation < 3 {
             end += 1;
+            continuation += 1;
         }
         let part = std::str::from_utf8(&raw[position..end]).map_err(|error| {
             build_runtime_error("xmlread: malformed XML (invalid name encoding)")
@@ -56,7 +58,14 @@ pub(super) async fn parse(
     raw: &[u8],
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<BTreeMap<String, String>> {
-    let mut attributes = BTreeMap::new();
+    Ok(parse_ordered(raw, cooperation).await?.into_iter().collect())
+}
+
+pub(super) async fn parse_ordered(
+    raw: &[u8],
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<Vec<(String, String)>> {
+    let mut attributes = Vec::<(String, String)>::new();
     let mut position = 0usize;
     while position < raw.len() {
         skip_space(raw, &mut position, cooperation).await?;
@@ -72,7 +81,7 @@ pub(super) async fn parse(
         )
         .await?;
         let key = name(&raw[name_start..position], cooperation).await?;
-        if attributes.contains_key(&key) {
+        if attributes.iter().any(|(existing, _)| existing == &key) {
             return Err(compat_error(
                 "xmlread",
                 "xmlread: malformed XML (duplicate attribute)",
@@ -114,7 +123,13 @@ pub(super) async fn parse(
                 "xmlread: malformed XML (attributes require whitespace separation)",
             ));
         }
-        attributes.insert(key, value);
+        attributes.try_reserve(1).map_err(|error| {
+            build_runtime_error("xmlread: cannot reserve XML attributes")
+                .with_builtin("xmlread")
+                .with_source(error)
+                .build()
+        })?;
+        attributes.push((key, value));
     }
     Ok(attributes)
 }
@@ -175,6 +190,9 @@ mod tests {
         for raw in ["a", "a='x' a='y'", "a='x'b='y'", "a=x", "a='x"] {
             assert!(parse_attributes(raw).is_err(), "invalid: {raw}");
         }
+        let mut cooperation = XmlCooperation::new(None, XmlOperation::XmlRead);
+        let invalid_name = [b'a', 0x80, 0x80, 0x80, 0x80];
+        assert!(futures::executor::block_on(name(&invalid_name, &mut cooperation)).is_err());
     }
 
     #[test]

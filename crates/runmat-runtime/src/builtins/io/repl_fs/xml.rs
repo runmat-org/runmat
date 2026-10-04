@@ -138,11 +138,19 @@ async fn readstruct_builtin(
     let options = ReadStructOptions::parse(&args[1..])
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
     let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
-    let text = cooperation
-        .await_io(source.read_to_string())
+    let bytes = cooperation
+        .await_io(source.read_bytes())
         .await?
         .map_err(|err| xml_io_error(operation, err))?;
-    cooperation.completed(text.len()).await?;
+    let text = decode_document_bytes(&bytes, &mut cooperation)
+        .await
+        .map_err(|err| {
+            if cooperation.is_execution_error(&err) {
+                err
+            } else {
+                xml_error_with_source(operation, XmlDiagnosticKind::MalformedXml, err)
+            }
+        })?;
     let root = parse_xml_document_with_context(&text, &mut cooperation).await?;
     let value = Value::Struct(
         xml_node_to_struct(&root, &options, &mut cooperation)
@@ -202,11 +210,19 @@ async fn xmlread_builtin(
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
     let filename = path_to_string(&path);
     let source = XmlFsPath::capture(path).map_err(|err| xml_io_error(operation, err))?;
-    let text = cooperation
-        .await_io(source.read_to_string())
+    let bytes = cooperation
+        .await_io(source.read_bytes())
         .await?
         .map_err(|err| xml_io_error(operation, err))?;
-    cooperation.completed(text.len()).await?;
+    let text = decode_document_bytes(&bytes, &mut cooperation)
+        .await
+        .map_err(|err| {
+            if cooperation.is_execution_error(&err) {
+                err
+            } else {
+                xml_error_with_source(operation, XmlDiagnosticKind::MalformedXml, err)
+            }
+        })?;
     let root = parse_xml_document_with_context(&text, &mut cooperation).await?;
     let mut object = ObjectInstance::new(XML_DOCUMENT_CLASS);
     object
@@ -314,7 +330,9 @@ async fn xmlwrite_builtin(
 
 #[path = "xml/parser.rs"]
 mod parser;
-use parser::{parse_xml_document_with_context, xml_node_to_struct, ReadStructOptions};
+use parser::{
+    decode_document_bytes, parse_xml_document_with_context, xml_node_to_struct, ReadStructOptions,
+};
 
 #[path = "xml/serialize.rs"]
 mod serialize;

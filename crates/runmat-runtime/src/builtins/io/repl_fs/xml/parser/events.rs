@@ -48,6 +48,7 @@ async fn parse_events(text: &str, cooperation: &mut XmlCooperation) -> BuiltinRe
     let mut stack = Vec::<XmlNode>::new();
     let mut root = None;
     let mut declaration_seen = false;
+    let mut declaration_position_open = true;
     loop {
         let event = reader
             .read_event_into_async(&mut event_buf)
@@ -55,12 +56,14 @@ async fn parse_events(text: &str, cooperation: &mut XmlCooperation) -> BuiltinRe
             .map_err(|error| quick_xml_error(error, cooperation))?;
         match event {
             Event::Start(start) => {
+                declaration_position_open = false;
                 if stack.is_empty() && root.is_some() {
                     return Err(malformed("multiple root elements"));
                 }
                 stack.push(node_from_start(&start, cooperation).await?);
             }
             Event::Empty(start) => {
+                declaration_position_open = false;
                 if stack.is_empty() && root.is_some() {
                     return Err(malformed("multiple root elements"));
                 }
@@ -68,30 +71,45 @@ async fn parse_events(text: &str, cooperation: &mut XmlCooperation) -> BuiltinRe
                 attach(&mut stack, &mut root, node)?;
             }
             Event::End(_) => {
+                declaration_position_open = false;
                 let node = stack
                     .pop()
                     .ok_or_else(|| malformed("unexpected closing tag"))?;
                 attach(&mut stack, &mut root, node)?;
             }
             Event::Text(content) => {
+                declaration_position_open = false;
                 append_text(&mut stack, content.as_ref(), cooperation).await?;
             }
             Event::CData(content) => {
+                declaration_position_open = false;
+                if stack.is_empty() {
+                    return Err(malformed("CDATA outside the root element"));
+                }
                 append_text(&mut stack, content.as_ref(), cooperation).await?;
             }
             Event::GeneralRef(reference) => {
+                declaration_position_open = false;
                 let node = stack
                     .last_mut()
                     .ok_or_else(|| malformed("entity outside the root element"))?;
                 decode::append_reference(&mut node.text, reference.as_ref(), cooperation).await?;
             }
-            Event::Comment(_) => {}
-            Event::PI(_) => {}
-            Event::Decl(_) => {
-                if declaration_seen || root.is_some() || !stack.is_empty() {
-                    return Err(malformed("XML declaration must appear before the root"));
+            Event::Comment(_) => declaration_position_open = false,
+            Event::PI(instruction) => {
+                declaration_position_open = false;
+                if instruction.target().eq_ignore_ascii_case(b"xml") {
+                    return Err(malformed("XML processing-instruction target is reserved"));
                 }
+                attributes::name(instruction.target(), cooperation).await?;
+            }
+            Event::Decl(declaration) => {
+                if declaration_seen || !declaration_position_open {
+                    return Err(malformed("XML declaration must be first"));
+                }
+                declaration::parse(&declaration, cooperation).await?;
                 declaration_seen = true;
+                declaration_position_open = false;
             }
             Event::DocType(_) => return Err(malformed("DTD declarations are not supported")),
             Event::Eof => break,
@@ -157,7 +175,10 @@ fn malformed_source(
         .build()
 }
 
-fn quick_xml_error(error: quick_xml::Error, cooperation: &XmlCooperation) -> RuntimeError {
+pub(super) fn quick_xml_error(
+    error: quick_xml::Error,
+    cooperation: &XmlCooperation,
+) -> RuntimeError {
     let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
     while let Some(current) = cause {
         if let Some(execution) = current.downcast_ref::<crate::execution::ExecutionServiceError>() {
@@ -209,6 +230,16 @@ mod tests {
             "<root/>outside",
             "<root/><other/>",
             "<!DOCTYPE root [<!ENTITY name 'text'>]><root>&name;</root>",
+            "<![CDATA[ ]]><root/>",
+            "<?xml version='1.0' encoding='UTF-8' version='1.0'?><root/>",
+            "<?xml encoding='UTF-8' version='1.0'?><root/>",
+            "<?xml version='1.1'?><root/>",
+            "<?xml version='1.0' standalone='maybe'?><root/>",
+            "<?xml version='1.0' standalone='yes' encoding='UTF-8'?><root/>",
+            "<!--comment--><?xml version='1.0'?><root/>",
+            " <?xml version='1.0'?><root/>",
+            "<?XML?><root/>",
+            "<?xml version='1.0' encoding='&#85;TF-8'?><root/>",
         ] {
             let error = parse(source).expect_err(source);
             assert_eq!(error.identifier(), Some("RunMat:xmlread:MalformedXml"));

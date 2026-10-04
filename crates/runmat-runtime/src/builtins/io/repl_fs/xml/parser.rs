@@ -243,6 +243,11 @@ mod events;
 mod decode;
 #[path = "parser/attributes.rs"]
 mod attributes;
+#[path = "parser/declaration.rs"]
+mod declaration;
+#[path = "parser/encoding.rs"]
+mod encoding;
 #[path = "parser/reader.rs"]
 mod reader;
+pub(super) use encoding::decode_document_bytes;
 pub(super) use events::parse_xml_document_with_context;
