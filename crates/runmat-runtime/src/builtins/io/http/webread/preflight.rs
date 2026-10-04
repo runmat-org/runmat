@@ -5,7 +5,9 @@ use super::*;
 pub(super) fn preflight_host_arguments(
     args: &[Value],
     prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
-) -> BuiltinResult<()> {
+) -> BuiltinResult<super::super::request_options::PreparedRequestNames> {
+    use super::super::request_options::{PreparedRequestNames, RequestOptionName};
+    let mut prepared_names = PreparedRequestNames::default();
     let mut options = WebReadOptions::default();
     let mut query = Vec::new();
     let mut index = 0;
@@ -23,8 +25,12 @@ pub(super) fn preflight_host_arguments(
             if prepared_api_key.is_some_and(|prepared| prepared.contains_field(name)) {
                 continue;
             }
+            let field = RequestOptionName::decode(name, true);
+            prepared_names
+                .struct_fields
+                .push((name.clone(), field.clone()));
             if !crate::dispatcher::value_contains_gpu(value) {
-                process_name_value_pair(name, value, &mut options, &mut query)?;
+                process_name_value_pair(&field, value, &mut options, &mut query)?;
             }
         }
         index = 1;
@@ -51,11 +57,15 @@ pub(super) fn preflight_host_arguments(
                 &args[index],
                 "webread: parameter names must be character vectors or string scalars",
             )?;
+            let field = RequestOptionName::decode(&name, false);
+            prepared_names.pair_fields.push(Some(field.clone()));
             if !crate::dispatcher::value_contains_gpu(&args[index + 1]) {
-                process_name_value_pair(&name, &args[index + 1], &mut options, &mut query)?;
+                process_name_value_pair(&field, &args[index + 1], &mut options, &mut query)?;
             }
+        } else {
+            prepared_names.pair_fields.push(None);
         }
         index += 2;
     }
-    Ok(())
+    Ok(prepared_names)
 }

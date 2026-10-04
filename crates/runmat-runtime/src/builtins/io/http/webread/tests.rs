@@ -93,7 +93,7 @@ fn direct_keyname_pair_remains_a_query_parameter() {
     let mut options = WebReadOptions::default();
     let mut query = Vec::new();
     process_name_value_pair(
-        "KeyName",
+        &RequestOptionName::decode("KeyName", false),
         &Value::from("ordinary-query"),
         &mut options,
         &mut query,
@@ -101,6 +101,26 @@ fn direct_keyname_pair_remains_a_query_parameter() {
     .expect("direct query pair");
     assert_eq!(query, vec![("KeyName".into(), "ordinary-query".into())]);
     assert!(options.api_key_header.is_none());
+}
+
+#[test]
+fn request_names_are_prepared_once_across_option_and_query_overloads() {
+    let args = [
+        Value::from("tImEoUt"),
+        Value::Num(3.0),
+        Value::from("KeyName"),
+        Value::from("ordinary-query"),
+    ];
+    let prepared = preflight_host_arguments(&args, None).unwrap();
+    assert_eq!(
+        prepared.pair_fields,
+        vec![
+            Some(RequestOptionName::Field(WebOptionField::Timeout)),
+            Some(RequestOptionName::Query("KeyName".into())),
+        ]
+    );
+    let (_, query) = parse_arguments(args.to_vec(), None, &prepared).unwrap();
+    assert_eq!(query, vec![("KeyName".into(), "ordinary-query".into())]);
 }
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};

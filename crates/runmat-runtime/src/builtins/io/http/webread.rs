@@ -14,7 +14,7 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
 use runmat_builtins::{
-    parse_http_url, BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode,
+    parse_http_url, BuiltinErrorDescriptor, HttpResponseDialect, HttpResponseMode, WebOptionField,
     WEBREAD_DESCRIPTOR, WEBREAD_ERROR_FLOW, WEBREAD_ERROR_INVALID_ARGUMENT,
     WEBREAD_ERROR_INVALID_CREDENTIALS, WEBREAD_ERROR_INVALID_OPTION_VALUE,
     WEBREAD_ERROR_INVALID_URL, WEBREAD_ERROR_MISSING_OPTION_VALUE, WEBREAD_ERROR_OUTPUT,
@@ -25,6 +25,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, IntegerStorage, StructValue, Tensor, Value};
 use url::Url;
 
+use super::request_options::{PreparedRequestNames, RequestOptionName};
 use super::transport::{
     self, decode_body_as_text, header_value, HttpMethod, HttpRequest, HEADER_CONTENT_TYPE,
 };
@@ -132,7 +133,7 @@ async fn webread_builtin(
         Some(Value::Struct(source)) => Some(super::api_key::PreparedApiKey::parse(source)),
         _ => None,
     };
-    preflight_host_arguments(&rest, prepared_api_key.as_ref())?;
+    let prepared_names = preflight_host_arguments(&rest, prepared_api_key.as_ref())?;
     let parsed_url = parse_http_url(&url_text).map_err(|err| {
         webread_error_with_source(
             &WEBREAD_ERROR_INVALID_URL,
@@ -141,7 +142,8 @@ async fn webread_builtin(
         )
     })?;
     let gathered_args = gather_arguments(rest).await?;
-    let (options, query_params) = parse_arguments(gathered_args, prepared_api_key.as_ref())?;
+    let (options, query_params) =
+        parse_arguments(gathered_args, prepared_api_key.as_ref(), &prepared_names)?;
     execute_request(parsed_url, options, &query_params, context.as_ref()).await
 }
 
@@ -160,6 +162,7 @@ async fn gather_arguments(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 fn parse_arguments(
     args: Vec<Value>,
     prepared_api_key: Option<&super::api_key::PreparedApiKey>,
+    prepared_names: &PreparedRequestNames,
 ) -> BuiltinResult<(WebReadOptions, Vec<(String, String)>)> {
     let mut queue: VecDeque<Value> = args.into();
     let mut options = WebReadOptions::default();
@@ -170,6 +173,7 @@ fn parse_arguments(
             process_struct_fields(
                 &struct_value,
                 prepared_api_key,
+                prepared_names,
                 &mut options,
                 &mut query_params,
             )?;
@@ -180,18 +184,30 @@ fn parse_arguments(
         }
     }
 
+    let mut pair_index = 0;
     while let Some(name_value) = queue.pop_front() {
-        let name = expect_string_scalar(
-            &name_value,
-            "webread: parameter names must be character vectors or string scalars",
-        )?;
+        let field = match prepared_names
+            .pair_fields
+            .get(pair_index)
+            .and_then(Clone::clone)
+        {
+            Some(field) => field,
+            None => RequestOptionName::decode(
+                &expect_string_scalar(
+                    &name_value,
+                    "webread: parameter names must be character vectors or string scalars",
+                )?,
+                false,
+            ),
+        };
+        pair_index += 1;
         let value = queue.pop_front().ok_or_else(|| {
             webread_error_with(
                 &WEBREAD_ERROR_MISSING_OPTION_VALUE,
                 "webread: missing value for name-value argument",
             )
         })?;
-        process_name_value_pair(&name, &value, &mut options, &mut query_params)?;
+        process_name_value_pair(&field, &value, &mut options, &mut query_params)?;
     }
 
     Ok((options, query_params))
@@ -200,6 +216,7 @@ fn parse_arguments(
 fn process_struct_fields(
     struct_value: &StructValue,
     prepared_api_key: Option<&super::api_key::PreparedApiKey>,
+    prepared_names: &PreparedRequestNames,
     options: &mut WebReadOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
@@ -216,58 +233,63 @@ fn process_struct_fields(
         if prepared_api_key.is_some_and(|prepared| prepared.contains_field(key)) {
             continue;
         }
-        process_name_value_pair(key, value, options, query_params)?;
+        let field = prepared_names
+            .struct_fields
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, field)| field.clone())
+            .ok_or_else(|| webread_error("webread: prepared option field changed during gather"))?;
+        process_name_value_pair(&field, value, options, query_params)?;
     }
     Ok(())
 }
 
 fn process_name_value_pair(
-    name: &str,
+    name: &RequestOptionName,
     value: &Value,
     options: &mut WebReadOptions,
     query_params: &mut Vec<(String, String)>,
 ) -> BuiltinResult<()> {
-    let lower = name.to_ascii_lowercase();
-    match lower.as_str() {
-        "contenttype" => {
+    match name {
+        RequestOptionName::Field(WebOptionField::ContentType) => {
             options.content_type = parse_content_type(value)?;
             Ok(())
         }
-        "timeout" => {
+        RequestOptionName::Field(WebOptionField::Timeout) => {
             options.timeout = parse_timeout(value)?;
             Ok(())
         }
-        "headerfields" => {
+        RequestOptionName::Field(WebOptionField::HeaderFields) => {
             let headers = parse_header_fields(value)?;
             options.headers.extend(headers);
             Ok(())
         }
-        "useragent" => {
+        RequestOptionName::Field(WebOptionField::UserAgent) => {
             options.user_agent = Some(expect_string_scalar(
                 value,
                 "webread: UserAgent must be a character vector or string scalar",
             )?);
             Ok(())
         }
-        "username" => {
+        RequestOptionName::Field(WebOptionField::Username) => {
             options.username = Some(expect_string_scalar(
                 value,
                 "webread: Username must be a character vector or string scalar",
             )?);
             Ok(())
         }
-        "password" => {
+        RequestOptionName::Field(WebOptionField::Password) => {
             options.password = Some(expect_string_scalar(
                 value,
                 "webread: Password must be a character vector or string scalar",
             )?);
             Ok(())
         }
-        "requestmethod" => {
+        RequestOptionName::Field(WebOptionField::RequestMethod) => {
             options.method = parse_request_method(value)?;
             Ok(())
         }
-        "mediatype" => {
+        RequestOptionName::Field(WebOptionField::MediaType) => {
             // weboptions exposes MediaType for webwrite; accept and ignore for webread.
             expect_string_scalar(
                 value,
@@ -275,12 +297,15 @@ fn process_name_value_pair(
             )?;
             Ok(())
         }
-        "queryparameters" => append_query_from_value(value, query_params),
-        _ => {
+        RequestOptionName::Field(WebOptionField::QueryParameters) => {
+            append_query_from_value(value, query_params)
+        }
+        RequestOptionName::Query(name) => {
             let param_value = value_to_query_string(value, name)?;
             query_params.push((name.to_string(), param_value));
             Ok(())
         }
+        RequestOptionName::Field(WebOptionField::KeyName | WebOptionField::KeyValue) => Ok(()),
     }
 }
 

@@ -92,7 +92,7 @@ fn direct_keyname_pair_remains_a_request_parameter() {
     let mut options = WebWriteOptions::default();
     let mut query = Vec::new();
     process_name_value_pair(
-        "KeyName",
+        &RequestOptionName::decode("KeyName", false),
         &Value::from("ordinary-query"),
         &mut options,
         &mut query,
@@ -100,6 +100,26 @@ fn direct_keyname_pair_remains_a_request_parameter() {
     .expect("direct request pair");
     assert_eq!(query, vec![("KeyName".into(), "ordinary-query".into())]);
     assert!(options.api_key_header.is_none());
+}
+
+#[test]
+fn request_names_are_prepared_once_across_option_and_query_overloads() {
+    let args = [
+        Value::from("ReQuEsTmEtHoD"),
+        Value::from("post"),
+        Value::from("KeyValue"),
+        Value::from("ordinary-query"),
+    ];
+    let prepared = preflight_host_arguments(&args, None).unwrap();
+    assert_eq!(
+        prepared.pair_fields,
+        vec![
+            Some(RequestOptionName::Field(WebOptionField::RequestMethod)),
+            Some(RequestOptionName::Query("KeyValue".into())),
+        ]
+    );
+    let (_, query) = parse_arguments(VecDeque::from(args.to_vec()), None, &prepared).unwrap();
+    assert_eq!(query, vec![("KeyValue".into(), "ordinary-query".into())]);
 }
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
