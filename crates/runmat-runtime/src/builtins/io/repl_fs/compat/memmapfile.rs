@@ -124,7 +124,7 @@ impl MemmapOption {
         match self {
             Self::Writable => Ok(()),
             Self::Offset => numeric_usize(value, "Offset").map(|_| ()),
-            Self::Repeat => numeric_usize(value, "Repeat").map(|_| ()),
+            Self::Repeat => repeat_count(value).map(|_| ()),
             Self::Format => {
                 let format = MemmapFormat::from_value(value)?;
                 format.validate_layout(None).map(|_| ())
@@ -495,4 +495,12 @@ pub(super) fn numeric_usize(value: &Value, arg: &str) -> BuiltinResult<usize> {
             "memmapfile: {arg} must be a nonnegative integer"
         ))),
     }
+}
+
+/// None denotes complete records through the opened file extent.
+pub(super) fn repeat_count(value: &Value) -> BuiltinResult<Option<usize>> {
+    if matches!(value, Value::Num(value) if *value == f64::INFINITY) {
+        return Ok(None);
+    }
+    numeric_usize(value, "Repeat").map(Some)
 }

@@ -550,7 +550,7 @@ async fn memmapfile_builtin(
             MemmapOption::Offset => offset = numeric_usize(&value, "Offset")?,
             MemmapOption::Format => format = MemmapFormat::from_value(&value)?,
             MemmapOption::Repeat => {
-                repeat = Some(numeric_usize(&value, "Repeat")?);
+                repeat = memmapfile::repeat_count(&value)?;
             }
         }
     }

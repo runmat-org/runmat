@@ -127,9 +127,37 @@ fn mapped_receiver_controls_clone_independently_without_changing_backing() {
             Value::String("data.bin".into()),
             Value::String("Writable".into()),
             Value::Bool(true),
+            Value::String("Repeat".into()),
+            Value::Num(f64::INFINITY),
         ],
     ))
     .unwrap();
+    assert_eq!(
+        futures::executor::block_on(subsref(None, original.clone(), property("Repeat"))).unwrap(),
+        Value::Num(f64::INFINITY)
+    );
+    let finite = futures::executor::block_on(subsasgn(
+        None,
+        original.clone(),
+        property("Repeat"),
+        Value::Num(1.0),
+    ))
+    .unwrap();
+    assert_eq!(
+        futures::executor::block_on(subsref(None, finite.clone(), property("Repeat"))).unwrap(),
+        Value::Num(1.0)
+    );
+    let unlimited = futures::executor::block_on(subsasgn(
+        None,
+        finite,
+        property("Repeat"),
+        Value::Num(f64::INFINITY),
+    ))
+    .unwrap();
+    assert_eq!(
+        futures::executor::block_on(subsref(None, unlimited, property("Repeat"))).unwrap(),
+        Value::Num(f64::INFINITY)
+    );
     let read_only_clone = futures::executor::block_on(subsasgn(
         None,
         original.clone(),

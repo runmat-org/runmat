@@ -191,7 +191,7 @@ async fn read_first(
             .repeat
             .map(super::memmap_count_value)
             .transpose()
-            .map(|value| value.unwrap_or_else(|| super::super::char_value("Inf"))),
+            .map(|value| value.unwrap_or(Value::Num(f64::INFINITY))),
         Property::Format => MemmapFormat::from_receiver(state)?.to_value(),
         Property::Data => match (&state.authority, backing) {
             (MemmapReceiverAuthority::Opened(_), Some(backing)) => {
@@ -286,9 +286,9 @@ async fn write_first(
             object.memmap_receiver_mut().expect("resolved state").offset = offset;
         }
         Property::Repeat => {
-            let repeat = super::numeric_usize(&rhs, "Repeat")?;
-            MemmapFormat::from_receiver(&state)?.validate_layout(Some(repeat))?;
-            object.memmap_receiver_mut().expect("resolved state").repeat = Some(repeat);
+            let repeat = super::repeat_count(&rhs)?;
+            MemmapFormat::from_receiver(&state)?.validate_layout(repeat)?;
+            object.memmap_receiver_mut().expect("resolved state").repeat = repeat;
         }
         Property::Format => {
             let format = MemmapFormat::from_value(&rhs)?;

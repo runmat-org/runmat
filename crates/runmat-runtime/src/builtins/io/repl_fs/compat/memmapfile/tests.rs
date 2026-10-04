@@ -1,5 +1,27 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn repeat_parser_retains_numeric_infinity_and_exact_finite_counts() {
+    assert_eq!(repeat_count(&Value::Num(f64::INFINITY)).unwrap(), None);
+    assert_eq!(repeat_count(&Value::Num(3.0)).unwrap(), Some(3));
+    assert_eq!(
+        repeat_count(&Value::Int(runmat_value::IntValue::U64(7))).unwrap(),
+        Some(7)
+    );
+    // Preserve the existing empty-map control; it is not an infinity spelling.
+    assert_eq!(repeat_count(&Value::Num(0.0)).unwrap(), Some(0));
+    for invalid in [
+        Value::Num(f64::NEG_INFINITY),
+        Value::Num(f64::NAN),
+        Value::Num(-1.0),
+        Value::Num(1.5),
+        Value::String("Inf".into()),
+    ] {
+        assert!(repeat_count(&invalid).is_err());
+    }
+}
+
 #[test]
 fn unnamed_cell_format_retains_declared_shape_and_cell_form() {
     let shape = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
