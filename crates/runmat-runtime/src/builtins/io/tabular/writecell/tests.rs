@@ -58,6 +58,53 @@ fn writecell_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"writecell(C, filename, nameValuePairs...)"));
 }
 
+#[test]
+fn scalar_text_geometry_rejects_paged_controls_and_accepts_singleton_pages() {
+    let paged = Value::CharArray(
+        CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).expect("paged characters"),
+    );
+    assert!(resolve_path(&paged).is_err());
+    assert!(string_scalar_from_value(&paged, "Delimiter").is_err());
+    assert!(table::cell_value_from_value(paged).is_err());
+
+    let singleton = Value::CharArray(
+        CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1])
+            .expect("singleton character page"),
+    );
+    assert_eq!(
+        string_scalar_from_value(&singleton, "Delimiter").unwrap(),
+        "ab"
+    );
+    assert!(
+        matches!(table::cell_value_from_value(singleton), Ok(CellValue::Text(text)) if text == "ab")
+    );
+}
+
+#[test]
+fn malformed_host_pair_precedes_earlier_resident_option_gather() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident option");
+    let data = cell(vec![Value::Num(1.0)], 1, 1);
+    let error = block_on(writecell_builtin(
+        data,
+        vec![
+            Value::from("unused.csv"),
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::from("ignored"),
+            Value::from("QuoteStrings"),
+            Value::from("not-a-boolean"),
+        ],
+    ))
+    .expect_err("known malformed host pair must precede resident gather");
+    assert!(error.message().contains("QuoteStrings"));
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writecell_writes_heterogeneous_csv() {

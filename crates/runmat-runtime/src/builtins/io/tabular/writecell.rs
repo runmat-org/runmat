@@ -103,6 +103,13 @@ async fn writecell_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResul
     }
 
     let path = resolve_path(&rest[0])?;
+    if !rest[1..].len().is_multiple_of(2) {
+        return Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG));
+    }
+    controls::preflight_host_options(&rest[1..])?;
+    if let Value::Cell(cell) = &data {
+        table::ensure_cell_shape(cell)?;
+    }
     let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
         writecell_error_with_source(
             &WRITECELL_ERROR_IO,
@@ -361,28 +368,20 @@ fn format_string(value: &str, quote: bool, _delimiter: &str) -> String {
 }
 
 fn string_scalar_from_value(value: &Value, context: &str) -> Result<String, String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(format!(
-            "writecell: expected {context} as a string scalar or character vector"
-        )),
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        format!("writecell: expected {context} as a string scalar or character vector")
+    })
 }
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return normalize_path(&text);
+    }
     match value {
-        Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
-        }
         Value::CharArray(_) => Err(writecell_error_with(
             &WRITECELL_ERROR_FILENAME,
             "writecell: expected a 1-by-N character vector for the filename",
         )),
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
         Value::StringArray(_) => Err(writecell_error_with(
             &WRITECELL_ERROR_FILENAME,
             "writecell: filename string array inputs must be scalar",

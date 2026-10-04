@@ -1,5 +1,22 @@
 use super::*;
 
+/// Reject all malformed host-known pairs before any resident option is read.
+/// A resident name or value is deliberately left for the ordinary parser.
+pub(super) fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
+    for pair in args.chunks_exact(2) {
+        if matches!(&pair[0], Value::GpuTensor(_)) {
+            continue;
+        }
+        let name = string_scalar_from_value(&pair[0], "option name")
+            .map_err(|message| writecell_error_with(&WRITECELL_ERROR_OPTION, message))?;
+        if matches!(&pair[1], Value::GpuTensor(_)) {
+            continue;
+        }
+        apply_option(&mut WriteCellOptions::default(), &name, &pair[1])?;
+    }
+    Ok(())
+}
+
 pub(super) async fn parse_options(args: &[Value]) -> BuiltinResult<WriteCellOptions> {
     if args.is_empty() {
         return Ok(WriteCellOptions::default());
