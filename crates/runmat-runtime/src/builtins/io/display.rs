@@ -2,120 +2,19 @@
 #[cfg(test)]
 use runmat_types::MemberAccess;
 
+#[cfg(test)]
+use runmat_builtins::DISPLAY_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, DISPLAY_ERROR_ARG_CONFIG, DISPLAY_ERROR_GATHER,
+    DISPLAY_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::console::{record_console_line, ConsoleStream};
 use crate::gather_if_needed_async;
 
 use super::disp::{empty_return_value, format_for_display};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::display")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "display",
-    op_kind: GpuOpKind::Custom("sink"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Always formats on the CPU; GPU tensors are gathered via the active provider before display.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::display")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "display",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Side-effecting sink; excluded from fusion planning.",
-};
-
-const DISPLAY_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Value to display with a variable-name header.",
-}];
-
-const DISPLAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "display(X)",
-    inputs: &DISPLAY_INPUTS_VALUE,
-    outputs: &[],
-}];
-
-const DISPLAY_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISPLAY.ARG_CONFIG",
-    identifier: Some("RunMat:display:TooManyInputs"),
-    when: "Too many input arguments are passed to display.",
-    message: "display: too many input arguments",
-};
-
-const DISPLAY_ERROR_GATHER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISPLAY.GATHER",
-    identifier: Some("RunMat:display:GatherFailed"),
-    when: "Input value cannot be gathered onto the host for rendering.",
-    message: "display: failed to gather value for display",
-};
-const DISPLAY_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DISPLAY.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:display:TooManyOutputs"),
-    when: "An output is requested from display.",
-    message: "display does not return output arguments",
-};
-
-const DISPLAY_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    DISPLAY_ERROR_ARG_CONFIG,
-    DISPLAY_ERROR_GATHER,
-    DISPLAY_ERROR_TOO_MANY_OUTPUTS,
-];
-
-pub const DISPLAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DISPLAY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DISPLAY_ERRORS,
-};
-
-const DISPLAY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every integer class is displayed exactly through the variable-aware display path unless class-specific display or disp dispatch handles the object.",
-    }];
-
-pub const DISPLAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "display(X)",
-        inputs: &DISPLAY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "display is a no-output host rendering sink with class-method dispatch. Resident integer arrays gather through exact typed provider download before the shared formatter runs.",
-    }];
 
 fn display_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
     display_error_with(error, error.message)
@@ -132,17 +31,19 @@ fn display_error_with(
     builder.build()
 }
 
+fn display_gather_error(source: crate::RuntimeError) -> crate::RuntimeError {
+    let mut builder = crate::build_runtime_error(format!("display: {source}"))
+        .with_builtin("display")
+        .with_source(source);
+    if let Some(identifier) = DISPLAY_ERROR_GATHER.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "display",
-    category = "io",
-    summary = "Display values with a variable-name header.",
-    keywords = "display,disp,print,object,gpu",
-    sink = true,
-    accel = "sink",
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::disp_type),
-    descriptor(crate::builtins::io::display::DISPLAY_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::display::DISPLAY_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::display"
 )]
 pub async fn display_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -162,7 +63,7 @@ pub async fn display_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
 
     let host_value = gather_if_needed_async(&value)
         .await
-        .map_err(|e| display_error_with(&DISPLAY_ERROR_GATHER, format!("display: {e}")))?;
+        .map_err(display_gather_error)?;
     let lines = format_for_display(&host_value);
     if !lines.is_empty() {
         let body = match display_label() {
