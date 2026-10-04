@@ -155,6 +155,7 @@ fn unique_path(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(filename)
 }
 mod resident;
+mod admission;
 mod controls;
 mod decoding;
 mod io;

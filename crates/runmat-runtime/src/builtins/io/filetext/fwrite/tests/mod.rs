@@ -40,6 +40,7 @@ fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 mod controls;
+mod admission;
 mod writing;
 
 fn unique_path(prefix: &str) -> PathBuf {

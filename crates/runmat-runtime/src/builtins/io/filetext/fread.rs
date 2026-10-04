@@ -680,6 +680,12 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
             &FREAD_ERROR_INVALID_IDENTIFIER,
         )
     })?;
+    if !info.access.read {
+        return Err(fread_error_with_detail(
+            &FREAD_ERROR_INVALID_IDENTIFIER,
+            "file identifier is not open for reading",
+        ));
+    }
     let handle = registry::shared_handle(fid).ok_or_else(|| {
         fread_error_with_message(
             FREAD_ERROR_INVALID_IDENTIFIER.message,

@@ -499,6 +499,12 @@ pub async fn evaluate(
             &FWRITE_ERROR_INVALID_IDENTIFIER,
         )
     })?;
+    if !info.access.write {
+        return Err(fwrite_error_with_detail(
+            &FWRITE_ERROR_INVALID_IDENTIFIER,
+            "file identifier is not open for writing",
+        ));
+    }
     let handle = registry::shared_handle(fid).ok_or_else(|| {
         fwrite_error_with_message(
             FWRITE_ERROR_INVALID_IDENTIFIER.message,
