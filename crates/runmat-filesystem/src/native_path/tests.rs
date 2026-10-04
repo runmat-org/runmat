@@ -1,5 +1,8 @@
 use super::*;
-use crate::{MemoryFsProvider, NativeFsProvider, SandboxFsProvider};
+use crate::{
+    DirEntry, FileHandle, FsMetadata, MemoryFsProvider, NativeFsProvider, OpenFlags,
+    SandboxFsProvider,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[test]
@@ -8,24 +11,43 @@ fn native_relative_path_and_intent_remain_with_selected_provider_after_swap() {
     let selected: Arc<dyn FsProvider> = Arc::new(NativeFsProvider);
     let _selected = crate::replace_provider(selected.clone());
     let cwd = std::env::current_dir().expect("native working directory");
-    let read = capture_native_path("selected.h5", NativePathIntent::Read)
+    let temporary = tempfile::Builder::new()
+        .prefix("runmat-native-path-")
+        .suffix(".h5")
+        .tempfile_in(&cwd)
+        .expect("temporary native file");
+    let file_name = temporary.path().file_name().expect("file name");
+    let read = capture_native_path(file_name, NativePathIntent::Read)
         .expect("capture")
         .expect("native route");
-    let write = capture_native_path("selected.h5", NativePathIntent::ReadWriteCreate)
+    let write = capture_native_path(file_name, NativePathIntent::ReadWriteCreate)
         .expect("capture")
         .expect("native route");
-    assert_eq!(read.path(), cwd.join("selected.h5"));
+    assert_eq!(read.path(), temporary.path());
     assert_eq!(write.path(), read.path());
     assert_eq!(read.intent(), NativePathIntent::Read);
     assert_eq!(write.intent(), NativePathIntent::ReadWriteCreate);
 
-    let _replacement =
-        crate::replace_provider(Arc::new(MemoryFsProvider::with_current_dir("/virtual")));
+    let replacement = Arc::new(MemoryFsProvider::with_current_dir("/virtual"));
+    replacement
+        .write_project_path(Path::new("/virtual").join(file_name), b"virtual")
+        .expect("virtual fixture");
+    let _replacement = crate::replace_provider(replacement.clone());
     assert!(Arc::ptr_eq(read.provider(), &selected));
-    assert_eq!(read.path(), cwd.join("selected.h5"));
+    assert_eq!(read.path(), temporary.path());
     assert!(read.check_current().is_ok());
     assert!(write.check_current().is_ok());
     assert_eq!(crate::current_dir().unwrap(), PathBuf::from("/virtual"));
+    std::fs::write(write.path(), b"selected native bytes").expect("native write");
+    assert_eq!(
+        std::fs::read(read.path()).unwrap(),
+        b"selected native bytes"
+    );
+    assert_eq!(
+        futures::executor::block_on(replacement.read(&Path::new("/virtual").join(file_name)))
+            .unwrap(),
+        b"virtual"
+    );
 }
 
 #[test]
@@ -100,4 +122,127 @@ fn provider_cannot_issue_relative_or_revoked_native_path() {
     .err()
     .expect("revoked issue rejected");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+}
+
+#[derive(Clone, Copy)]
+enum FixtureIssue {
+    WrongIntent,
+    RevokedAfterIssue,
+    Failure,
+}
+
+struct FixtureProvider(FixtureIssue);
+
+#[derive(Debug)]
+struct FixtureCause;
+
+impl std::fmt::Display for FixtureCause {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("fixture provider cause")
+    }
+}
+
+impl std::error::Error for FixtureCause {}
+
+fn unused_operation() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "fixture does not perform filesystem I/O",
+    )
+}
+
+#[async_trait::async_trait(?Send)]
+impl FsProvider for FixtureProvider {
+    fn acquire_native_path(
+        &self,
+        path: &Path,
+        intent: NativePathIntent,
+    ) -> io::Result<Option<NativePathGrant>> {
+        if matches!(self.0, FixtureIssue::Failure) {
+            return Err(io::Error::other(FixtureCause));
+        }
+        let valid = Arc::new(AtomicBool::new(true));
+        let issued_intent = if matches!(self.0, FixtureIssue::WrongIntent) {
+            NativePathIntent::ReadWriteCreate
+        } else {
+            intent
+        };
+        let grant = NativePathGrant::issued_by_provider(
+            path.to_path_buf(),
+            issued_intent,
+            Box::new(Revocable(valid.clone())),
+        )?;
+        if matches!(self.0, FixtureIssue::RevokedAfterIssue) {
+            valid.store(false, Ordering::SeqCst);
+        }
+        Ok(Some(grant))
+    }
+
+    fn open(&self, _: &Path, _: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+        Err(unused_operation())
+    }
+    async fn read(&self, _: &Path) -> io::Result<Vec<u8>> {
+        Err(unused_operation())
+    }
+    async fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn remove_file(&self, _: &Path) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn metadata(&self, _: &Path) -> io::Result<FsMetadata> {
+        Err(unused_operation())
+    }
+    async fn symlink_metadata(&self, _: &Path) -> io::Result<FsMetadata> {
+        Err(unused_operation())
+    }
+    async fn read_dir(&self, _: &Path) -> io::Result<Vec<DirEntry>> {
+        Err(unused_operation())
+    }
+    async fn canonicalize(&self, _: &Path) -> io::Result<PathBuf> {
+        Err(unused_operation())
+    }
+    async fn create_dir(&self, _: &Path) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn create_dir_all(&self, _: &Path) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn remove_dir(&self, _: &Path) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn remove_dir_all(&self, _: &Path) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+        Err(unused_operation())
+    }
+    async fn set_readonly(&self, _: &Path, _: bool) -> io::Result<()> {
+        Err(unused_operation())
+    }
+}
+
+#[test]
+fn capture_rejects_wrong_intent_and_revoked_returned_grant_without_losing_io_cause() {
+    let _serial = crate::provider_override_lock();
+    for (issue, expected_kind) in [
+        (FixtureIssue::WrongIntent, io::ErrorKind::PermissionDenied),
+        (
+            FixtureIssue::RevokedAfterIssue,
+            io::ErrorKind::PermissionDenied,
+        ),
+    ] {
+        let _selected = crate::replace_provider(Arc::new(FixtureProvider(issue)));
+        let error = capture_native_path("fixture.h5", NativePathIntent::Read)
+            .err()
+            .expect("invalid grant rejected");
+        assert_eq!(error.kind(), expected_kind);
+    }
+    let _selected = crate::replace_provider(Arc::new(FixtureProvider(FixtureIssue::Failure)));
+    let error = capture_native_path("fixture.h5", NativePathIntent::Read)
+        .err()
+        .expect("provider error retained");
+    assert!(error
+        .get_ref()
+        .is_some_and(|source| source.is::<FixtureCause>()));
 }

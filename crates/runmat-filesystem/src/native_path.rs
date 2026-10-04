@@ -121,7 +121,11 @@ pub fn capture_native_path(
             "provider issued native path for a different access intent",
         ));
     }
-    Ok(Some(CapturedNativePath { provider, grant }))
+    let captured = CapturedNativePath { provider, grant };
+    // An issuer may revoke after constructing its grant but before returning
+    // from acquire_native_path. Never publish that already-stale authority.
+    captured.check_current()?;
+    Ok(Some(captured))
 }
 
 #[cfg(test)]
