@@ -437,7 +437,7 @@ fn tensor_dtype_mat_class(dtype: NumericDType) -> MatClass {
 }
 
 mod writer;
-use writer::write_mat_bytes;
+use writer::write_mat_bytes_cooperative;
 pub(super) use writer::write_mat_file;
 pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
     let mut mat_vars = Vec::with_capacity(entries.len());
@@ -448,7 +448,7 @@ pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> Built
             array: convert_value(value).await?,
         });
     }
-    write_mat_bytes(&mat_vars)
+    write_mat_bytes_cooperative(&mat_vars, None).await
 }
 
 #[cfg(test)]
