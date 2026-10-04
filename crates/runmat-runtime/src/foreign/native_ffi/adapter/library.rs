@@ -1,0 +1,387 @@
+use super::*;
+
+impl NativeFfiAdapter {
+    pub(super) fn load(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        self.load_legacy(arguments)
+            .map(|report| Value::String(report.alias))
+    }
+
+    pub(super) fn load_report(
+        &self,
+        arguments: &[Value],
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
+        let report = self.load_legacy(arguments)?;
+        let count = report.notfound.len();
+        let notfound = CellArray::new(
+            report.notfound.into_iter().map(Value::String).collect(),
+            1,
+            count,
+        )
+        .map_err(invalid_call)?;
+        runmat_value::ValueSequence::comma_separated(vec![
+            Value::Cell(notfound),
+            Value::String(report.warnings),
+        ])
+        .map_err(crate::sequence::sequence_error_to_runtime)
+    }
+
+    pub(super) fn load_legacy(
+        &self,
+        arguments: &[Value],
+    ) -> Result<LegacyLoadReport, RuntimeError> {
+        if arguments.len() < 2 {
+            return Err(invalid_call(
+                "native FFI load expects library path, header path, and an optional alias",
+            ));
+        }
+        let library_path = string_argument(arguments, 0, "load")?;
+        let header_path = string_argument(arguments, 1, "load")?;
+        let alias = optional_string_argument(arguments, 2, "load")?
+            .map(Ok)
+            .unwrap_or_else(|| default_alias(&library_path))?;
+        let mut include_directories = Vec::new();
+        let mut additional_headers = Vec::new();
+        let options = &arguments[3..];
+        if !options.is_empty()
+            && options.len().is_multiple_of(2)
+            && options.iter().step_by(2).all(|value| {
+                String::try_from(value).is_ok_and(|name| {
+                    matches!(
+                        name.to_ascii_lowercase().as_str(),
+                        "includepath" | "addheader"
+                    )
+                })
+            })
+        {
+            for pair in options.chunks_exact(2) {
+                let name = String::try_from(&pair[0]).expect("validated option name");
+                let value = PathBuf::from(String::try_from(&pair[1]).map_err(|_| {
+                    invalid_call(format!("native FFI load option `{name}` must be text"))
+                })?);
+                match name.to_ascii_lowercase().as_str() {
+                    "includepath" => include_directories.push(value),
+                    "addheader" => additional_headers.push(value),
+                    _ => unreachable!("validated native FFI load option"),
+                }
+            }
+        } else {
+            include_directories = options
+                .iter()
+                .enumerate()
+                .map(|(index, _)| string_argument(arguments, index + 3, "load").map(PathBuf::from))
+                .collect::<Result<Vec<_>, _>>()?;
+        }
+        self.validate_available_alias(&alias)?;
+        let preparation = HeaderPreparation {
+            header: PathBuf::from(header_path),
+            library_name: alias.clone(),
+            library_path: library_path.clone(),
+            target_triple: target_lexicon::HOST.to_string(),
+            clang: self.compiler_frontend.clone(),
+            include_directories,
+            definitions: Vec::new(),
+        };
+        let preparation =
+            prepare_header_with_declarations_report(&preparation, &additional_headers)
+                .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let identity = artifact_identity(&preparation.metadata)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let notfound =
+            self.insert_library(&alias, &library_path, preparation.metadata, identity, true)?;
+        Ok(LegacyLoadReport {
+            alias,
+            notfound,
+            warnings: preparation.warnings,
+        })
+    }
+
+    pub(super) fn load_prepared(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if !(2..=3).contains(&arguments.len()) {
+            return Err(invalid_call(
+                "prepared native FFI load expects a library path, manifest path, and optional alias",
+            ));
+        }
+        let library_path = PathBuf::from(string_argument(arguments, 0, "load_prepared")?);
+        let manifest_path = PathBuf::from(string_argument(arguments, 1, "load_prepared")?);
+        let manifest = NativeInterfaceArtifactManifest::read(&manifest_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let alias = optional_string_argument(arguments, 2, "load_prepared")?
+            .unwrap_or_else(|| manifest.interface_name.clone());
+        self.load_prepared_manifest(&alias, &library_path, manifest)
+    }
+
+    pub(super) fn load_prepared_manifest(
+        &self,
+        alias: &str,
+        library_path: &std::path::Path,
+        manifest: NativeInterfaceArtifactManifest,
+    ) -> Result<Value, RuntimeError> {
+        self.validate_available_alias(alias)?;
+        let library_bytes = std::fs::read(library_path).map_err(|error| {
+            foreign_error(
+                ForeignErrorKind::LoadFailed,
+                format!(
+                    "could not read native library {}: {error}",
+                    library_path.display()
+                ),
+            )
+        })?;
+        manifest
+            .validate_current_library(&library_bytes)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let metadata = manifest
+            .materialized_metadata(library_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let identity = manifest.identity.to_string();
+        self.insert_library(alias, library_path, metadata, identity, false)?;
+        Ok(Value::String(alias.into()))
+    }
+
+    pub(super) fn validate_available_alias(&self, alias: &str) -> Result<(), RuntimeError> {
+        if alias.trim().is_empty() {
+            return Err(invalid_call("native library alias must not be empty"));
+        }
+        if self.state.borrow().libraries.contains_key(alias) {
+            return Err(invalid_call(format!(
+                "native library alias `{alias}` is already loaded"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn insert_library(
+        &self,
+        alias: &str,
+        library_path: impl AsRef<std::path::Path>,
+        metadata: NativeLibraryMetadata,
+        artifact_identity: String,
+        allow_missing_symbols: bool,
+    ) -> Result<Vec<String>, RuntimeError> {
+        let library = runmat_native_ffi::LoadedLibrary::open(library_path.as_ref())
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let mut metadata = metadata;
+        let mut missing = Vec::new();
+        for declared_library in &mut metadata.libraries {
+            let mut available = Vec::with_capacity(declared_library.symbols.len());
+            for symbol in std::mem::take(&mut declared_library.symbols) {
+                if library.symbol(&symbol.exported_name).is_ok() {
+                    available.push(symbol);
+                } else {
+                    missing.push(symbol.name.clone());
+                    if !allow_missing_symbols {
+                        continue;
+                    }
+                }
+            }
+            declared_library.symbols = available;
+        }
+        if !allow_missing_symbols && !missing.is_empty() {
+            return Err(foreign_error(
+                ForeignErrorKind::LoadFailed,
+                format!(
+                    "prepared native interface is missing declared symbols: {}",
+                    missing.join(", ")
+                ),
+            ));
+        }
+        self.prepared_artifact_identities
+            .borrow_mut()
+            .insert(artifact_identity.clone());
+        self.state.borrow_mut().libraries.insert(
+            alias.into(),
+            LibraryEntry {
+                library: Rc::new(library),
+                metadata: Rc::new(metadata),
+                artifact_identity,
+            },
+        );
+        Ok(missing)
+    }
+
+    pub(super) fn unload(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if arguments.len() != 1 {
+            return Err(invalid_call("native FFI unload expects one library alias"));
+        }
+        let alias = string_argument(arguments, 0, "unload")?;
+        let removed = self.state.borrow_mut().libraries.remove(&alias).is_some();
+        if !removed {
+            return Err(invalid_call(format!(
+                "native library alias `{alias}` is not loaded"
+            )));
+        }
+        Ok(Value::Bool(true))
+    }
+
+    pub(super) fn is_loaded(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if arguments.len() != 1 {
+            return Err(invalid_call(
+                "native FFI is_loaded expects one library alias",
+            ));
+        }
+        let alias = string_argument(arguments, 0, "is_loaded")?;
+        Ok(Value::Bool(
+            self.state.borrow().libraries.contains_key(&alias),
+        ))
+    }
+
+    pub(super) fn functions(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if !(1..=2).contains(&arguments.len()) {
+            return Err(invalid_call(
+                "native FFI functions expects a library alias and optional -full flag",
+            ));
+        }
+        let alias = string_argument(arguments, 0, "functions")?;
+        let full = match optional_string_argument(arguments, 1, "functions")? {
+            None => false,
+            Some(option) if option.eq_ignore_ascii_case("-full") => true,
+            Some(option) => {
+                return Err(invalid_call(format!(
+                    "unsupported libfunctions option `{option}`; expected -full"
+                )))
+            }
+        };
+        let entry = self.library(&alias)?;
+        let values = entry.metadata.libraries[0]
+            .symbols
+            .iter()
+            .map(|symbol| {
+                Value::String(if full {
+                    legacy_signature(symbol)
+                } else {
+                    symbol.name.clone()
+                })
+            })
+            .collect::<Vec<_>>();
+        CellArray::new(values.clone(), 1, values.len())
+            .map(Value::Cell)
+            .map_err(invalid_call)
+    }
+    pub(super) fn library(&self, alias: &str) -> Result<LibraryEntry, RuntimeError> {
+        self.state
+            .borrow()
+            .libraries
+            .get(alias)
+            .cloned()
+            .ok_or_else(|| invalid_call(format!("native library alias `{alias}` is not loaded")))
+    }
+
+    pub(super) fn build_interface(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+        if arguments.is_empty() || arguments.len().is_multiple_of(2) {
+            return Err(invalid_call(
+                "clibgen.buildInterface expects a header followed by name-value pairs",
+            ));
+        }
+        let header = string_argument(arguments, 0, "build_interface")?;
+        let mut library = None;
+        let mut alias = None;
+        let mut includes = Vec::new();
+        for pair in arguments[1..].chunks_exact(2) {
+            let name = String::try_from(&pair[0])
+                .map_err(|_| invalid_call("buildInterface option names must be text"))?;
+            match name.to_ascii_lowercase().as_str() {
+                "libraries" => {
+                    library = Some(String::try_from(&pair[1]).map_err(|_| {
+                        invalid_call("buildInterface Libraries must name one shared library")
+                    })?);
+                }
+                "interfacename" => {
+                    alias = Some(String::try_from(&pair[1]).map_err(|_| {
+                        invalid_call("buildInterface InterfaceName must be text")
+                    })?);
+                }
+                "includepath" | "includedirectories" => {
+                    includes.push(PathBuf::from(String::try_from(&pair[1]).map_err(|_| {
+                        invalid_call("buildInterface include path must be text")
+                    })?));
+                }
+                unsupported => {
+                    return Err(invalid_call(format!(
+                        "buildInterface option `{unsupported}` is not supported by the C ABI interface builder"
+                    )))
+                }
+            }
+        }
+        let library = library.ok_or_else(|| {
+            invalid_call("buildInterface requires the Libraries option for a native interface")
+        })?;
+        let alias = alias.map(Ok).unwrap_or_else(|| default_alias(&header))?;
+        self.validate_available_alias(&alias)?;
+        let library_path = PathBuf::from(&library);
+        let prepared = prepare_native_interface(&NativeInterfacePreparation {
+            interface_name: alias.clone(),
+            library_name: alias.clone(),
+            library_path: library_path.clone(),
+            primary_header: PathBuf::from(header),
+            additional_headers: Vec::new(),
+            include_directories: includes,
+            definitions: Vec::new(),
+            compiler_frontend: self.compiler_frontend.clone(),
+        })
+        .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let manifest = prepared.manifest;
+        let manifest_path = NativeInterfaceArtifactManifest::path_for_library(&library_path);
+        manifest
+            .publish(&manifest_path)
+            .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        self.load_prepared_manifest(&alias, &library_path, manifest)
+    }
+}
+pub(super) fn legacy_signature(symbol: &SymbolPrototype) -> String {
+    let outputs = std::iter::once((&symbol.return_type, None))
+        .filter(|(ty, _)| !matches!(ty, NativeType::Void))
+        .chain(symbol.parameters.iter().filter_map(|parameter| {
+            matches!(
+                parameter.direction,
+                ParameterDirection::Output | ParameterDirection::InputOutput
+            )
+            .then_some((&parameter.ty, Some(parameter.name.as_str())))
+        }))
+        .map(|(ty, name)| match name {
+            Some(name) => format!("{} {name}", legacy_type_name(ty)),
+            None => legacy_type_name(ty),
+        })
+        .collect::<Vec<_>>();
+    let inputs = symbol
+        .parameters
+        .iter()
+        .map(|parameter| legacy_type_name(&parameter.ty))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match outputs.as_slice() {
+        [] => format!("{}({inputs})", symbol.name),
+        [output] => format!("{output} {}({inputs})", symbol.name),
+        outputs => format!("[{}] {}({inputs})", outputs.join(", "), symbol.name),
+    }
+}
+
+pub(super) fn legacy_type_name(ty: &NativeType) -> String {
+    match ty {
+        NativeType::Void => "void".into(),
+        NativeType::Scalar { scalar } => match scalar {
+            NativeScalar::Bool => "logical",
+            NativeScalar::Char | NativeScalar::SignedChar => "int8",
+            NativeScalar::UnsignedChar => "uint8",
+            NativeScalar::Short => "int16",
+            NativeScalar::UnsignedShort => "uint16",
+            NativeScalar::Int => "int32",
+            NativeScalar::UnsignedInt => "uint32",
+            NativeScalar::Long | NativeScalar::LongLong => "int64",
+            NativeScalar::UnsignedLong | NativeScalar::UnsignedLongLong => "uint64",
+            NativeScalar::I8 => "int8",
+            NativeScalar::U8 => "uint8",
+            NativeScalar::I16 => "int16",
+            NativeScalar::U16 => "uint16",
+            NativeScalar::I32 => "int32",
+            NativeScalar::U32 => "uint32",
+            NativeScalar::I64 | NativeScalar::Isize => "int64",
+            NativeScalar::U64 | NativeScalar::Usize => "uint64",
+            NativeScalar::F32 => "single",
+            NativeScalar::F64 => "double",
+        }
+        .into(),
+        NativeType::Pointer { pointee, .. } => format!("{}Ptr", legacy_type_name(pointee)),
+        NativeType::Array { element, .. } => format!("{}Ptr", legacy_type_name(element)),
+        NativeType::Structure { name } | NativeType::Enumeration { name, .. } => name.clone(),
+        NativeType::Callback { .. } => "FcnPtr".into(),
+    }
+}
