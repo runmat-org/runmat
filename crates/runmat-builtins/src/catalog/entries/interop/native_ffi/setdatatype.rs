@@ -1,6 +1,6 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
 use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
-use super::inference_support::{infer_with, text_at};
+use super::inference_support::{arity, infer_with, text_at};
 use super::{NATIVE_FFI_INTEGER_AUDIT, SETDATATYPE_DESCRIPTOR};
 use crate::*;
 use runmat_types::*;
@@ -29,8 +29,8 @@ pub const SETDATATYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::MayThrow,
         ],
         capabilities: &[
-            CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::NativeCode,
+            CapabilityRequirement::ForeignRuntime,
         ],
     },
     placement: HOST_PLACEMENT,
@@ -44,7 +44,32 @@ pub const SETDATATYPE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    arity(request, 3, None, &mut diagnostics);
+    if request.arguments.first().is_some_and(|fact| {
+        !matches!(
+            fact.kind,
+            ValueKindFact::Unknown | ValueKindFact::Foreign(_)
+        )
+    }) {
+        diagnostics.push(catalog::inference::argument_error(
+            "RM-NATIVE-FFI-POINTER",
+            "setdatatype requires a native pointer handle",
+            0,
+        ));
+    }
     text_at(request, 1, &mut diagnostics);
+    for index in 2..request.arguments.len() {
+        if !matches!(
+            request.arguments[index].kind,
+            ValueKindFact::Unknown | ValueKindFact::Numeric(_)
+        ) {
+            diagnostics.push(catalog::inference::argument_error(
+                "RM-NATIVE-FFI-DIMENSION",
+                "pointer dimensions must be positive integer scalars",
+                index,
+            ));
+        }
+    }
     infer_with(request, entry, vec![], diagnostics)
 }
 

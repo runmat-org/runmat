@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use runmat_builtins::NativeLoadOption;
 use runmat_native_ffi::{
     artifact_identity, invoke_symbol_with_bindings, prepare_header_with_declarations_report,
     prepare_native_interface, CallbackBinding, HeaderPreparation, InvocationValue,

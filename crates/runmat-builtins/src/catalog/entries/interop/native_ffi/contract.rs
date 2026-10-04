@@ -1,6 +1,35 @@
 use crate::*;
 use runmat_types::ExecutionStackRequirement;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeLoadOption {
+    Alias,
+    IncludePath,
+    AddHeader,
+}
+
+impl NativeLoadOption {
+    pub fn parse(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("Alias") {
+            Some(Self::Alias)
+        } else if name.eq_ignore_ascii_case("IncludePath") {
+            Some(Self::IncludePath)
+        } else if name.eq_ignore_ascii_case("AddHeader") {
+            Some(Self::AddHeader)
+        } else {
+            None
+        }
+    }
+
+    pub const fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Alias => "Alias",
+            Self::IncludePath => "IncludePath",
+            Self::AddHeader => "AddHeader",
+        }
+    }
+}
+
 pub(super) const HOST_PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     preparation: BuiltinOperandPreparation::RuntimeOwned,
     portability: BuiltinPortability::NativeOnly,

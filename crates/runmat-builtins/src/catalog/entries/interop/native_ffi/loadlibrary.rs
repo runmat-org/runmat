@@ -1,6 +1,6 @@
-use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
+use super::contract::{NativeLoadOption, FOREIGN_LINK, HOST_PLACEMENT};
 use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
-use super::inference_support::{infer_with, text_at};
+use super::inference_support::{arity, infer_with, string_cell_row, text_at};
 use super::{LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
@@ -23,16 +23,17 @@ pub const LOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::FilesystemRead,
             EffectKind::EnvironmentRead,
             EffectKind::EnvironmentWrite,
+            EffectKind::FilesystemRead,
+            EffectKind::FilesystemWrite,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
         capabilities: &[
             CapabilityRequirement::Filesystem,
-            CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::NativeCode,
+            CapabilityRequirement::ForeignRuntime,
         ],
     },
     placement: HOST_PLACEMENT,
@@ -46,6 +47,7 @@ pub const LOADLIBRARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    arity(request, 1, None, &mut diagnostics);
     text_at(request, 0, &mut diagnostics);
     text_at(request, 1, &mut diagnostics);
     if request.arguments.len() > 2 && !(request.arguments.len() - 2).is_multiple_of(2) {
@@ -55,7 +57,20 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
             2,
         ));
     }
-    let notfound = ValueFact::unknown(DynamicReason::RuntimeValue);
+    for index in (2..request.arguments.len()).step_by(2) {
+        text_at(request, index, &mut diagnostics);
+        text_at(request, index + 1, &mut diagnostics);
+        if let Some(name) = request.literals.literal_string_at(index) {
+            if NativeLoadOption::parse(name).is_none() {
+                diagnostics.push(catalog::inference::argument_error(
+                    "RM-NATIVE-FFI-OPTION",
+                    "loadlibrary supports Alias, IncludePath, and AddHeader",
+                    index,
+                ));
+            }
+        }
+    }
+    let notfound = string_cell_row();
     let warnings = ValueFact::scalar(ValueKindFact::String);
     infer_with(request, entry, vec![notfound, warnings], diagnostics)
 }

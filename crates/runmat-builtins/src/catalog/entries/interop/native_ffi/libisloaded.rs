@@ -1,6 +1,6 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
 use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
-use super::inference_support::{infer_with, text_at};
+use super::inference_support::{arity, infer_with, text_at};
 use super::{LIBISLOADED_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
@@ -28,8 +28,8 @@ pub const LIBISLOADED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::MayThrow,
         ],
         capabilities: &[
-            CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::NativeCode,
+            CapabilityRequirement::ForeignRuntime,
         ],
     },
     placement: HOST_PLACEMENT,
@@ -43,6 +43,7 @@ pub const LIBISLOADED_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    arity(request, 1, Some(1), &mut diagnostics);
     text_at(request, 0, &mut diagnostics);
     infer_with(
         request,

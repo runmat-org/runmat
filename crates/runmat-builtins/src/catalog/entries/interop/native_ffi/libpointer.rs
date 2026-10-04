@@ -1,6 +1,6 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
 use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
-use super::inference_support::{infer_with, owned_pointer, text_at};
+use super::inference_support::{arity, infer_with, owned_pointer, text_at};
 use super::{LIBPOINTER_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
@@ -21,13 +21,14 @@ pub const LIBPOINTER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
+            EffectKind::EnvironmentRead,
             EffectKind::EnvironmentWrite,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
         capabilities: &[
-            CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::NativeCode,
+            CapabilityRequirement::ForeignRuntime,
         ],
     },
     placement: HOST_PLACEMENT,
@@ -41,6 +42,7 @@ pub const LIBPOINTER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    arity(request, 0, Some(2), &mut diagnostics);
     text_at(request, 0, &mut diagnostics);
     infer_with(request, entry, vec![owned_pointer()], diagnostics)
 }

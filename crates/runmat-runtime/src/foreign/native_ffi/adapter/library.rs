@@ -47,8 +47,8 @@ impl NativeFfiAdapter {
             && options.iter().step_by(2).all(|value| {
                 String::try_from(value).is_ok_and(|name| {
                     matches!(
-                        name.to_ascii_lowercase().as_str(),
-                        "includepath" | "addheader"
+                        NativeLoadOption::parse(&name),
+                        Some(NativeLoadOption::IncludePath | NativeLoadOption::AddHeader)
                     )
                 })
             })
@@ -58,9 +58,9 @@ impl NativeFfiAdapter {
                 let value = PathBuf::from(String::try_from(&pair[1]).map_err(|_| {
                     invalid_call(format!("native FFI load option `{name}` must be text"))
                 })?);
-                match name.to_ascii_lowercase().as_str() {
-                    "includepath" => include_directories.push(value),
-                    "addheader" => additional_headers.push(value),
+                match NativeLoadOption::parse(&name) {
+                    Some(NativeLoadOption::IncludePath) => include_directories.push(value),
+                    Some(NativeLoadOption::AddHeader) => additional_headers.push(value),
                     _ => unreachable!("validated native FFI load option"),
                 }
             }

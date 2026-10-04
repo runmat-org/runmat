@@ -46,6 +46,18 @@ pub(super) fn owned_pointer() -> ValueFact {
     fact
 }
 
+pub(super) fn string_cell_row() -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::scalar(ValueKindFact::String)),
+            elements: Vec::new(),
+            elements_complete: false,
+        }),
+        ShapeFact::from(vec![Some(1), None]),
+        StorageFact::Opaque,
+    )
+}
+
 pub(super) fn text_at(
     request: &CallRequest,
     index: usize,
@@ -62,5 +74,21 @@ pub(super) fn text_at(
                 index,
             ));
         }
+    }
+}
+
+pub(super) fn arity(
+    request: &CallRequest,
+    minimum: usize,
+    maximum: Option<usize>,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) {
+    let count = request.arguments.len();
+    if count < minimum || maximum.is_some_and(|maximum| count > maximum) {
+        diagnostics.push(argument_error(
+            "RM-NATIVE-FFI-ARITY",
+            "native library call has an invalid number of arguments",
+            count,
+        ));
     }
 }

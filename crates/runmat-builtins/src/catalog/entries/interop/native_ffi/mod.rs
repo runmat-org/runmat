@@ -12,9 +12,12 @@ mod libpointer;
 mod libstruct;
 mod loadlibrary;
 mod setdatatype;
+#[cfg(test)]
+mod tests;
 mod unloadlibrary;
 
 pub use calllib::CALLLIB_CATALOG_ENTRY;
+pub use contract::NativeLoadOption;
 pub use descriptor::{
     CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR, LIBPOINTER_DESCRIPTOR,
     LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_ERROR_HOST_UNAVAILABLE,

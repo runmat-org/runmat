@@ -2,9 +2,9 @@
 
 use runmat_builtins::BuiltinErrorDescriptor;
 pub use runmat_builtins::{
-    CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR, LIBPOINTER_DESCRIPTOR,
-    LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT, SETDATATYPE_DESCRIPTOR,
-    UNLOADLIBRARY_DESCRIPTOR,
+    NativeLoadOption, CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR,
+    LIBPOINTER_DESCRIPTOR, LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT,
+    SETDATATYPE_DESCRIPTOR, UNLOADLIBRARY_DESCRIPTOR,
 };
 use runmat_builtins::{
     NATIVE_FFI_ERROR_HOST_UNAVAILABLE as ERROR_HOST_UNAVAILABLE,
@@ -71,6 +71,9 @@ async fn loadlibrary_builtin(
     context: Option<crate::context::RuntimeContext>,
     mut arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if arguments.is_empty() {
+        return Err(invalid_builtin_call("loadlibrary expects a library path"));
+    }
     if arguments.len() == 1 {
         let library = String::try_from(&arguments[0]).map_err(|error| {
             native_error(
@@ -93,27 +96,32 @@ async fn loadlibrary_builtin(
         for pair in arguments[2..].chunks_exact(2) {
             let name = String::try_from(&pair[0])
                 .map_err(|_| invalid_builtin_call("loadlibrary option names must be text"))?;
-            match name.to_ascii_lowercase().as_str() {
-                "alias" => {
+            match NativeLoadOption::parse(&name) {
+                Some(NativeLoadOption::Alias) => {
                     alias = Some(Value::String(String::try_from(&pair[1]).map_err(|_| {
                         invalid_builtin_call("loadlibrary alias must be text")
                     })?));
                 }
-                "includepath" => {
-                    preparation_options.push(Value::String("includepath".into()));
+                Some(NativeLoadOption::IncludePath) => {
+                    preparation_options.push(Value::String(
+                        NativeLoadOption::IncludePath.canonical_name().into(),
+                    ));
                     preparation_options.push(Value::String(String::try_from(&pair[1]).map_err(
                         |_| invalid_builtin_call("loadlibrary include path must be text"),
                     )?));
                 }
-                "addheader" => {
-                    preparation_options.push(Value::String("addheader".into()));
+                Some(NativeLoadOption::AddHeader) => {
+                    preparation_options.push(Value::String(
+                        NativeLoadOption::AddHeader.canonical_name().into(),
+                    ));
                     preparation_options.push(Value::String(String::try_from(&pair[1]).map_err(
                         |_| invalid_builtin_call("loadlibrary additional header must be text"),
                     )?));
                 }
-                unsupported => {
+                None => {
                     return Err(invalid_builtin_call(format!(
-                        "loadlibrary option `{unsupported}` is not available in this interface path"
+                        "loadlibrary option `{}` is not available in this interface path",
+                        name.to_ascii_lowercase()
                     )))
                 }
             }

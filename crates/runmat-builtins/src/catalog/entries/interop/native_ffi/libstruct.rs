@@ -1,6 +1,6 @@
 use super::contract::{FOREIGN_LINK, HOST_PLACEMENT};
 use super::documentation_support::{IMPLEMENTATION, NATIVE_FIXTURE, NATIVE_HOST};
-use super::inference_support::{infer_with, owned_pointer, text_at};
+use super::inference_support::{arity, infer_with, owned_pointer, text_at};
 use super::{LIBSTRUCT_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT};
 use crate::*;
 use runmat_types::*;
@@ -27,8 +27,8 @@ pub const LIBSTRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             EffectKind::MayThrow,
         ],
         capabilities: &[
-            CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::NativeCode,
+            CapabilityRequirement::ForeignRuntime,
         ],
     },
     placement: HOST_PLACEMENT,
@@ -42,7 +42,19 @@ pub const LIBSTRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    arity(request, 1, Some(2), &mut diagnostics);
     text_at(request, 0, &mut diagnostics);
+    if request
+        .arguments
+        .get(1)
+        .is_some_and(|fact| !matches!(fact.kind, ValueKindFact::Unknown | ValueKindFact::Struct(_)))
+    {
+        diagnostics.push(catalog::inference::argument_error(
+            "RM-NATIVE-FFI-STRUCT",
+            "libstruct initializer must be a scalar structure",
+            1,
+        ));
+    }
     infer_with(request, entry, vec![owned_pointer()], diagnostics)
 }
 
