@@ -78,13 +78,6 @@ pub(super) fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
         1 => Ok(OutputTarget::Stdout),
         2 => Ok(OutputTarget::Stderr),
         _ => {
-            let info = registry::info_for(fid).ok_or_else(|| {
-                fprintf_error_with_message(
-                    FPRINTF_ERROR_INVALID_IDENTIFIER.message,
-                    &FPRINTF_ERROR_INVALID_IDENTIFIER,
-                )
-            })?;
-            ensure_writable(&info)?;
             let operation = registry::acquire_file(fid).map_err(|err| match err {
                 registry::FileOperationError::InvalidIdentifier => fprintf_error_with_message(
                     FPRINTF_ERROR_INVALID_IDENTIFIER.message,
@@ -93,15 +86,17 @@ pub(super) fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
                 other => {
                     let source = other.into_io_error();
                     fprintf_error_with_source(
-                        format!("fprintf: file identifier is busy ({source})"),
+                        format!("fprintf: file identifier is unavailable ({source})"),
                         &FPRINTF_ERROR_IO,
                         source,
                     )
                 }
             })?;
+            ensure_writable(&operation.info)?;
+            let encoding = operation.info.encoding.clone();
             Ok(OutputTarget::File {
                 operation,
-                encoding: info.encoding.clone(),
+                encoding,
             })
         }
     }

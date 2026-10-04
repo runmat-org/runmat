@@ -4,7 +4,6 @@ use runmat_value::{NumericDType, NumericScalar, NumericStorage};
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 
-use encoding_rs::{Encoding, SHIFT_JIS};
 #[cfg(test)]
 use runmat_builtins::TEXTSCAN_DESCRIPTOR;
 use runmat_builtins::{
@@ -15,7 +14,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::io::filetext::{helpers::decode_bytes, registry};
+use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "textscan";
@@ -97,7 +96,7 @@ async fn textscan_builtin(
     cooperation.completed(0).await?;
     let parsed = parse_input(&input, &parsed_format, repeat, &options, &mut cooperation).await?;
     cooperation.completed(0).await?;
-    let output = build_output(parsed, &options)?;
+    let output = build_output(parsed, &options, &mut cooperation).await?;
     cooperation.completed(0).await?;
     Ok(output)
 }

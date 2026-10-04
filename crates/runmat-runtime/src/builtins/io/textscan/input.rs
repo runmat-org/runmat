@@ -1,5 +1,8 @@
 use super::*;
 
+mod decoder;
+use decoder::DecodedFileText;
+
 pub(super) async fn parse_input(
     value: &Value,
     format_spec: &[FormatElement],
@@ -35,7 +38,7 @@ pub(super) async fn parse_registered_file(
             let source = other.into_io_error();
             textscan_error_with_source(
                 &TEXTSCAN_ERROR_FILE,
-                format!("textscan: file identifier {fid} is busy ({source})"),
+                format!("textscan: file identifier {fid} is unavailable ({source})"),
                 source,
             )
         }
@@ -83,7 +86,7 @@ pub(super) async fn parse_registered_file(
     } else {
         operation.info.encoding.as_str()
     };
-    let decoded = DecodedFileText::decode(&bytes, encoding)?;
+    let decoded = DecodedFileText::decode(&bytes, encoding, cooperation).await?;
     cooperation.completed(bytes.len()).await?;
     let parsed = parse_textscan(&decoded.text, format_spec, repeat, options, cooperation).await?;
     let consumed_bytes = decoded.byte_offset_for_text_pos(parsed.consumed_text_pos)?;
@@ -131,146 +134,83 @@ pub(super) fn validate_fid(fid: i32) -> BuiltinResult<()> {
     Ok(())
 }
 
-struct DecodedFileText {
-    text: String,
-    text_offsets: Vec<usize>,
-    byte_offsets: Vec<usize>,
-    byte_len: usize,
-}
-
-impl DecodedFileText {
-    fn decode(bytes: &[u8], encoding: &str) -> BuiltinResult<Self> {
-        if is_shift_jis_encoding(encoding) {
-            return decode_shift_jis_with_offsets(bytes, encoding);
-        }
-        let chars = decode_bytes(bytes, encoding, BUILTIN_NAME).map_err(|err| {
-            let message = err.message().to_string();
-            textscan_error_with_source(&TEXTSCAN_ERROR_FILE, message, err)
-        })?;
-        let byte_width = byte_preserving_encoding_width(encoding)?;
-        let mut text = String::new();
-        let mut text_offsets = Vec::with_capacity(chars.len());
-        let mut byte_offsets = Vec::with_capacity(chars.len());
-        let mut byte_offset = 0usize;
-        for ch in chars {
-            text_offsets.push(text.len());
-            byte_offsets.push(byte_offset);
-            text.push(ch);
-            byte_offset += byte_width.unwrap_or_else(|| ch.len_utf8());
-        }
-        Ok(Self {
-            text,
-            text_offsets,
-            byte_offsets,
-            byte_len: bytes.len(),
-        })
-    }
-
-    fn byte_offset_for_text_pos(&self, text_pos: usize) -> BuiltinResult<usize> {
-        if text_pos == self.text.len() {
-            return Ok(self.byte_len);
-        }
-        match self.text_offsets.binary_search(&text_pos) {
-            Ok(idx) => Ok(self.byte_offsets[idx]),
-            Err(idx) if idx == self.text_offsets.len() => Ok(self.byte_len),
-            Err(_) => Err(textscan_error_with(
-                &TEXTSCAN_ERROR_FILE,
-                "textscan: parsed position did not fall on a decoded character boundary",
-            )),
-        }
-    }
-}
-
-fn decode_shift_jis_with_offsets(bytes: &[u8], encoding: &str) -> BuiltinResult<DecodedFileText> {
-    let mut text = String::new();
-    let mut text_offsets = Vec::new();
-    let mut byte_offsets = Vec::new();
-    let mut byte_offset = 0usize;
-    while byte_offset < bytes.len() {
-        let width = shift_jis_unit_width(bytes, byte_offset)?;
-        let decoded = decode_bytes(
-            &bytes[byte_offset..byte_offset + width],
-            encoding,
-            BUILTIN_NAME,
-        )
-        .map_err(|err| {
-            let message = err.message().to_string();
-            textscan_error_with_source(&TEXTSCAN_ERROR_FILE, message, err)
-        })?;
-        for ch in decoded {
-            text_offsets.push(text.len());
-            byte_offsets.push(byte_offset);
-            text.push(ch);
-        }
-        byte_offset += width;
-    }
-    Ok(DecodedFileText {
-        text,
-        text_offsets,
-        byte_offsets,
-        byte_len: bytes.len(),
-    })
-}
-
-fn shift_jis_unit_width(bytes: &[u8], offset: usize) -> BuiltinResult<usize> {
-    let first = bytes[offset];
-    if first <= 0x80 || (0xA1..=0xDF).contains(&first) {
-        return Ok(1);
-    }
-    if (0x81..=0x9F).contains(&first) || (0xE0..=0xFC).contains(&first) {
-        let Some(&second) = bytes.get(offset + 1) else {
-            return Err(textscan_error_with(
-                &TEXTSCAN_ERROR_FILE,
-                "textscan: incomplete Shift_JIS character at end of file",
-            ));
-        };
-        if (0x40..=0x7E).contains(&second) || (0x80..=0xFC).contains(&second) {
-            return Ok(2);
-        }
-    }
-    Err(textscan_error_with(
-        &TEXTSCAN_ERROR_FILE,
-        "textscan: invalid Shift_JIS byte sequence",
-    ))
-}
-
-fn is_shift_jis_encoding(encoding: &str) -> bool {
-    Encoding::for_label(encoding.trim().as_bytes()) == Some(SHIFT_JIS)
-}
-
-fn byte_preserving_encoding_width(encoding: &str) -> BuiltinResult<Option<usize>> {
-    let label = encoding.trim();
-    if label.is_empty() || label.eq_ignore_ascii_case("utf-8") || label.eq_ignore_ascii_case("utf8")
-    {
-        return Ok(None);
-    }
-    if is_shift_jis_encoding(label) {
-        return Ok(None);
-    }
-    if label.eq_ignore_ascii_case("binary")
-        || label.eq_ignore_ascii_case("latin1")
-        || label.eq_ignore_ascii_case("latin-1")
-        || label.eq_ignore_ascii_case("iso-8859-1")
-        || label.eq_ignore_ascii_case("windows-1252")
-        || label.eq_ignore_ascii_case("cp1252")
-        || label.eq_ignore_ascii_case("us-ascii")
-        || label.eq_ignore_ascii_case("ascii")
-        || label.eq_ignore_ascii_case("us_ascii")
-        || label.eq_ignore_ascii_case("usascii")
-    {
-        return Ok(Some(1));
-    }
-    Err(textscan_error_with(
-        &TEXTSCAN_ERROR_FILE,
-        format!(
-            "textscan: file-position preserving reads do not yet support encoding '{encoding}'"
-        ),
-    ))
-}
-
 #[cfg(test)]
 mod position_tests {
     use super::*;
+    use futures::executor::block_on;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn chunked_utf8_decode_retains_interior_bom_and_exact_boundary() {
+        let mut bytes = vec![b'a'; 4096];
+        bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF, b'z']);
+        let mut cooperation = TextscanCooperation::new(None);
+        let decoded =
+            block_on(DecodedFileText::decode(&bytes, "UTF-8", &mut cooperation)).expect("decode");
+        assert_eq!(decoded.text.chars().count(), 4098);
+        assert!(decoded.text.ends_with("\u{FEFF}z"));
+        assert_eq!(
+            decoded.byte_offset_for_text_pos(4096).expect("offset"),
+            4096
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn initial_bom_only_and_four_byte_boundary_have_exact_offsets() {
+        let mut cooperation = TextscanCooperation::new(None);
+        let only_bom = block_on(DecodedFileText::decode(
+            b"\xef\xbb\xbf",
+            "UTF-8",
+            &mut cooperation,
+        ))
+        .expect("BOM only");
+        assert!(only_bom.text.is_empty());
+        assert_eq!(only_bom.byte_offset_for_text_pos(0).expect("after BOM"), 3);
+
+        let mut bytes = vec![b'a'; 4095];
+        bytes.extend_from_slice("😀z".as_bytes());
+        let decoded = block_on(DecodedFileText::decode(&bytes, "UTF-8", &mut cooperation))
+            .expect("four-byte scalar crosses chunk edge");
+        assert!(decoded.text.ends_with("😀z"));
+        assert_eq!(decoded.byte_offset_for_text_pos(4095).expect("emoji"), 4095);
+        assert_eq!(decoded.byte_offset_for_text_pos(4099).expect("z"), 4099);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn malformed_continuation_run_rejects_without_unbounded_extension() {
+        let mut bytes = vec![b'a'; 4095];
+        bytes.extend(std::iter::repeat(0x80).take(8192));
+        let mut cooperation = TextscanCooperation::new(None);
+        let error = block_on(DecodedFileText::decode(&bytes, "UTF-8", &mut cooperation))
+            .expect_err("invalid UTF-8");
+        assert_eq!(error.identifier(), TEXTSCAN_ERROR_FILE.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bom_selected_utf16_and_windows1252_override_map_source_bytes() {
+        let mut cooperation = TextscanCooperation::new(None);
+        let utf16 = block_on(DecodedFileText::decode(
+            &[0xFF, 0xFE, b'1', 0, b'\n', 0, b'2', 0],
+            "UTF-8",
+            &mut cooperation,
+        ))
+        .expect("UTF-16 BOM is honored by the prior decoder contract");
+        assert_eq!(utf16.text, "1\n2");
+        assert_eq!(utf16.byte_offset_for_text_pos(0).expect("first"), 2);
+        assert_eq!(utf16.byte_offset_for_text_pos(2).expect("second"), 6);
+
+        let override_encoding = block_on(DecodedFileText::decode(
+            b"\xef\xbb\xbf\xc3\xa9z",
+            "windows-1252",
+            &mut cooperation,
+        ))
+        .expect("BOM switches encoding once");
+        assert_eq!(override_encoding.text, "éz");
+        assert_eq!(override_encoding.byte_offset_for_text_pos(2).expect("z"), 5);
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -156,18 +156,6 @@ pub async fn evaluate(
         ));
     }
 
-    let info = registry::info_for(fid).ok_or_else(|| {
-        fwrite_error_with_message(
-            FWRITE_ERROR_INVALID_IDENTIFIER.message,
-            &FWRITE_ERROR_INVALID_IDENTIFIER,
-        )
-    })?;
-    if !info.access.write {
-        return Err(fwrite_error_with_detail(
-            &FWRITE_ERROR_INVALID_IDENTIFIER,
-            "file identifier is not open for writing",
-        ));
-    }
     let mut operation = registry::acquire_file(fid).map_err(|err| match err {
         registry::FileOperationError::InvalidIdentifier => fwrite_error_with_message(
             FWRITE_ERROR_INVALID_IDENTIFIER.message,
@@ -178,6 +166,12 @@ pub async fn evaluate(
             fwrite_error_with_source(source.to_string(), &FWRITE_ERROR_IO, source)
         }
     })?;
+    if !operation.info.access.write {
+        return Err(fwrite_error_with_detail(
+            &FWRITE_ERROR_INVALID_IDENTIFIER,
+            "file identifier is not open for writing",
+        ));
+    }
     let skip_host = match raw_skip {
         Some(value @ Value::GpuTensor(_)) => Some(gather_value(value).await?),
         Some(value) => Some(value.clone()),
@@ -186,7 +180,7 @@ pub async fn evaluate(
     let skip_bytes =
         map_string_result(parse_skip(skip_host.as_ref()), &FWRITE_ERROR_INVALID_OPTION)?;
     let machine_format = map_string_result(
-        parse_machine_format(raw_machine, &info.machinefmt),
+        parse_machine_format(raw_machine, &operation.info.machinefmt),
         &FWRITE_ERROR_INVALID_OPTION,
     )?;
     let data_host = gather_value(data_value).await?;

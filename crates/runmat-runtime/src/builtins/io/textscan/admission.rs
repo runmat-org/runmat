@@ -28,13 +28,13 @@ pub(super) fn preflight(
     if !crate::dispatcher::value_contains_gpu(input) {
         if let Some(fid) = numeric_fid(input) {
             input::validate_fid(fid)?;
-            let snapshot = registry::snapshot_file(fid).ok_or_else(|| {
+            let info = registry::info_for(fid).ok_or_else(|| {
                 textscan_error_with(
                     &TEXTSCAN_ERROR_FILE,
                     format!("textscan: invalid file identifier {fid}"),
                 )
             })?;
-            if !snapshot.info.access.read {
+            if !info.access.read {
                 return Err(textscan_error_with(
                     &TEXTSCAN_ERROR_FILE,
                     format!("textscan: file identifier {fid} is not open for reading"),

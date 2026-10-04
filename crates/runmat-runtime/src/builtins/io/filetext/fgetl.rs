@@ -44,6 +44,16 @@ fn fgetl_error_with_detail(
     fgetl_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn fgetl_error_with_source(source: std::io::Error) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {source}", FGETL_ERROR_IO.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = FGETL_ERROR_IO.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
@@ -119,20 +129,19 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         ));
     }
 
-    let info =
-        registry::info_for(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
-    if !info.access.read {
+    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier => {
+            fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER)
+        }
+        other => fgetl_error_with_source(other.into_io_error()),
+    })?;
+    if !operation.info.access.read {
         return Err(fgetl_error_with_detail(
             &FGETL_ERROR_INVALID_IDENTIFIER,
             "file identifier is not open for reading",
         ));
     }
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => {
-            fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER)
-        }
-        other => fgetl_error_with_detail(&FGETL_ERROR_IO, other.into_io_error().to_string()),
-    })?;
+    let encoding = operation.info.encoding.clone();
     let read = read_text_line(operation.file_mut(), None, BUILTIN_NAME)
         .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
     drop(operation);
@@ -143,10 +152,10 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
         return Ok(FgetlEval::end_of_file());
     }
 
-    let encoding = if info.encoding.trim().is_empty() {
+    let encoding = if encoding.trim().is_empty() {
         "UTF-8".to_string()
     } else {
-        info.encoding.clone()
+        encoding
     };
 
     let line_len = read.data.len().saturating_sub(read.terminators.len());

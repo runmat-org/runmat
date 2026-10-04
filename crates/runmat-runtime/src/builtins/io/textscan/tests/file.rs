@@ -240,6 +240,43 @@ fn textscan_repeated_file_read_preserves_next_record_position() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn initial_utf8_bom_partial_read_seeks_to_exact_source_byte() {
+    let _guard = registry::test_guard();
+    registry::reset_for_tests();
+    let path = file_fixture("bom-partial.txt", b"\xef\xbb\xbf10\n20\n");
+    let mut options = OpenOptions::new();
+    options.read(true);
+    let file = block_on(options.open_async(&path)).expect("open file");
+    let handle = Arc::new(StdMutex::new(Some(file)));
+    let fid = registry::register_file(RegisteredFile {
+        path: path.to_path_buf(),
+        permission: "r".to_string(),
+        access: registry::FileAccess::READ,
+        machinefmt: "native".to_string(),
+        encoding: "UTF-8".to_string(),
+        handle: handle.clone(),
+    });
+    let out = block_on(textscan_builtin(
+        None,
+        Value::Num(fid as f64),
+        Value::from("%f"),
+        vec![Value::Num(1.0)],
+    ))
+    .expect("read first record");
+    assert_eq!(numeric_column(&out, 0), vec![10.0]);
+    let mut remaining = String::new();
+    let mut operation = registry::acquire_file(fid).expect("same file");
+    std::io::Read::read_to_string(operation.file_mut(), &mut remaining).expect("remainder");
+    assert_eq!(remaining, "20\n");
+    drop(operation);
+    block_on(registry::close_async(fid))
+        .expect("close")
+        .expect("entry");
+    registry::reset_for_tests();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn textscan_shift_jis_registered_file_restores_source_byte_position() {
     shift_jis_registered_file_restores_source_byte_position(
         "shift_jis",

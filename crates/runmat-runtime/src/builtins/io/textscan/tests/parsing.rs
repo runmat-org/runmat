@@ -1,6 +1,39 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerStorage, Tensor};
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn one_long_field_yields_through_the_invocation_budget() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::task::{Context, Poll};
+
+    let source = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(4096).expect("quantum")),
+        source.token(),
+        || Box::pin(std::future::pending::<Result<(), ExecutionServiceError>>()),
+    );
+    let mut cooperation = TextscanCooperation::with_budget(budget);
+    let field = "x".repeat(8192);
+    let format = parse_format_spec("%s").expect("format");
+    let options = TextscanOptions::default();
+    let mut call = Box::pin(parse_textscan(
+        &field,
+        &format,
+        None,
+        &options,
+        &mut cooperation,
+    ));
+    let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(
+        Future::poll(call.as_mut(), &mut cx),
+        Poll::Pending
+    ));
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn textscan_descriptor_covers_core_forms() {

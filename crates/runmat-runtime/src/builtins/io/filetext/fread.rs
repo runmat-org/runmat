@@ -128,27 +128,32 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
     let prepared = PreparedFreadCall::new(fid_value, rest)?;
     let fid = prepared.resolve_fid().await?;
 
-    let info = registry::info_for(fid).ok_or_else(|| {
-        fread_error_with_message(
-            FREAD_ERROR_INVALID_IDENTIFIER.message,
-            &FREAD_ERROR_INVALID_IDENTIFIER,
-        )
-    })?;
-    if !info.access.read {
-        return Err(fread_error_with_detail(
-            &FREAD_ERROR_INVALID_IDENTIFIER,
-            "file identifier is not open for reading",
-        ));
-    }
     let mut operation = registry::acquire_file(fid).map_err(|err| match err {
         registry::FileOperationError::InvalidIdentifier => fread_error_with_message(
             FREAD_ERROR_INVALID_IDENTIFIER.message,
             &FREAD_ERROR_INVALID_IDENTIFIER,
         ),
-        other => fread_error_with_detail(&FREAD_ERROR_IO, other.into_io_error().to_string()),
+        other => {
+            let source = other.into_io_error();
+            let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(source);
+            if let Some(identifier) = FREAD_ERROR_IO.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        }
     })?;
+    if !operation.info.access.read {
+        return Err(fread_error_with_detail(
+            &FREAD_ERROR_INVALID_IDENTIFIER,
+            "file identifier is not open for reading",
+        ));
+    }
     let like = prepared.like;
-    let controls = prepared.resolve_controls(&info.machinefmt).await?;
+    let controls = prepared
+        .resolve_controls(&operation.info.machinefmt)
+        .await?;
 
     let (mut eval, encountered_eof) = read_from_handle(
         operation.file_mut(),

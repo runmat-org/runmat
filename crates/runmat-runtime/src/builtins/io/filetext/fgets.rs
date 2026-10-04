@@ -47,6 +47,16 @@ fn fgets_error_with_detail(
     fgets_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn fgets_error_with_source(source: std::io::Error) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {source}", FGETS_ERROR_IO.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = FGETS_ERROR_IO.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
@@ -137,20 +147,19 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         ));
     }
 
-    let info =
-        registry::info_for(fid).ok_or_else(|| fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER))?;
-    if !info.access.read {
+    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
+        registry::FileOperationError::InvalidIdentifier => {
+            fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER)
+        }
+        other => fgets_error_with_source(other.into_io_error()),
+    })?;
+    if !operation.info.access.read {
         return Err(fgets_error_with_detail(
             &FGETS_ERROR_INVALID_IDENTIFIER,
             "file identifier is not open for reading",
         ));
     }
-    let mut operation = registry::acquire_file(fid).map_err(|err| match err {
-        registry::FileOperationError::InvalidIdentifier => {
-            fgets_error(&FGETS_ERROR_INVALID_IDENTIFIER)
-        }
-        other => fgets_error_with_detail(&FGETS_ERROR_IO, other.into_io_error().to_string()),
-    })?;
+    let encoding = operation.info.encoding.clone();
     let nchar_limit = parse_nchar(rest).await?;
     let read = read_text_line(operation.file_mut(), nchar_limit, BUILTIN_NAME)
         .map_err(|e| fgets_error_with_detail(&FGETS_ERROR_IO, e.message()))?;
@@ -162,10 +171,10 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         return Ok(FgetsEval::end_of_file());
     }
 
-    let encoding = if info.encoding.trim().is_empty() {
+    let encoding = if encoding.trim().is_empty() {
         "UTF-8".to_string()
     } else {
-        info.encoding.clone()
+        encoding
     };
 
     let line_value = bytes_to_char_array(&read.data, &encoding, BUILTIN_NAME)
