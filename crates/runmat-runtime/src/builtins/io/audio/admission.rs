@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::context::host_effect::{
-    admit_host_effect_stage, select_host_effect, select_host_effect_after_stage, AudioDecodeOutput,
-    AudioFrameRange, HostEffectOutput, HostEffectReceipt, HostEffectRequest, HostEffectStagePermit,
-    HostEffectWorkload,
+    select_host_effect, select_host_effect_after_stage, try_admit_host_effect_stage,
+    AudioDecodeOutput, AudioFrameRange, HostEffectOutput, HostEffectReceipt, HostEffectRequest,
+    HostEffectStagePermit, HostEffectWorkload,
 };
 use crate::context::RuntimeContext;
 use runmat_execution::{Digest, WholeWorkObservationOutcome};
@@ -37,8 +37,8 @@ pub(super) fn admit_decode_stage(
     input: &FsInputLease,
     options: AudioreadOptions,
     outputs: Option<usize>,
-) -> BuiltinResult<HostEffectStagePermit> {
-    admit_host_effect_stage(runtime, decode_request(input, options, outputs, None)?)
+) -> BuiltinResult<Option<HostEffectStagePermit>> {
+    try_admit_host_effect_stage(runtime, decode_request(input, options, outputs, None)?)
 }
 
 pub(super) fn select_decode_after_stage(

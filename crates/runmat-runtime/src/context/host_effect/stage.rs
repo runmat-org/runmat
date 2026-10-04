@@ -112,6 +112,17 @@ pub fn admit_host_effect_stage(
     runtime: &RuntimeContext,
     request: HostEffectRequest<'_>,
 ) -> BuiltinResult<HostEffectStagePermit> {
+    try_admit_host_effect_stage(runtime, request)?
+        .ok_or_else(|| insufficient("staged source has no complete bounded admission"))
+}
+
+/// A service with complete pre-open admission need not implement a staged
+/// route. An offered stage is authoritative: invalid evidence is an error,
+/// never a cue to fall back after opening the source.
+pub fn try_admit_host_effect_stage(
+    runtime: &RuntimeContext,
+    request: HostEffectRequest<'_>,
+) -> BuiltinResult<Option<HostEffectStagePermit>> {
     if runtime.is_cancelled() {
         return Err(cancelled());
     }
@@ -124,9 +135,9 @@ pub fn admit_host_effect_stage(
         .service_ports()
         .host_effect_resources()
         .ok_or_else(|| insufficient("staged source resource service is absent"))?;
-    let admission = resource_service
-        .stage_admission(&request, runtime)
-        .ok_or_else(|| insufficient("staged source has no complete bounded admission"))?;
+    let Some(admission) = resource_service.stage_admission(&request, runtime) else {
+        return Ok(None);
+    };
     let ResourceByteBound::Known(scratch_bytes) = admission.evidence.scratch_bytes else {
         return Err(insufficient("staged scan peak is unavailable"));
     };
@@ -163,7 +174,7 @@ pub fn admit_host_effect_stage(
     if !admission.reservation.is_current() {
         return Err(stale_resource());
     }
-    Ok(HostEffectStagePermit {
+    Ok(Some(HostEffectStagePermit {
         runtime: runtime.clone(),
         identity: request_identity(&request),
         filesystem: request.filesystem.clone(),
@@ -171,7 +182,7 @@ pub fn admit_host_effect_stage(
         revision,
         reservation: admission.reservation,
         started: Instant::now(),
-    })
+    }))
 }
 
 pub fn select_host_effect_after_stage(

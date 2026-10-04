@@ -17,8 +17,9 @@ use std::sync::Arc;
 mod workload;
 mod stage;
 pub use stage::{
-    admit_host_effect_stage, select_host_effect_after_stage, HostEffectStageAdmission,
-    HostEffectStageEvidence, HostEffectStagePermit, HostEffectStageReservation,
+    admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,
+    HostEffectStageAdmission, HostEffectStageEvidence, HostEffectStagePermit,
+    HostEffectStageReservation,
 };
 pub use workload::{
     AudioDecodeOutput, AudioFrameRange, HostEffectOutput, HostEffectSource, HostEffectWorkload,

@@ -64,6 +64,51 @@ pub(super) async fn fill_stream_samples<T: Copy, R: Read + Seek>(
     buffer: &mut [u8],
     decode: impl Fn(&[u8]) -> T,
 ) -> BuiltinResult<()> {
+    let selected_frames = geometry
+        .end
+        .checked_sub(geometry.start)
+        .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
+    let sample_count = selected_frames
+        .checked_mul(geometry.channels)
+        .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
+    if output.len() != sample_count {
+        return Err(format_error("invalid decoded WAVE sample layout"));
+    }
+    visit_stream_samples(
+        file,
+        path,
+        geometry,
+        cooperation,
+        buffer,
+        |index, sample| {
+            output[index] = decode(sample);
+        },
+    )
+    .await
+}
+
+pub(super) async fn validate_stream_samples<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+    geometry: StreamGeometry,
+    cooperation: &mut AudioCooperation,
+    buffer: &mut [u8],
+    coding: WaveSampleCoding,
+) -> BuiltinResult<()> {
+    visit_stream_samples(file, path, geometry, cooperation, buffer, |_, sample| {
+        let _ = decode_wave_sample(sample, coding, false);
+    })
+    .await
+}
+
+async fn visit_stream_samples<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+    geometry: StreamGeometry,
+    cooperation: &mut AudioCooperation,
+    buffer: &mut [u8],
+    mut visit: impl FnMut(usize, &[u8]),
+) -> BuiltinResult<()> {
     let StreamGeometry {
         data_offset,
         channels,
@@ -86,10 +131,7 @@ pub(super) async fn fill_stream_samples<T: Copy, R: Read + Seek>(
     let selected_frames = end
         .checked_sub(start)
         .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
-    let sample_count = selected_frames
-        .checked_mul(channels)
-        .ok_or_else(|| format_error("decoded audio dimensions overflow platform limits"))?;
-    if output.len() != sample_count || (start < end && bytes_per_channel > 8) {
+    if start < end && bytes_per_channel > 8 {
         return Err(format_error("invalid decoded WAVE sample layout"));
     }
     if selected_frames == 0 {
@@ -127,7 +169,7 @@ pub(super) async fn fill_stream_samples<T: Copy, R: Read + Seek>(
             let at = local_frame * block_align;
             let sample_at = at + channel * bytes_per_channel;
             let output_at = channel * selected_frames + (frame - start) + local_frame;
-            output[output_at] = decode(&buffer[sample_at..sample_at + bytes_per_channel]);
+            visit(output_at, &buffer[sample_at..sample_at + bytes_per_channel]);
         };
         if channels <= AUDIO_WORK_CHUNK {
             for local_frame in 0..frames {

@@ -9,8 +9,10 @@ const AUDIO_WORK_CHUNK: usize = 4096;
 mod classify;
 mod exact;
 mod scatter;
-pub(super) use exact::decode_prepared_wave_stream_exact;
-use scatter::{collect_stream_samples, fill_stream_samples};
+pub(super) use exact::{
+    decode_prepared_wave_stream_exact, validate_prepared_wave_stream_discarded,
+};
+use scatter::{collect_stream_samples, fill_stream_samples, validate_stream_samples};
 
 #[cfg(test)]
 #[path = "stream/tests.rs"]

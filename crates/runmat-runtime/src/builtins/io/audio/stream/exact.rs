@@ -2,6 +2,38 @@
 
 use super::*;
 
+/// Zero-output calls still scan and read the selected samples, but do not
+/// construct a tensor or demand a retained-output allocation permit.
+pub(super) async fn validate_prepared_wave_stream_discarded(
+    mut prepared: PreparedWaveStream,
+    path: &Path,
+    cooperation: &mut AudioCooperation,
+) -> BuiltinResult<()> {
+    let facts = prepared.geometry;
+    if facts.input_chunk_bytes > INPUT_CHUNK_BYTES {
+        return Err(finite_decode_unavailable("input chunk allocation"));
+    }
+    let geometry = StreamGeometry {
+        data_offset: facts.data_offset,
+        channels: facts.channels,
+        start: facts.start,
+        end: facts.end,
+        block_align: facts.block_align,
+        bytes_per_channel: facts.bytes_per_channel,
+    };
+    let mut input_chunk = [0u8; INPUT_CHUNK_BYTES];
+    validate_stream_samples(
+        &mut prepared.file,
+        path,
+        geometry,
+        cooperation,
+        &mut input_chunk[..facts.input_chunk_bytes],
+        facts.coding,
+    )
+    .await?;
+    cooperation.completed(0).await
+}
+
 pub(super) async fn decode_prepared_wave_stream_exact(
     mut prepared: PreparedWaveStream,
     path: &Path,

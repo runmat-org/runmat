@@ -32,16 +32,10 @@ pub(super) async fn audioread_builtin(
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
     cooperation.completed(0).await?;
     if needs_decode_stage(runtime.as_ref()) {
-        return read_staged(
-            runtime
-                .as_ref()
-                .expect("finite resource budget requires runtime"),
-            &input,
-            options,
-            outputs,
-            &mut cooperation,
-        )
-        .await;
+        let runtime = runtime.as_ref().expect("finite budget requires runtime");
+        if let Some(stage) = admit_decode_stage(runtime, &input, options, outputs)? {
+            return read_staged(runtime, &input, options, outputs, stage, &mut cooperation).await;
+        }
     }
     let receipt = select_decode(runtime.as_ref(), &input, options, outputs)?;
     if let Some(receipt) = receipt.as_ref() {
@@ -64,9 +58,9 @@ async fn read_staged(
     input: &FsInputLease,
     options: AudioreadOptions,
     outputs: Option<usize>,
+    stage: crate::context::host_effect::HostEffectStagePermit,
     cooperation: &mut AudioCooperation,
 ) -> BuiltinResult<Value> {
-    let stage = admit_decode_stage(runtime, input, options, outputs)?;
     cooperation.install_stage_reservation(stage.reservation());
     let prepared = prepare_wave_stream(input, options, cooperation)
         .await?
@@ -88,6 +82,10 @@ async fn read_staged(
     cooperation.install_resource_liveness_lease(receipt.resource_liveness_lease());
     let result = async {
         cooperation.completed(0).await?;
+        if outputs == Some(0) {
+            validate_prepared_wave_stream_discarded(prepared, &input.path, cooperation).await?;
+            return Ok(Value::OutputList(Vec::new()));
+        }
         let permit = receipt.output_allocation_permit().ok_or_else(|| {
             build_runtime_error("audioread: exact output allocation authority is unavailable")
                 .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
