@@ -35,6 +35,8 @@ fn contract_and_native_effects_are_inferred() {
     );
     assert_eq!(positive.outputs[0].kind, ValueKindFact::String);
     assert!(positive.effects.0.contains(&EffectKind::FilesystemRead));
+    assert!(!positive.effects.0.contains(&EffectKind::UserInterface));
+    assert!(!positive.effects.0.contains(&EffectKind::HostCallback));
     assert!(positive
         .capabilities
         .0
@@ -45,6 +47,28 @@ fn contract_and_native_effects_are_inferred() {
     );
     assert_eq!(H5DISP_CATALOG_ENTRY.bindings, &REQUIRED_DEFAULT_BINDING);
     assert_eq!(H5DISP_CATALOG_ENTRY.extensions, &[H5DISP_CAPTURE_EXTENSION]);
+}
+
+#[test]
+fn statement_and_dynamic_output_contexts_keep_console_effects() {
+    for requested in [
+        RequestedOutputCount::Zero,
+        RequestedOutputCount::Exactly(0),
+        RequestedOutputCount::CurrentFunctionNargout,
+        RequestedOutputCount::DestinationSequenceCardinality,
+    ] {
+        let mut call = request(
+            vec![text()],
+            vec![LiteralValue::String("example.h5".into())],
+            0,
+        );
+        call.outputs = OutputSelection::new(requested);
+        let inferred = inference::infer(&call, &H5DISP_CATALOG_ENTRY);
+        assert!(inferred.effects.0.contains(&EffectKind::UserInterface));
+        assert!(inferred.effects.0.contains(&EffectKind::HostCallback));
+        assert!(inferred.effects.0.contains(&EffectKind::FilesystemRead));
+    }
+    assert_eq!(H5DISP_CATALOG_ENTRY.contract.purity, BuiltinPurity::Impure);
 }
 
 #[test]
