@@ -16,7 +16,7 @@ use std::cell::{Cell, RefCell};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
@@ -233,6 +233,7 @@ impl runmat_filesystem::FsResourceLease for RevocableLease {
 struct RevocableProvider {
     memory: runmat_filesystem::MemoryFsProvider,
     valid: Arc<AtomicBool>,
+    writes: Arc<AtomicUsize>,
 }
 
 fn unsupported() -> std::io::Error {
@@ -258,13 +259,14 @@ impl runmat_filesystem::FsProvider for RevocableProvider {
         self.memory.read(path).await
     }
     async fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
         self.memory.write(path, bytes).await
     }
     async fn remove_file(&self, _: &Path) -> std::io::Result<()> {
         Err(unsupported())
     }
-    async fn metadata(&self, _: &Path) -> std::io::Result<runmat_filesystem::FsMetadata> {
-        Err(unsupported())
+    async fn metadata(&self, path: &Path) -> std::io::Result<runmat_filesystem::FsMetadata> {
+        self.memory.metadata(path).await
     }
     async fn symlink_metadata(&self, _: &Path) -> std::io::Result<runmat_filesystem::FsMetadata> {
         Err(unsupported())
@@ -272,8 +274,8 @@ impl runmat_filesystem::FsProvider for RevocableProvider {
     async fn read_dir(&self, _: &Path) -> std::io::Result<Vec<runmat_filesystem::DirEntry>> {
         Err(unsupported())
     }
-    async fn canonicalize(&self, _: &Path) -> std::io::Result<PathBuf> {
-        Err(unsupported())
+    async fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        self.memory.canonicalize(path).await
     }
     async fn create_dir(&self, _: &Path) -> std::io::Result<()> {
         Err(unsupported())
@@ -300,11 +302,14 @@ impl runmat_filesystem::FsProvider for RevocableProvider {
 fn revoked_during_turn_rejects_write_before_provider_effect() {
     let _guard = fs_test_guard();
     let valid = Arc::new(AtomicBool::new(true));
+    let writes = Arc::new(AtomicUsize::new(0));
     let selected = Arc::new(RevocableProvider {
         memory: runmat_filesystem::MemoryFsProvider::with_current_dir(selected_dir()),
         valid: valid.clone(),
+        writes: writes.clone(),
     });
     let _selected = runmat_filesystem::replace_provider(selected.clone());
+    runmat_filesystem::set_current_dir(selected_dir()).expect("selected cwd");
     let turn = Turn::new();
     let runtime = RuntimeContext::new(Rc::new(TurnService(turn.clone())));
     let mut call = Box::pin(xmlwrite_builtin(
@@ -318,5 +323,10 @@ fn revoked_during_turn_rejects_write_before_provider_effect() {
     let error = futures::executor::block_on(call).expect_err("revoked owner");
     assert_eq!(error.identifier(), Some("RunMat:xmlwrite:IoFailed"));
     assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(
+        writes.load(Ordering::SeqCst),
+        0,
+        "no provider write after revoke"
+    );
     assert!(futures::executor::block_on(selected.read(&selected_path("revoked.xml"))).is_err());
 }
