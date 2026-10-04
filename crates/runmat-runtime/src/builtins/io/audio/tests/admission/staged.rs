@@ -52,16 +52,25 @@ impl ExactHostAllocationPermit for TestOutputQuota {
     }
 }
 
-struct TestStageReservation(AtomicBool);
+struct TestStageReservation {
+    current: Arc<AtomicBool>,
+    live: Arc<AtomicUsize>,
+}
+impl Drop for TestStageReservation {
+    fn drop(&mut self) {
+        self.live.fetch_sub(128 * 1024, Ordering::SeqCst);
+    }
+}
 impl HostEffectStageReservation for TestStageReservation {
     fn reserved_bytes(&self) -> u64 {
         128 * 1024
     }
     fn is_current(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.current.load(Ordering::SeqCst)
     }
 }
-impl HostEffectResourceLivenessLease for TestStageReservation {
+struct TestCurrent(Arc<AtomicBool>);
+impl HostEffectResourceLivenessLease for TestCurrent {
     fn is_current(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
@@ -74,7 +83,8 @@ struct StagedTestResources {
     final_calls: Cell<usize>,
     direct_calls: Cell<usize>,
     live_output: Arc<AtomicUsize>,
-    stage: Arc<TestStageReservation>,
+    current: Arc<AtomicBool>,
+    live_stage: Arc<AtomicUsize>,
 }
 
 impl RuntimeHostEffectResourceService for StagedTestResources {
@@ -98,12 +108,21 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
         {
             return None;
         }
+        self.live_stage
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
+                live.checked_add(128 * 1024)
+                    .filter(|total| *total <= 256 * 1024)
+            })
+            .ok()?;
         Some(HostEffectStageAdmission {
             evidence: HostEffectStageEvidence {
                 authority_revision: Digest::sha256(b"test-staged-native-wave"),
                 scratch_bytes: ResourceByteBound::Known(128 * 1024),
             },
-            reservation: self.stage.clone(),
+            reservation: Arc::new(TestStageReservation {
+                current: self.current.clone(),
+                live: self.live_stage.clone(),
+            }),
         })
     }
 
@@ -141,7 +160,7 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
                 scratch_bytes: ResourceByteBound::Known(128 * 1024),
                 returned_value_bytes: ResourceByteBound::Known(if effect_only { 0 } else { 16 }),
             },
-            liveness_lease: self.stage.clone(),
+            liveness_lease: Arc::new(TestCurrent(self.current.clone())),
             output_allocation_permit: (!effect_only).then(|| {
                 Arc::new(TestOutputQuota {
                     live: self.live_output.clone(),
@@ -168,7 +187,8 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
         final_calls: Cell::new(0),
         direct_calls: Cell::new(0),
         live_output: Arc::new(AtomicUsize::new(0)),
-        stage: Arc::new(TestStageReservation(AtomicBool::new(true))),
+        current: Arc::new(AtomicBool::new(true)),
+        live_stage: Arc::new(AtomicUsize::new(0)),
     });
     let placement = Rc::new(Placement::default());
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
@@ -207,6 +227,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     .expect("changed public controls must reject");
     assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
     assert_eq!(placement.selections.get(), 0);
+    assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
 
     let stage = admit_decode_stage(&runtime, &input, options, None)
         .expect("second stage admission")
@@ -223,6 +244,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
             .expect("changed source must reject");
     assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
     assert_eq!(placement.selections.get(), 0);
+    assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
 
     let value = block_on(audioread_builtin(
         Some(runtime.clone()),
@@ -236,12 +258,14 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     assert_eq!(placement.selections.get(), 1);
     assert_eq!(placement.observations.borrow().len(), 1);
     assert_eq!(resources.live_output.load(Ordering::SeqCst), 16);
+    assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
     let Value::Tensor(samples) = &value else {
         panic!("single-output decode must return tensor");
     };
     assert_eq!(samples.materialize_f64(), vec![0.0, 0.5]);
     drop(value);
     assert_eq!(resources.live_output.load(Ordering::SeqCst), 0);
+    assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
 
     let discarded = {
         let _outputs = crate::output_count::push_output_count(Some(0));
