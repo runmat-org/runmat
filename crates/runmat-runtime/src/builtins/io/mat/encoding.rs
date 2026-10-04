@@ -635,7 +635,7 @@ mod tests {
             Some(&mut cooperation),
         ));
         assert!(matches!(
-            futures::poll!(future.as_mut()),
+            crate::builtins::io::mat::tests::receipt::poll_once(future.as_mut()),
             std::task::Poll::Pending
         ));
         assert_eq!(owner.requests(), 1);

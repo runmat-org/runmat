@@ -236,7 +236,7 @@ fn selected_outer_assignment_pending_drop_releases_without_publication_or_feedba
         Value::Num(42.0),
     ));
     assert!(matches!(
-        futures::poll!(future.as_mut()),
+        super::super::tests::receipt::poll_once(future.as_mut()),
         std::task::Poll::Pending
     ));
     assert_eq!(selected.writes(), 1);

@@ -272,7 +272,7 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
         vec![Value::from(filename), Value::from("answer")],
     ));
     assert!(matches!(
-        futures::poll!(abandoned.as_mut()),
+        super::super::tests::receipt::poll_once(abandoned.as_mut()),
         std::task::Poll::Pending
     ));
     assert_eq!(witness.selections(), 1);
@@ -292,7 +292,7 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
         vec![Value::from(filename), Value::from("answer")],
     ));
     assert!(matches!(
-        futures::poll!(cancelled.as_mut()),
+        super::super::tests::receipt::poll_once(cancelled.as_mut()),
         std::task::Poll::Pending
     ));
     cancellation.cancel(CancellationReason::User);
@@ -344,7 +344,7 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
         vec![Value::from(filename), Value::from("nested")],
     ));
     assert!(matches!(
-        futures::poll!(abandoned.as_mut()),
+        super::super::tests::receipt::poll_once(abandoned.as_mut()),
         std::task::Poll::Pending
     ));
     assert_eq!(owner.requests(), 1);
@@ -359,7 +359,7 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
         vec![Value::from(filename), Value::from("nested")],
     ));
     assert!(matches!(
-        futures::poll!(future.as_mut()),
+        super::super::tests::receipt::poll_once(future.as_mut()),
         std::task::Poll::Pending
     ));
     assert_eq!(owner.requests(), 2);

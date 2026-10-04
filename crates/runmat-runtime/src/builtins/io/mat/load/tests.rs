@@ -43,7 +43,7 @@ fn selected_outer_load_revoked_during_pending_open_never_reads_or_publishes() {
         vec![Value::from(filename)],
     ));
     assert!(matches!(
-        futures::poll!(future.as_mut()),
+        super::super::tests::receipt::poll_once(future.as_mut()),
         std::task::Poll::Pending
     ));
     assert_eq!(witness.selections(), 1);

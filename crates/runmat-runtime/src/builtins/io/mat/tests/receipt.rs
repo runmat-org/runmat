@@ -18,9 +18,19 @@ use runmat_execution::{
 };
 use runmat_filesystem::FsProvider;
 use std::cell::{Cell, RefCell};
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
+
+pub(in crate::builtins::io::mat) fn poll_once<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
+    Future::poll(
+        future,
+        &mut Context::from_waker(futures::task::noop_waker_ref()),
+    )
+}
 
 mod fs;
 pub(in crate::builtins::io::mat) use fs::{GatedOpenFs, PendingWriteFs};
