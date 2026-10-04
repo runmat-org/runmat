@@ -1,9 +1,11 @@
 //! Captured filesystem owner for one copyfile invocation.
 
 use crate::context::RuntimeContext;
+use crate::execution::ExecutionServiceError;
+use async_trait::async_trait;
 use runmat_execution::cancellation::CancellationToken;
 use runmat_filesystem::{self as vfs, FsMetadata, FsProvider};
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,6 +16,31 @@ pub(super) struct CopyFilesystem {
     lease: Option<vfs::CapturedFsResourceLease>,
     cancellation: Option<CancellationToken>,
     cooperation: RefCell<super::cooperation::CopyCooperation>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CopyCheckpointError {
+    #[error(transparent)]
+    Filesystem(#[from] io::Error),
+    #[error(transparent)]
+    Execution(#[from] ExecutionServiceError),
+}
+
+struct OwnerCheckpoint<'a> {
+    owner: &'a CopyFilesystem,
+    cooperation: RefMut<'a, super::cooperation::CopyCooperation>,
+}
+
+#[async_trait(?Send)]
+impl vfs::FsCopyCheckpoint for OwnerCheckpoint<'_> {
+    type Error = CopyCheckpointError;
+
+    async fn checkpoint(&mut self, completed_bytes: u64) -> Result<(), Self::Error> {
+        self.owner.check()?;
+        self.cooperation.raw_checkpoint(completed_bytes).await?;
+        self.owner.check()?;
+        Ok(())
+    }
 }
 
 impl CopyFilesystem {
@@ -129,12 +156,15 @@ impl CopyFilesystem {
 
     pub(super) async fn copy_file(&self, from: &Path, to: &Path) -> io::Result<u64> {
         self.check()?;
-        let mut cooperation = self.cooperation.borrow_mut();
+        let mut checkpoint = OwnerCheckpoint {
+            owner: self,
+            cooperation: self.cooperation.borrow_mut(),
+        };
         let result = vfs::copy_file_on_async(
             self.provider.as_ref(),
             &self.path(from),
             &self.path(to),
-            &mut *cooperation,
+            &mut checkpoint,
         )
         .await
         .map_err(|error| match error {

@@ -71,10 +71,17 @@ pub async fn copy_file_on_async<C: FsCopyCheckpoint>(
             .checkpoint(0)
             .await
             .map_err(FsCopyError::Checkpoint)?;
-        let read = reader
-            .read_async(&mut buffer)
-            .await
-            .map_err(FsCopyError::Io)?;
+        let read = loop {
+            match reader.read_async(&mut buffer).await {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                    checkpoint
+                        .checkpoint(0)
+                        .await
+                        .map_err(FsCopyError::Checkpoint)?;
+                }
+                result => break result.map_err(FsCopyError::Io)?,
+            }
+        };
         if read > buffer.len() {
             return Err(FsCopyError::Io(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -90,14 +97,20 @@ pub async fn copy_file_on_async<C: FsCopyCheckpoint>(
                 .checkpoint(0)
                 .await
                 .map_err(FsCopyError::Checkpoint)?;
-            let wrote = writer
-                .write_async(&buffer[offset..read])
-                .await
-                .map_err(FsCopyError::Io)?;
-            if wrote == 0 || wrote > read - offset {
+            let wrote = match writer.write_async(&buffer[offset..read]).await {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => result.map_err(FsCopyError::Io)?,
+            };
+            if wrote > read - offset {
+                return Err(FsCopyError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "filesystem handle reported writing beyond the supplied bytes",
+                )));
+            }
+            if wrote == 0 {
                 return Err(FsCopyError::Io(io::Error::new(
                     io::ErrorKind::WriteZero,
-                    "filesystem handle did not accept a valid copy chunk",
+                    "filesystem handle did not accept a copy chunk",
                 )));
             }
             offset += wrote;
