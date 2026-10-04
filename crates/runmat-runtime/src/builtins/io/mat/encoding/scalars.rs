@@ -34,13 +34,13 @@ pub(super) async fn char_array_to_utf16_cooperative(
     owner: MatEncodingOwner,
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u16>> {
-    if chars.shape.len() != 2 || chars.rows != 1 {
-        if chars.data.iter().any(|ch| ch.len_utf16() != 1) {
-            return Err(owner.error(
-                MatEncodingFailure::Unsupported,
-                "non-BMP multidimensional MAT character arrays cannot retain rectangular UTF-16 geometry",
-            ));
-        }
+    if (chars.shape.len() != 2 || chars.rows != 1)
+        && chars.data.iter().any(|ch| ch.len_utf16() != 1)
+    {
+        return Err(owner.error(
+            MatEncodingFailure::Unsupported,
+            "non-BMP multidimensional MAT character arrays cannot retain rectangular UTF-16 geometry",
+        ));
     }
     let mut data = Vec::new();
     let mut work = 0usize;

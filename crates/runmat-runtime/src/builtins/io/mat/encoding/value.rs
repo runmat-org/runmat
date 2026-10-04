@@ -62,7 +62,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 let dims = canonical_dims(&t.shape);
                 let storage = t
                     .into_numeric_storage()
-                    .map_err(|error| owner.error(MatEncodingFailure::Io, error.to_string()))?;
+                    .map_err(|error| owner.error(MatEncodingFailure::Io, &error))?;
                 let class = tensor_dtype_mat_class(storage.numeric_dtype());
                 let data = MatData::Numeric {
                     real: storage,

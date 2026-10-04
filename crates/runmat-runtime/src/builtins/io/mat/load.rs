@@ -188,7 +188,7 @@ async fn evaluate_with_context(
 
     let mut regex_patterns = Vec::with_capacity(invocation.regex_tokens.len());
     for pattern in &invocation.regex_tokens {
-        let regex = Regex::new(&pattern).map_err(|err| {
+        let regex = Regex::new(pattern).map_err(|err| {
             load_error_with_source(
                 &LOAD_ERROR_INVALID_OPTION,
                 format!("load: invalid regular expression '{pattern}': {err}"),

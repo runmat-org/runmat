@@ -16,7 +16,7 @@ pub(super) enum OutputTarget {
     Stdout,
     Stderr,
     File {
-        operation: FileOperation,
+        operation: Box<FileOperation>,
         encoding: String,
     },
 }
@@ -117,7 +117,7 @@ pub(super) fn target_from_fid(
             ensure_writable(&operation.info)?;
             let encoding = operation.info.encoding.clone();
             Ok(OutputTarget::File {
-                operation,
+                operation: Box::new(operation),
                 encoding,
             })
         }

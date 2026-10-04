@@ -10,13 +10,15 @@ use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 
 const SOURCE_CHUNK: usize = 4096;
 
+type XmlCheckpointFuture = Pin<Box<dyn Future<Output = Result<(), ExecutionServiceError>>>>;
+
 pub(super) struct CooperativeXmlBuf<'a> {
     source: &'a [u8],
     position: usize,
     exposed_end: usize,
     completed: u64,
     budget: Option<XmlBudgetOwner>,
-    pending: Option<Pin<Box<dyn Future<Output = Result<(), ExecutionServiceError>>>>>,
+    pending: Option<XmlCheckpointFuture>,
 }
 
 impl<'a> CooperativeXmlBuf<'a> {

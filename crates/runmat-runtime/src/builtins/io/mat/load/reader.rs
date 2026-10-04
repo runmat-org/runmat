@@ -121,7 +121,7 @@ pub(super) async fn restore_loaded_entries(
             cooperation.completed(1).await?;
         }
     }
-    if let Some(cooperation) = cooperation.as_deref_mut() {
+    if let Some(cooperation) = cooperation {
         cooperation.completed(0).await?;
     }
     Ok(restored)
