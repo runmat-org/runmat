@@ -6,7 +6,7 @@ use runmat_types::{
 
 #[test]
 fn known_off_removes_file_write_but_filename_requires_filesystem() {
-    let request = |literal| CallRequest {
+    let request = |literal: &str| CallRequest {
         arguments: vec![ValueFact::scalar(ValueKindFact::String)],
         literals: LiteralContext::new(vec![LiteralValue::String(literal.into())]),
         outputs: OutputSelection::new(RequestedOutputCount::Zero),

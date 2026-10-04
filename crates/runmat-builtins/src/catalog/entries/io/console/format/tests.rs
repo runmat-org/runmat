@@ -1,4 +1,5 @@
 use super::*;
+use runmat_types::ShapeFact;
 use runmat_types::{
     CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, OutputSelection,
     RequestedOutputCount, ValueFact, ValueKindFact,
