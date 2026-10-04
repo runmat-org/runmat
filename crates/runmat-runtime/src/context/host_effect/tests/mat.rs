@@ -92,6 +92,57 @@ fn mat_identity_preserves_non_utf8_path_bytes() {
     assert_ne!(identity(&first), identity(&second));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mat_encode_identity_separates_destination_controls_and_output() {
+    let names = vec!["A".to_owned()];
+    let other = vec!["B".to_owned()];
+    let structs = [MatStructSelection {
+        source: "record",
+        fields: None,
+    }];
+    let patterns = vec!["^sensor_".to_owned()];
+    let workload = |destination: &Path, names: &[String], output| {
+        HostEffectWorkload::MatEncode {
+            destination,
+            mode: MatEncodeMode::Save {
+                append: true,
+                names,
+                structs: &structs,
+                patterns: &patterns,
+            },
+            output,
+        }
+        .identity_bytes()
+    };
+    let first = workload(Path::new("/data/one.mat"), &names, MatEncodeOutput::Status);
+    assert_ne!(
+        first,
+        workload(Path::new("/data/two.mat"), &names, MatEncodeOutput::Status)
+    );
+    assert_ne!(
+        first,
+        workload(Path::new("/data/one.mat"), &other, MatEncodeOutput::Status)
+    );
+    assert_ne!(
+        first,
+        workload(
+            Path::new("/data/one.mat"),
+            &names,
+            MatEncodeOutput::EffectOnly
+        )
+    );
+    assert_eq!(
+        HostEffectWorkload::MatEncode {
+            destination: Path::new("/data/one.mat"),
+            mode: MatEncodeMode::AssignMember { member: "x" },
+            output: MatEncodeOutput::UpdatedObject,
+        }
+        .output(),
+        HostEffectOutput::ReturnedValue
+    );
+}
+
 #[test]
 fn finite_mat_decode_without_a_resource_producer_rejects_before_selection() {
     let placement = Rc::new(Placement::default());

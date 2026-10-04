@@ -11,6 +11,9 @@ use runmat_value::{CharArray, StructValue, Value};
 use super::authority::MatFsPath;
 use super::cooperation::MatCodecCooperation;
 use super::load::read_mat_file_on_with_context;
+use crate::context::host_effect::{
+    HostEffectWorkload, MatEncodeMode, MatEncodeOutput, MatStructSelection,
+};
 
 use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
 use crate::workspace;
@@ -31,7 +34,8 @@ async fn save_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let requested_outputs = match crate::output_count::current_output_scope() {
+    let output_scope = crate::output_count::current_output_scope();
+    let requested_outputs = match output_scope {
         crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
         crate::output_count::InvocationOutputScope::Implicit => None,
         crate::output_count::InvocationOutputScope::Unscoped => {
@@ -53,20 +57,8 @@ async fn save_builtin(
             "save: filename, options, and variable selectors must be host text values",
         ));
     }
-    let mut preparation =
-        MatCodecCooperation::new(runtime.as_ref(), None, BUILTIN_NAME, &SAVE_ERROR_IO);
-    preparation.completed(0).await?;
-    let mut host_args = Vec::with_capacity(args.len());
-    for value in &args {
-        host_args.push(
-            preparation
-                .await_io(gather_if_needed_async(value))
-                .await??,
-        );
-    }
-
     let default_path = Value::from("matlab.mat");
-    let (mut path_value, option_start, used_default) = match host_args.first() {
+    let (mut path_value, option_start, used_default) = match args.first() {
         Some(first) if option_token(first)?.is_some() => (default_path, 0usize, true),
         Some(first) => (first.clone(), 1usize, false),
         None => (default_path, 0usize, true),
@@ -78,7 +70,20 @@ async fn save_builtin(
         }
     }
 
-    let request = parse_arguments(&host_args[option_start..]).await?;
+    let request = parse_arguments(&args[option_start..]).await?;
+    let regex_patterns: Vec<Regex> = request
+        .regex_patterns
+        .iter()
+        .map(|pattern| {
+            Regex::new(pattern).map_err(|error| {
+                save_error_with_source(
+                    &SAVE_ERROR_INVALID_OPTION,
+                    format!("save: invalid regular expression '{pattern}': {error}"),
+                    error,
+                )
+            })
+        })
+        .collect::<BuiltinResult<_>>()?;
     let path = normalise_path(&path_value)?;
     let destination = MatFsPath::capture(path).map_err(|err| {
         save_error_with_source(
@@ -87,137 +92,169 @@ async fn save_builtin(
             err,
         )
     })?;
-    let mut cooperation = MatCodecCooperation::new(
-        runtime.as_ref(),
-        Some(&destination),
-        BUILTIN_NAME,
-        &SAVE_ERROR_IO,
-    );
-    cooperation.completed(0).await?;
+    let struct_selections: Vec<_> = request
+        .structs
+        .iter()
+        .map(|selection| MatStructSelection {
+            source: &selection.source,
+            fields: selection.fields.as_deref(),
+        })
+        .collect();
+    let workload = HostEffectWorkload::MatEncode {
+        destination: destination.path(),
+        mode: MatEncodeMode::Save {
+            append: request.append,
+            names: &request.variables,
+            structs: &struct_selections,
+            patterns: &request.regex_patterns,
+        },
+        output: if matches!(
+            output_scope,
+            crate::output_count::InvocationOutputScope::Requested(0)
+        ) {
+            MatEncodeOutput::EffectOnly
+        } else {
+            MatEncodeOutput::Status
+        },
+    };
+    let receipt = super::admission::select(runtime.as_ref(), &destination, BUILTIN_NAME, workload)?;
+    let result = async {
+        let mut cooperation = MatCodecCooperation::new(
+            runtime.as_ref(),
+            Some(&destination),
+            BUILTIN_NAME,
+            &SAVE_ERROR_IO,
+        )
+        .with_resource_liveness(
+            receipt
+                .as_ref()
+                .map(|selected| selected.resource_liveness_lease()),
+        );
+        cooperation.completed(0).await?;
 
-    let mut workspace_entries: Option<Vec<(String, Value)>> = None;
-    let mut entries: Vec<(String, Value)> = Vec::new();
+        let mut workspace_entries: Option<Vec<(String, Value)>> = None;
+        let mut entries: Vec<(String, Value)> = Vec::new();
 
-    if request.variables.is_empty()
-        && request.structs.is_empty()
-        && request.regex_patterns.is_empty()
-    {
-        let snapshot = ensure_workspace_entries(&mut workspace_entries).await?;
-        entries.extend(snapshot.iter().cloned());
-    } else {
-        for name in &request.variables {
-            if let Some(snapshot) = workspace_entries.as_ref() {
-                if let Some(value) = find_in_entries(snapshot, name) {
-                    entries.push((name.clone(), value));
-                    continue;
+        if request.variables.is_empty()
+            && request.structs.is_empty()
+            && request.regex_patterns.is_empty()
+        {
+            let snapshot =
+                ensure_workspace_entries(&mut workspace_entries, &mut cooperation).await?;
+            entries.extend(snapshot.iter().cloned());
+        } else {
+            for name in &request.variables {
+                if let Some(snapshot) = workspace_entries.as_ref() {
+                    if let Some(value) = find_in_entries(snapshot, name) {
+                        entries.push((name.clone(), value));
+                        continue;
+                    }
                 }
+                let value = cooperation.await_io(lookup_workspace(name)).await??;
+                entries.push((name.clone(), value));
             }
-            let value = lookup_workspace(name).await?;
-            entries.push((name.clone(), value));
-        }
 
-        for struct_req in &request.structs {
-            let value = if let Some(snapshot) = workspace_entries.as_ref() {
-                find_in_entries(snapshot, &struct_req.source)
-            } else {
-                None
-            };
-            let value = match value {
-                Some(val) => val,
-                None => lookup_workspace(&struct_req.source).await?,
-            };
+            for struct_req in &request.structs {
+                let value = if let Some(snapshot) = workspace_entries.as_ref() {
+                    find_in_entries(snapshot, &struct_req.source)
+                } else {
+                    None
+                };
+                let value = match value {
+                    Some(val) => val,
+                    None => {
+                        cooperation
+                            .await_io(lookup_workspace(&struct_req.source))
+                            .await??
+                    }
+                };
 
-            let struct_value = match value {
-                Value::Struct(s) => s,
-                _ => {
+                let struct_value = match value {
+                    Value::Struct(s) => s,
+                    _ => {
+                        return Err(save_error_with(
+                            &SAVE_ERROR_SELECTION,
+                            format!("save: variable '{}' is not a struct", struct_req.source),
+                        ))
+                    }
+                };
+                append_struct_fields(
+                    &struct_req.source,
+                    &struct_value,
+                    &struct_req.fields,
+                    &mut entries,
+                    &mut cooperation,
+                )
+                .await?;
+            }
+
+            if !request.regex_patterns.is_empty() {
+                let snapshot =
+                    ensure_workspace_entries(&mut workspace_entries, &mut cooperation).await?;
+                let mut matched = 0usize;
+                for (name, value) in snapshot.iter() {
+                    if regex_patterns.iter().any(|regex| regex.is_match(name)) {
+                        entries.push((name.clone(), value.clone()));
+                        matched += 1;
+                    }
+                }
+                if matched == 0 {
                     return Err(save_error_with(
                         &SAVE_ERROR_SELECTION,
-                        format!("save: variable '{}' is not a struct", struct_req.source),
-                    ))
+                        "save: no variables matched '-regexp' patterns",
+                    ));
                 }
-            };
-            append_struct_fields(
-                &struct_req.source,
-                &struct_value,
-                &struct_req.fields,
-                &mut entries,
+            }
+        }
+
+        if entries.is_empty() {
+            return Err(save_error_with(
+                &SAVE_ERROR_SELECTION,
+                "save: no variables selected",
+            ));
+        }
+
+        let mut unique_entries = deduplicate_entries(entries);
+        if request.append {
+            unique_entries = append_existing_entries(
+                &destination,
+                unique_entries,
+                runtime.as_ref(),
+                &mut cooperation,
             )
             .await?;
         }
 
-        if !request.regex_patterns.is_empty() {
-            let snapshot = ensure_workspace_entries(&mut workspace_entries).await?;
-            let mut patterns = Vec::with_capacity(request.regex_patterns.len());
-            for pattern in &request.regex_patterns {
-                let regex = Regex::new(pattern).map_err(|err| {
-                    save_error_with_source(
-                        &SAVE_ERROR_INVALID_OPTION,
-                        format!("save: invalid regular expression '{pattern}': {err}"),
-                        err,
-                    )
-                })?;
-                patterns.push(regex);
-            }
-            let mut matched = 0usize;
-            for (name, value) in snapshot.iter() {
-                if patterns.iter().any(|regex| regex.is_match(name)) {
-                    entries.push((name.clone(), value.clone()));
-                    matched += 1;
-                }
-            }
-            if matched == 0 {
-                return Err(save_error_with(
-                    &SAVE_ERROR_SELECTION,
-                    "save: no variables matched '-regexp' patterns",
-                ));
-            }
+        let mut mat_vars = Vec::with_capacity(unique_entries.len());
+        for (name, value) in unique_entries {
+            cooperation.completed(0).await?;
+            let value = prepare_value_for_mat_save(value).await?;
+            cooperation.completed(0).await?;
+            mat_vars.push(MatVar {
+                name,
+                array: convert_value_with_cooperation(
+                    value,
+                    MatEncodingOwner::Save,
+                    Some(&mut cooperation),
+                )
+                .await?,
+            });
+            cooperation.completed(0).await?;
         }
-    }
 
-    if entries.is_empty() {
-        return Err(save_error_with(
-            &SAVE_ERROR_SELECTION,
-            "save: no variables selected",
-        ));
-    }
-
-    let mut unique_entries = deduplicate_entries(entries);
-    if request.append {
-        unique_entries = append_existing_entries(
+        write_mat_file(
             &destination,
-            unique_entries,
-            runtime.as_ref(),
+            &mat_vars,
+            MatEncodingOwner::Save,
             &mut cooperation,
         )
         .await?;
+
+        Ok(Value::Num(0.0))
     }
-
-    let mut mat_vars = Vec::with_capacity(unique_entries.len());
-    for (name, value) in unique_entries {
-        cooperation.completed(0).await?;
-        let value = prepare_value_for_mat_save(value).await?;
-        cooperation.completed(0).await?;
-        mat_vars.push(MatVar {
-            name,
-            array: convert_value_with_cooperation(
-                value,
-                MatEncodingOwner::Save,
-                Some(&mut cooperation),
-            )
-            .await?,
-        });
-        cooperation.completed(0).await?;
-    }
-
-    write_mat_file(
-        &destination,
-        &mat_vars,
-        MatEncodingOwner::Save,
-        &mut cooperation,
-    )
-    .await?;
-
-    Ok(Value::Num(0.0))
+    .await;
+    super::admission::finish(receipt, &result);
+    result
 }
 
 fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {
@@ -403,22 +440,28 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
     })
 }
 
-async fn ensure_workspace_entries(
-    cache: &mut Option<Vec<(String, Value)>>,
-) -> BuiltinResult<&Vec<(String, Value)>> {
+async fn ensure_workspace_entries<'a>(
+    cache: &'a mut Option<Vec<(String, Value)>>,
+    cooperation: &mut MatCodecCooperation<'_>,
+) -> BuiltinResult<&'a Vec<(String, Value)>> {
     if cache.is_none() {
-        let entries = collect_workspace_entries().await?;
+        let entries = collect_workspace_entries(cooperation).await?;
         *cache = Some(entries);
     }
     Ok(cache.as_ref().unwrap())
 }
 
-async fn collect_workspace_entries() -> BuiltinResult<Vec<(String, Value)>> {
+async fn collect_workspace_entries(
+    cooperation: &mut MatCodecCooperation<'_>,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    cooperation.completed(0).await?;
     let snapshot = workspace::snapshot()
         .ok_or_else(|| save_error_with(&SAVE_ERROR_WORKSPACE, SAVE_ERROR_WORKSPACE.message))?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
-        let gathered = gather_if_needed_async(&value).await?;
+        let gathered = cooperation
+            .await_io(gather_if_needed_async(&value))
+            .await??;
         entries.push((name, gathered));
     }
     Ok(entries)
@@ -558,12 +601,13 @@ async fn append_struct_fields(
     value: &StructValue,
     fields: &Option<Vec<String>>,
     out: &mut Vec<(String, Value)>,
+    cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<()> {
     if let Some(ref names) = fields {
         for field in names {
             match value.fields.get(field) {
                 Some(val) => {
-                    let gathered = gather_if_needed_async(val).await?;
+                    let gathered = cooperation.await_io(gather_if_needed_async(val)).await??;
                     out.push((field.clone(), gathered));
                 }
                 None => {
@@ -579,7 +623,7 @@ async fn append_struct_fields(
         }
     } else {
         for (field, val) in &value.fields {
-            let gathered = gather_if_needed_async(val).await?;
+            let gathered = cooperation.await_io(gather_if_needed_async(val)).await??;
             out.push((field.clone(), gathered));
         }
     }

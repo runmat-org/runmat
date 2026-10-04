@@ -27,6 +27,7 @@ pub use workload::{
     AudioDecodeOutput, AudioFrameRange, DatasetHandleInput, DatasetHandleKey,
     DatasetHandleOperation, DatasetHandleRole, DatasetPathOperation, HostEffectOutput,
     HostEffectSource, HostEffectWorkload, MatDecodeOutput, MatDecodeSelection,
+    MatEncodeMode, MatEncodeOutput, MatStructSelection,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]

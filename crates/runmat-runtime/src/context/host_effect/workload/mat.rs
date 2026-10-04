@@ -20,6 +20,41 @@ pub enum MatDecodeOutput {
     RewriteInput,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct MatStructSelection<'a> {
+    pub source: &'a str,
+    pub fields: Option<&'a [String]>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum MatEncodeMode<'a> {
+    Save {
+        append: bool,
+        names: &'a [String],
+        structs: &'a [MatStructSelection<'a>],
+        patterns: &'a [String],
+    },
+    AssignMember {
+        member: &'a str,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum MatEncodeOutput {
+    EffectOnly,
+    Status,
+    UpdatedObject,
+}
+
+impl MatEncodeOutput {
+    pub const fn host_effect_output(self) -> HostEffectOutput {
+        match self {
+            Self::EffectOnly => HostEffectOutput::EffectOnly,
+            Self::Status | Self::UpdatedObject => HostEffectOutput::ReturnedValue,
+        }
+    }
+}
+
 impl MatDecodeOutput {
     pub const fn host_effect_output(self) -> HostEffectOutput {
         match self {

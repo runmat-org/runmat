@@ -66,12 +66,77 @@ fn numeric_resident_text_control_rejects_without_download() {
     assert_eq!(error.identifier(), Some("RunMat:save:InvalidArgument"));
     assert_eq!(owner.downloads(), 0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn finite_save_without_complete_resource_evidence_rejects_before_workspace_gather_or_write() {
+    struct Finite;
+    impl crate::context::RuntimeParallelService for Finite {
+        fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+            crate::context::RuntimeParallelResources {
+                memory_available_bytes: Some(1024),
+                ..Default::default()
+            }
+        }
+    }
+    let _lock = test_support::accel_test_lock();
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _workspace = workspace_guard();
+    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/mat",
+    ));
+    let _selected = runmat_filesystem::replace_provider(filesystem.clone());
+    runmat_filesystem::set_current_dir("/mat").expect("virtual cwd");
+    let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    set_workspace(&[("gpu_data", Value::GpuTensor(owner.resident()))]);
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        crate::context::RuntimeServicePorts::default().with_parallel(std::rc::Rc::new(Finite)),
+    );
+    let error = block_on(super::save_builtin(
+        Some(runtime),
+        vec![Value::from("blocked.mat"), Value::from("gpu_data")],
+    ))
+    .expect_err("unknown complete-call memory cannot enter finite route");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(owner.downloads(), 0);
+    let missing = block_on(filesystem.read(std::path::Path::new("/mat/blocked.mat")))
+        .expect_err("no destination effect");
+    assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn invalid_regexp_rejects_before_workspace_gather() {
+    let _lock = test_support::accel_test_lock();
+    let _workspace = workspace_guard();
+    let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
+    set_workspace(&[("gpu_data", Value::GpuTensor(owner.resident()))]);
+    let error = block_on(save_builtin(vec![
+        Value::from("case.mat"),
+        Value::from("-regexp"),
+        Value::from("["),
+    ]))
+    .expect_err("known-invalid regexp before workspace effects");
+    assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
+    assert_eq!(owner.downloads(), 0);
+}
 use crate::builtins::common::test_support;
 use crate::workspace::WorkspaceResolver;
 use futures::executor::block_on;
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::HostTensorView;
-use runmat_filesystem::File;
+use runmat_filesystem::{File, FsProvider};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::{IntValue, IntegerStorage, NumericDType, StringArray, Tensor};
 use std::cell::RefCell;

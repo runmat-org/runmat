@@ -1,6 +1,7 @@
 //! MATLAB MAT-file I/O builtins.
 
 pub(crate) mod format;
+mod admission;
 pub(crate) mod authority;
 mod cooperation;
 mod encoding;

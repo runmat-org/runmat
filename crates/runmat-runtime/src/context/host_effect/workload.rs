@@ -9,7 +9,9 @@ pub use dataset::{
     DatasetPathOperation,
 };
 mod mat;
-pub use mat::{MatDecodeOutput, MatDecodeSelection};
+pub use mat::{
+    MatDecodeOutput, MatDecodeSelection, MatEncodeMode, MatEncodeOutput, MatStructSelection,
+};
 
 /// The requested result is distinct from the committed side effects. No
 /// output still needs a bound for temporary codec and result storage.
@@ -89,6 +91,11 @@ pub enum HostEffectWorkload<'a> {
         selection: MatDecodeSelection<'a>,
         output: MatDecodeOutput,
     },
+    MatEncode {
+        destination: &'a Path,
+        mode: MatEncodeMode<'a>,
+        output: MatEncodeOutput,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -136,6 +143,13 @@ struct MatDecodeFacts<'a> {
     output: MatDecodeOutput,
 }
 
+#[derive(serde::Serialize)]
+struct MatEncodeFacts<'a> {
+    destination: &'a [u8],
+    mode: MatEncodeMode<'a>,
+    output: MatEncodeOutput,
+}
+
 impl HostEffectWorkload<'_> {
     /// An absent control digest is not a fabricated reusable identity.
     pub fn identity_complete(self) -> bool {
@@ -155,6 +169,7 @@ impl HostEffectWorkload<'_> {
             Self::DatasetHandle { output, .. } => output,
             Self::AudioDecode { output, .. } => output.host_effect_output(),
             Self::MatDecode { output, .. } => output.host_effect_output(),
+            Self::MatEncode { output, .. } => output.host_effect_output(),
         }
     }
 
@@ -238,6 +253,16 @@ impl HostEffectWorkload<'_> {
                 output,
             })
             .expect("typed MAT decode facts serialize"),
+            Self::MatEncode {
+                destination,
+                mode,
+                output,
+            } => serde_json::to_vec(&MatEncodeFacts {
+                destination: destination.as_os_str().as_encoded_bytes(),
+                mode,
+                output,
+            })
+            .expect("typed MAT encode facts serialize"),
         }
     }
 }

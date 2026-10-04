@@ -2,15 +2,18 @@
 //! policy and the exact captured filesystem owner across awaits.
 
 use super::authority::MatFsPath;
+use crate::context::host_effect::HostEffectResourceLivenessLease;
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::BuiltinErrorDescriptor;
 use std::future::Future;
+use std::sync::Arc;
 
 pub(in crate::builtins::io::mat) struct MatCodecCooperation<'a> {
     budget: Option<CpuCooperationBudget>,
     source: Option<&'a MatFsPath>,
+    resource_liveness: Option<Arc<dyn HostEffectResourceLivenessLease>>,
     builtin: &'static str,
     io_error: &'static BuiltinErrorDescriptor,
 }
@@ -25,6 +28,7 @@ impl<'a> MatCodecCooperation<'a> {
         Self {
             budget: runtime.map(RuntimeContext::cpu_cooperation),
             source,
+            resource_liveness: None,
             builtin,
             io_error,
         }
@@ -39,9 +43,18 @@ impl<'a> MatCodecCooperation<'a> {
         Self {
             budget: Some(budget),
             source: None,
+            resource_liveness: None,
             builtin,
             io_error,
         }
+    }
+
+    pub(in crate::builtins::io::mat) fn with_resource_liveness(
+        mut self,
+        resource_liveness: Option<Arc<dyn HostEffectResourceLivenessLease>>,
+    ) -> Self {
+        self.resource_liveness = resource_liveness;
+        self
     }
 
     pub(in crate::builtins::io::mat) async fn completed(
@@ -79,6 +92,13 @@ impl<'a> MatCodecCooperation<'a> {
     }
 
     fn check_source(&self) -> BuiltinResult<()> {
+        if self
+            .resource_liveness
+            .as_ref()
+            .is_some_and(|lease| !lease.is_current())
+        {
+            return Err(crate::context::host_effect::stale_resource());
+        }
         if let Some(source) = self.source {
             source.check_current().map_err(|error| {
                 let mut builder = build_runtime_error(format!(
