@@ -25,7 +25,7 @@ impl std::fmt::Display for XmlName<'_> {
     }
 }
 
-fn name_start(ch: char) -> bool {
+pub(super) fn name_start(ch: char) -> bool {
     matches!(ch,
         ':' | '_' | 'A'..='Z' | 'a'..='z'
         | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
@@ -37,7 +37,7 @@ fn name_start(ch: char) -> bool {
     )
 }
 
-fn name_char(ch: char) -> bool {
+pub(super) fn name_char(ch: char) -> bool {
     name_start(ch)
         || matches!(ch, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }

@@ -1,0 +1,246 @@
+//! Well-formed XML events projected into the existing lightweight node model.
+
+use super::*;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::Reader;
+
+use super::reader::CooperativeXmlBuf;
+use super::{attributes, decode};
+
+pub(super) async fn parse_xml_document_with_context(
+    text: &str,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<XmlNode> {
+    parse_events(text, cooperation).await.map_err(|error| {
+        if cooperation.is_execution_error(&error) {
+            return error;
+        }
+        let operation = cooperation.operation();
+        let message = error
+            .message()
+            .replace("xmlread:", &format!("{}:", operation.name()));
+        build_runtime_error(message)
+            .with_identifier(operation.identifier(XmlDiagnosticKind::MalformedXml))
+            .with_builtin(operation.name())
+            .with_source(error)
+            .build()
+    })
+}
+
+async fn parse_events(text: &str, cooperation: &mut XmlCooperation) -> BuiltinResult<XmlNode> {
+    let source = CooperativeXmlBuf::new(text.as_bytes(), cooperation.budget_owner());
+    let mut reader = Reader::from_reader(source);
+    reader.config_mut().check_end_names = true;
+    reader.config_mut().allow_unmatched_ends = false;
+    reader.config_mut().check_comments = true;
+    reader.config_mut().trim_text(false);
+    let mut event_buf = Vec::new();
+    // The reader may grow this for a single large event; do not eagerly retain
+    // another full-document allocation before it has seen any XML.
+    event_buf
+        .try_reserve_exact(text.len().min(4096))
+        .map_err(|error| {
+            build_runtime_error("xmlread: cannot reserve XML event storage")
+                .with_builtin("xmlread")
+                .with_source(error)
+                .build()
+        })?;
+    let mut stack = Vec::<XmlNode>::new();
+    let mut root = None;
+    let mut declaration_seen = false;
+    loop {
+        let event = reader
+            .read_event_into_async(&mut event_buf)
+            .await
+            .map_err(|error| quick_xml_error(error, cooperation))?;
+        match event {
+            Event::Start(start) => {
+                if stack.is_empty() && root.is_some() {
+                    return Err(malformed("multiple root elements"));
+                }
+                stack.push(node_from_start(&start, cooperation).await?);
+            }
+            Event::Empty(start) => {
+                if stack.is_empty() && root.is_some() {
+                    return Err(malformed("multiple root elements"));
+                }
+                let node = node_from_start(&start, cooperation).await?;
+                attach(&mut stack, &mut root, node)?;
+            }
+            Event::End(_) => {
+                let node = stack
+                    .pop()
+                    .ok_or_else(|| malformed("unexpected closing tag"))?;
+                attach(&mut stack, &mut root, node)?;
+            }
+            Event::Text(content) => {
+                append_text(&mut stack, content.as_ref(), cooperation).await?;
+            }
+            Event::CData(content) => {
+                append_text(&mut stack, content.as_ref(), cooperation).await?;
+            }
+            Event::GeneralRef(reference) => {
+                let node = stack
+                    .last_mut()
+                    .ok_or_else(|| malformed("entity outside the root element"))?;
+                decode::append_reference(&mut node.text, reference.as_ref(), cooperation).await?;
+            }
+            Event::Comment(_) => {}
+            Event::PI(_) => {}
+            Event::Decl(_) => {
+                if declaration_seen || root.is_some() || !stack.is_empty() {
+                    return Err(malformed("XML declaration must appear before the root"));
+                }
+                declaration_seen = true;
+            }
+            Event::DocType(_) => return Err(malformed("DTD declarations are not supported")),
+            Event::Eof => break,
+        }
+        event_buf.clear();
+        cooperation.completed(0).await?;
+    }
+    if let Some(open) = stack.last() {
+        return Err(malformed(&format!("unclosed tag <{}>", open.name)));
+    }
+    root.ok_or_else(|| malformed("no root element"))
+}
+
+async fn node_from_start(
+    start: &BytesStart<'_>,
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<XmlNode> {
+    let name = attributes::name(start.name().as_ref(), cooperation).await?;
+    let attributes = attributes::parse(start.attributes_raw(), cooperation).await?;
+    Ok(XmlNode::new(name, attributes))
+}
+
+async fn append_text(
+    stack: &mut [XmlNode],
+    text: &[u8],
+    cooperation: &mut XmlCooperation,
+) -> BuiltinResult<()> {
+    let Some(node) = stack.last_mut() else {
+        for chunk in text.chunks(4096) {
+            if !chunk
+                .iter()
+                .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+            {
+                return Err(malformed("text outside the root element"));
+            }
+            cooperation.completed(chunk.len()).await?;
+        }
+        return Ok(());
+    };
+    decode::append_text_bytes(&mut node.text, text, cooperation).await
+}
+
+fn attach(stack: &mut [XmlNode], root: &mut Option<XmlNode>, node: XmlNode) -> BuiltinResult<()> {
+    if let Some(parent) = stack.last_mut() {
+        parent.children.push(node);
+    } else if root.replace(node).is_some() {
+        return Err(malformed("multiple root elements"));
+    }
+    Ok(())
+}
+
+fn malformed(reason: &str) -> RuntimeError {
+    compat_error("xmlread", format!("xmlread: malformed XML ({reason})"))
+}
+
+fn malformed_source(
+    reason: &str,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
+    build_runtime_error(format!("xmlread: malformed XML ({reason})"))
+        .with_builtin("xmlread")
+        .with_source(source)
+        .build()
+}
+
+fn quick_xml_error(error: quick_xml::Error, cooperation: &XmlCooperation) -> RuntimeError {
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+    while let Some(current) = cause {
+        if let Some(execution) = current.downcast_ref::<crate::execution::ExecutionServiceError>() {
+            return cooperation.execution_error(execution.clone());
+        }
+        cause = current.source();
+    }
+    malformed_source("invalid XML syntax", error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(source: &str) -> BuiltinResult<XmlNode> {
+        let mut cooperation = XmlCooperation::new(None, XmlOperation::XmlRead);
+        futures::executor::block_on(parse_xml_document_with_context(source, &mut cooperation))
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn quoted_gt_cdata_comments_and_entities_retain_projected_content() {
+        let root = parse(
+            "<?xml version=\"1.0\"?><root note=\"a>b\"><!--x>y--><item><![CDATA[a>b]]>&amp;&#65;</item></root>",
+        )
+        .expect("valid XML");
+        assert_eq!(root.name, "root");
+        assert_eq!(root.attributes.get("note").map(String::as_str), Some("a>b"));
+        assert_eq!(root.children.len(), 1);
+        assert_eq!(root.children[0].text, "a>b&A");
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn long_numeric_reference_and_literal_newlines_preserve_xml_text() {
+        let zeros = "0".repeat(12 * 1024);
+        let document = format!("<root>a\r\nb&#{zeros}65;\nc</root>");
+        let root = parse(&document).expect("valid large character reference");
+        assert_eq!(root.text, "a\nbA\nc");
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn malformed_tails_external_text_and_dtd_are_typed_parser_failures() {
+        for source in [
+            "<root attr/>",
+            "<root a=\"x\" a=\"y\"/>",
+            "outside<root/>",
+            "<root/>outside",
+            "<root/><other/>",
+            "<!DOCTYPE root [<!ENTITY name 'text'>]><root>&name;</root>",
+        ] {
+            let error = parse(source).expect_err(source);
+            assert_eq!(error.identifier(), Some("RunMat:xmlread:MalformedXml"));
+        }
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn long_single_text_event_yields_and_cancels_before_projection() {
+        use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+        use runmat_execution::cancellation::CancellationSource;
+        use runmat_execution::CancellationReason;
+        use std::num::NonZeroU64;
+
+        let source = CancellationSource::new();
+        let canceller = source.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                canceller.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::XmlRead);
+        let document = format!("<root>{}</root>", "x".repeat(12 * 1024));
+        let error = futures::executor::block_on(parse_xml_document_with_context(
+            &document,
+            &mut cooperation,
+        ))
+        .expect_err("reader refill must observe the cancelled service turn");
+        assert_eq!(error.identifier(), Some("RunMat:xmlread:Cancelled"));
+        assert!(cooperation.budget_owner().unwrap().borrow().is_some());
+    }
+}
