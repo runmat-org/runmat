@@ -4,7 +4,7 @@ use super::PreferenceDocument;
 use crate::context::{UserPathSetting, UserPathSnapshot};
 use runmat_execution::value::ValuePayload;
 
-pub(super) enum DocumentMutation {
+pub(in crate::context::preferences) enum DocumentMutation {
     Set {
         group: String,
         entries: Vec<(String, ValuePayload)>,
@@ -17,21 +17,21 @@ pub(super) enum DocumentMutation {
     UserPath(UserPathSetting),
 }
 
-pub(super) struct DocumentPrepared {
+pub(in crate::context::preferences) struct DocumentPrepared {
     pub values: Vec<ValuePayload>,
     pub user_path: Option<UserPathSnapshot>,
     pub changed: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum DocumentMutationError {
+pub(in crate::context::preferences) enum DocumentMutationError {
     #[error("preference '{name}' does not exist in group '{group}'")]
     Missing { group: String, name: String },
     #[error("application user-path revision is exhausted")]
     RevisionExhausted,
 }
 
-pub(super) fn apply(
+pub(in crate::context::preferences) fn apply(
     mut document: PreferenceDocument,
     mutation: DocumentMutation,
 ) -> Result<(PreferenceDocument, DocumentPrepared), DocumentMutationError> {
