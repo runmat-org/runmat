@@ -120,7 +120,7 @@ fn possible_text_scalar(value: &ValueFact) -> bool {
     match value.kind {
         ValueKindFact::String => value.shape.element_count().is_none_or(|count| count == 1),
         ValueKindFact::Character => {
-            crate::catalog::inference::text::possible_character_row(&value.shape)
+            crate::catalog::inference::possible_character_row(&value.shape)
         }
         ValueKindFact::Unknown => true,
         _ => false,
