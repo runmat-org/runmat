@@ -4,13 +4,16 @@
 mod python;
 mod java;
 mod mex_api;
+mod native_ffi;
 
 pub use self::java::*;
 pub use self::mex_api::*;
+pub use self::native_ffi::*;
 pub use self::python::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(python::ENTRIES.iter().copied());
     values.extend(java::ENTRIES.iter().copied());
     values.extend(mex_api::ENTRIES.iter().copied());
+    values.extend(native_ffi::ENTRIES.iter().copied());
 }
