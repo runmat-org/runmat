@@ -1,3 +1,4 @@
+use super::path::{field_path, index_path};
 use super::ValueCodecError;
 use runmat_execution::value::{
     CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, RegisteredData,
@@ -401,12 +402,4 @@ fn indices(values: &[usize], path: &str) -> Result<Vec<u64>, ValueCodecError> {
                 .map_err(|_| ValueCodecError::invalid(path, "index exceeds portable limits"))
         })
         .collect()
-}
-
-fn index_path(parent: &str, index: usize) -> String {
-    format!("{parent}[{index}]")
-}
-
-fn field_path(parent: &str, field: &str) -> String {
-    format!("{parent}.{field}")
 }

@@ -2,6 +2,7 @@ mod decode;
 mod durable;
 mod encode;
 mod error;
+mod path;
 
 pub use decode::decode_inline_value;
 pub use durable::{decode_durable_value, encode_durable_value};

@@ -1,6 +1,7 @@
 //! Reconstruction of validated durable preference aggregates.
 
-use super::{decode, field_path, usize_shape};
+use super::{decode, usize_shape};
+use crate::execution::value_codec::path::field_path;
 use crate::execution::value_codec::ValueCodecError;
 use runmat_execution::value::{DurableObjectArray, DurablePlainObject, DurableStructArray};
 use runmat_value::{DynamicPropertyDef, ObjectArray, ObjectInstance, StructArray, Value};
