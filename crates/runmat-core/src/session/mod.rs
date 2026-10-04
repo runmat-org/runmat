@@ -53,6 +53,7 @@ mod config;
 mod dynamic;
 mod executable;
 mod host_services;
+mod application_settings;
 #[cfg(not(target_arch = "wasm32"))]
 mod host_driver;
 mod http_host;

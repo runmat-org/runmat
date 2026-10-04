@@ -20,12 +20,20 @@ pub struct BuiltinExampleFixtureId {
 pub enum BuiltinExampleFixture {
     None,
     Filesystem(BuiltinFilesystemFixture),
+    /// A fresh application-settings authority for this example only. It is
+    /// independent of its workspace filesystem and starts empty.
+    ApplicationSettings(BuiltinApplicationSettingsFixture),
     Loopback(BuiltinLoopbackFixture),
     ForeignAdapter(BuiltinForeignAdapterFixture),
     CliInteraction(BuiltinCliInteractionFixture),
     /// Requires the RunMat Desktop host. Browser and standalone CLI runners
     /// must reject this boundary rather than approximating host behavior.
     DesktopHostOnly(BuiltinDesktopHostFixture),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinApplicationSettingsFixture {
+    pub id: BuiltinExampleFixtureId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

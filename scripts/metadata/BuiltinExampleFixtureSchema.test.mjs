@@ -38,6 +38,14 @@ test("accepts a closed loopback fixture with a declared fixed token", () => {
   }), fixture);
 });
 
+test("application settings fixture is explicit, bounded, and portable", () => {
+  const fixture = { ApplicationSettings: { id: { local_name: "fresh-settings" } } };
+  const context = { program: "setpref('Example','Value',1);", harness: "Portable", requirements: NO_EXAMPLE_REQUIREMENTS };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", context), fixture);
+  assert.throws(() => validateBuiltinExampleFixture({ ApplicationSettings: { ...fixture.ApplicationSettings, path: "/real-home" } }, "fixture", context), /fields/);
+  assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", { ...context, harness: "NativeFilesystem" }), /harness/);
+});
+
 test("rejects unsafe filesystem paths and file descendants", () => {
   const base = { id: { local_name: "files" }, root: "IsolatedWorkspace" };
   assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...base, entries: [{ Directory: { relative_path: "../escape" } }] } }), /relative path/);

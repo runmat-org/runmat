@@ -1,13 +1,54 @@
 use super::*;
 use crate::{
-    BuiltinCliTranscriptStep, BuiltinCompilerCapability, BuiltinEndpointSubstitution,
-    BuiltinExampleCompatibility, BuiltinExampleRequirements, BuiltinExampleVerification,
-    BuiltinFilesystemEntry, BuiltinFilesystemFixture, BuiltinFilesystemRoot, BuiltinFixtureContent,
-    BuiltinForeignAdapterFixture, BuiltinForeignPreparation, BuiltinHttpExchange,
-    BuiltinHttpMethod, BuiltinHttpRequest, BuiltinHttpResponse, BuiltinHttpScenario,
-    BuiltinLoopbackFixture, BuiltinMexApi, BuiltinMexPreparation, BuiltinNativeSourceLanguage,
-    BuiltinNativeTranslationUnit, BuiltinRuntimeCapability, BuiltinToolchainCapability,
+    BuiltinApplicationSettingsFixture, BuiltinCliTranscriptStep, BuiltinCompilerCapability,
+    BuiltinEndpointSubstitution, BuiltinExampleCompatibility, BuiltinExampleRequirements,
+    BuiltinExampleVerification, BuiltinFilesystemEntry, BuiltinFilesystemFixture,
+    BuiltinFilesystemRoot, BuiltinFixtureContent, BuiltinForeignAdapterFixture,
+    BuiltinForeignPreparation, BuiltinHttpExchange, BuiltinHttpMethod, BuiltinHttpRequest,
+    BuiltinHttpResponse, BuiltinHttpScenario, BuiltinLoopbackFixture, BuiltinMexApi,
+    BuiltinMexPreparation, BuiltinNativeSourceLanguage, BuiltinNativeTranslationUnit,
+    BuiltinRuntimeCapability, BuiltinToolchainCapability,
 };
+
+#[test]
+fn application_settings_fixture_requires_supported_engine_and_valid_id() {
+    let mut example = BuiltinExample {
+        id: "isolated",
+        title: "Isolated settings",
+        program: "setpref('Example','Value',1); assert(getpref('Example','Value') == 1);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::ApplicationSettings(BuiltinApplicationSettingsFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "fresh",
+            },
+        }),
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(true);",
+        },
+    };
+    let mut errors = Vec::new();
+    validate("setpref", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    example.harness = BuiltinExampleHarness::NativeFilesystem;
+    let mut errors = Vec::new();
+    validate("setpref", &example, &mut errors);
+    assert!(errors.iter().any(|error| error.message.contains("harness")));
+
+    example.harness = BuiltinExampleHarness::Portable;
+    example.fixture =
+        BuiltinExampleFixture::ApplicationSettings(BuiltinApplicationSettingsFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "bad id",
+            },
+        });
+    let mut errors = Vec::new();
+    validate("setpref", &example, &mut errors);
+    assert!(errors.iter().any(|error| error.message.contains("fixture")));
+}
 
 const HTTP_EXCHANGES: &[BuiltinHttpExchange] = &[BuiltinHttpExchange {
     request: BuiltinHttpRequest {

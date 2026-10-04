@@ -31,6 +31,19 @@ pub(super) fn validate(
     }
     match example.fixture {
         BuiltinExampleFixture::None => {}
+        BuiltinExampleFixture::ApplicationSettings(fixture) => {
+            require_harness(
+                builtin,
+                example,
+                &[
+                    BuiltinExampleHarness::Portable,
+                    BuiltinExampleHarness::Browser,
+                    BuiltinExampleHarness::Native,
+                ],
+                errors,
+            );
+            resource::validate_fixture_id(builtin, fixture.id, errors);
+        }
         BuiltinExampleFixture::Filesystem(fixture) => {
             require_harness(
                 builtin,

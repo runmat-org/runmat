@@ -30,14 +30,20 @@ export function validateBuiltinExampleFixture(value, label = "example fixture", 
     if (context) compatibility(value, context, label);
     return value;
   }
-  const [tag, inner] = tagged(value, ["Filesystem", "Loopback", "ForeignAdapter", "CliInteraction", "DesktopHostOnly"], label);
+  const [tag, inner] = tagged(value, ["Filesystem", "ApplicationSettings", "Loopback", "ForeignAdapter", "CliInteraction", "DesktopHostOnly"], label);
   if (tag === "Filesystem") filesystem(inner, label);
+  else if (tag === "ApplicationSettings") applicationSettings(inner, label);
   else if (tag === "Loopback") loopback(inner, label);
   else if (tag === "ForeignAdapter") foreignAdapter(inner, label);
   else if (tag === "CliInteraction") cliInteraction(inner, label);
   else desktopHost(inner, label);
   if (context) compatibility(value, context, label);
   return value;
+}
+
+function applicationSettings(value, label) {
+  exact(value, ["id"], `${label} application settings`);
+  fixtureId(value.id, label);
 }
 
 export function validateBuiltinExampleRequirements(value, label = "example requirements") {
@@ -416,7 +422,7 @@ function compatibility(fixture, context, label) {
     return;
   }
   const [tag, value] = Object.entries(fixture)[0];
-  const expectedHarnesses = { Filesystem: ["Portable", "Browser", "NativeFilesystem"], Loopback: ["NativeLoopbackNetwork"], ForeignAdapter: ["NativeForeignRuntime"], CliInteraction: ["InteractiveHost"], DesktopHostOnly: ["InteractiveHost"] };
+  const expectedHarnesses = { Filesystem: ["Portable", "Browser", "NativeFilesystem"], ApplicationSettings: ["Portable", "Browser", "Native"], Loopback: ["NativeLoopbackNetwork"], ForeignAdapter: ["NativeForeignRuntime"], CliInteraction: ["InteractiveHost"], DesktopHostOnly: ["InteractiveHost"] };
   if (!expectedHarnesses[tag].includes(harness)) throw new Error(`${label} is incompatible with its harness`);
   if (["Loopback", "ForeignAdapter", "CliInteraction"].includes(tag) && requirements.host !== "NativeOnly") throw new Error(`${label} requires a native-only host`);
   if (tag === "DesktopHostOnly" && requirements.host !== "DesktopHostOnly") throw new Error(`${label} requires a desktop-host-only boundary`);

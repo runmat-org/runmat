@@ -6,6 +6,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 
 import { materializeFilesystemFixture } from "./adapters/filesystem.mjs";
+import { isolateApplicationSettings } from "./adapters/application-settings.mjs";
 import { prepareForeignFixture } from "./adapters/foreign.mjs";
 import { runInteraction } from "./adapters/interaction.mjs";
 import { withLoopbackFixture } from "./adapters/loopback.mjs";
@@ -73,6 +74,8 @@ async function runCase(binary, root, testCase, timeoutMs) {
             "the native CLI product cannot provide the declared RunMat Desktop host scenario"
         );
     }
+    const settings = isolateApplicationSettings(caseDirectory, testCase.fixture);
+    if (!settings.available) return unavailable(testCase.id, settings.reason);
     try {
         prepareWorkspace(workspaceDirectory, testCase.fixture);
     } catch (error) {
@@ -103,7 +106,7 @@ async function runCase(binary, root, testCase, timeoutMs) {
             const outcome = await withLoopbackFixture(
                 testCase.input,
                 testCase.fixture.Loopback,
-                ({ program }) => executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, program, testCase, timeoutMs, null, foreignEnvironment)
+                ({ program }) => executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, program, testCase, timeoutMs, null, { ...foreignEnvironment, ...settings.environment })
             );
             return outcome.value;
         } catch (error) {
@@ -113,7 +116,7 @@ async function runCase(binary, root, testCase, timeoutMs) {
     const transcript = testCase.fixture && typeof testCase.fixture === "object" && "CliInteraction" in testCase.fixture
         ? testCase.fixture.CliInteraction.transcript
         : null;
-    return executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, testCase.input, testCase, timeoutMs, transcript, foreignEnvironment);
+    return executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, testCase.input, testCase, timeoutMs, transcript, { ...foreignEnvironment, ...settings.environment });
 }
 
 async function executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, program, testCase, timeoutMs, transcript = null, environmentOverrides = {}) {
@@ -248,7 +251,7 @@ async function executeAotProgram(binary, caseDirectory, workspaceDirectory, conf
 function prepareWorkspace(workspaceDirectory, fixture) {
     if (fixture === undefined
         || fixture === "None"
-        || (fixture && typeof fixture === "object" && ("Loopback" in fixture || "CliInteraction" in fixture))) {
+        || (fixture && typeof fixture === "object" && ("Loopback" in fixture || "CliInteraction" in fixture || "ApplicationSettings" in fixture))) {
         mkdirSync(workspaceDirectory);
         return;
     }

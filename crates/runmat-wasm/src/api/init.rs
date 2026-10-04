@@ -10,7 +10,9 @@ use runmat_value::Value;
 
 use crate::api::plot::ensure_figure_event_bridge;
 use crate::api::session::RunMatWasm;
-use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
+use crate::runtime::config::{
+    apply_plotting_overrides, ApplicationSettingsMode, InitOptions, SessionConfig,
+};
 use crate::runtime::execution::{execution_host_from_options, BrowserExecutionService};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
@@ -85,6 +87,16 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
+    if matches!(
+        parsed_opts.application_settings,
+        Some(ApplicationSettingsMode::IsolatedMemory)
+    ) {
+        session
+            .install_application_settings(std::rc::Rc::new(
+                runmat_runtime::context::IsolatedMemoryPreferenceService::new(),
+            ))
+            .map_err(|err| init_error(InitErrorCode::SessionCreation, err.to_string()))?;
+    }
     session.set_telemetry_consent(config.telemetry_consent);
     if let Some(cid) = config.telemetry_client_id.clone() {
         session.set_telemetry_client_id(Some(cid));

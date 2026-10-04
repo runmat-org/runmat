@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, mkdtempSync } from "node:fs";
+import { readFileSync, rmSync, mkdtempSync, mkdirSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -7,11 +7,31 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 
 import { fixturePath, materializeFilesystemFixture } from "./filesystem.mjs";
+import { isolateApplicationSettings } from "./application-settings.mjs";
 import { runInteraction } from "./interaction.mjs";
 import { withLoopbackFixture } from "./loopback.mjs";
 import { substituteLoopbackEndpoints } from "./substitutions.mjs";
 
 const id = { local_name: "fixture" };
+
+test("application settings fixture isolates only the child environment per case", () => {
+    const parent = mkdtempSync(join(tmpdir(), "runmat-settings-fixture-"));
+    try {
+        const first = join(parent, "first");
+        const second = join(parent, "second");
+        mkdirSync(first);
+        mkdirSync(second);
+        const fixture = { ApplicationSettings: { id } };
+        const one = isolateApplicationSettings(first, fixture, "linux");
+        const two = isolateApplicationSettings(second, fixture, "linux");
+        assert.notEqual(one.environment.HOME, two.environment.HOME);
+        assert.notEqual(one.environment.HOME, process.env.HOME);
+        assert.deepEqual(isolateApplicationSettings(first, "None", "linux").environment, {});
+        assert.equal(isolateApplicationSettings(first, fixture, "win32").available, false);
+    } finally {
+        rmSync(parent, { recursive: true, force: true });
+    }
+});
 
 test("filesystem fixtures materialize exact catalog bytes below a fresh root", () => {
     const parent = mkdtempSync(join(tmpdir(), "runmat-fixture-"));

@@ -11,6 +11,9 @@ use runmat_runtime::builtins::plotting::{set_scatter_target_points, set_surface_
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InitOptions {
+    /// Explicit embedding authority; omitted means the normal browser host.
+    #[serde(default)]
+    pub(crate) application_settings: Option<ApplicationSettingsMode>,
     #[serde(default)]
     pub(crate) enable_jit: Option<bool>,
     #[serde(default)]
@@ -46,6 +49,12 @@ pub(crate) struct InitOptions {
     #[cfg(target_arch = "wasm32")]
     #[serde(skip)]
     pub(crate) telemetry_emitter: Option<JsValue>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ApplicationSettingsMode {
+    IsolatedMemory,
 }
 
 #[derive(Clone)]
@@ -197,6 +206,21 @@ mod compatibility_tests {
     #[wasm_bindgen_test]
     fn language_compat_defaults_to_runmat() {
         assert_eq!(parse_language_compat(None), CompatMode::RunMat);
+    }
+
+    #[wasm_bindgen_test]
+    fn application_settings_requires_an_explicit_supported_mode() {
+        let normal: InitOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(normal.application_settings, None);
+        let isolated: InitOptions =
+            serde_json::from_str(r#"{"applicationSettings":"isolatedMemory"}"#).unwrap();
+        assert_eq!(
+            isolated.application_settings,
+            Some(ApplicationSettingsMode::IsolatedMemory)
+        );
+        assert!(
+            serde_json::from_str::<InitOptions>(r#"{"applicationSettings":"unknown"}"#).is_err()
+        );
     }
 
     #[wasm_bindgen_test]
