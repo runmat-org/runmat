@@ -1,6 +1,10 @@
 //! Shared-library interoperability builtins backed by the session foreign service.
 
-use runmat_builtins::{BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinParamArity};
+#[cfg(target_arch = "wasm32")]
+use runmat_builtins::NATIVE_FFI_ERROR_UNAVAILABLE as ERROR_UNAVAILABLE;
+use runmat_builtins::{
+    BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinParamArity, NativeFfiOperation,
+};
 pub use runmat_builtins::{
     NativeLoadOption, CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR,
     LIBPOINTER_DESCRIPTOR, LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, SETDATATYPE_DESCRIPTOR,
@@ -8,7 +12,7 @@ pub use runmat_builtins::{
 };
 use runmat_builtins::{
     NATIVE_FFI_ERROR_HOST_UNAVAILABLE as ERROR_HOST_UNAVAILABLE,
-    NATIVE_FFI_ERROR_INVALID as ERROR_INVALID, NATIVE_FFI_ERROR_UNAVAILABLE as ERROR_UNAVAILABLE,
+    NATIVE_FFI_ERROR_INVALID as ERROR_INVALID,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;

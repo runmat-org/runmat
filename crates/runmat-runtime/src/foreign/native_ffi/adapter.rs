@@ -42,8 +42,8 @@ mod pointer_view;
 use call::requested_output_sequence;
 pub(crate) use call::{is_callable, isolated_callback_value};
 use pointer_view::{
-    declared_pointer_type, default_structure_value, foreign_ownership, pointer_dimension,
-    pointer_metadata, pointer_type_identity, pointer_view_type,
+    declared_pointer_type, default_structure_value, foreign_ownership, pointer_metadata,
+    pointer_type_identity,
 };
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
