@@ -116,6 +116,16 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
             }
             Ok(Value::Struct(value))
         }
+        InlineValue::DurableOrderedStruct(fields) => {
+            let mut value = StructValue::new();
+            for field in fields {
+                value.insert(
+                    field.name.clone(),
+                    decode(&field.value, &format!("{path}.{}", field.name))?,
+                );
+            }
+            Ok(Value::Struct(value))
+        }
         InlineValue::Exception(value) => decode_exception(value, path),
         InlineValue::Callable(value) => decode_callable(value, path),
         InlineValue::ImmutableValueClass(value) => {

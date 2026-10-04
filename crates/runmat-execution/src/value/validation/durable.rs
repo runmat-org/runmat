@@ -2,11 +2,36 @@
 
 use super::{checked_product, ValidationBudget};
 use crate::{
-    value::{DurableObjectArray, DurablePlainObject, DurableStructArray},
+    value::{DurableObjectArray, DurablePlainObject, DurableStructArray, StructField},
     ContractError,
 };
 
 impl ValidationBudget<'_> {
+    pub(super) fn ordered_fields(
+        &mut self,
+        fields: &[StructField],
+        depth: u16,
+    ) -> Result<(), ContractError> {
+        if fields.len() > self.limits.max_fields as usize {
+            return Err(ContractError::Limit {
+                field: "ordered structure fields",
+                limit: self.limits.max_fields.into(),
+            });
+        }
+        let mut names = std::collections::HashSet::with_capacity(fields.len());
+        for field in fields {
+            self.text(&field.name)?;
+            if !names.insert(field.name.as_str()) {
+                return Err(ContractError::invalid(
+                    "ordered structure",
+                    "field names must be unique",
+                ));
+            }
+            self.payload(&field.value, depth + 1)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn plain_object(
         &mut self,
         value: &DurablePlainObject,

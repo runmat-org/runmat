@@ -86,8 +86,12 @@ fn encode(
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
-            fields.sort_by(|left, right| left.name.cmp(&right.name));
-            InlineValue::Struct(fields)
+            if purpose == CodecPurpose::DurablePreference {
+                InlineValue::DurableOrderedStruct(fields)
+            } else {
+                fields.sort_by(|left, right| left.name.cmp(&right.name));
+                InlineValue::Struct(fields)
+            }
         }
         Value::StructArray(value) if purpose == CodecPurpose::DurablePreference => {
             InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose)?)

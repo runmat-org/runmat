@@ -167,6 +167,15 @@ impl ValidationBudget<'_> {
                 }
             }
             InlineValue::Struct(fields) => self.fields(fields, depth)?,
+            InlineValue::DurableOrderedStruct(fields) if self.durable => {
+                self.ordered_fields(fields, depth)?;
+            }
+            InlineValue::DurableOrderedStruct(_) => {
+                return Err(ContractError::invalid(
+                    "V2 execution value",
+                    "durable ordered structures are not admitted by V2 transport",
+                ));
+            }
             InlineValue::DurablePlainObject(value) if self.durable => {
                 self.plain_object(value, depth)?
             }

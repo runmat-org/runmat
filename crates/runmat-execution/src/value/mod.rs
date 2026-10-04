@@ -143,6 +143,7 @@ pub enum InlineValue {
         values: Vec<ValuePayload>,
     },
     Struct(Vec<StructField>),
+    DurableOrderedStruct(Vec<StructField>),
     Exception(ExceptionValue),
     Callable(CallableValue),
     ImmutableValueClass(RegisteredData),

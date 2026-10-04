@@ -112,6 +112,43 @@ mod tests {
     }
 
     #[test]
+    fn durable_nested_scalar_structure_keeps_insertion_order_without_changing_v2() {
+        let mut structure = StructValue::new();
+        structure.insert("zeta", Value::Int(IntValue::U64(u64::MAX)));
+        structure.insert("alpha", Value::Num(1.0));
+        let nested = Value::Cell(CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap());
+        let durable = encode_durable_value(&nested).unwrap();
+        assert!(decode_inline_value(&durable).is_err());
+        let Value::Cell(decoded) = decode_durable_value(&durable).unwrap() else {
+            panic!("cell")
+        };
+        let Value::Struct(ordered) = &decoded.data[0] else {
+            panic!("structure")
+        };
+        assert_eq!(
+            ordered
+                .field_names()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["zeta", "alpha"]
+        );
+        let v2 = encode_inline_value(&nested).unwrap();
+        let Value::Cell(v2_decoded) = decode_inline_value(&v2).unwrap() else {
+            panic!("V2 cell")
+        };
+        let Value::Struct(v2_struct) = &v2_decoded.data[0] else {
+            panic!("V2 structure")
+        };
+        assert_eq!(
+            v2_struct
+                .field_names()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+    }
+
+    #[test]
     fn portable_value_roundtrip_is_centralized_and_bit_exact() {
         let value = Value::Cell(
             CellArray::new(

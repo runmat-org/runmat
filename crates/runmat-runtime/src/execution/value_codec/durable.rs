@@ -49,7 +49,7 @@ fn require_durable(payload: &ValuePayload, path: &str) -> Result<(), ValueCodecE
             }
             Ok(())
         }
-        InlineValue::Struct(fields) => {
+        InlineValue::Struct(fields) | InlineValue::DurableOrderedStruct(fields) => {
             for field in fields {
                 require_durable(&field.value, &format!("{path}.{}", field.name))?;
             }
