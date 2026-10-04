@@ -39,10 +39,6 @@ pub fn textscan_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::cell()
 }
 
-pub fn weboptions_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    struct_type(args, ctx)
-}
-
 pub fn load_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -198,12 +194,6 @@ mod tests {
     assert_resolver!(disp_type_resolver, disp_type, &[], Type::tensor());
     assert_resolver!(input_type_resolver, input_type, &[], Type::Unknown);
 
-    assert_resolver!(
-        weboptions_type_resolver,
-        weboptions_type,
-        &[],
-        Type::Struct { known_fields: None }
-    );
     assert_resolver!(
         load_type_resolver,
         load_type,
