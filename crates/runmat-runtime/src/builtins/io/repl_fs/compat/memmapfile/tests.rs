@@ -53,7 +53,10 @@ fn named_multirecord_format_retains_declared_field_order() {
         panic!("two format records must retain structure array class");
     };
     assert_eq!(
-        records.field_names().map(String::as_str).collect::<Vec<_>>(),
+        records
+            .field_names()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         ["zeta", "alpha"]
     );
     let elements = records.into_elements();
