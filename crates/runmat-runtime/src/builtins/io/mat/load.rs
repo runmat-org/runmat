@@ -405,12 +405,12 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
     let mut idx = 0usize;
     while idx < values.len() {
         if let Some(flag) = option_token(&values[idx])? {
-            match flag.as_str() {
-                "-mat" => {
+            match runmat_builtins::MatLoadOption::parse(&flag) {
+                Some(runmat_builtins::MatLoadOption::Mat) => {
                     idx += 1;
                     continue;
                 }
-                "-regexp" => {
+                Some(runmat_builtins::MatLoadOption::Regexp) => {
                     idx += 1;
                     if idx >= values.len() {
                         return Err(load_error_with(
@@ -434,10 +434,10 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                     }
                     continue;
                 }
-                other => {
+                None => {
                     return Err(load_error_with(
                         &LOAD_ERROR_INVALID_OPTION,
-                        format!("load: unsupported option '{other}'"),
+                        format!("load: unsupported option '{flag}'"),
                     ));
                 }
             }

@@ -231,6 +231,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::io::mat::save"
 )]
 async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if crate::output_count::current_output_count()
+        .or_else(crate::output_context::requested_output_count)
+        .is_some_and(|count| count > 0)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::SAVE_STATUS_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let mut host_args = Vec::with_capacity(args.len());
     for value in &args {
         host_args.push(gather_if_needed_async(value).await?);
@@ -413,9 +422,9 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
     let mut idx = 0;
     while idx < values.len() {
         if let Some(flag) = option_token(&values[idx])? {
-            match flag.as_str() {
-                "-append" => append = true,
-                "-struct" => {
+            match runmat_builtins::MatSaveOption::parse(&flag) {
+                Some(runmat_builtins::MatSaveOption::Append) => append = true,
+                Some(runmat_builtins::MatSaveOption::Struct) => {
                     idx += 1;
                     if idx >= values.len() {
                         return Err(save_error_with(
@@ -452,7 +461,7 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                     };
                     structs.push(StructRequest { source, fields });
                 }
-                "-regexp" => {
+                Some(runmat_builtins::MatSaveOption::Regexp) => {
                     idx += 1;
                     if idx >= values.len() {
                         return Err(save_error_with(
@@ -484,10 +493,10 @@ async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
                     idx -= 1;
                     regex_patterns.extend(patterns);
                 }
-                other => {
+                None => {
                     return Err(save_error_with(
                         &SAVE_ERROR_INVALID_OPTION,
-                        format!("save: unsupported option '{other}'"),
+                        format!("save: unsupported option '{flag}'"),
                     ));
                 }
             }
@@ -1366,6 +1375,36 @@ pub(crate) mod tests {
             matfile::NumericData::Double { real, .. } => assert_eq!(real, &[expected]),
             other => panic!("expected double array for {name}, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn captured_status_is_a_pre_effect_runmat_extension() {
+        let _workspace = workspace_guard();
+        ensure_test_resolver();
+        set_workspace(&[("x", Value::Num(4.0))]);
+        let folder = tempdir().expect("MAT test folder");
+        let path = folder.path().join("status.mat");
+        let previous = crate::compatibility::runmat_extensions_enabled();
+        crate::compatibility::set_runmat_extensions_enabled(false);
+        let _outputs = crate::output_context::push_output_count(1);
+        let result = block_on(save_builtin(vec![Value::String(
+            path.to_string_lossy().into_owned(),
+        )]));
+        crate::compatibility::set_runmat_extensions_enabled(previous);
+        let error = result.expect_err("captured status requires RunMat extension");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:SaveStatusOutputExtension")
+        );
+        assert!(!path.exists(), "rejection precedes MAT file publication");
+        drop(_outputs);
+        let _statement = crate::output_context::push_output_count(0);
+        let status = block_on(save_builtin(vec![Value::String(
+            path.to_string_lossy().into_owned(),
+        )]))
+        .expect("MATLAB-compatible statement form");
+        assert_eq!(status, Value::Num(0.0));
+        assert_saved_double(&path, "x", 4.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    MatFileOptionName,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
@@ -242,13 +243,12 @@ pub async fn matfile_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
-    preflight_writable_options(&rest)?;
+    let controls = prepare_writable_options(rest)?;
     if !matches!(&filename, Value::GpuTensor(_)) {
         normalise_path(&filename)?;
     }
     let host_filename = gather_if_needed_async(&filename).await?;
-    let host_rest = gather_rest(rest).await?;
-    let writable = parse_writable_option(&host_rest)?;
+    let writable = controls.resolve().await?;
     let path = normalise_path(&host_filename)?;
     let public_path = path.to_string_lossy().into_owned();
     let source = std::sync::Arc::new(MatFsPath::capture(path).map_err(|err| {
@@ -527,78 +527,100 @@ async fn read_existing_entries_for_assignment(
     }
 }
 
-async fn gather_rest(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(rest.len());
-    for value in rest {
-        out.push(gather_if_needed_async(&value).await?);
-    }
-    Ok(out)
+enum PreparedWritableName {
+    Known,
+    Resident(Value),
 }
 
-fn parse_writable_option(rest: &[Value]) -> BuiltinResult<bool> {
-    if rest.is_empty() {
-        return Ok(false);
-    }
+enum PreparedWritableValue {
+    Known(bool),
+    Resident(Value),
+}
+
+struct PreparedWritablePair {
+    name: PreparedWritableName,
+    value: PreparedWritableValue,
+}
+
+struct PreparedWritableOptions(Vec<PreparedWritablePair>);
+
+fn prepare_writable_options(rest: Vec<Value>) -> BuiltinResult<PreparedWritableOptions> {
     if !rest.len().is_multiple_of(2) {
         return Err(matfile_error_with(
             &MATFILE_ERROR_INVALID_OPTION,
             "matfile: name-value arguments must come in pairs",
         ));
     }
-    let mut writable = false;
-    for pair in rest.chunks_exact(2) {
-        let name = value_to_string_scalar(&pair[0]).ok_or_else(|| {
-            matfile_error_with(
-                &MATFILE_ERROR_INVALID_OPTION,
-                "matfile: option names must be character vectors or string scalars",
-            )
-        })?;
-        if !name.eq_ignore_ascii_case(WRITABLE_FIELD) {
-            return Err(matfile_error_with(
-                &MATFILE_ERROR_INVALID_OPTION,
-                format!("matfile: unsupported option '{name}'"),
-            ));
-        }
-        writable = value_to_bool_scalar(&pair[1]).ok_or_else(|| {
-            matfile_error_with(
-                &MATFILE_ERROR_INVALID_OPTION,
-                "matfile: Writable must be a scalar logical or numeric value",
-            )
-        })?;
-    }
-    Ok(writable)
-}
-
-fn preflight_writable_options(rest: &[Value]) -> BuiltinResult<()> {
-    if !rest.len().is_multiple_of(2) {
-        return Err(matfile_error_with(
-            &MATFILE_ERROR_INVALID_OPTION,
-            "matfile: name-value arguments must come in pairs",
-        ));
-    }
-    for pair in rest.chunks_exact(2) {
-        if !matches!(&pair[0], Value::GpuTensor(_)) {
-            let name = value_to_string_scalar(&pair[0]).ok_or_else(|| {
+    let mut pairs = Vec::with_capacity(rest.len() / 2);
+    let mut values = rest.into_iter();
+    while let Some(name) = values.next() {
+        let value = values.next().expect("validated complete Writable pair");
+        let name = if matches!(&name, Value::GpuTensor(_)) {
+            PreparedWritableName::Resident(name)
+        } else {
+            let name = value_to_string_scalar(&name).ok_or_else(|| {
                 matfile_error_with(
                     &MATFILE_ERROR_INVALID_OPTION,
                     "matfile: option names must be character vectors or string scalars",
                 )
             })?;
-            if !name.eq_ignore_ascii_case(WRITABLE_FIELD) {
+            if MatFileOptionName::parse(&name) != Some(MatFileOptionName::Writable) {
                 return Err(matfile_error_with(
                     &MATFILE_ERROR_INVALID_OPTION,
                     format!("matfile: unsupported option '{name}'"),
                 ));
             }
-        }
-        if !matches!(&pair[1], Value::GpuTensor(_)) && value_to_bool_scalar(&pair[1]).is_none() {
-            return Err(matfile_error_with(
-                &MATFILE_ERROR_INVALID_OPTION,
-                "matfile: Writable must be a scalar logical or numeric value",
-            ));
-        }
+            PreparedWritableName::Known
+        };
+        let value = if matches!(&value, Value::GpuTensor(_)) {
+            PreparedWritableValue::Resident(value)
+        } else {
+            PreparedWritableValue::Known(value_to_bool_scalar(&value).ok_or_else(|| {
+                matfile_error_with(
+                    &MATFILE_ERROR_INVALID_OPTION,
+                    "matfile: Writable must be a scalar logical or numeric value",
+                )
+            })?)
+        };
+        pairs.push(PreparedWritablePair { name, value });
     }
-    Ok(())
+    Ok(PreparedWritableOptions(pairs))
+}
+
+impl PreparedWritableOptions {
+    async fn resolve(self) -> BuiltinResult<bool> {
+        let mut writable = false;
+        for pair in self.0 {
+            if let PreparedWritableName::Resident(name) = pair.name {
+                let value = gather_if_needed_async(&name).await?;
+                let name = value_to_string_scalar(&value).ok_or_else(|| {
+                    matfile_error_with(
+                        &MATFILE_ERROR_INVALID_OPTION,
+                        "matfile: option names must be character vectors or string scalars",
+                    )
+                })?;
+                if MatFileOptionName::parse(&name) != Some(MatFileOptionName::Writable) {
+                    return Err(matfile_error_with(
+                        &MATFILE_ERROR_INVALID_OPTION,
+                        format!("matfile: unsupported option '{name}'"),
+                    ));
+                }
+            }
+            writable = match pair.value {
+                PreparedWritableValue::Known(value) => value,
+                PreparedWritableValue::Resident(value) => {
+                    let gathered = gather_if_needed_async(&value).await?;
+                    value_to_bool_scalar(&gathered).ok_or_else(|| {
+                        matfile_error_with(
+                            &MATFILE_ERROR_INVALID_OPTION,
+                            "matfile: Writable must be a scalar logical or numeric value",
+                        )
+                    })?
+                }
+            };
+        }
+        Ok(writable)
+    }
 }
 
 fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
@@ -849,6 +871,31 @@ mod tests {
             Some(&Value::Bool(true))
         );
         assert!(object.matfile_authority().is_some());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn repeated_writable_pairs_are_prepared_once_and_last_value_wins() {
+        let object = block_on(matfile_builtin(
+            Value::String("repeated.mat".into()),
+            vec![
+                Value::String("Writable".into()),
+                Value::Bool(true),
+                Value::String("wRiTaBlE".into()),
+                Value::Int(runmat_value::IntValue::I8(0)),
+            ],
+        ))
+        .expect("repeated complete pairs");
+        let Value::Object(object) = object else {
+            panic!("MAT object");
+        };
+        let Some(Value::Struct(properties)) = object.properties.get(PROPERTIES_FIELD) else {
+            panic!("Properties");
+        };
+        assert_eq!(
+            properties.fields.get(WRITABLE_FIELD),
+            Some(&Value::Bool(false))
+        );
     }
 
     #[test]
