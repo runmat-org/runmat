@@ -122,7 +122,7 @@ fn restoration_cancellation_drops_all_unpublished_entries() {
     ];
     let mut cooperation =
         MatCodecCooperation::with_budget(budget, "load", &runmat_builtins::LOAD_ERROR_IO);
-    let error = block_on(super::super::restore_loaded_entries(
+    let error = block_on(super::super::reader::restore_loaded_entries(
         entries,
         None,
         Some(&mut cooperation),

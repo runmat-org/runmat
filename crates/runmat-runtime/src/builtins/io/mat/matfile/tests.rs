@@ -7,7 +7,7 @@ use std::sync::Arc;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cancelled_assignment_does_not_open_or_publish_mat_bytes() {
-    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
     use std::rc::Rc;
 
     let _lock = fs::provider_override_lock();

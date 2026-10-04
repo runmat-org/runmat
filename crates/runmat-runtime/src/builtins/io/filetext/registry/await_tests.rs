@@ -191,9 +191,10 @@ fn pending_open_keeps_original_provider_and_relative_cwd() {
     let _selected = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir(directory()).expect("selected cwd");
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let args = [Value::from("source.txt"), Value::from("r")];
     let mut call = Box::pin(crate::builtins::io::filetext::fopen::evaluate_in(
         Some(&runtime),
-        &[Value::from("source.txt"), Value::from("r")],
+        &args,
     ));
     assert!(poll_once(call.as_mut()).is_pending());
     assert!(gate.entered.load(Ordering::SeqCst));
@@ -238,9 +239,10 @@ fn pending_open_cancellation_drops_provider_future_without_registering_fid() {
         Rc::new(RuntimeExecutionService::new()),
         cancellation.token(),
     );
+    let args = [Value::from("source.txt"), Value::from("r")];
     let mut call = Box::pin(crate::builtins::io::filetext::fopen::evaluate_in(
         Some(&runtime),
-        &[Value::from("source.txt"), Value::from("r")],
+        &args,
     ));
     assert!(poll_once(call.as_mut()).is_pending());
     cancellation.cancel(CancellationReason::User);
@@ -267,9 +269,10 @@ fn pending_open_resource_revocation_cannot_publish_fid() {
     let _selected = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir(directory()).expect("selected cwd");
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let args = [Value::from("source.txt"), Value::from("r")];
     let mut call = Box::pin(crate::builtins::io::filetext::fopen::evaluate_in(
         Some(&runtime),
-        &[Value::from("source.txt"), Value::from("r")],
+        &args,
     ));
     assert!(poll_once(call.as_mut()).is_pending());
     valid.store(false, Ordering::Release);

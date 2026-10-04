@@ -242,7 +242,7 @@ fn revoked_mat_resource_authority_rejects_outer_save_before_write() {
 #[test]
 fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
     use super::super::tests::receipt::{PendingWriteFs, Witness};
-    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 
     let _filesystem = runmat_filesystem::provider_override_lock();
     let _workspace = workspace_guard();
@@ -310,7 +310,7 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
 fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
     use super::super::tests::pending_provider::PendingDownloadProvider;
     use super::super::tests::receipt::Witness;
-    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
 
     let _accel = test_support::accel_test_lock();
     let _filesystem = runmat_filesystem::provider_override_lock();

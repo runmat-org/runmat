@@ -85,7 +85,7 @@ pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(Strin
     futures::executor::block_on(restore_loaded_entries(entries, None, None))
 }
 
-async fn restore_loaded_entries(
+pub(super) async fn restore_loaded_entries(
     entries: Vec<(String, Value)>,
     source: Option<&MatFsPath>,
     mut cooperation: Option<&mut decoder::MatCodecCooperation<'_>>,

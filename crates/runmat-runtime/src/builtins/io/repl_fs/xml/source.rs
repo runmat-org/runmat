@@ -98,6 +98,7 @@ fn capture_lease(provider: &Arc<dyn FsProvider>) -> io::Result<Option<CapturedFs
 
 #[cfg(test)]
 mod tests {
+    use super::super::{XmlCooperation, XmlOperation};
     use super::*;
 
     fn test_dir(name: &str) -> PathBuf {

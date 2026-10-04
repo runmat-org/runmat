@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn nested_resident_gather_is_cancelled_while_provider_download_is_pending() {
         use crate::builtins::io::mat::tests::pending_provider::PendingDownloadProvider;
-        use runmat_execution::cancellation::CancellationReason;
+        use runmat_execution::CancellationReason;
 
         let _accel = crate::builtins::common::test_support::accel_test_lock();
         let owner = Box::leak(Box::new(PendingDownloadProvider::new()));
