@@ -141,7 +141,11 @@ fn defaults_are_one_ordered_transaction_and_nested_bits_round_trip() {
         Some(vec![nested.clone(), Value::Num(0.0)]),
     ))
     .expect("commit first default once");
-    assert_eq!(values, vec![nested.clone(), nested.clone()]);
+    assert_eq!(values.len(), 2);
+    let expected = encode_durable_value(&nested).unwrap();
+    for value in &values {
+        assert_eq!(encode_durable_value(value).unwrap(), expected);
+    }
     let stored = block_on(service.group_values(runtime(), "app".into()))
         .unwrap()
         .unwrap();
