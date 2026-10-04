@@ -29,13 +29,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     examples: &[BuiltinExample {
         id: "loopback-client-properties", title: "Connect to a local TCP peer",
-        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\nassert(client.Connected);\nassert(strcmp(client.Address, '__RUNMAT_LOOPBACK_HOST__'));\nassert(client.Port == __RUNMAT_LOOPBACK_PORT__);\nclose(client);",
+        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\nassert(client.Connected);\nassert(strcmp(client.Address, '__RUNMAT_LOOPBACK_HOST__'));\nassert(client.Port == __RUNMAT_LOOPBACK_PORT__);\nwrite(client, uint8(9));\nclose(client);",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeLoopbackNetwork,
         fixture: BuiltinExampleFixture::Loopback(BuiltinLoopbackFixture {
             id: BuiltinExampleFixtureId { local_name: "tcpclient-properties" },
-            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: b"", server_bytes: b"" }] }),
+            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: &[9], server_bytes: b"" }] }),
             endpoint_substitutions: &[BuiltinEndpointSubstitution::LoopbackHost, BuiltinEndpointSubstitution::LoopbackPort],
         }),
         requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },

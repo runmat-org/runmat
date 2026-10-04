@@ -35,13 +35,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "loopback-line",
         title: "Read a deterministic line from a local peer",
-        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\nline = readline(client);\ndisp(line);\nclose(client);",
+        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\nwrite(client, uint8(9));\nline = readline(client);\ndisp(line);\nclose(client);",
         display_output: Some("ping"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeLoopbackNetwork,
         fixture: BuiltinExampleFixture::Loopback(BuiltinLoopbackFixture {
             id: BuiltinExampleFixtureId { local_name: "readline-line" },
-            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: b"", server_bytes: b"ping\n" }] }),
+            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: &[9], server_bytes: b"ping\n" }] }),
             endpoint_substitutions: &[BuiltinEndpointSubstitution::LoopbackHost, BuiltinEndpointSubstitution::LoopbackPort],
         }),
         requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },

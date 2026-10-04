@@ -3,220 +3,24 @@
 use super::control::{canonicalize_byte_order, default_user_data, parse_port, string_scalar};
 use super::server_state::{insert_server, DEFAULT_TIMEOUT_SECONDS, HANDLE_ID_FIELD};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, TCPSERVER_ERROR_BIND_FAILED, TCPSERVER_ERROR_INTERNAL,
+    TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
+    TCPSERVER_ERROR_INVALID_PORT,
+    TCPSERVER_EXPLICIT_GPU_INPUT_EXTENSION as EXPLICIT_GPU_INPUT_EXTENSION,
+    TCPSERVER_INTEGER_PORT_EXTENSION as INTEGER_PORT_EXTENSION,
+    TCPSERVER_INTEGER_TIMEOUT_EXTENSION as INTEGER_TIMEOUT_EXTENSION,
+    TCPSERVER_LEGACY_OPTIONS_EXTENSION as LEGACY_OPTIONS_EXTENSION,
+    TCPSERVER_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
 use std::net::{SocketAddr, TcpListener};
 
 const BUILTIN_NAME: &str = "tcpserver";
-
-const INTEGER_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-integer-port",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver with a typed-integer port is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverIntegerPortExtension"),
-};
-const INTEGER_TIMEOUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-integer-timeout",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver with a typed-integer Timeout is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverIntegerTimeoutExtension"),
-};
-const ZERO_PORT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-zero-port",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver ephemeral port selection with port zero is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverZeroPortExtension"),
-};
-const LEGACY_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-legacy-constructor-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver legacy constructor options are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverLegacyOptionsExtension"),
-};
-const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "tcpserver-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "tcpserver with explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TcpserverExplicitGpuInputExtension"),
-};
-pub const TCPSERVER_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
-    INTEGER_PORT_EXTENSION,
-    INTEGER_TIMEOUT_EXTENSION,
-    ZERO_PORT_EXTENSION,
-    LEGACY_OPTIONS_EXTENSION,
-    EXPLICIT_GPU_INPUT_EXTENSION,
-];
-
-const INTEGER_PORT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "port",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The public ServerPort datatype is double. RunMat mode additionally decodes all eight typed integer classes directly into the validated 1..65535 structural range.",
-}];
-const INTEGER_TIMEOUT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Timeout",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The public Timeout datatype is double; typed integers cross a checked binary64-seconds boundary only in RunMat mode.",
-}];
-pub const TCPSERVER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "server = tcpserver(address, integer_port, ...)",
-        inputs: &INTEGER_PORT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The port is range-checked from authoritative integer storage before socket binding. Public object properties remain double-valued.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "server = tcpserver(..., Timeout=integer_timeout)",
-        inputs: &INTEGER_TIMEOUT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Typed Timeout is gated before provider access and must be exactly representable as binary64 before host networking observes it.",
-    },
-];
-
-const TCPSERVER_OUTPUT_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "server",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpserver handle struct for accept/close operations.",
-}];
-const TCPSERVER_INPUTS_ADDRESS_PORT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "address",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bind address or hostname.",
-    },
-    BuiltinParamDescriptor {
-        name: "port",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Listening TCP port (0..65535).",
-    },
-];
-const TCPSERVER_INPUTS_ADDRESS_PORT_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "address",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bind address or hostname.",
-    },
-    BuiltinParamDescriptor {
-        name: "port",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Listening TCP port (0..65535).",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value_pairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/Value options such as Timeout, UserData, Name, and ByteOrder.",
-    },
-];
-const TCPSERVER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "server = tcpserver(address, port)",
-        inputs: &TCPSERVER_INPUTS_ADDRESS_PORT,
-        outputs: &TCPSERVER_OUTPUT_SERVER,
-    },
-    BuiltinSignatureDescriptor {
-        label: "server = tcpserver(address, port, Name, Value, ...)",
-        inputs: &TCPSERVER_INPUTS_ADDRESS_PORT_NAME_VALUE,
-        outputs: &TCPSERVER_OUTPUT_SERVER,
-    },
-];
-
-const TCPSERVER_ERROR_INVALID_ADDRESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INVALID_ADDRESS",
-    identifier: Some("RunMat:tcpserver:InvalidAddress"),
-    when: "Address argument is not a valid string scalar.",
-    message: "tcpserver: invalid address argument",
-};
-const TCPSERVER_ERROR_INVALID_PORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INVALID_PORT",
-    identifier: Some("RunMat:tcpserver:InvalidPort"),
-    when: "Port argument is non-scalar, non-integer, non-finite, or out of range.",
-    message: "tcpserver: invalid port argument",
-};
-const TCPSERVER_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INVALID_NAME_VALUE",
-    identifier: Some("RunMat:tcpserver:InvalidNameValue"),
-    when: "Name/Value arguments are malformed, unsupported, or have invalid values.",
-    message: "tcpserver: invalid name-value arguments",
-};
-const TCPSERVER_ERROR_BIND_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.BIND_FAILED",
-    identifier: Some("RunMat:tcpserver:BindFailed"),
-    when: "Socket bind operation fails.",
-    message: "tcpserver: unable to bind listener",
-};
-const TCPSERVER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TCPSERVER.INTERNAL",
-    identifier: Some("RunMat:tcpserver:InternalError"),
-    when: "Internal listener metadata retrieval fails.",
-    message: "tcpserver: internal error",
-};
-const TCPSERVER_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    TCPSERVER_ERROR_INVALID_ADDRESS,
-    TCPSERVER_ERROR_INVALID_PORT,
-    TCPSERVER_ERROR_INVALID_NAME_VALUE,
-    TCPSERVER_ERROR_BIND_FAILED,
-    TCPSERVER_ERROR_INTERNAL,
-];
-pub const TCPSERVER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TCPSERVER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TCPSERVER_ERRORS,
-};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "tcpserver",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host networking only. GPU-resident scalars are gathered prior to socket binding.",
-};
 
 fn tcpserver_error_with_message(
     message: impl Into<String>,
@@ -245,26 +49,9 @@ fn tcpserver_flow(
     tcpserver_error_with_detail(error, message)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpserver")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "tcpserver",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
-
 #[runtime_builtin(
     name = "tcpserver",
-    category = "io/net",
-    summary = "Create TCP server listeners and return server metadata.",
-    keywords = "tcpserver,tcp,network,server",
-    type_resolver(crate::builtins::io::type_resolvers::tcpserver_type),
-    descriptor(crate::builtins::io::net::tcpserver::TCPSERVER_DESCRIPTOR),
-    extensions(crate::builtins::io::net::tcpserver::TCPSERVER_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::net::tcpserver::TCPSERVER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) async fn tcpserver_builtin(
@@ -585,6 +372,7 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
 pub(crate) mod tests {
     use super::super::server_state::remove_server_for_test;
     use super::*;
+    use runmat_builtins::TCPSERVER_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpStream;
     use std::time::Duration;

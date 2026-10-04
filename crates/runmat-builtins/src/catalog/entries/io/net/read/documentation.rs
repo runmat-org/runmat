@@ -30,13 +30,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     examples: &[BuiltinExample {
         id: "loopback-exact-u8", title: "Read exact bytes from a local peer",
-        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\ndata = read(client, 3, 'uint8');\nassert(isa(data, 'uint8'));\nassert(isequal(double(data), [1 2 3]));\nclose(client);",
+        program: "client = tcpclient('__RUNMAT_LOOPBACK_HOST__', __RUNMAT_LOOPBACK_PORT__);\nwrite(client, uint8(9));\ndata = read(client, 3, 'uint8');\nassert(isa(data, 'uint8'));\nassert(isequal(double(data), [1 2 3]));\nclose(client);",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeLoopbackNetwork,
         fixture: BuiltinExampleFixture::Loopback(BuiltinLoopbackFixture {
             id: BuiltinExampleFixtureId { local_name: "read-exact-u8" },
-            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: b"", server_bytes: &[1, 2, 3] }] }),
+            scenario: BuiltinLoopbackScenario::Tcp(BuiltinTcpScenario { exchanges: &[BuiltinTcpExchange { client_bytes: &[9], server_bytes: &[1, 2, 3] }] }),
             endpoint_substitutions: &[BuiltinEndpointSubstitution::LoopbackHost, BuiltinEndpointSubstitution::LoopbackPort],
         }),
         requirements: BuiltinExampleRequirements { host: BuiltinExampleHostRequirement::NativeOnly, ..BuiltinExampleRequirements::NONE },
