@@ -109,7 +109,6 @@ pub async fn evaluate(
     data_value: &Value,
     rest: &[Value],
 ) -> BuiltinResult<FwriteEval> {
-    let mut cooperation = super::cooperation::FileCooperation::new(runtime, BUILTIN_NAME);
     evaluate_in(None, fid_value, data_value, rest).await
 }
 
@@ -119,6 +118,7 @@ pub async fn evaluate_in(
     data_value: &Value,
     rest: &[Value],
 ) -> BuiltinResult<FwriteEval> {
+    let mut cooperation = super::cooperation::FileCooperation::new(runtime, BUILTIN_NAME);
     preflight_data(data_value)?;
     if matches!(data_value, Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(

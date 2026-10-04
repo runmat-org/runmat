@@ -40,10 +40,13 @@ impl FileCooperation {
         let Some(budget) = self.budget.as_ref() else {
             return Ok(work.await);
         };
-        budget
-            .await_cancellable(work)
-            .await
-            .map_err(|source| self.execution_error(source))
+        budget.await_cancellable(work).await.map_err(|source| {
+            execution_error(
+                self.builtin,
+                self.namespace.as_deref().unwrap_or("RunMat"),
+                source,
+            )
+        })
     }
 
     pub(crate) async fn completed(&mut self, units: usize) -> BuiltinResult<()> {
@@ -51,23 +54,13 @@ impl FileCooperation {
             return Ok(());
         };
         let outcome = budget.checkpoint(units as u64).await;
-        outcome.map_err(|source| self.execution_error(source))
-    }
-
-    fn execution_error(&self, source: ExecutionServiceError) -> crate::RuntimeError {
-        match source {
-            cancelled @ ExecutionServiceError::Cancelled => {
-                build_runtime_error(format!("{}: execution was cancelled", self.builtin))
-                    .with_builtin(self.builtin)
-                    .with_identifier(format!(
-                        "{}:Cancelled",
-                        self.namespace.as_deref().unwrap_or("RunMat")
-                    ))
-                    .with_source(cancelled)
-                    .build()
-            }
-            other => other.into_runtime_error(),
-        }
+        outcome.map_err(|source| {
+            execution_error(
+                self.builtin,
+                self.namespace.as_deref().unwrap_or("RunMat"),
+                source,
+            )
+        })
     }
 }
 
@@ -82,7 +75,7 @@ pub(crate) async fn checkpoint(
         .cpu_cooperation()
         .checkpoint(0)
         .await
-        .map_err(|source| execution_error(runtime, builtin, source))
+        .map_err(|source| execution_error(builtin, &runtime.error_namespace(), source))
 }
 
 pub(crate) async fn await_io<T, E, F>(
@@ -100,19 +93,19 @@ where
         .cpu_cooperation()
         .await_cancellable(work)
         .await
-        .map_err(|source| execution_error(runtime, builtin, source))
+        .map_err(|source| execution_error(builtin, &runtime.error_namespace(), source))
 }
 
 fn execution_error(
-    runtime: &RuntimeContext,
     builtin: &'static str,
+    namespace: &str,
     source: ExecutionServiceError,
 ) -> crate::RuntimeError {
     match source {
         cancelled @ ExecutionServiceError::Cancelled => {
             build_runtime_error(format!("{builtin}: execution was cancelled"))
                 .with_builtin(builtin)
-                .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+                .with_identifier(format!("{namespace}:Cancelled"))
                 .with_source(cancelled)
                 .build()
         }
