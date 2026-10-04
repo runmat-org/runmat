@@ -82,6 +82,7 @@ async fn csvwrite_builtin(
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs.is_some_and(|count| count > 1) {
         return Err(csvwrite_error_with(
@@ -139,6 +140,7 @@ async fn csvwrite_builtin(
     )
     .await?
     .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
     let path = owner
         .path(resolve_path(&filename_value)?)
         .map_err(|source| {
@@ -160,6 +162,7 @@ async fn csvwrite_builtin(
             .await?
             .map_err(map_control_flow)?,
         );
+        cooperation.completed(0).await?;
     }
     let (row_offset, col_offset) = parse_offsets(&gathered_offsets)?;
 
@@ -170,10 +173,20 @@ async fn csvwrite_builtin(
     )
     .await?
     .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
     let matrix = CsvMatrix::from_value(gathered_data)?;
     matrix.ensure_matrix_shape()?;
 
-    let bytes = write_csv(runtime.as_ref(), &path, &matrix, row_offset, col_offset).await?;
+    let bytes = write_csv(
+        runtime.as_ref(),
+        &mut cooperation,
+        &path,
+        &matrix,
+        row_offset,
+        col_offset,
+    )
+    .await?;
+    cooperation.completed(0).await?;
     match requested_outputs {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes as f64)])),

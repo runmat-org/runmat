@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) async fn write_csv(
     runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
     matrix: &CsvMatrix,
     row_offset: usize,
@@ -22,7 +23,6 @@ pub(super) async fn write_csv(
                 err,
             )
         })?;
-    let mut cooperation = TabularCooperation::new(runtime, BUILTIN_NAME);
 
     let line_ending = "\n";
     let rows = matrix.rows();

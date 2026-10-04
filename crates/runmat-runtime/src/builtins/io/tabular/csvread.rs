@@ -79,6 +79,7 @@ async fn csvread_builtin(
     path: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if matches!(path, Value::GpuTensor(_)) || rest.iter().any(|v| matches!(v, Value::GpuTensor(_)))
     {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -106,7 +107,9 @@ async fn csvread_builtin(
     )
     .await?
     .map_err(map_control_flow)?;
+    cooperation.completed(0).await?;
     let options = await_io(runtime.as_ref(), BUILTIN_NAME, parse_arguments(&rest)).await??;
+    cooperation.completed(0).await?;
     let resolved = resolve_path(&gathered_path)?;
     let selected = owner.path(resolved).map_err(|source| {
         csvread_error_with_source(
@@ -116,7 +119,7 @@ async fn csvread_builtin(
         )
     })?;
     let (rows, max_cols, skipped_rows) =
-        read_csv_rows(runtime.as_ref(), &selected, &options).await?;
+        read_csv_rows(runtime.as_ref(), &mut cooperation, &selected, &options).await?;
     let start_row = if options.range.is_none() {
         options.start_row.saturating_sub(skipped_rows)
     } else {
@@ -124,25 +127,34 @@ async fn csvread_builtin(
     };
     let subset = if let Some(range) = options.range {
         let loaded_range = range.relative_to_loaded_rows();
-        apply_range(&rows, max_cols, &loaded_range, ParsedNumber::ZERO)
+        apply_range(
+            &mut cooperation,
+            &rows,
+            max_cols,
+            &loaded_range,
+            ParsedNumber::ZERO,
+        )
+        .await?
     } else {
         apply_offsets(
+            &mut cooperation,
             &rows,
             max_cols,
             start_row,
             options.start_col,
             ParsedNumber::ZERO,
         )
+        .await?
     };
     let value = rows_to_value(
+        &mut cooperation,
         subset.rows,
         subset.row_count,
         subset.col_count,
         ParsedNumber::ZERO,
-    )?;
-    TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME)
-        .completed(0)
-        .await?;
+    )
+    .await?;
+    cooperation.completed(0).await?;
     selected.check().map_err(|source| {
         csvread_error_with_source(
             &CSVREAD_ERROR_IO_READ,

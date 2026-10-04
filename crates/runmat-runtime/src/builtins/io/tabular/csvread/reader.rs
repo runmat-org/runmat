@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) async fn read_csv_rows(
     runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
     options: &CsvReadOptions,
 ) -> BuiltinResult<(Vec<Vec<ParsedNumber>>, usize, usize)> {
@@ -15,7 +16,6 @@ pub(super) async fn read_csv_rows(
                 err,
             )
         })?;
-    let mut cooperation = TabularCooperation::new(runtime, BUILTIN_NAME);
     let mut reader = BufReader::new(file);
     let mut buffer = Vec::new();
     let mut rows = Vec::new();
@@ -70,7 +70,14 @@ pub(super) async fn read_csv_rows(
             None => (options.start_col, None),
         };
         let line = String::from_utf8_lossy(&buffer);
-        let parsed = parse_csv_row(&line, line_index, parse_start_col, parse_end_col)?;
+        let parsed = parse_csv_row(
+            cooperation,
+            &line,
+            line_index,
+            parse_start_col,
+            parse_end_col,
+        )
+        .await?;
         max_cols = max_cols.max(parsed.len());
         rows.push(parsed);
     }
@@ -96,7 +103,8 @@ fn trim_line_ending(buffer: &mut Vec<u8>) {
     }
 }
 
-fn parse_csv_row(
+async fn parse_csv_row(
+    cooperation: &mut TabularCooperation<'_>,
     line: &str,
     line_index: usize,
     parse_start_col: usize,
@@ -104,6 +112,9 @@ fn parse_csv_row(
 ) -> BuiltinResult<Vec<ParsedNumber>> {
     let mut values = Vec::new();
     for (col_index, raw_field) in line.split(',').enumerate() {
+        if col_index > 0 && col_index % 1024 == 0 {
+            cooperation.completed(1024).await?;
+        }
         if col_index < parse_start_col {
             // Respect csvread(..., row, col) offsets by skipping validation for
             // columns that will be dropped before materializing the output.
@@ -143,5 +154,6 @@ fn parse_csv_row(
         };
         values.push(value);
     }
+    cooperation.completed(values.len() % 1024).await?;
     Ok(values)
 }
