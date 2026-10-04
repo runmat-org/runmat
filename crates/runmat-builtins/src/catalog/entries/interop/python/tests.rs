@@ -6,6 +6,36 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_catalog_call(entry, request)
 }
 
+#[test]
+fn python_effect_and_capability_declarations_are_canonical_sets() {
+    for entry in [
+        &PYARGS_CATALOG_ENTRY,
+        &PYENV_CATALOG_ENTRY,
+        &PYRUN_CATALOG_ENTRY,
+        &PYRUNFILE_CATALOG_ENTRY,
+        &TERMINATE_CATALOG_ENTRY,
+    ] {
+        assert!(
+            entry
+                .contract
+                .effects
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "{} effects must be sorted and unique",
+            entry.identity.name
+        );
+        assert!(
+            entry
+                .contract
+                .capabilities
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "{} capabilities must be sorted and unique",
+            entry.identity.name
+        );
+    }
+}
+
 fn request(arguments: Vec<ValueFact>, count: usize) -> CallRequest {
     CallRequest {
         arguments,

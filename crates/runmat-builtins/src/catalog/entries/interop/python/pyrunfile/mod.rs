@@ -26,16 +26,16 @@ pub const PYRUNFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::FilesystemRead,
             EffectKind::EnvironmentRead,
+            EffectKind::FilesystemRead,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
             EffectKind::Unknown,
         ],
         capabilities: &[
-            CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::Filesystem,
+            CapabilityRequirement::ForeignRuntime,
         ],
     },
     placement: HOST_PLACEMENT,
