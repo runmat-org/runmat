@@ -13,7 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "State and placement",
         paragraphs: &[
-            "The setting persists across cells on the same execution thread until another `format` call changes it. `disp` and automatic output use the active mode; `fprintf` and `sprintf` do not.",
+            "The setting persists across cells on the same execution thread until another `format` call changes it. `format` has no public output; a requested output is rejected before the setting changes. `disp` and automatic output use the active mode; `fprintf` and `sprintf` do not.",
             "This is a console-state operation, not a GPU kernel or fusion candidate. The active host renders later values, including values materialized from a provider by the display consumer.",
         ],
     },

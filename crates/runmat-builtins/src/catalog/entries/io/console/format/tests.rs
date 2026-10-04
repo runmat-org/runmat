@@ -1,7 +1,7 @@
 use super::*;
 use runmat_types::{
     CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, OutputSelection,
-    RequestedOutputCount, ShapeFact, ValueFact, ValueKindFact,
+    RequestedOutputCount, ValueFact, ValueKindFact,
 };
 
 fn request(argument: Option<ValueFact>, literal: Option<LiteralValue>) -> CallRequest {
@@ -10,18 +10,16 @@ fn request(argument: Option<ValueFact>, literal: Option<LiteralValue>) -> CallRe
         literals: literal.map_or_else(LiteralContext::default, |value| {
             LiteralContext::new(vec![value])
         }),
-        outputs: OutputSelection::new(RequestedOutputCount::One),
+        outputs: OutputSelection::new(RequestedOutputCount::Zero),
     }
 }
 
 #[test]
-fn fixed_empty_result_and_known_modes_match_runtime_surface() {
+fn no_public_output_and_known_modes_match_runtime_surface() {
     let entry = &FORMAT_CATALOG_ENTRY;
     let no_args = inference::infer(&request(None, None), entry);
-    assert_eq!(
-        no_args.outputs[0].shape,
-        ShapeFact::from(vec![Some(0), Some(0)])
-    );
+    assert!(no_args.outputs.is_empty());
+    assert!(no_args.diagnostics.is_empty());
     let text = ValueFact::scalar(ValueKindFact::String);
     assert!(inference::infer(
         &request(

@@ -2,7 +2,7 @@
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, FormatCommand, FORMAT_DESCRIPTOR, FORMAT_ERROR_ARG_CONFIG,
-    FORMAT_ERROR_UNKNOWN_MODE, FORMAT_INTEGER_AUDIT,
+    FORMAT_ERROR_UNKNOWN_MODE,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{set_display_format, FormatMode, Tensor, Value};
@@ -22,17 +22,16 @@ fn format_error_with(
 
 #[runtime_builtin(
     name = "format",
-    category = "io",
-    summary = "Set numeric display format for console output.",
-    keywords = "format,display,precision,numeric,short,long,scientific",
-    sink = true,
-    suppress_auto_output = true,
-    integer_audit(runmat_builtins::FORMAT_INTEGER_AUDIT),
     binding_variant = "default",
-    descriptor(runmat_builtins::FORMAT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::format"
 )]
 async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().unwrap_or(0) > 0 {
+        return Err(format_error_with(
+            &runmat_builtins::FORMAT_ERROR_TOO_MANY_OUTPUTS,
+            "format: expected no output arguments",
+        ));
+    }
     let keyword = match args.as_slice() {
         [] => {
             set_display_format(FormatMode::Short);
@@ -258,5 +257,15 @@ mod tests {
                 .unwrap();
             assert_eq!(format_number(1e-5), "1.0000e-05");
         });
+    }
+
+    #[test]
+    fn captured_output_rejects_before_mode_change() {
+        set_display_format(FormatMode::Long);
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let err = block_on(format_builtin(vec![Value::from("hex")])).expect_err("sink output");
+        assert_eq!(err.identifier(), Some("RunMat:format:TooManyOutputs"));
+        assert_eq!(get_display_format(), FormatMode::Long);
+        set_display_format(FormatMode::Short);
     }
 }

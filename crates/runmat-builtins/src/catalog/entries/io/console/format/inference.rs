@@ -1,16 +1,8 @@
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
-use runmat_types::{
-    CallInference, CallRequest, LiteralValue, NumericClass, NumericDomain, ShapeFact, ValueFact,
-    ValueKindFact,
-};
+use runmat_types::{CallInference, CallRequest, LiteralValue, ValueFact, ValueKindFact};
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    let mut output = ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
-        class: NumericClass::Double,
-        domain: NumericDomain::Real,
-    }));
-    output.shape = ShapeFact::from(vec![Some(0), Some(0)]);
-    let mut contract = runmat_types::CallContract::fixed(vec![output]);
+    let mut contract = runmat_types::CallContract::fixed(vec![]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let mut result = runmat_types::infer_call(&contract, request);
