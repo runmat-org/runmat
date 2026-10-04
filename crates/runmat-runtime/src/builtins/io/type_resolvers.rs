@@ -44,10 +44,6 @@ pub fn fread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
 }
 
-pub fn fwrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
 pub fn weboptions_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -230,7 +226,6 @@ mod tests {
         &[],
         Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
     );
-    assert_resolver!(fwrite_type_resolver, fwrite_type, &[], Type::Num);
     assert_resolver!(
         weboptions_type_resolver,
         weboptions_type,

@@ -2,378 +2,23 @@
 use std::io::{Seek, SeekFrom, Write};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, FWRITE_ARROW_PRECISION_EXTENSION, FWRITE_ERROR_INTERNAL,
+    FWRITE_ERROR_INVALID_IDENTIFIER, FWRITE_ERROR_INVALID_INPUT, FWRITE_ERROR_INVALID_OPTION,
+    FWRITE_ERROR_IO, FWRITE_GPU_INPUT_EXTENSION, FWRITE_INTEGER_ID_EXTENSION,
+    FWRITE_INTEGER_SKIP_EXTENSION, FWRITE_LOGICAL_CONTROL_EXTENSION,
+    FWRITE_RESIDENT_CONTROL_EXTENSION, FWRITE_SINGLE_CONTROL_EXTENSION,
 };
+#[cfg(test)]
+use runmat_builtins::{FWRITE_DESCRIPTOR, FWRITE_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, NumericDType, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::registry;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_filesystem::File;
 
-const FWRITE_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "direct fwrite of gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteGpuInputExtension"),
-};
-const FWRITE_INTEGER_ID_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-integer-fileid",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "integer-class fwrite file identifiers are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteIntegerIdExtension"),
-};
-const FWRITE_INTEGER_SKIP_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-integer-skip",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "typed integer fwrite skip controls are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteIntegerSkipExtension"),
-};
-const FWRITE_LOGICAL_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-logical-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "logical fwrite file identifiers and skips are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteLogicalControlExtension"),
-};
-const FWRITE_SINGLE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-single-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "single-precision fwrite file identifiers and skips are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteSingleControlExtension"),
-};
-const FWRITE_RESIDENT_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-resident-control",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "provider-resident fwrite control arguments are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteResidentControlExtension"),
-};
-const FWRITE_ARROW_PRECISION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fwrite-arrow-precision",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fread-style source=>output fwrite precision syntax is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FwriteArrowPrecisionExtension"),
-};
-
-pub const FWRITE_EXTENSIONS: [BuiltinExtensionDescriptor; 7] = [
-    FWRITE_GPU_INPUT_EXTENSION,
-    FWRITE_INTEGER_ID_EXTENSION,
-    FWRITE_INTEGER_SKIP_EXTENSION,
-    FWRITE_LOGICAL_CONTROL_EXTENSION,
-    FWRITE_SINGLE_CONTROL_EXTENSION,
-    FWRITE_RESIDENT_CONTROL_EXTENSION,
-    FWRITE_ARROW_PRECISION_EXTENSION,
-];
-
-const FWRITE_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents all eight integer data classes; exact source values convert directly to the selected binary precision.",
-    }];
-const FWRITE_INTEGER_ID_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fileID",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents double identifiers; typed integer identifiers are independently gated.",
-    }];
-const FWRITE_INTEGER_SKIP_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "skip",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents a double skip scalar; typed integer skips are independently gated and range-checked exactly.",
-    }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "count = fwrite(fileID, integer_A, precision, ...)",
-        inputs: &FWRITE_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Saturate,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer data remains authoritative through binary encoding; narrowing saturates and count is double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "count = fwrite(integer_fileID, A, ...)",
-        inputs: &FWRITE_INTEGER_ID_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The identifier is validated exactly before registry access.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "count = fwrite(fileID, A, precision, integer_skip, ...)",
-        inputs: &FWRITE_INTEGER_SKIP_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The skip is validated exactly in the host seek domain.",
-    },
-];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "fwrite",
-    op_kind: GpuOpKind::Custom("file-io-write"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host-only binary file I/O; GPU arguments are gathered to the CPU prior to writing.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fwrite")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "fwrite",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "File I/O is never fused; metadata recorded for completeness.",
-};
-
 const BUILTIN_NAME: &str = "fwrite";
-
-const FWRITE_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "count",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of elements successfully written.",
-}];
-const FWRITE_INPUTS_FID_DATA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "fid",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "File identifier opened by fopen.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric/logical/text payload to write.",
-    },
-];
-const FWRITE_INPUTS_FID_DATA_PRECISION: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "fid",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "File identifier opened by fopen.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric/logical/text payload to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
-        description: "Write precision label (for example \"uint8\", \"double\").",
-    },
-];
-const FWRITE_INPUTS_FID_DATA_PRECISION_SKIP: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "fid",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "File identifier opened by fopen.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric/logical/text payload to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
-        description: "Write precision label (for example \"uint8\", \"double\").",
-    },
-    BuiltinParamDescriptor {
-        name: "skip",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
-        description: "Bytes skipped after each element written.",
-    },
-];
-const FWRITE_INPUTS_FID_DATA_PRECISION_MACHINEFMT: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "fid",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "File identifier opened by fopen.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric/logical/text payload to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
-        description: "Write precision label (for example \"uint8\", \"double\").",
-    },
-    BuiltinParamDescriptor {
-        name: "machinefmt",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"native\""),
-        description: "Machine format label (native/little-endian/big-endian aliases).",
-    },
-];
-const FWRITE_INPUTS_FID_DATA_PRECISION_SKIP_MACHINEFMT: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "fid",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "File identifier opened by fopen.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric/logical/text payload to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "precision",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"uint8\""),
-        description: "Write precision label (for example \"uint8\", \"double\").",
-    },
-    BuiltinParamDescriptor {
-        name: "skip",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
-        description: "Bytes skipped after each element written.",
-    },
-    BuiltinParamDescriptor {
-        name: "machinefmt",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"native\""),
-        description: "Machine format label (native/little-endian/big-endian aliases).",
-    },
-];
-const FWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "count = fwrite(fid, data)",
-        inputs: &FWRITE_INPUTS_FID_DATA,
-        outputs: &FWRITE_OUTPUT_COUNT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "count = fwrite(fid, data, precision)",
-        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION,
-        outputs: &FWRITE_OUTPUT_COUNT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "count = fwrite(fid, data, precision, skip)",
-        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION_SKIP,
-        outputs: &FWRITE_OUTPUT_COUNT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "count = fwrite(fid, data, precision, machinefmt)",
-        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION_MACHINEFMT,
-        outputs: &FWRITE_OUTPUT_COUNT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "count = fwrite(fid, data, precision, skip, machinefmt)",
-        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION_SKIP_MACHINEFMT,
-        outputs: &FWRITE_OUTPUT_COUNT,
-    },
-];
-
-const FWRITE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FWRITE.INVALID_INPUT",
-    identifier: Some("RunMat:fwrite:InvalidInput"),
-    when: "Identifier, payload, or argument cardinality/type constraints are violated.",
-    message: "fwrite: invalid input arguments",
-};
-const FWRITE_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FWRITE.INVALID_IDENTIFIER",
-    identifier: Some("RunMat:fwrite:InvalidIdentifier"),
-    when: "Identifier does not refer to a writable open file.",
-    message: "fwrite: invalid file identifier. Use fopen to generate a valid file ID.",
-};
-const FWRITE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FWRITE.INVALID_OPTION",
-    identifier: Some("RunMat:fwrite:InvalidOption"),
-    when: "Precision, skip, or machine format options are invalid.",
-    message: "fwrite: invalid option configuration",
-};
-const FWRITE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FWRITE.IO",
-    identifier: Some("RunMat:fwrite:IoFailure"),
-    when: "Write/seek operation fails.",
-    message: "fwrite: file write failed",
-};
-const FWRITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FWRITE.INTERNAL",
-    identifier: None,
-    when: "Internal runtime control-flow conversion fails.",
-    message: "fwrite: internal error",
-};
-const FWRITE_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FWRITE_ERROR_INVALID_INPUT,
-    FWRITE_ERROR_INVALID_IDENTIFIER,
-    FWRITE_ERROR_INVALID_OPTION,
-    FWRITE_ERROR_IO,
-    FWRITE_ERROR_INTERNAL,
-];
-pub const FWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FWRITE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FWRITE_ERRORS,
-};
 
 fn fwrite_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -389,6 +34,20 @@ fn fwrite_error_with_message(
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fwrite_error_with_source(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -414,14 +73,7 @@ fn map_string_result<T>(
 
 #[runtime_builtin(
     name = "fwrite",
-    category = "io/filetext",
-    summary = "Write binary data to file identifiers.",
-    keywords = "fwrite,file,io,binary,precision",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::fwrite_type),
-    descriptor(crate::builtins::io::filetext::fwrite::FWRITE_DESCRIPTOR),
-    extensions(crate::builtins::io::filetext::fwrite::FWRITE_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::filetext::fwrite::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -452,6 +104,7 @@ pub async fn evaluate(
     data_value: &Value,
     rest: &[Value],
 ) -> BuiltinResult<FwriteEval> {
+    preflight_data(data_value)?;
     if matches!(data_value, Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FWRITE_GPU_INPUT_EXTENSION,
@@ -459,9 +112,8 @@ pub async fn evaluate(
         )?;
     }
     preflight_control(fid_value, ControlRole::FileId)?;
-    let raw_refs: Vec<Value> = rest.to_vec();
-    let (raw_precision, raw_skip, _) =
-        map_string_result(classify_arguments(&raw_refs), &FWRITE_ERROR_INVALID_INPUT)?;
+    let (raw_precision, raw_skip, raw_machine) =
+        map_string_result(classify_arguments(rest), &FWRITE_ERROR_INVALID_INPUT)?;
     if let Some(skip) = raw_skip {
         preflight_control(skip, ControlRole::Skip)?;
     }
@@ -477,6 +129,17 @@ pub async fn evaluate(
                 BUILTIN_NAME,
             )?;
         }
+    }
+    let precision_spec =
+        map_string_result(parse_precision(raw_precision), &FWRITE_ERROR_INVALID_OPTION)?;
+    if let Some(skip) = raw_skip.filter(|value| !matches!(value, Value::GpuTensor(_))) {
+        map_string_result(parse_skip(Some(skip)), &FWRITE_ERROR_INVALID_OPTION)?;
+    }
+    if let Some(machine) = raw_machine {
+        map_string_result(
+            parse_machine_format(Some(machine), "native"),
+            &FWRITE_ERROR_INVALID_OPTION,
+        )?;
     }
     let fid_host = gather_value(fid_value).await?;
     let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
@@ -512,18 +175,19 @@ pub async fn evaluate(
         )
     })?;
 
-    let data_host = gather_value(data_value).await?;
-    let rest_host = gather_args(rest).await?;
-    let (precision_arg, skip_arg, machine_arg) =
-        map_string_result(classify_arguments(&rest_host), &FWRITE_ERROR_INVALID_INPUT)?;
-
-    let precision_spec =
-        map_string_result(parse_precision(precision_arg), &FWRITE_ERROR_INVALID_OPTION)?;
-    let skip_bytes = map_string_result(parse_skip(skip_arg), &FWRITE_ERROR_INVALID_OPTION)?;
+    let skip_host = match raw_skip {
+        Some(value @ Value::GpuTensor(_)) => Some(gather_value(value).await?),
+        Some(value) => Some(value.clone()),
+        None => None,
+    };
+    let skip_bytes =
+        map_string_result(parse_skip(skip_host.as_ref()), &FWRITE_ERROR_INVALID_OPTION)?;
     let machine_format = map_string_result(
-        parse_machine_format(machine_arg, &info.machinefmt),
+        parse_machine_format(raw_machine, &info.machinefmt),
         &FWRITE_ERROR_INVALID_OPTION,
     )?;
+    let data_host = gather_value(data_value).await?;
+    let elements = map_string_result(flatten_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
 
     let mut guard = handle.lock().map_err(|_| {
         fwrite_error_with_detail(
@@ -538,11 +202,7 @@ pub async fn evaluate(
         )
     })?;
 
-    let elements = map_string_result(flatten_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
-    let count = map_string_result(
-        write_elements(file, &elements, precision_spec, skip_bytes, machine_format),
-        &FWRITE_ERROR_IO,
-    )?;
+    let count = write_elements(file, &elements, precision_spec, skip_bytes, machine_format)?;
     Ok(FwriteEval::new(count))
 }
 
@@ -552,741 +212,33 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
         .map_err(map_control_flow)
 }
 
-async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(gathered)
-}
-
-#[derive(Clone, Copy)]
-enum ControlRole {
-    FileId,
-    Skip,
-}
-
-fn preflight_control(value: &Value, role: ControlRole) -> BuiltinResult<()> {
-    let integer_extension = match role {
-        ControlRole::FileId => &FWRITE_INTEGER_ID_EXTENSION,
-        ControlRole::Skip => &FWRITE_INTEGER_SKIP_EXTENSION,
-    };
+fn preflight_data(value: &Value) -> BuiltinResult<()> {
     match value {
-        Value::Int(_) => {
-            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
-        }
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            crate::compatibility::ensure_builtin_extension_enabled(integer_extension, BUILTIN_NAME)
-        }
-        Value::Bool(_) | Value::LogicalArray(_) => {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &FWRITE_LOGICAL_CONTROL_EXTENSION,
-                BUILTIN_NAME,
-            )
-        }
-        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &FWRITE_SINGLE_CONTROL_EXTENSION,
-                BUILTIN_NAME,
-            )
-        }
-        Value::GpuTensor(handle) => {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &FWRITE_RESIDENT_CONTROL_EXTENSION,
-                BUILTIN_NAME,
-            )?;
-            if runmat_accelerate_api::handle_is_logical(handle) {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &FWRITE_LOGICAL_CONTROL_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-            } else if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    integer_extension,
-                    BUILTIN_NAME,
-                )?;
-            } else if runmat_accelerate_api::handle_precision(handle)
-                == Some(runmat_accelerate_api::ProviderPrecision::F32)
-            {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &FWRITE_SINGLE_CONTROL_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-            }
+        Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Tensor(_)
+        | Value::LogicalArray(_)
+        | Value::CharArray(_)
+        | Value::String(_)
+        | Value::StringArray(_) => Ok(()),
+        Value::GpuTensor(handle)
+            if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>
+        {
             Ok(())
         }
-        _ => Ok(()),
+        _ => Err(fwrite_error_with_detail(
+            &FWRITE_ERROR_INVALID_INPUT,
+            "data must be real numeric, logical, or text",
+        )),
     }
 }
 
-fn parse_fid(value: &Value) -> Result<i32, String> {
-    let scalar = match value {
-        Value::Num(n) => *n,
-        Value::Int(int) => {
-            return int
-                .try_to_i32()
-                .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
-        }
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
-            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                return int
-                    .try_to_i32()
-                    .ok_or_else(|| "fwrite: file identifier is out of range".to_string());
-            }
-            tensor::tensor_value_f64(t, 0)
-        }
-        _ => return Err("fwrite: file identifier must be numeric".to_string()),
-    };
-    if !scalar.is_finite() {
-        return Err("fwrite: file identifier must be finite".to_string());
-    }
-    if scalar.fract().abs() > f64::EPSILON {
-        return Err("fwrite: file identifier must be an integer".to_string());
-    }
-    if scalar < i32::MIN as f64 || scalar > i32::MAX as f64 {
-        return Err("fwrite: file identifier is out of range".to_string());
-    }
-    Ok(scalar as i32)
-}
+mod controls;
+mod writing;
 
-type FwriteArgs<'a> = (Option<&'a Value>, Option<&'a Value>, Option<&'a Value>);
-
-fn classify_arguments(args: &[Value]) -> Result<FwriteArgs<'_>, String> {
-    match args.len() {
-        0 => Ok((None, None, None)),
-        1 => {
-            if is_string_like(&args[0]) {
-                Ok((Some(&args[0]), None, None))
-            } else {
-                Err(
-                    "fwrite: precision argument must be a string scalar or character vector"
-                        .to_string(),
-                )
-            }
-        }
-        2 => {
-            if !is_string_like(&args[0]) {
-                return Err(
-                    "fwrite: precision argument must be a string scalar or character vector"
-                        .to_string(),
-                );
-            }
-            if is_numeric_like(&args[1]) {
-                Ok((Some(&args[0]), Some(&args[1]), None))
-            } else if is_string_like(&args[1]) {
-                Ok((Some(&args[0]), None, Some(&args[1])))
-            } else {
-                Err("fwrite: invalid argument combination (expected numeric skip or machine format string)".to_string())
-            }
-        }
-        3 => {
-            if !is_string_like(&args[0]) || !is_numeric_like(&args[1]) || !is_string_like(&args[2])
-            {
-                return Err("fwrite: expected arguments (precision, skip, machinefmt)".to_string());
-            }
-            Ok((Some(&args[0]), Some(&args[1]), Some(&args[2])))
-        }
-        _ => Err("fwrite: too many input arguments".to_string()),
-    }
-}
-
-fn is_string_like(value: &Value) -> bool {
-    match value {
-        Value::String(_) => true,
-        Value::CharArray(ca) => ca.rows == 1,
-        Value::StringArray(sa) => sa.data.len() == 1,
-        _ => false,
-    }
-}
-
-fn is_numeric_like(value: &Value) -> bool {
-    match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(t) => tensor::is_scalar_tensor(t),
-        Value::LogicalArray(la) => la.data.len() == 1,
-        Value::GpuTensor(handle) => handle.shape().iter().product::<usize>() == 1,
-        _ => false,
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct WriteSpec {
-    input: InputType,
-}
-
-impl WriteSpec {
-    fn default() -> Self {
-        Self {
-            input: InputType::UInt8,
-        }
-    }
-}
-
-fn parse_precision(arg: Option<&Value>) -> Result<WriteSpec, String> {
-    match arg {
-        None => Ok(WriteSpec::default()),
-        Some(value) => {
-            let text = scalar_string(
-                value,
-                "fwrite: precision argument must be a string scalar or character vector",
-            )?;
-            parse_precision_string(&text)
-        }
-    }
-}
-
-fn parse_precision_string(raw: &str) -> Result<WriteSpec, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("fwrite: precision argument must not be empty".to_string());
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if let Some((lhs, rhs)) = lower.split_once("=>") {
-        let lhs = lhs.trim();
-        let rhs = rhs.trim();
-        let input = parse_input_label(lhs)?;
-        let output = parse_input_label(rhs)?;
-        if input != output {
-            return Err(
-                "fwrite: differing input/output precisions are not implemented yet".to_string(),
-            );
-        }
-        Ok(WriteSpec { input })
-    } else {
-        parse_input_label(lower.trim()).map(|input| WriteSpec { input })
-    }
-}
-
-fn parse_skip(arg: Option<&Value>) -> Result<usize, String> {
-    match arg {
-        None => Ok(0),
-        Some(Value::Int(int)) => int_to_skip(int),
-        Some(Value::Tensor(t)) if tensor::is_scalar_tensor(t) => {
-            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                return int_to_skip(&int);
-            }
-            parse_skip_scalar(tensor::tensor_value_f64(t, 0))
-        }
-        Some(value) => {
-            let scalar = numeric_scalar(value, "fwrite: skip must be numeric")?;
-            parse_skip_scalar(scalar)
-        }
-    }
-}
-
-fn parse_skip_scalar(scalar: f64) -> Result<usize, String> {
-    if !scalar.is_finite() {
-        return Err("fwrite: skip value must be finite".to_string());
-    }
-    if scalar < 0.0 {
-        return Err("fwrite: skip value must be non-negative".to_string());
-    }
-    let rounded = scalar.round();
-    if (rounded - scalar).abs() > f64::EPSILON {
-        return Err("fwrite: skip value must be an integer".to_string());
-    }
-    if rounded >= i64::MAX as f64 {
-        return Err("fwrite: skip value is too large".to_string());
-    }
-    Ok(rounded as usize)
-}
-
-fn int_to_skip(value: &IntValue) -> Result<usize, String> {
-    let Some(skip) = value.try_to_usize() else {
-        return Err("fwrite: skip value must be non-negative".to_string());
-    };
-    if skip > i64::MAX as usize {
-        return Err("fwrite: skip value is too large".to_string());
-    }
-    Ok(skip)
-}
-
-#[derive(Clone, Copy, Debug)]
-enum MachineFormat {
-    Native,
-    LittleEndian,
-    BigEndian,
-}
-
-impl MachineFormat {
-    fn to_endianness(self) -> Endianness {
-        match self {
-            MachineFormat::Native => {
-                if cfg!(target_endian = "little") {
-                    Endianness::Little
-                } else {
-                    Endianness::Big
-                }
-            }
-            MachineFormat::LittleEndian => Endianness::Little,
-            MachineFormat::BigEndian => Endianness::Big,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Endianness {
-    Little,
-    Big,
-}
-
-fn parse_machine_format(arg: Option<&Value>, default_label: &str) -> Result<MachineFormat, String> {
-    match arg {
-        Some(value) => {
-            let text = scalar_string(
-                value,
-                "fwrite: machine format must be a string scalar or character vector",
-            )?;
-            machine_format_from_label(&text)
-        }
-        None => machine_format_from_label(default_label),
-    }
-}
-
-fn machine_format_from_label(label: &str) -> Result<MachineFormat, String> {
-    let trimmed = label.trim();
-    if trimmed.is_empty() {
-        return Err("fwrite: machine format must not be empty".to_string());
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let collapsed: String = lower
-        .chars()
-        .filter(|c| !matches!(c, '-' | '_' | ' '))
-        .collect();
-    if matches!(collapsed.as_str(), "native" | "n" | "system" | "default") {
-        return Ok(MachineFormat::Native);
-    }
-    if matches!(
-        collapsed.as_str(),
-        "l" | "le" | "littleendian" | "pc" | "intel"
-    ) {
-        return Ok(MachineFormat::LittleEndian);
-    }
-    if matches!(
-        collapsed.as_str(),
-        "b" | "be" | "bigendian" | "mac" | "motorola"
-    ) {
-        return Ok(MachineFormat::BigEndian);
-    }
-    if lower.starts_with("ieee-le") {
-        return Ok(MachineFormat::LittleEndian);
-    }
-    if lower.starts_with("ieee-be") {
-        return Ok(MachineFormat::BigEndian);
-    }
-    Err(format!("fwrite: unsupported machine format '{trimmed}'"))
-}
-
-fn scalar_string(value: &Value, err: &str) -> Result<String, String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(err.to_string()),
-    }
-}
-
-fn numeric_scalar(value: &Value, err: &str) -> Result<f64, String> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(int) => Ok(int.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(tensor::tensor_value_f64(t, 0)),
-        Value::LogicalArray(la) if la.data.len() == 1 => {
-            Ok(if la.data[0] != 0 { 1.0 } else { 0.0 })
-        }
-        _ => Err(err.to_string()),
-    }
-}
-
-#[derive(Clone, Debug)]
-enum WriteElement {
-    Floating(f64),
-    Integer(IntValue),
-}
-
-impl WriteElement {
-    fn as_f64(&self) -> f64 {
-        match self {
-            Self::Floating(value) => *value,
-            Self::Integer(value) => value.to_f64(),
-        }
-    }
-}
-
-fn flatten_elements(value: &Value) -> Result<Vec<WriteElement>, String> {
-    match value {
-        Value::Tensor(tensor) => Ok((0..tensor.len())
-            .map(|index| {
-                let value = tensor
-                    .numeric_value_at(index)
-                    .expect("index within authoritative numeric storage");
-                value.into_int_value().map_or_else(
-                    || WriteElement::Floating(value.materialize_f64()),
-                    WriteElement::Integer,
-                )
-            })
-            .collect()),
-        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
-        Value::Int(int) => Ok(vec![WriteElement::Integer(int.clone())]),
-        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
-        Value::LogicalArray(array) => Ok(array
-            .data
-            .iter()
-            .map(|bit| WriteElement::Floating(if *bit != 0 { 1.0 } else { 0.0 }))
-            .collect()),
-        Value::CharArray(ca) => Ok(flatten_char_array(ca)
-            .into_iter()
-            .map(WriteElement::Floating)
-            .collect()),
-        Value::String(text) => Ok(text
-            .chars()
-            .map(|ch| WriteElement::Floating(ch as u32 as f64))
-            .collect()),
-        Value::StringArray(sa) => Ok(flatten_string_array(sa)
-            .into_iter()
-            .map(WriteElement::Floating)
-            .collect()),
-        Value::GpuTensor(_) => Err("fwrite: expected host tensor data after gathering".to_string()),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err("fwrite: complex values are not supported yet".to_string())
-        }
-        _ => Err(format!("fwrite: unsupported data type {:?}", value)),
-    }
-}
-
-fn flatten_char_array(ca: &CharArray) -> Vec<f64> {
-    let mut values = Vec::with_capacity(ca.rows.saturating_mul(ca.cols));
-    for c in 0..ca.cols {
-        for r in 0..ca.rows {
-            let idx = r * ca.cols + c;
-            values.push(ca.data[idx] as u32 as f64);
-        }
-    }
-    values
-}
-
-fn flatten_string_array(sa: &runmat_value::StringArray) -> Vec<f64> {
-    if sa.data.is_empty() {
-        return Vec::new();
-    }
-    let mut values = Vec::new();
-    for (idx, text) in sa.data.iter().enumerate() {
-        if idx > 0 {
-            values.push('\n' as u32 as f64);
-        }
-        values.extend(text.chars().map(|ch| ch as u32 as f64));
-    }
-    values
-}
-
-fn write_elements(
-    file: &mut File,
-    values: &[WriteElement],
-    spec: WriteSpec,
-    skip: usize,
-    machine: MachineFormat,
-) -> Result<usize, String> {
-    let endianness = machine.to_endianness();
-    let skip_offset = skip as i64;
-    for value in values {
-        match spec.input {
-            InputType::UInt8 => {
-                let byte = match integer_unsigned(value, u8::MAX as u64) {
-                    Some(value) => value as u8,
-                    None => to_u8(value.as_f64()),
-                };
-                write_bytes(file, &[byte])?;
-            }
-            InputType::Int8 => {
-                let byte = match integer_signed(value, i8::MIN as i64, i8::MAX as i64) {
-                    Some(value) => value as i8,
-                    None => to_i8(value.as_f64()),
-                } as u8;
-                write_bytes(file, &[byte])?;
-            }
-            InputType::UInt16 => {
-                let bytes = match integer_unsigned(value, u16::MAX as u64) {
-                    Some(value) => endian_u16(value as u16, endianness),
-                    None => encode_u16(value.as_f64(), endianness),
-                };
-                write_bytes(file, &bytes)?;
-            }
-            InputType::Int16 => {
-                let bytes = match integer_signed(value, i16::MIN as i64, i16::MAX as i64) {
-                    Some(value) => endian_i16(value as i16, endianness),
-                    None => encode_i16(value.as_f64(), endianness),
-                };
-                write_bytes(file, &bytes)?;
-            }
-            InputType::UInt32 => {
-                let bytes = match integer_unsigned(value, u32::MAX as u64) {
-                    Some(value) => endian_u32(value as u32, endianness),
-                    None => encode_u32(value.as_f64(), endianness),
-                };
-                write_bytes(file, &bytes)?;
-            }
-            InputType::Int32 => {
-                let bytes = match integer_signed(value, i32::MIN as i64, i32::MAX as i64) {
-                    Some(value) => endian_i32(value as i32, endianness),
-                    None => encode_i32(value.as_f64(), endianness),
-                };
-                write_bytes(file, &bytes)?;
-            }
-            InputType::UInt64 => {
-                let bytes = match value {
-                    WriteElement::Integer(_) => {
-                        endian_u64(integer_unsigned(value, u64::MAX).unwrap(), endianness)
-                    }
-                    _ => encode_u64(value.as_f64(), endianness),
-                };
-                write_bytes(file, &bytes)?;
-            }
-            InputType::Int64 => {
-                let bytes = match value {
-                    WriteElement::Integer(_) => endian_i64(
-                        integer_signed(value, i64::MIN, i64::MAX).unwrap(),
-                        endianness,
-                    ),
-                    _ => encode_i64(value.as_f64(), endianness),
-                };
-                write_bytes(file, &bytes)?;
-            }
-            InputType::Float32 => {
-                let bytes = encode_f32(value.as_f64(), endianness);
-                write_bytes(file, &bytes)?;
-            }
-            InputType::Float64 => {
-                let bytes = encode_f64(value.as_f64(), endianness);
-                write_bytes(file, &bytes)?;
-            }
-        }
-
-        if skip > 0 {
-            file.seek(SeekFrom::Current(skip_offset))
-                .map_err(|err| format!("fwrite: failed to seek while applying skip ({err})"))?;
-        }
-    }
-    Ok(values.len())
-}
-
-fn integer_raw(value: &WriteElement) -> Option<i128> {
-    match value {
-        WriteElement::Integer(IntValue::I8(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::I16(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::I32(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::I64(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::U8(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::U16(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::U32(v)) => Some(*v as i128),
-        WriteElement::Integer(IntValue::U64(v)) => Some(*v as i128),
-        WriteElement::Floating(_) => None,
-    }
-}
-fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
-    integer_raw(value).map(|v| v.clamp(0, max as i128) as u64)
-}
-fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
-    integer_raw(value).map(|v| v.clamp(min as i128, max as i128) as i64)
-}
-fn endian_u16(value: u16, endian: Endianness) -> [u8; 2] {
-    match endian {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    }
-}
-fn endian_i16(value: i16, endian: Endianness) -> [u8; 2] {
-    match endian {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    }
-}
-fn endian_u32(value: u32, endian: Endianness) -> [u8; 4] {
-    match endian {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    }
-}
-fn endian_i32(value: i32, endian: Endianness) -> [u8; 4] {
-    match endian {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    }
-}
-fn endian_u64(value: u64, endian: Endianness) -> [u8; 8] {
-    match endian {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    }
-}
-fn endian_i64(value: i64, endian: Endianness) -> [u8; 8] {
-    match endian {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    }
-}
-
-fn write_bytes(file: &mut File, bytes: &[u8]) -> Result<(), String> {
-    file.write_all(bytes)
-        .map_err(|err| format!("fwrite: failed to write to file ({err})"))
-}
-
-fn to_u8(value: f64) -> u8 {
-    if value.is_nan() {
-        return 0;
-    }
-    if !value.is_finite() {
-        return if value.is_sign_negative() { 0 } else { u8::MAX };
-    }
-    let mut rounded = value.round();
-    if rounded.is_nan() {
-        return 0;
-    }
-    if rounded < 0.0 {
-        rounded = 0.0;
-    }
-    if rounded > u8::MAX as f64 {
-        rounded = u8::MAX as f64;
-    }
-    rounded as u8
-}
-
-fn to_i8(value: f64) -> i8 {
-    saturating_round(value, i8::MIN as f64, i8::MAX as f64) as i8
-}
-
-fn encode_u16(value: f64, endianness: Endianness) -> [u8; 2] {
-    let rounded = saturating_round(value, 0.0, u16::MAX as f64) as u16;
-    match endianness {
-        Endianness::Little => rounded.to_le_bytes(),
-        Endianness::Big => rounded.to_be_bytes(),
-    }
-}
-
-fn encode_i16(value: f64, endianness: Endianness) -> [u8; 2] {
-    let rounded = saturating_round(value, i16::MIN as f64, i16::MAX as f64) as i16;
-    match endianness {
-        Endianness::Little => rounded.to_le_bytes(),
-        Endianness::Big => rounded.to_be_bytes(),
-    }
-}
-
-fn encode_u32(value: f64, endianness: Endianness) -> [u8; 4] {
-    let rounded = saturating_round(value, 0.0, u32::MAX as f64) as u32;
-    match endianness {
-        Endianness::Little => rounded.to_le_bytes(),
-        Endianness::Big => rounded.to_be_bytes(),
-    }
-}
-
-fn encode_i32(value: f64, endianness: Endianness) -> [u8; 4] {
-    let rounded = saturating_round(value, i32::MIN as f64, i32::MAX as f64) as i32;
-    match endianness {
-        Endianness::Little => rounded.to_le_bytes(),
-        Endianness::Big => rounded.to_be_bytes(),
-    }
-}
-
-fn encode_u64(value: f64, endianness: Endianness) -> [u8; 8] {
-    let rounded = saturating_round(value, 0.0, u64::MAX as f64);
-    let as_u64 = if rounded.is_finite() {
-        rounded as u64
-    } else if rounded.is_sign_negative() {
-        0
-    } else {
-        u64::MAX
-    };
-    match endianness {
-        Endianness::Little => as_u64.to_le_bytes(),
-        Endianness::Big => as_u64.to_be_bytes(),
-    }
-}
-
-fn encode_i64(value: f64, endianness: Endianness) -> [u8; 8] {
-    let rounded = saturating_round(value, i64::MIN as f64, i64::MAX as f64);
-    let as_i64 = if rounded.is_finite() {
-        rounded as i64
-    } else if rounded.is_sign_negative() {
-        i64::MIN
-    } else {
-        i64::MAX
-    };
-    match endianness {
-        Endianness::Little => as_i64.to_le_bytes(),
-        Endianness::Big => as_i64.to_be_bytes(),
-    }
-}
-
-fn encode_f32(value: f64, endianness: Endianness) -> [u8; 4] {
-    let as_f32 = value as f32;
-    let bits = as_f32.to_bits();
-    match endianness {
-        Endianness::Little => bits.to_le_bytes(),
-        Endianness::Big => bits.to_be_bytes(),
-    }
-}
-
-fn encode_f64(value: f64, endianness: Endianness) -> [u8; 8] {
-    let bits = value.to_bits();
-    match endianness {
-        Endianness::Little => bits.to_le_bytes(),
-        Endianness::Big => bits.to_be_bytes(),
-    }
-}
-
-fn saturating_round(value: f64, min: f64, max: f64) -> f64 {
-    if value.is_nan() {
-        return 0.0;
-    }
-    if !value.is_finite() {
-        return if value.is_sign_negative() { min } else { max };
-    }
-    let mut rounded = value.round();
-    if rounded.is_nan() {
-        return 0.0;
-    }
-    if rounded < min {
-        rounded = min;
-    }
-    if rounded > max {
-        rounded = max;
-    }
-    rounded
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputType {
-    UInt8,
-    Int8,
-    UInt16,
-    Int16,
-    UInt32,
-    Int32,
-    UInt64,
-    Int64,
-    Float32,
-    Float64,
-}
-
-fn parse_input_label(label: &str) -> Result<InputType, String> {
-    match label {
-        "double" | "float64" | "real*8" => Ok(InputType::Float64),
-        "single" | "float32" | "real*4" => Ok(InputType::Float32),
-        "int8" | "schar" | "integer*1" => Ok(InputType::Int8),
-        "uint8" | "uchar" | "unsignedchar" | "char" | "byte" => Ok(InputType::UInt8),
-        "int16" | "short" | "integer*2" => Ok(InputType::Int16),
-        "uint16" | "ushort" | "unsignedshort" => Ok(InputType::UInt16),
-        "int32" | "integer*4" | "long" => Ok(InputType::Int32),
-        "uint32" | "unsignedint" | "unsignedlong" => Ok(InputType::UInt32),
-        "int64" | "integer*8" | "longlong" => Ok(InputType::Int64),
-        "uint64" | "unsignedlonglong" => Ok(InputType::UInt64),
-        other => Err(format!("fwrite: unsupported precision '{other}'")),
-    }
-}
+use controls::*;
+use writing::*;
 
 #[cfg(test)]
 pub(crate) mod tests;
