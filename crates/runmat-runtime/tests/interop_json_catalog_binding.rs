@@ -1,4 +1,4 @@
-//! Production-linked authority checks for interop, JSON, HTTP, Data, HDF5, and console cutovers.
+//! Production-linked authority checks for interop and migrated I/O families.
 
 use runmat_builtins::{
     builtin_catalog_entries, builtin_function_by_name, BuiltinCatalogEntry, CALLLIB_CATALOG_ENTRY,
@@ -12,6 +12,10 @@ use runmat_builtins::{
 use runmat_builtins::{
     DIARY_CATALOG_ENTRY, DISPLAY_CATALOG_ENTRY, DISP_CATALOG_ENTRY, FORMAT_CATALOG_ENTRY,
     INPUT_CATALOG_ENTRY,
+};
+use runmat_builtins::{
+    LOAD_CATALOG_ENTRY, MATFILE_CATALOG_ENTRY, MATFILE_SUBSASGN_CATALOG_ENTRY,
+    MATFILE_SUBSREF_CATALOG_ENTRY, SAVE_CATALOG_ENTRY,
 };
 use runmat_runtime::builtin::migration_inventory::migration_inventory;
 
@@ -43,6 +47,11 @@ fn migrated_identities_have_one_production_binding_and_no_legacy_authority() {
         &DISPLAY_CATALOG_ENTRY,
         &FORMAT_CATALOG_ENTRY,
         &INPUT_CATALOG_ENTRY,
+        &LOAD_CATALOG_ENTRY,
+        &SAVE_CATALOG_ENTRY,
+        &MATFILE_CATALOG_ENTRY,
+        &MATFILE_SUBSREF_CATALOG_ENTRY,
+        &MATFILE_SUBSASGN_CATALOG_ENTRY,
     ];
     // This is an inventory scope, not runtime class or operation dispatch.
     let data_entries: Vec<_> = builtin_catalog_entries()
