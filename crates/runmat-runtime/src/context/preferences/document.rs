@@ -1,6 +1,7 @@
 //! Versioned preference document, independent of execution ValueRef V2.
 
 use super::PreferenceServiceError;
+use crate::context::UserPathSetting;
 use crate::execution::value_codec::{decode_durable_value, ValueCodecError};
 use runmat_execution::value::ValuePayload;
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,8 @@ pub(super) enum PreferenceDocumentError {
     Json(#[source] serde_json::Error),
     #[error("invalid durable preference value: {0}")]
     Value(#[source] ValueCodecError),
+    #[error("invalid empty custom user path in application settings")]
+    InvalidUserPath,
 }
 
 impl From<PreferenceDocumentError> for PreferenceServiceError {
@@ -25,6 +28,7 @@ impl From<PreferenceDocumentError> for PreferenceServiceError {
             PreferenceDocumentError::Version(version) => Self::UnsupportedDocumentVersion(version),
             PreferenceDocumentError::Json(source) => Self::Document(source),
             PreferenceDocumentError::Value(source) => Self::ValueEncoding(source),
+            PreferenceDocumentError::InvalidUserPath => Self::InvalidStoredUserPath,
         }
     }
 }
@@ -34,6 +38,10 @@ impl From<PreferenceDocumentError> for PreferenceServiceError {
 pub(super) struct PreferenceDocument {
     pub version: u32,
     pub groups: EncodedGroups,
+    #[serde(default)]
+    pub user_path: UserPathSetting,
+    #[serde(default)]
+    pub user_path_revision: u64,
 }
 
 impl PreferenceDocument {
@@ -41,6 +49,8 @@ impl PreferenceDocument {
         Self {
             version: PREFERENCE_DOCUMENT_VERSION,
             groups: BTreeMap::new(),
+            user_path: UserPathSetting::Default,
+            user_path_revision: 0,
         }
     }
 
@@ -52,6 +62,9 @@ impl PreferenceDocument {
             serde_json::from_slice(bytes).map_err(PreferenceDocumentError::Json)?;
         if document.version != PREFERENCE_DOCUMENT_VERSION {
             return Err(PreferenceDocumentError::Version(document.version));
+        }
+        if matches!(&document.user_path, UserPathSetting::Custom(text) if text.is_empty()) {
+            return Err(PreferenceDocumentError::InvalidUserPath);
         }
         for values in document.groups.values() {
             for payload in values.values() {
@@ -98,5 +111,20 @@ mod tests {
             PreferenceDocument::decode(&bytes),
             Err(PreferenceDocumentError::Version(0))
         ));
+    }
+
+    #[test]
+    fn prior_version_one_document_defaults_only_the_distinct_user_setting() {
+        let old = br#"{"version":1,"groups":{"app":{}}}"#;
+        let decoded = PreferenceDocument::decode(old).unwrap();
+        assert_eq!(decoded.user_path, UserPathSetting::Default);
+        assert_eq!(decoded.user_path_revision, 0);
+        assert!(decoded.groups.contains_key("app"));
+        let mut updated = decoded;
+        updated.user_path = UserPathSetting::Custom("relative/MiXeD".into());
+        updated.user_path_revision = 7;
+        let reopened = PreferenceDocument::decode(&updated.encode().unwrap()).unwrap();
+        assert_eq!(reopened.user_path, updated.user_path);
+        assert_eq!(reopened.user_path_revision, 7);
     }
 }

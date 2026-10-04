@@ -16,6 +16,51 @@ fn runtime() -> RuntimeContext {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn isolated_user_path_is_distinct_and_reopens_with_exact_text_and_revision() {
+    let service = IsolatedMemoryPreferenceService::new();
+    let initial = block_on(RuntimeUserPathService::read(&service, runtime())).unwrap();
+    assert_eq!(initial.setting, crate::context::UserPathSetting::Default);
+    assert_eq!(initial.revision, 0);
+    let set = block_on(RuntimeUserPathService::commit(
+        &service,
+        runtime(),
+        UserPathMutation::Set("relative/MiXeD".into()),
+    ))
+    .unwrap();
+    assert_eq!(set.revision, 1);
+    assert_eq!(
+        set.setting,
+        crate::context::UserPathSetting::Custom("relative/MiXeD".into())
+    );
+    let reopened = IsolatedMemoryPreferenceService::from_document_bytes(
+        &block_on(service.document_bytes()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        block_on(RuntimeUserPathService::read(&reopened, runtime())).unwrap(),
+        set
+    );
+    assert!(block_on(reopened.all_groups(runtime())).unwrap().is_empty());
+    let clear = block_on(RuntimeUserPathService::commit(
+        &reopened,
+        runtime(),
+        UserPathMutation::Clear,
+    ))
+    .unwrap();
+    assert_eq!(clear.revision, 2);
+    assert_eq!(clear.setting, crate::context::UserPathSetting::Cleared);
+    let reset = block_on(RuntimeUserPathService::commit(
+        &reopened,
+        runtime(),
+        UserPathMutation::Reset,
+    ))
+    .unwrap();
+    assert_eq!(reset.revision, 3);
+    assert_eq!(reset.setting, crate::context::UserPathSetting::Default);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn cloned_authority_shares_commits_but_separate_authority_is_isolated() {
     let service = IsolatedMemoryPreferenceService::new();
     let clone = service.clone();

@@ -6,6 +6,7 @@
 
 mod capability;
 mod preferences;
+mod user_path;
 mod host_document;
 pub mod host_effect;
 pub(crate) mod host_presentation;
@@ -50,3 +51,7 @@ pub use services::{
     RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;
+pub use user_path::{
+    RuntimeUserPathService, UserPathMutation, UserPathServiceError, UserPathSetting,
+    UserPathSnapshot,
+};

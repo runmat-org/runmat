@@ -34,6 +34,8 @@ pub enum PreferenceServiceError {
     UnsupportedDocumentVersion(u32),
     #[error("invalid preference document: {0}")]
     Document(#[source] serde_json::Error),
+    #[error("application settings contain an invalid empty custom user path")]
+    InvalidStoredUserPath,
 }
 
 /// Installed by the application host, not created by a builtin or session.

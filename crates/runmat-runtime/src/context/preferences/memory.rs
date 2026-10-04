@@ -4,6 +4,9 @@
 use super::document::PreferenceDocument;
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
 use crate::context::{RuntimeContext, RuntimeServiceFuture};
+use crate::context::{
+    RuntimeUserPathService, UserPathMutation, UserPathServiceError, UserPathSnapshot,
+};
 use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
 use futures::lock::Mutex;
@@ -224,6 +227,54 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
             checkpoint(&mut budget, 0).await?;
             document.groups.insert(group, candidate);
             Ok(())
+        })
+    }
+}
+
+impl RuntimeUserPathService for IsolatedMemoryPreferenceService {
+    fn read(
+        &self,
+        runtime: RuntimeContext,
+    ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
+        let document = self.document.clone();
+        Box::pin(async move {
+            let mut budget = runtime.cpu_cooperation();
+            checkpoint(&mut budget, 0).await?;
+            let document = budget
+                .await_cancellable(document.lock())
+                .await
+                .map_err(storage)?;
+            checkpoint(&mut budget, 1).await?;
+            Ok(UserPathSnapshot {
+                setting: document.user_path.clone(),
+                revision: document.user_path_revision,
+            })
+        })
+    }
+
+    fn commit(
+        &self,
+        runtime: RuntimeContext,
+        mutation: UserPathMutation,
+    ) -> RuntimeServiceFuture<Result<UserPathSnapshot, UserPathServiceError>> {
+        let document = self.document.clone();
+        Box::pin(async move {
+            let setting = mutation.into_setting()?;
+            let mut budget = runtime.cpu_cooperation();
+            checkpoint(&mut budget, 0).await?;
+            let mut document = budget
+                .await_cancellable(document.lock())
+                .await
+                .map_err(storage)?;
+            let revision = document.user_path_revision.checked_add(1).ok_or_else(|| {
+                PreferenceServiceError::InvalidTransaction(
+                    "application user-path revision is exhausted".into(),
+                )
+            })?;
+            checkpoint(&mut budget, 1).await?;
+            document.user_path = setting.clone();
+            document.user_path_revision = revision;
+            Ok(UserPathSnapshot { setting, revision })
         })
     }
 }

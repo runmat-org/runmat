@@ -1,4 +1,6 @@
-use super::{RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService};
+use super::{
+    RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService, RuntimeUserPathService,
+};
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
 use crate::warning_store::RuntimeWarning;
@@ -719,6 +721,7 @@ pub struct RuntimeServicePorts {
     host: Option<Rc<dyn RuntimeHostService>>,
     http: Option<Rc<dyn RuntimeHttpService>>,
     preferences: Option<Rc<dyn RuntimePreferenceService>>,
+    user_path: Option<Rc<dyn RuntimeUserPathService>>,
     error: Option<Rc<dyn RuntimeErrorService>>,
     acceleration: Option<Rc<dyn RuntimeAccelerationService>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
@@ -742,6 +745,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("host", &self.host.is_some())
             .field("http", &self.http.is_some())
             .field("preferences", &self.preferences.is_some())
+            .field("user_path", &self.user_path.is_some())
             .field("error", &self.error.is_some())
             .field("acceleration", &self.acceleration.is_some())
             .field("placement", &self.placement.is_some())
@@ -860,6 +864,14 @@ impl RuntimeServicePorts {
         preferences,
         RuntimePreferenceService,
         Preferences
+    );
+    port_accessors!(
+        with_user_path,
+        user_path,
+        require_user_path,
+        user_path,
+        RuntimeUserPathService,
+        UserPath
     );
     port_accessors!(
         with_error,
@@ -1013,6 +1025,7 @@ mod tests {
             missing(ports.require_host("console write")),
             missing(ports.require_http("HTTP request")),
             missing(ports.require_preferences("read preference")),
+            missing(ports.require_user_path("hydrate user path")),
             missing(ports.require_error("report error")),
             missing(ports.require_acceleration("resident operation")),
             missing(ports.require_placement("placement plan")),
@@ -1035,6 +1048,7 @@ mod tests {
                 RuntimeCapability::Host,
                 RuntimeCapability::Http,
                 RuntimeCapability::Preferences,
+                RuntimeCapability::UserPath,
                 RuntimeCapability::Error,
                 RuntimeCapability::Acceleration,
                 RuntimeCapability::Placement,
