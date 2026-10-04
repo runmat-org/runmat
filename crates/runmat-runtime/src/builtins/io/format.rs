@@ -1,8 +1,9 @@
 //! MATLAB-compatible `format` builtin for controlling numeric display precision.
 
+#[cfg(test)]
+use runmat_builtins::FORMAT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FormatCommand, FORMAT_DESCRIPTOR, FORMAT_ERROR_ARG_CONFIG,
-    FORMAT_ERROR_UNKNOWN_MODE,
+    BuiltinErrorDescriptor, FormatCommand, FORMAT_ERROR_ARG_CONFIG, FORMAT_ERROR_UNKNOWN_MODE,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{set_display_format, FormatMode, Tensor, Value};
