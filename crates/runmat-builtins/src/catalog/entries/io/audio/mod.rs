@@ -4,11 +4,13 @@ pub mod audioinfo;
 pub mod audioread;
 mod contract;
 mod datatype;
+mod decode_facts;
 mod fixtures;
 
 pub use audioinfo::AUDIOINFO_CATALOG_ENTRY;
 pub use audioread::AUDIOREAD_CATALOG_ENTRY;
 pub use datatype::AudioReadDataType;
+pub use decode_facts::{AudioDecodeResourceFacts, AudioSampleCoding};
 
 pub use contract::{
     AUDIOINFO_DESCRIPTOR, AUDIOINFO_ERROR_ARGUMENT, AUDIOINFO_ERROR_FORMAT, AUDIOINFO_ERROR_IO,

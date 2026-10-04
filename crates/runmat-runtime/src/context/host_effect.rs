@@ -16,6 +16,8 @@ use std::sync::Arc;
 
 mod workload;
 mod stage;
+mod final_facts;
+pub use final_facts::HostEffectFinalFacts;
 pub use stage::{
     admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,
     HostEffectStageAdmission, HostEffectStageEvidence, HostEffectStagePermit,
@@ -97,10 +99,13 @@ fn select_host_effect_inner(
     runtime: Option<&RuntimeContext>,
     request: HostEffectRequest<'_>,
     stage: Option<HostEffectStagePermit>,
-    final_facts: Option<&dyn std::any::Any>,
+    final_facts: Option<HostEffectFinalFacts<'_>>,
 ) -> BuiltinResult<Option<HostEffectReceipt>> {
     if let Some(stage) = stage.as_ref() {
         stage.validate_request(&request)?;
+    }
+    if let Some(facts) = final_facts {
+        facts.validate_for(&request)?;
     }
     let Some(runtime) = runtime else {
         return Ok(None);
@@ -291,6 +296,9 @@ impl HostEffectReceipt {
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {
+        if let Some(stage) = self._stage.as_ref() {
+            stage.checkpoint()?;
+        }
         if self.resource_liveness_lease.is_current() {
             Ok(())
         } else {
@@ -299,7 +307,12 @@ impl HostEffectReceipt {
     }
 
     pub fn finish(self, outcome: WholeWorkObservationOutcome) {
-        if !self.resource_liveness_lease.is_current() {
+        if !self.resource_liveness_lease.is_current()
+            || self
+                ._stage
+                .as_ref()
+                .is_some_and(|stage| stage.checkpoint().is_err())
+        {
             return;
         }
         let outcome = if self.runtime.is_cancelled() {

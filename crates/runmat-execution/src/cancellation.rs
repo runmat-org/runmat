@@ -81,6 +81,17 @@ enum TokenStates {
 }
 
 impl CancellationToken {
+    /// Exact invocation-generation identity, without observing mutable
+    /// cancelled state. A rebound token cannot inherit an earlier permit.
+    pub fn same_generation(&self, other: &Self) -> bool {
+        self.states().len() == other.states().len()
+            && self
+                .states()
+                .iter()
+                .zip(other.states())
+                .all(|(left, right)| Arc::ptr_eq(left, right))
+    }
+
     fn states(&self) -> &[Arc<State>] {
         match &self.states {
             TokenStates::Single(state) => std::slice::from_ref(state),

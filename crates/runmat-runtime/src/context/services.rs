@@ -285,14 +285,14 @@ pub trait RuntimeHostEffectResourceService {
         None
     }
 
-    /// The operation owner supplies its checked, typed post-scan facts. The
-    /// installed resource adapter downcasts only its own domain type; shared
-    /// placement never interprets operation spellings or opaque digests as
-    /// physical resource evidence. No fallback to pre-scan admission exists.
+    /// The operation owner supplies checked, closed typed post-scan facts.
+    /// The resource adapter matches the declared variant; shared placement
+    /// verifies workload/facts identity but never calculates domain geometry.
+    /// No fallback to pre-scan admission exists.
     fn final_admission_after_stage(
         &self,
         _request: &super::host_effect::HostEffectRequest<'_>,
-        _facts: &dyn std::any::Any,
+        _facts: super::host_effect::HostEffectFinalFacts<'_>,
         _runtime: &super::RuntimeContext,
     ) -> Option<super::host_effect::HostEffectResourceAdmission> {
         None
@@ -780,6 +780,21 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    /// A staged effect may finish only under the same installed owners that
+    /// reserved the scan and supplied the original placement revision.
+    pub(crate) fn same_host_effect_owners(&self, other: &Self) -> bool {
+        fn same<T: ?Sized>(left: Option<&Rc<T>>, right: Option<&Rc<T>>) -> bool {
+            match (left, right) {
+                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+        }
+        same(self.placement(), other.placement())
+            && same(self.host_effect_resources(), other.host_effect_resources())
+            && same(self.parallel(), other.parallel())
+    }
+
     port_accessors!(
         with_call,
         call,

@@ -89,16 +89,6 @@ pub(super) struct WaveFormat {
     pub(super) valid_bits_per_sample: Option<u16>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
-pub(super) enum WaveSampleCoding {
-    Pcm8,
-    Pcm16,
-    Pcm24,
-    Pcm32,
-    Float32,
-    Float64,
-}
-
 impl WaveFormat {
     pub(super) fn effective_format_tag(self) -> u16 {
         self.subformat_tag.unwrap_or(self.format_tag)

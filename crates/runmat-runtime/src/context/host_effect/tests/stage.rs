@@ -69,11 +69,10 @@ impl RuntimeHostEffectResourceService for StagedResources {
     fn final_admission_after_stage(
         &self,
         request: &HostEffectRequest<'_>,
-        facts: &dyn std::any::Any,
+        facts: HostEffectFinalFacts<'_>,
         runtime: &RuntimeContext,
     ) -> Option<HostEffectResourceAdmission> {
-        facts
-            .is::<()>()
+        matches!(facts, HostEffectFinalFacts::TestOnly(_))
             .then(|| self.admission(request, runtime))
             .flatten()
     }
@@ -130,7 +129,7 @@ fn stage_reserves_before_effect_and_final_selection_owns_one_probe_and_observati
     let receipt = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),
-        &(),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
         stage,
     )
     .unwrap();
@@ -180,7 +179,7 @@ fn revoked_or_abandoned_stage_never_selects_or_observes() {
     let error = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),
-        &(),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
         stage,
     )
     .err()
@@ -217,7 +216,7 @@ fn cancellation_after_scan_releases_reservation_without_a_probe() {
     let error = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),
-        &(),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
         stage,
     )
     .err()
@@ -242,7 +241,7 @@ fn final_call_must_match_original_owner_identity_and_peak() {
     let error = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),
-        &(),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
         stage,
     )
     .err()
@@ -271,9 +270,14 @@ fn stage_cannot_be_replayed_on_another_filesystem_owner() {
         domain_facts: original.domain_facts,
         filesystem: &foreign,
     };
-    let error = select_host_effect_after_stage(&runtime, other, &(), stage)
-        .err()
-        .expect("foreign filesystem is not the opened source owner");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        other,
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .err()
+    .expect("foreign filesystem is not the opened source owner");
     assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
     assert_eq!(placement.selections.get(), 0);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
@@ -294,7 +298,7 @@ fn stage_cannot_be_selected_from_another_runtime_session() {
     let error = select_host_effect_after_stage(
         &other,
         request(HostEffectOutput::ReturnedValue),
-        &(),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
         stage,
     )
     .err()
@@ -302,4 +306,90 @@ fn stage_cannot_be_selected_from_another_runtime_session() {
     assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
     assert_eq!(placement.selections.get(), 0);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn staged_receipt_suppresses_feedback_when_scan_reservation_is_revoked() {
+    let (runtime, placement, live, drops) = staged_runtime(
+        ResourceByteBound::Known(16),
+        ResourceByteBound::Known(16),
+        16,
+        64,
+    );
+    let stage =
+        admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
+    let receipt = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .unwrap();
+    assert_eq!(placement.selections.get(), 1);
+    live.store(false, Ordering::SeqCst);
+    assert_eq!(
+        receipt.checkpoint().unwrap_err().identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    receipt.finish(WholeWorkObservationOutcome::Success);
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn same_session_cannot_rebind_placement_parallel_or_cancellation_authority() {
+    for replacement in 0..4 {
+        let (runtime, placement, live, drops) = staged_runtime(
+            ResourceByteBound::Known(16),
+            ResourceByteBound::Known(16),
+            16,
+            64,
+        );
+        let stage =
+            admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
+        let changed = match replacement {
+            0 => {
+                let other = Rc::new(Placement::default());
+                other.revision_available.set(true);
+                runtime
+                    .clone()
+                    .with_service_ports(runtime.service_ports().clone().with_placement(other))
+            }
+            1 => runtime.clone().with_service_ports(
+                runtime
+                    .service_ports()
+                    .clone()
+                    .with_parallel(Rc::new(Parallel(Some(64)))),
+            ),
+            2 => runtime.clone().with_service_ports(
+                runtime
+                    .service_ports()
+                    .clone()
+                    .with_host_effect_resources(Rc::new(StagedResources {
+                        revision: Digest::sha256(b"staged-resource-v1"),
+                        stage_scratch: ResourceByteBound::Known(16),
+                        final_scratch: ResourceByteBound::Known(16),
+                        reserved: 16,
+                        live,
+                        drops: Arc::new(AtomicUsize::new(0)),
+                    })),
+            ),
+            _ => runtime
+                .clone()
+                .with_cancellation_token(CancellationSource::new().token()),
+        };
+        assert_eq!(runtime.local_identity(), changed.local_identity());
+        let error = select_host_effect_after_stage(
+            &changed,
+            request(HostEffectOutput::ReturnedValue),
+            HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+            stage,
+        )
+        .err()
+        .expect("rebound authority cannot consume original scan");
+        assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
+        assert_eq!(placement.selections.get(), 0);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
 }

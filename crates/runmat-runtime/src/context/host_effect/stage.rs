@@ -29,6 +29,7 @@ pub struct HostEffectStageAdmission {
 /// across suspension. Only the matching complete call can consume it.
 pub struct HostEffectStagePermit {
     runtime: RuntimeContext,
+    cancellation: runmat_execution::cancellation::CancellationToken,
     identity: Digest,
     filesystem: Arc<dyn runmat_filesystem::FsProvider>,
     authority_revision: Digest,
@@ -47,7 +48,15 @@ impl HostEffectStagePermit {
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {
-        if self.runtime.is_cancelled() {
+        if !self
+            .cancellation
+            .same_generation(&self.runtime.cancellation())
+        {
+            return Err(invalid_stage(
+                "staged invocation cancellation generation changed",
+            ));
+        }
+        if self.cancellation.is_cancelled() {
             return Err(cancelled());
         }
         if !self.reservation.is_current() {
@@ -58,7 +67,15 @@ impl HostEffectStagePermit {
 
     fn validate_runtime(&self, runtime: &RuntimeContext) -> BuiltinResult<()> {
         self.checkpoint()?;
-        if self.runtime.local_identity() != runtime.local_identity() {
+        if self.runtime.local_identity() != runtime.local_identity()
+            || !self
+                .runtime
+                .service_ports()
+                .same_host_effect_owners(runtime.service_ports())
+            || !std::rc::Rc::ptr_eq(self.runtime.execution(), runtime.execution())
+            || self.runtime.program_revision() != runtime.program_revision()
+            || !self.cancellation.same_generation(&runtime.cancellation())
+        {
             return Err(invalid_stage("final call uses a different runtime session"));
         }
         if runtime.is_cancelled() {
@@ -175,6 +192,7 @@ pub fn try_admit_host_effect_stage(
         return Err(stale_resource());
     }
     Ok(Some(HostEffectStagePermit {
+        cancellation: runtime.cancellation(),
         runtime: runtime.clone(),
         identity: request_identity(&request),
         filesystem: request.filesystem.clone(),
@@ -188,7 +206,7 @@ pub fn try_admit_host_effect_stage(
 pub fn select_host_effect_after_stage(
     runtime: &RuntimeContext,
     request: HostEffectRequest<'_>,
-    final_facts: &dyn std::any::Any,
+    final_facts: HostEffectFinalFacts<'_>,
     stage: HostEffectStagePermit,
 ) -> BuiltinResult<HostEffectReceipt> {
     stage.validate_runtime(runtime)?;
@@ -213,7 +231,7 @@ fn request_identity(request: &HostEffectRequest<'_>) -> Digest {
     )
 }
 
-fn invalid_stage(detail: &str) -> crate::RuntimeError {
+pub(super) fn invalid_stage(detail: &str) -> crate::RuntimeError {
     build_runtime_error(detail)
         .with_identifier("RunMat:Placement:InvalidStage")
         .build()

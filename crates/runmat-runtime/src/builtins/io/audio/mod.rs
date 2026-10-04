@@ -3,6 +3,7 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use runmat_builtins::AudioSampleCoding as WaveSampleCoding;
 use runmat_builtins::BuiltinErrorDescriptor;
 pub use runmat_builtins::{
     AudioReadDataType, AUDIOINFO_DESCRIPTOR, AUDIOINFO_ERROR_ARGUMENT, AUDIOINFO_ERROR_FORMAT,

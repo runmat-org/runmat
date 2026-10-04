@@ -12,7 +12,6 @@ use runmat_execution::{Digest, ResourceByteBound};
 use runmat_value::{
     ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
 };
-use std::any::Any;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -129,7 +128,7 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
     fn final_admission_after_stage(
         &self,
         request: &HostEffectRequest<'_>,
-        facts: &dyn Any,
+        facts: crate::context::host_effect::HostEffectFinalFacts<'_>,
         _: &RuntimeContext,
     ) -> Option<HostEffectResourceAdmission> {
         self.final_calls.set(self.final_calls.get() + 1);
@@ -138,8 +137,9 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
         {
             return None;
         }
-        let geometry =
-            facts.downcast_ref::<crate::builtins::io::audio::admission::AudioDecodeGeometry>()?;
+        let crate::context::host_effect::HostEffectFinalFacts::AudioDecode(geometry) = facts else {
+            return None;
+        };
         if geometry.output_payload_bytes != 16
             || geometry.sample_count != 2
             || geometry.channels != 1

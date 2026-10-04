@@ -49,10 +49,11 @@ pub(super) fn select_decode_after_stage(
     geometry: &AudioDecodeGeometry,
     stage: HostEffectStagePermit,
 ) -> BuiltinResult<HostEffectReceipt> {
+    let facts = geometry.resource_facts();
     select_host_effect_after_stage(
         runtime,
         decode_request(input, options, outputs, Some(*geometry))?,
-        geometry,
+        crate::context::host_effect::HostEffectFinalFacts::AudioDecode(&facts),
         stage,
     )
 }

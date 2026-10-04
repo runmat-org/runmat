@@ -20,6 +20,20 @@ fn poll(listener: &mut Cancelled, waker: &Waker) -> Poll<CancellationReason> {
 }
 
 #[test]
+fn generation_identity_is_distinct_from_cancellation_state() {
+    let first = CancellationSource::new();
+    let second = CancellationSource::new();
+    let token = first.token();
+    assert!(token.same_generation(&token.clone()));
+    assert!(!token.same_generation(&second.token()));
+    let combined = token.or(&second.token());
+    assert!(combined.same_generation(&token.or(&second.token())));
+    assert!(!combined.same_generation(&second.token().or(&token)));
+    first.cancel(CancellationReason::User);
+    assert!(token.same_generation(&first.token()));
+}
+
+#[test]
 fn cancellation_wakes_every_listener_and_keeps_first_reason() {
     let source = CancellationSource::new();
     let token = source.token();
