@@ -46,11 +46,6 @@ pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::tensor(), Type::logical()])
-}
-
 pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![
@@ -112,10 +107,4 @@ mod tests {
     );
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
-    assert_resolver!(
-        readmatrix_type_resolver,
-        readmatrix_type,
-        &[],
-        Type::Union(vec![Type::tensor(), Type::logical()])
-    );
 }

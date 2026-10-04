@@ -994,6 +994,7 @@ fn detect_import_options_struct_can_drive_readmatrix() {
     let options = detect_options(&path, Vec::new());
     let matrix = block_on(
         crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
+            None,
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::Struct(options)],
         ),
@@ -1105,6 +1106,7 @@ fn detect_import_options_encoding_replays_through_readmatrix() {
     );
     let matrix = block_on(
         crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
+            None,
             Value::from(path.to_string_lossy().to_string()),
             vec![Value::Struct(options)],
         ),
@@ -1161,6 +1163,7 @@ fn detect_import_options_replays_through_filesystem_provider() {
         let matrix_options = detect_options(Path::new("/provider_numeric.csv"), Vec::new());
         let matrix = block_on(
             crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
+                None,
                 Value::from("/provider_numeric.csv"),
                 vec![Value::Struct(matrix_options)],
             ),
