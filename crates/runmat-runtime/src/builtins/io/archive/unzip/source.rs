@@ -118,6 +118,7 @@ async fn local_archive_to_temp_file(
             err,
         )
     })?;
+    check_resource_lease(resource_lease)?;
     temp.close();
     Ok(temp)
 }

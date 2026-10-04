@@ -24,6 +24,7 @@ pub(super) async fn extract_archive_file_on_worker(
         .name("runmat-unzip-extract".to_string())
         .spawn(move || {
             let result = (|| {
+                check_resource_lease(&resource_lease)?;
                 let file = std::fs::File::open(input.path()).map_err(|err| {
                     unzip_error_with_source(
                         &UNZIP_ERROR_IO,
@@ -31,6 +32,7 @@ pub(super) async fn extract_archive_file_on_worker(
                         err,
                     )
                 })?;
+                check_resource_lease(&resource_lease)?;
                 let control =
                     ExtractionControl::native(cancellation, worker_abandonment, resource_lease);
                 futures::executor::block_on(extract_archive_impl(
@@ -92,7 +94,9 @@ async fn extract_archive_impl<R>(
 where
     R: Read + Seek,
 {
+    control.check_resource()?;
     let mut archive = ZipArchive::new(reader).map_err(map_zip_error)?;
+    control.check_resource()?;
     let mut filenames = Vec::new();
     let mut total_written = 0u64;
 

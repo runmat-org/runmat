@@ -120,6 +120,7 @@ async fn stream_to_temp(
             err,
         )
     })?;
+    check_resource_lease(resource_lease)?;
     temp.close();
     Ok(temp)
 }

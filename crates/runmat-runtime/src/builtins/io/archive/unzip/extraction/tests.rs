@@ -158,3 +158,34 @@ fn worker_uses_captured_output_provider_not_thread_ambient_provider() {
     );
     assert!(!input_path.exists());
 }
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn revoked_worker_lease_rejects_before_opening_or_parsing_source() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Revoked(std::sync::Arc<AtomicBool>);
+    impl crate::context::host_effect::HostEffectResourceLivenessLease for Revoked {
+        fn is_current(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    let output = tempfile::tempdir().unwrap();
+    let mut input = super::super::source::TempArchive::create().unwrap();
+    input.write_all(b"invalid ZIP must not be parsed").unwrap();
+    input.close();
+    let valid = std::sync::Arc::new(AtomicBool::new(false));
+    let error = block_on(extract_archive_file_on_worker(
+        input,
+        output.path().to_path_buf(),
+        None,
+        vfs::current_provider(),
+        Some(std::sync::Arc::new(Revoked(valid))),
+    ))
+    .expect_err("revoked lease must precede source parse");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert!(std::fs::read_dir(output.path()).unwrap().next().is_none());
+}
