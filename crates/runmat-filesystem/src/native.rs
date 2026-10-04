@@ -2,8 +2,8 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{
-    DirEntry, FileHandle, FsFilePayloadContract, FsFileType, FsMetadata, FsProvider,
-    FsResourceContract, FsResourceLease, FsResourceRevision, OpenFlags,
+    DirEntry, FileHandle, FsBoundedInput, FsFilePayloadContract, FsFileType, FsMetadata,
+    FsProvider, FsResourceContract, FsResourceLease, FsResourceRevision, OpenFlags,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -19,6 +19,23 @@ pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    async fn open_bounded_input(&self, path: &Path) -> io::Result<Option<FsBoundedInput>> {
+        if !path.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "bounded native input requires a resolved absolute path",
+            ));
+        }
+        let file = fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Ok(None);
+        }
+        let metadata = FsMetadata::from(metadata);
+        let lease = self.resource_lease().expect("native direct-file authority");
+        FsBoundedInput::new(Box::new(file), metadata, lease).map(Some)
+    }
+
     fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
         Some(Arc::new(NativeDirectFileLease))
     }
@@ -195,7 +212,7 @@ impl FsResourceLease for NativeDirectFileLease {
         FsResourceContract {
             revision: FsResourceRevision::for_provider(
                 "runmat.filesystem.native",
-                b"direct-file-handles-v1",
+                b"direct-file-handles-bounded-open-v2",
             ),
             opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
             opened_output_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),

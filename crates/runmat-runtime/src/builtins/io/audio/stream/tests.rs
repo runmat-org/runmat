@@ -58,6 +58,59 @@ fn stream_decodes_inclusive_open_ended_range() {
     assert_eq!(decoded.sample_rate, 8000.0);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_sparse_large_wave_decodes_a_small_requested_range() {
+    use std::fs::{self as std_fs, OpenOptions};
+    use std::io::Write;
+
+    let _lock = fs::provider_override_lock();
+    let stamp = runmat_time::system_time_now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "runmat-audio-small-range-{}-{stamp}",
+        std::process::id()
+    ));
+    let mut header = PCM16.to_vec();
+    let data_bytes = 1_000_000_000u32;
+    header[4..8].copy_from_slice(&(36 + data_bytes).to_le_bytes());
+    header[40..44].copy_from_slice(&data_bytes.to_le_bytes());
+    let mut writer = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .expect("isolated sparse WAV");
+    writer.write_all(&header).expect("WAV prefix");
+    writer
+        .set_len(44 + u64::from(data_bytes))
+        .expect("sparse WAV extent");
+    let _owner = fs::replace_provider(Arc::new(fs::NativeFsProvider));
+    let input = FsInputLease::capture(path.clone(), &AUDIOREAD_ERROR_IO, AUDIOREAD_BUILTIN_NAME)
+        .expect("native source");
+    let opened = block_on(input.open()).expect("opened source");
+    assert_eq!(opened.opened_extent(), Some(44 + u64::from(data_bytes)));
+    drop(opened);
+    let mut cooperation = AudioCooperation::new(None, AUDIOREAD_BUILTIN_NAME);
+    let decoded = block_on(decode_wave_stream(
+        &input,
+        AudioreadOptions {
+            range: Some(AudioSampleRange {
+                first: 1,
+                last: Some(1),
+            }),
+            datatype: AudioReadDataType::Double,
+        },
+        &mut cooperation,
+    ))
+    .expect("one-frame decode");
+    assert_eq!(decoded.samples.shape, vec![1, 1]);
+    assert_eq!(decoded.samples.materialize_f64(), vec![0.0]);
+    drop(writer);
+    std_fs::remove_file(path).expect("remove isolated WAV");
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn cancellation_during_decode_prevents_result_publication() {

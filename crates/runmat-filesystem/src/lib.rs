@@ -22,14 +22,14 @@ mod wasm;
 
 pub use dialog::*;
 pub use memory::MemoryFsProvider;
-pub use resource::{
-    capture_resource_lease, CapturedFsResourceLease, FsFilePayloadContract, FsResourceContract,
-    FsResourceLease, FsResourceRevision,
-};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
+pub use resource::{
+    capture_resource_lease, CapturedFsResourceLease, FsBoundedInput, FsFilePayloadContract,
+    FsResourceContract, FsResourceLease, FsResourceRevision,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox::SandboxFsProvider;
 #[cfg(target_arch = "wasm32")]
@@ -336,6 +336,14 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Opt-in opened-source bound for an already resolved absolute path.
+    /// `None` means this provider cannot certify direct, extent-limited reads;
+    /// callers retain their ordinary route. The certificate and handle must
+    /// refer to the same open, never to a separate path metadata lookup.
+    async fn open_bounded_input(&self, _path: &Path) -> io::Result<Option<FsBoundedInput>> {
+        Ok(None)
+    }
+
     /// Opt-in resource authority for this exact provider instance. The lease
     /// must keep its claims valid while retained by a caller. This does not
     /// certify codec, path, result, or whole-invocation allocations.

@@ -145,6 +145,7 @@ fn run(
             seek_kind,
         }),
         path: PathBuf::from("/audio.wav"),
+        resource: None,
     };
     let mut cooperation = AudioCooperation::new(None, AUDIOREAD_BUILTIN_NAME);
     let result = block_on(decode_wave_stream(

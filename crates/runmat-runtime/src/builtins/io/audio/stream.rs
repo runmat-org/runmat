@@ -69,13 +69,17 @@ pub(super) async fn decode_wave_stream(
         }
         Err(source) => return Err(io_error(&input.path, source)),
     };
-    let file_size = match file.seek(SeekFrom::End(0)) {
-        Ok(size) => size,
-        Err(source) if source.kind() == std::io::ErrorKind::Unsupported => {
-            drop(file);
-            return decode_whole_on_provider(input, options, cooperation).await;
+    let file_size = if let Some(extent) = file.opened_extent() {
+        extent
+    } else {
+        match file.seek(SeekFrom::End(0)) {
+            Ok(size) => size,
+            Err(source) if source.kind() == std::io::ErrorKind::Unsupported => {
+                drop(file);
+                return decode_whole_on_provider(input, options, cooperation).await;
+            }
+            Err(source) => return Err(io_error(&input.path, source)),
         }
-        Err(source) => return Err(io_error(&input.path, source)),
     };
     if file_size < 4 {
         return Err(format_error("unsupported audio format"));
