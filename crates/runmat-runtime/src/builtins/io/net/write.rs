@@ -1,5 +1,6 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
+use runmat_builtins::NetDataType as DataType;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -460,33 +461,6 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 #[derive(Clone, Copy)]
-enum DataType {
-    UInt8,
-    Int8,
-    UInt16,
-    Int16,
-    UInt32,
-    Int32,
-    UInt64,
-    Int64,
-    Single,
-    Double,
-    Char,
-    String,
-}
-
-impl DataType {
-    fn element_size(self) -> usize {
-        match self {
-            DataType::UInt8 | DataType::Int8 | DataType::Char | DataType::String => 1,
-            DataType::UInt16 | DataType::Int16 => 2,
-            DataType::UInt32 | DataType::Int32 | DataType::Single => 4,
-            DataType::UInt64 | DataType::Int64 | DataType::Double => 8,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
 enum ByteOrder {
     Little,
     Big,
@@ -585,34 +559,18 @@ fn datatype_for_numeric_dtype(dtype: NumericDType) -> DataType {
 
 fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
     let text = scalar_string(value)?;
-    let lowered = text.trim().to_ascii_lowercase();
-    if lowered.is_empty() {
+    if text.trim().is_empty() {
         return Err(write_flow(
             &WRITE_ERROR_INVALID_DATATYPE,
             "write: datatype must not be empty",
         ));
     }
-    let dtype = match lowered.as_str() {
-        "uint8" => DataType::UInt8,
-        "int8" => DataType::Int8,
-        "uint16" => DataType::UInt16,
-        "int16" => DataType::Int16,
-        "uint32" => DataType::UInt32,
-        "int32" => DataType::Int32,
-        "uint64" => DataType::UInt64,
-        "int64" => DataType::Int64,
-        "single" => DataType::Single,
-        "double" => DataType::Double,
-        "char" => DataType::Char,
-        "string" => DataType::String,
-        _ => {
-            return Err(write_flow(
-                &WRITE_ERROR_INVALID_DATATYPE,
-                format!("write: unsupported datatype '{text}'"),
-            ))
-        }
-    };
-    Ok(dtype)
+    DataType::parse(&text).ok_or_else(|| {
+        write_flow(
+            &WRITE_ERROR_INVALID_DATATYPE,
+            format!("write: unsupported datatype '{text}'"),
+        )
+    })
 }
 
 fn prepare_payload(data: &Value, datatype: DataType, order: ByteOrder) -> BuiltinResult<Payload> {
