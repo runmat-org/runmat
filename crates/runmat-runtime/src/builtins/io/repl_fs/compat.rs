@@ -525,15 +525,15 @@ async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<()> {
+    // Decode the complete option list before the first filesystem mutation.
+    // Read flags have no mutation in the current provider vocabulary; the last
+    // supported writable flag determines the single required update.
+    let mut readonly = None;
     for flag_value in flags {
         let flag = scalar_text(flag_value, "fileattrib", "attribute")?;
         match flag.to_ascii_lowercase().as_str() {
-            "+w" | "w" => vfs::set_readonly_async(path, false)
-                .await
-                .map_err(|err| compat_error("fileattrib", format!("fileattrib: {err}")))?,
-            "-w" => vfs::set_readonly_async(path, true)
-                .await
-                .map_err(|err| compat_error("fileattrib", format!("fileattrib: {err}")))?,
+            "+w" | "w" => readonly = Some(false),
+            "-w" => readonly = Some(true),
             "+r" | "r" | "-r" => {
                 // MATLAB exposes read flags, but the active filesystem provider only models
                 // writable/read-only state. Treat read flags as accepted no-ops.
@@ -545,6 +545,16 @@ async fn apply_fileattrib_flags(path: &Path, flags: &[Value]) -> BuiltinResult<(
                 ));
             }
         }
+    }
+    if let Some(readonly) = readonly {
+        vfs::set_readonly_async(path, readonly)
+            .await
+            .map_err(|source| {
+                build_runtime_error(format!("fileattrib: {source}"))
+                    .with_builtin("fileattrib")
+                    .with_source(source)
+                    .build()
+            })?;
     }
     Ok(())
 }
@@ -1919,6 +1929,14 @@ mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join("runmat_fileattrib_test.txt");
         std::fs::write(&path, "data").unwrap();
+        let rejected = run(fileattrib_builtin(vec![
+            Value::String(path_to_string(&path)),
+            char_value("-w"),
+            char_value("unsupported"),
+        ]))
+        .expect_err("a later invalid flag cannot leave an earlier mutation");
+        assert!(rejected.message().contains("unsupported attribute flag"));
+        assert!(!std::fs::metadata(&path).unwrap().permissions().readonly());
         run(fileattrib_builtin(vec![
             Value::String(path_to_string(&path)),
             char_value("-w"),
