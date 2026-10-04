@@ -57,11 +57,11 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[BuiltinDocumentationSection { heading: "Type and storage", paragraphs: &["Accepted scalar pointer spellings include signed and unsigned fixed-width integers, logical, single, and double types. The declared C ABI type controls range checks; integer payloads are not silently converted through double storage. A returned borrowed pointer from `calllib` remains borrowed rather than becoming caller-owned through `libpointer`."] }],
     examples: &[BuiltinExample {
         id: "int32-pointer", title: "Create exact integer pointer storage",
-        program: "p = libpointer('int32Ptr', int32(7));\nassert(~isempty(p));",
+        program: "p = libpointer('int32Ptr', int32(7));\nassert(p.Value == int32(7));",
         display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeForeignRuntime,
         fixture: NATIVE_FIXTURE, requirements: NATIVE_HOST,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(~isempty(p));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(p.Value == int32(7));" },
     }],
     example_exemption: None,
     faqs: &[BuiltinDocumentationFaq { question: "Does libpointer copy a C-returned pointer?", answer: "No. Pointers returned from C keep their borrowed ownership and must be interpreted under the native adapter's handle contract." }],

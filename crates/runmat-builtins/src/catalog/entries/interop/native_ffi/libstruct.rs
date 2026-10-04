@@ -68,11 +68,11 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[BuiltinDocumentationSection { heading: "Layout and ownership", paragraphs: &["The prepared ABI manifest, not field-name guessing, determines native layout. The resulting foreign handle owns its storage and remains tied to the originating native session/thread. A mismatched initializer raises a native call error."] }],
     examples: &[BuiltinExample {
         id: "declared-structure", title: "Allocate a declared C structure",
-        program: "loadlibrary('fixture', 'fixture.h', 'Alias', 'fixture');\nrecord = libstruct('fixture.fixture_record');\nassert(~isempty(record));\nunloadlibrary('fixture');",
+        program: "loadlibrary('fixture', 'fixture.h', 'Alias', 'fixture');\nrecord = libstruct('fixture.fixture_record');\nassert(record.left == 0 && record.right == 0);\nunloadlibrary('fixture');",
         display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeForeignRuntime,
         fixture: NATIVE_FIXTURE, requirements: NATIVE_HOST,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(~isempty(record));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(record.left == 0 && record.right == 0);" },
     }],
     example_exemption: None, faqs: &[], links: &[], media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Manifest-backed structure allocation", location: "tests::native_ffi_session" }], notes: &[] },

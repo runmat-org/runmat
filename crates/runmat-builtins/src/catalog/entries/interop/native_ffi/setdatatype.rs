@@ -83,11 +83,11 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[BuiltinDocumentationSection { heading: "Borrowed memory", paragraphs: &["The foreign handle retains its original borrowed ownership, origin affinity, and session lifetime. Dimensions are validated with checked multiplication before the view is published; assigning a type does not authorize an unsafe copy from an unknown address."] }],
     examples: &[BuiltinExample {
         id: "borrowed-int32", title: "Type an opaque pointer returned from C",
-        program: "loadlibrary('fixture', 'fixture.h', 'Alias', 'fixture');\np = calllib('fixture', 'fixture_borrowed_value', int32(1));\nsetdatatype(p, 'int32Ptr', 1);\nassert(~isempty(p));\nunloadlibrary('fixture');",
+        program: "loadlibrary('fixture', 'fixture.h', 'Alias', 'fixture');\np = calllib('fixture', 'fixture_borrowed_value', int32(1));\nsetdatatype(p, 'int32Ptr', 1);\nassert(p.Value == int32(17));\nunloadlibrary('fixture');",
         display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeForeignRuntime,
         fixture: NATIVE_FIXTURE, requirements: NATIVE_HOST,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(~isempty(p));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(p.Value == int32(17));" },
     }],
     example_exemption: None, faqs: &[], links: &[], media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Borrowed pointer type and extent", location: "tests::native_ffi_session" }], notes: &[] },
