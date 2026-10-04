@@ -14,10 +14,25 @@ pub(super) const WRITE_EFFECTS: &[EffectKind] = &[
     EffectKind::EnvironmentRead,
     EffectKind::FilesystemRead,
     EffectKind::FilesystemWrite,
+    EffectKind::Clock,
     EffectKind::MaySuspend,
     EffectKind::MayThrow,
 ];
-pub(super) const SNAPSHOT_EFFECTS: &[EffectKind] = WRITE_EFFECTS;
+pub(super) const SNAPSHOT_EFFECTS: &[EffectKind] = &[
+    EffectKind::EnvironmentRead,
+    EffectKind::FilesystemRead,
+    EffectKind::FilesystemWrite,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
+];
+pub(super) const BEGIN_EFFECTS: &[EffectKind] = &[
+    EffectKind::EnvironmentRead,
+    EffectKind::EnvironmentWrite,
+    EffectKind::FilesystemRead,
+    EffectKind::Clock,
+    EffectKind::MaySuspend,
+    EffectKind::MayThrow,
+];
 pub(super) const FILESYSTEM: &[CapabilityRequirement] = &[CapabilityRequirement::Filesystem];
 
 pub(super) const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {

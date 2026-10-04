@@ -19,22 +19,72 @@ fn call(
 }
 
 #[test]
-fn accessor_identities_are_unique_sorted_and_source_linked() {
+fn dataset_identities_are_unique_sorted_and_source_linked() {
     let names: Vec<_> = ENTRIES.iter().map(|entry| entry.identity.name).collect();
     assert_eq!(
         names,
         [
             "Dataset.array",
             "Dataset.arrays",
+            "Dataset.attrs",
+            "Dataset.begin",
+            "Dataset.get_attr",
             "Dataset.has_array",
             "Dataset.id",
             "Dataset.path",
+            "Dataset.refresh",
+            "Dataset.set_attr",
+            "Dataset.set_attrs",
+            "Dataset.snapshot",
             "Dataset.version"
         ]
     );
     assert!(ENTRIES.iter().all(|entry| !entry.bindings.is_empty()));
     let errors = crate::validate_builtin_catalog(ENTRIES);
     assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
+fn attribute_and_lifecycle_forms_preserve_integer_and_effect_boundaries() {
+    let receiver = super::super::inference::dataset();
+    let text = ValueFact::scalar(ValueKindFact::String);
+    let read = call(
+        &DATASET_GET_ATTR_CATALOG_ENTRY,
+        vec![receiver.clone(), text.clone()],
+        1,
+    );
+    assert!(matches!(read.outputs[0].kind, ValueKindFact::Unknown));
+    assert_eq!(DATASET_GET_ATTR_CATALOG_ENTRY.integer_capabilities.len(), 2);
+    let write = call(
+        &DATASET_SET_ATTR_CATALOG_ENTRY,
+        vec![
+            receiver.clone(),
+            text.clone(),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::UInt64,
+                domain: NumericDomain::Real,
+            })),
+        ],
+        1,
+    );
+    assert!(write.effects.0.contains(&EffectKind::Clock));
+    assert!(write.effects.0.contains(&EffectKind::FilesystemWrite));
+    assert_eq!(DATASET_SET_ATTR_CATALOG_ENTRY.integer_capabilities.len(), 1);
+    let begin = call(&DATASET_BEGIN_CATALOG_ENTRY, vec![receiver.clone()], 1);
+    let ValueKindFact::Object(tx) = &begin.outputs[0].kind else {
+        panic!("transaction handle expected")
+    };
+    assert!(tx
+        .runtime_class
+        .as_ref()
+        .is_some_and(|class| class.is(super::super::super::data_family::DATA_TRANSACTION_CLASS)));
+    assert_eq!(tx.handle_semantics, Some(true));
+    assert!(begin.effects.0.contains(&EffectKind::EnvironmentWrite));
+    let bad_attrs = call(&DATASET_SET_ATTRS_CATALOG_ENTRY, vec![receiver, text], 1);
+    assert!(bad_attrs
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DATA-HANDLE-ATTRS"));
 }
 
 #[test]

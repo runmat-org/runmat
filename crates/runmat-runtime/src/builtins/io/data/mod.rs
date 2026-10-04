@@ -4362,6 +4362,31 @@ mod tests {
             .expect("read committed attribute through selected provider"),
             Value::String("selected".into())
         );
+        let Value::Struct(attrs) = call_builtin("Dataset.attrs", std::slice::from_ref(&result))
+            .expect("attributes stay on original provider")
+        else {
+            panic!("Dataset.attrs must return a struct");
+        };
+        assert_eq!(
+            attrs.fields.get("owner"),
+            Some(&Value::String("selected".into()))
+        );
+        let refreshed = call_builtin("Dataset.refresh", std::slice::from_ref(&result))
+            .expect("refresh stays on original provider");
+        assert_ne!(
+            call_builtin("Dataset.version", std::slice::from_ref(&result)).unwrap(),
+            call_builtin("Dataset.version", &[refreshed]).unwrap(),
+            "old handle retains its captured version"
+        );
+        let snapshot = call_builtin(
+            "Dataset.snapshot",
+            &[result.clone(), Value::String("owner-check".into())],
+        )
+        .expect("snapshot stays on original provider");
+        let Value::String(snapshot) = snapshot else {
+            panic!("Dataset.snapshot must return a path");
+        };
+        assert!(std::path::Path::new(&snapshot).is_file());
         assert_eq!(*suspensions.lock().expect("suspension count"), 1);
         let root = dir.path().join("pinned.data");
         assert!(root.join("manifest.json").is_file());

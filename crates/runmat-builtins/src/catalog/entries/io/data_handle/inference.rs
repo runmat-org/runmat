@@ -99,7 +99,7 @@ pub(super) fn dataset_infer(
     let count = request.arguments.len();
     let (minimum, maximum) = match form {
         DatasetForm::HasArray | DatasetForm::Array | DatasetForm::SetAttrs => (2, 2),
-        DatasetForm::GetAttr => (2, 3),
+        DatasetForm::GetAttr => (2, usize::MAX),
         DatasetForm::SetAttr => (3, 3),
         DatasetForm::Snapshot => (2, usize::MAX),
         DatasetForm::Begin => (1, usize::MAX),
