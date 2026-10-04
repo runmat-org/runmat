@@ -38,6 +38,7 @@ fn read_only_file_rejects_resident_payload_before_download() {
 
 #[test]
 fn known_invalid_precision_precedes_resident_payload_download_and_write() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = registry_guard();
     registry::reset_for_tests();
     let path = unique_path("fwrite_precision_preflight");
