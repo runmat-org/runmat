@@ -39,7 +39,7 @@ impl IsolatedMemoryPreferenceService {
     }
 
     pub async fn document_bytes(&self) -> Result<Vec<u8>, PreferenceServiceError> {
-        self.document.lock().await.encode()
+        Ok(self.document.lock().await.encode()?)
     }
 }
 
