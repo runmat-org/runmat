@@ -54,6 +54,7 @@ pub(super) async fn parse_input(
     })
 }
 
+#[cfg(test)]
 pub(super) async fn parse_registered_file(
     fid: i32,
     format_spec: &[FormatElement],

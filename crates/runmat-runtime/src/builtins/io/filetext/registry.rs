@@ -392,6 +392,7 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
     close_async_in(fid, None).await
 }
 
+#[cfg(test)]
 pub(crate) async fn close_async_in(
     fid: i32,
     runtime: Option<&RuntimeContext>,
