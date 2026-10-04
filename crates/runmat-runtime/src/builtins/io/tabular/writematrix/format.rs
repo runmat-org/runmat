@@ -70,28 +70,3 @@ fn trim_trailing_zeros(mut value: String) -> String {
         }
     }
 }
-
-pub(super) fn format_string(value: &str, quote: QuoteStrings, delimiter: &str) -> String {
-    let quote = match quote {
-        QuoteStrings::All => true,
-        QuoteStrings::None => false,
-        QuoteStrings::Minimal => {
-            value.contains(delimiter) || value.contains('"') || value.contains(['\n', '\r'])
-        }
-    };
-    if !quote {
-        return value.to_string();
-    }
-    let mut escaped = String::with_capacity(value.len() + 2);
-    escaped.push('"');
-    for ch in value.chars() {
-        if ch == '"' {
-            escaped.push('"');
-            escaped.push('"');
-        } else {
-            escaped.push(ch);
-        }
-    }
-    escaped.push('"');
-    escaped
-}

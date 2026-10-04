@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::CharArray;
+use runmat_value::{CharArray, StringArray};
 use std::sync::Arc;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -63,5 +63,33 @@ fn singleton_page_char_filename_remains_admitted() {
             .read_project_path("/tabular/out.csv")
             .expect("file"),
         b"3\n"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn large_text_cell_quotes_across_chunk_boundary_without_payload_mirror() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/tabular",
+    ));
+    let _guard = runmat_filesystem::replace_provider(provider.clone());
+    runmat_filesystem::set_current_dir("/tabular").expect("cwd");
+    let left = "a".repeat(4095);
+    let right = "b".repeat(4095);
+    let text = format!("{left}\"{right}");
+    let matrix = StringArray::new_2d(vec![text], 1, 1).expect("string matrix");
+    block_on(super::super::writematrix_builtin(
+        None,
+        Value::StringArray(matrix),
+        vec![Value::from("large.csv")],
+    ))
+    .expect("chunked text write");
+    let expected = format!("\"{left}\"\"{right}\"\n");
+    assert_eq!(
+        provider
+            .read_project_path("/tabular/large.csv")
+            .expect("file"),
+        expected.into_bytes()
     );
 }

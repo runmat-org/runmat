@@ -11,6 +11,8 @@ use runmat_value::{IntegerStorage, StringArray, Tensor};
 
 #[path = "tests/admission.rs"]
 mod admission;
+#[path = "tests/owner.rs"]
+mod owner;
 
 async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     super::writematrix_builtin(None, data, rest).await

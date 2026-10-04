@@ -248,7 +248,7 @@ impl MatrixData {
                 Ok(MatrixData::Text {
                     rows,
                     cols,
-                    data: sa.data.clone(),
+                    data: sa.data,
                 })
             }
             Value::String(s) => Ok(MatrixData::Text {
@@ -296,13 +296,7 @@ impl MatrixData {
         }
     }
 
-    fn format_cell(
-        &self,
-        row: usize,
-        col: usize,
-        options: &WriteMatrixOptions,
-        delimiter: &str,
-    ) -> String {
+    fn cell_at(&self, row: usize, col: usize, options: &WriteMatrixOptions) -> MatrixCell<'_> {
         match self {
             MatrixData::Numeric(tensor) => {
                 let rows = tensor.rows();
@@ -311,19 +305,27 @@ impl MatrixData {
                     .numeric_value_at(idx)
                     .expect("index within authoritative numeric storage");
                 if let Some(value) = value.into_int_value() {
-                    return value.decimal_string();
+                    return MatrixCell::Numeric(value.decimal_string());
                 }
-                format_numeric(value.materialize_f64(), options.decimal_separator)
+                MatrixCell::Numeric(format_numeric(
+                    value.materialize_f64(),
+                    options.decimal_separator,
+                ))
             }
             MatrixData::Text { rows, data, .. } => {
                 if *rows == 0 {
-                    return String::new();
+                    return MatrixCell::Text("");
                 }
                 let idx = row + col * rows;
-                format_string(&data[idx], options.quote_strings, delimiter)
+                MatrixCell::Text(&data[idx])
             }
         }
     }
+}
+
+enum MatrixCell<'a> {
+    Numeric(String),
+    Text(&'a str),
 }
 
 fn preflight_data(value: &Value) -> BuiltinResult<()> {
