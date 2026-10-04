@@ -89,8 +89,7 @@ impl ReadStructOptions {
 pub(super) struct XmlNode {
     pub(super) name: String,
     attributes: BTreeMap<String, String>,
-    children: Vec<XmlNode>,
-    text: String,
+    content: Vec<XmlContent>,
 }
 
 impl XmlNode {
@@ -98,8 +97,7 @@ impl XmlNode {
         Self {
             name,
             attributes,
-            children: Vec::new(),
-            text: String::new(),
+            content: Vec::new(),
         }
     }
 
@@ -108,9 +106,8 @@ impl XmlNode {
         self,
         cooperation: &mut XmlCooperation,
     ) -> BuiltinResult<ObjectInstance> {
-        cooperation
-            .completed(self.name.len() + self.text.len())
-            .await?;
+        let text = self.direct_text(cooperation).await?;
+        cooperation.completed(self.name.len()).await?;
         let mut object = ObjectInstance::new(XML_ELEMENT_CLASS);
         object
             .properties
@@ -120,7 +117,7 @@ impl XmlNode {
             .insert("TagName".to_string(), char_value(&self.name));
         object
             .properties
-            .insert("TextContent".to_string(), char_value(self.text.trim()));
+            .insert("TextContent".to_string(), char_value(text.trim()));
         let mut attributes = StructValue::new();
         for (name, value) in &self.attributes {
             cooperation.completed(name.len() + value.len()).await?;
@@ -130,14 +127,16 @@ impl XmlNode {
             .properties
             .insert("Attributes".to_string(), Value::Struct(attributes));
         let mut children = Vec::new();
-        children.try_reserve(self.children.len()).map_err(|err| {
+        children.try_reserve(self.element_count()).map_err(|err| {
             build_runtime_error("xmlread: cannot allocate child-node collection")
                 .with_builtin("xmlread")
                 .with_source(err)
                 .build()
         })?;
-        for child in self.children {
-            children.push(Value::Object(child.into_object(cooperation).await?));
+        for item in self.content {
+            if let XmlContent::Element(child) = item {
+                children.push(Value::Object(child.into_object(cooperation).await?));
+            }
         }
         let child_count = children.len();
         object.properties.insert(
@@ -157,9 +156,7 @@ pub(super) async fn xml_node_to_struct(
     options: &ReadStructOptions,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<StructValue> {
-    cooperation
-        .completed(node.name.len() + node.text.len())
-        .await?;
+    cooperation.completed(node.name.len()).await?;
     let mut out = StructValue::new();
     for (name, value) in &node.attributes {
         cooperation.completed(name.len() + value.len()).await?;
@@ -168,7 +165,8 @@ pub(super) async fn xml_node_to_struct(
             char_value(value),
         );
     }
-    let text = node.text.trim();
+    let direct_text = node.direct_text(cooperation).await?;
+    let text = direct_text.trim();
     if !text.is_empty() {
         out.insert(
             xml_struct_field_name(&options.text_node_name),
@@ -177,7 +175,10 @@ pub(super) async fn xml_node_to_struct(
     }
 
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
-    for child in &node.children {
+    for child in node.content.iter().filter_map(|item| match item {
+        XmlContent::Element(child) => Some(child),
+        _ => None,
+    }) {
         let field = xml_struct_field_name(&child.name);
         let value = xml_node_to_struct_value(child, options, cooperation).await?;
         if let Some((_, values)) = groups.iter_mut().find(|(name, _)| *name == field) {
@@ -206,8 +207,8 @@ async fn xml_node_to_struct_value(
     options: &ReadStructOptions,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<Value> {
-    if node.attributes.is_empty() && node.children.is_empty() {
-        return Ok(char_value(node.text.trim()));
+    if node.attributes.is_empty() && node.element_count() == 0 {
+        return Ok(char_value(node.direct_text(cooperation).await?.trim()));
     }
     xml_node_to_struct(node, options, cooperation)
         .await
@@ -239,6 +240,9 @@ fn xml_struct_field_name(name: &str) -> String {
 
 #[path = "parser/events.rs"]
 mod events;
+#[path = "parser/content.rs"]
+mod content;
+use content::XmlContent;
 #[path = "parser/decode.rs"]
 mod decode;
 #[path = "parser/attributes.rs"]

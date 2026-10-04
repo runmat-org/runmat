@@ -93,15 +93,28 @@ async fn parse_events(text: &str, cooperation: &mut XmlCooperation) -> BuiltinRe
                 let node = stack
                     .last_mut()
                     .ok_or_else(|| malformed("entity outside the root element"))?;
-                decode::append_reference(&mut node.text, reference.as_ref(), cooperation).await?;
+                decode::append_reference(node.text_run()?, reference.as_ref(), cooperation).await?;
             }
-            Event::Comment(_) => declaration_position_open = false,
+            Event::Comment(comment) => {
+                declaration_position_open = false;
+                if let Some(node) = stack.last_mut() {
+                    let mut text = String::new();
+                    decode::append_text_bytes(&mut text, comment.as_ref(), cooperation).await?;
+                    node.push_content(XmlContent::Comment(text))?;
+                }
+            }
             Event::PI(instruction) => {
                 declaration_position_open = false;
                 if instruction.target().eq_ignore_ascii_case(b"xml") {
                     return Err(malformed("XML processing-instruction target is reserved"));
                 }
-                attributes::name(instruction.target(), cooperation).await?;
+                let target = attributes::name(instruction.target(), cooperation).await?;
+                if let Some(node) = stack.last_mut() {
+                    let mut content = String::new();
+                    decode::append_text_bytes(&mut content, instruction.content(), cooperation)
+                        .await?;
+                    node.push_content(XmlContent::ProcessingInstruction { target, content })?;
+                }
             }
             Event::Decl(declaration) => {
                 if declaration_seen || !declaration_position_open {
@@ -149,12 +162,12 @@ async fn append_text(
         }
         return Ok(());
     };
-    decode::append_text_bytes(&mut node.text, text, cooperation).await
+    decode::append_text_bytes(node.text_run()?, text, cooperation).await
 }
 
 fn attach(stack: &mut [XmlNode], root: &mut Option<XmlNode>, node: XmlNode) -> BuiltinResult<()> {
     if let Some(parent) = stack.last_mut() {
-        parent.children.push(node);
+        parent.push_content(XmlContent::Element(node))?;
     } else if root.replace(node).is_some() {
         return Err(malformed("multiple root elements"));
     }
@@ -207,8 +220,10 @@ mod tests {
         .expect("valid XML");
         assert_eq!(root.name, "root");
         assert_eq!(root.attributes.get("note").map(String::as_str), Some("a>b"));
-        assert_eq!(root.children.len(), 1);
-        assert_eq!(root.children[0].text, "a>b&A");
+        assert_eq!(root.content.len(), 2);
+        assert!(matches!(&root.content[0], XmlContent::Comment(text) if text == "x>y"));
+        assert!(matches!(&root.content[1], XmlContent::Element(child)
+            if child.name == "item" && matches!(&child.content[..], [XmlContent::Text(text)] if text == "a>b&A")));
     }
 
     #[test]
@@ -217,7 +232,60 @@ mod tests {
         let zeros = "0".repeat(12 * 1024);
         let document = format!("<root>a\r\nb&#{zeros}65;\nc</root>");
         let root = parse(&document).expect("valid large character reference");
-        assert_eq!(root.text, "a\nbA\nc");
+        assert!(matches!(&root.content[..], [XmlContent::Text(text)] if text == "a\nbA\nc"));
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn mixed_content_has_one_exact_ordered_authority() {
+        let root = parse("<p> a<b/> c<![CDATA[d]]>&amp; e<!--note--><?pi data?>z</p>")
+            .expect("valid mixed content");
+        assert_eq!(root.content.len(), 6);
+        assert!(matches!(&root.content[0], XmlContent::Text(text) if text == " a"));
+        assert!(matches!(&root.content[1], XmlContent::Element(child) if child.name == "b"));
+        assert!(matches!(&root.content[2], XmlContent::Text(text) if text == " cd& e"));
+        assert!(matches!(&root.content[3], XmlContent::Comment(text) if text == "note"));
+        assert!(
+            matches!(&root.content[4], XmlContent::ProcessingInstruction { target, content }
+            if target == "pi" && content == " data")
+        );
+        assert!(matches!(&root.content[5], XmlContent::Text(text) if text == "z"));
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn literal_newlines_normalize_before_character_references() {
+        let root = parse("<root>a\r\nb&#13;c</root>").expect("valid XML text");
+        assert!(matches!(&root.content[..], [XmlContent::Text(text)] if text == "a\nb\rc"));
+
+        // Markup separates the two source line endings. A local CR state
+        // must not collapse them merely because the semantic text run joins.
+        let root = parse("<root>a\r<![CDATA[\n]]>b</root>").expect("valid adjacent text");
+        assert!(matches!(&root.content[..], [XmlContent::Text(text)] if text == "a\n\nb"));
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn readstruct_projection_groups_elements_and_loses_mixed_order_explicitly() {
+        let root = parse("<p>before<b>inner</b>after<b>last</b></p>").expect("valid XML");
+        let mut cooperation = XmlCooperation::new(None, XmlOperation::ReadStruct);
+        let projected = futures::executor::block_on(xml_node_to_struct(
+            &root,
+            &ReadStructOptions::default(),
+            &mut cooperation,
+        ))
+        .expect("legacy grouped projection");
+        assert_eq!(
+            projected.fields.get("Text"),
+            Some(&char_value("beforeafter"))
+        );
+        let Some(Value::Cell(elements)) = projected.fields.get("b") else {
+            panic!("expected grouped repeated elements");
+        };
+        assert_eq!(elements.data, vec![char_value("inner"), char_value("last")]);
+        assert!(
+            matches!(&root.content[..], [XmlContent::Text(before), XmlContent::Element(_), XmlContent::Text(after), XmlContent::Element(_)] if before == "before" && after == "after")
+        );
     }
 
     #[test]
