@@ -64,10 +64,27 @@ pub(super) fn text_at(
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) {
     if let Some(fact) = request.arguments.get(index) {
-        if !matches!(
-            fact.kind,
-            ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
-        ) {
+        // The retained Value-to-String ABI also accepts primitive numeric and
+        // logical scalars. A one-element Numeric/Logical fact alone does not
+        // prove whether the runtime representation is primitive or an array.
+        let definitely_invalid = match &fact.kind {
+            ValueKindFact::Unknown => false,
+            ValueKindFact::String | ValueKindFact::Logical => fact.shape.is_definitely_nonscalar(),
+            ValueKindFact::Numeric(numeric) => {
+                numeric.domain == NumericDomain::Complex || fact.shape.is_definitely_nonscalar()
+            }
+            ValueKindFact::Character => {
+                fact.shape.rank().is_some_and(|rank| rank > 2)
+                    || fact.shape.known_dims().is_some_and(|dims| {
+                        dims.first()
+                            .copied()
+                            .flatten()
+                            .is_some_and(|rows| rows != 1)
+                    })
+            }
+            _ => true,
+        };
+        if definitely_invalid {
             diagnostics.push(argument_error(
                 "RM-NATIVE-FFI-TEXT",
                 "native library path and alias arguments must be text",

@@ -117,3 +117,43 @@ fn load_options_use_one_typed_case_insensitive_vocabulary() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-OPTION"));
 }
+
+#[test]
+fn retained_scalar_value_to_text_forms_are_not_false_errors() {
+    let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let numeric_alias = infer_catalog_call(&LIBISLOADED_CATALOG_ENTRY, &request(vec![numeric], 1));
+    assert!(!numeric_alias
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-TEXT"));
+
+    let cell = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(text()),
+            elements: vec![text()],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Opaque,
+    );
+    let invalid = infer_catalog_call(&LIBISLOADED_CATALOG_ENTRY, &request(vec![cell], 1));
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-TEXT"));
+
+    let paged_char = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(3), Some(1)]),
+        StorageFact::Opaque,
+    );
+    let invalid_page =
+        infer_catalog_call(&LIBISLOADED_CATALOG_ENTRY, &request(vec![paged_char], 1));
+    assert!(invalid_page
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-NATIVE-FFI-TEXT"));
+}

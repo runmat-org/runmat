@@ -85,6 +85,7 @@ async fn loadlibrary_builtin(
         let header = std::path::PathBuf::from(library).with_extension("h");
         arguments.push(Value::String(header.display().to_string()));
     }
+    text_argument(&arguments[1], "loadlibrary header")?;
     let mut alias = None;
     let mut preparation_options = Vec::new();
     if arguments.len() > 2 {
@@ -176,6 +177,13 @@ async fn calllib_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if arguments.len() < 2 {
+        return Err(invalid_builtin_call(
+            "calllib requires a library alias and function name",
+        ));
+    }
+    text_argument(&arguments[0], "calllib library alias")?;
+    text_argument(&arguments[1], "calllib function name")?;
     let requested = crate::output_count::current_output_count().unwrap_or(1);
     invoke_native(
         context,
@@ -196,6 +204,7 @@ async fn unloadlibrary_builtin(
     context: Option<crate::context::RuntimeContext>,
     alias: Value,
 ) -> BuiltinResult<Value> {
+    text_argument(&alias, "unloadlibrary alias")?;
     invoke_native(
         context,
         crate::foreign::NativeFfiOperation::Unload,
@@ -216,6 +225,7 @@ async fn libisloaded_builtin(
     context: Option<crate::context::RuntimeContext>,
     alias: Value,
 ) -> BuiltinResult<Value> {
+    text_argument(&alias, "libisloaded alias")?;
     invoke_native(
         context,
         crate::foreign::NativeFfiOperation::IsLoaded,
@@ -235,6 +245,20 @@ async fn libfunctions_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !(1..=2).contains(&arguments.len()) {
+        return Err(invalid_builtin_call(
+            "libfunctions expects an alias and optional -full flag",
+        ));
+    }
+    text_argument(&arguments[0], "libfunctions alias")?;
+    if let Some(option) = arguments.get(1) {
+        let option = text_argument(option, "libfunctions option")?;
+        if !option.eq_ignore_ascii_case("-full") {
+            return Err(invalid_builtin_call(format!(
+                "unsupported libfunctions option `{option}`; expected -full"
+            )));
+        }
+    }
     invoke_native(
         context,
         crate::foreign::NativeFfiOperation::Functions,
@@ -254,6 +278,14 @@ async fn libpointer_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if arguments.len() > 2 {
+        return Err(invalid_builtin_call(
+            "libpointer expects an optional type and value",
+        ));
+    }
+    if let Some(pointer_type) = arguments.first() {
+        text_argument(pointer_type, "libpointer type")?;
+    }
     invoke_native(
         context,
         crate::foreign::NativeFfiOperation::Pointer,
@@ -278,6 +310,12 @@ async fn setdatatype_builtin(
             "setdatatype expects a pointer, type, and one or more dimensions",
         ));
     }
+    if !matches!(arguments.first(), Some(Value::Foreign(_))) {
+        return Err(invalid_builtin_call(
+            "setdatatype requires a native pointer handle",
+        ));
+    }
+    text_argument(&arguments[1], "setdatatype pointer type")?;
     arguments.insert(1, Value::String("setdatatype".into()));
     invoke_native(
         context,
@@ -299,6 +337,20 @@ async fn libstruct_builtin(
     context: Option<crate::context::RuntimeContext>,
     arguments: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !(1..=2).contains(&arguments.len()) {
+        return Err(invalid_builtin_call(
+            "libstruct expects a type and optional scalar structure",
+        ));
+    }
+    text_argument(&arguments[0], "libstruct type")?;
+    if arguments
+        .get(1)
+        .is_some_and(|value| !matches!(value, Value::Struct(_)))
+    {
+        return Err(invalid_builtin_call(
+            "native structure initialization requires a scalar structure value",
+        ));
+    }
     invoke_native(
         context,
         crate::foreign::NativeFfiOperation::Structure,
@@ -312,6 +364,10 @@ fn invalid_builtin_call(message: impl Into<String>) -> crate::RuntimeError {
     native_error(&ERROR_INVALID, "native_ffi", message)
 }
 
+fn text_argument(value: &Value, label: &str) -> BuiltinResult<String> {
+    String::try_from(value).map_err(|_| invalid_builtin_call(format!("{label} must be text")))
+}
+
 fn native_error(
     descriptor: &'static BuiltinErrorDescriptor,
     builtin: &'static str,
@@ -323,3 +379,6 @@ fn native_error(
     }
     builder.build()
 }
+
+#[cfg(test)]
+mod tests;
