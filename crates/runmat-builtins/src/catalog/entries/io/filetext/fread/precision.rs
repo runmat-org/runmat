@@ -101,31 +101,30 @@ fn parse_star_precision(label: &str) -> Result<FreadPrecisionSpec, String> {
 #[derive(Clone, Copy)]
 enum InputSpelling {
     Numeric(FreadInputType),
-    CharacterAlias(FreadInputType),
+    UnsignedCharacterAlias,
     Char,
 }
 
 impl InputSpelling {
     fn input(self) -> FreadInputType {
         match self {
-            Self::Numeric(input) | Self::CharacterAlias(input) => input,
-            Self::Char => FreadInputType::UInt8,
+            Self::Numeric(input) => input,
+            Self::UnsignedCharacterAlias | Self::Char => FreadInputType::UInt8,
         }
     }
 
     fn plain_output(self) -> FreadOutputKind {
         match self {
             Self::Numeric(_) => FreadOutputKind::Numeric(NumericClass::Double),
-            Self::CharacterAlias(_) | Self::Char => FreadOutputKind::Char,
+            Self::UnsignedCharacterAlias | Self::Char => FreadOutputKind::Char,
         }
     }
 
     fn star_output(self) -> FreadOutputKind {
         match self {
             Self::Char => FreadOutputKind::Char,
-            Self::Numeric(input) | Self::CharacterAlias(input) => {
-                FreadOutputKind::Numeric(input.numeric_class())
-            }
+            Self::Numeric(input) => FreadOutputKind::Numeric(input.numeric_class()),
+            Self::UnsignedCharacterAlias => FreadOutputKind::Numeric(NumericClass::UInt8),
         }
     }
 }
@@ -147,14 +146,14 @@ fn parse_repeated_input_label(label: &str) -> Result<(usize, InputSpelling), Str
 
 fn parse_input_label(label: &str) -> Result<InputSpelling, String> {
     use FreadInputType as Input;
-    use InputSpelling::{CharacterAlias, Numeric};
+    use InputSpelling::Numeric;
     match label {
         "double" | "float64" | "real*8" => Ok(Numeric(Input::Float64)),
         "single" | "float" | "float32" | "real*4" => Ok(Numeric(Input::Float32)),
         "int8" | "integer*1" => Ok(Numeric(Input::Int8)),
-        "schar" | "signedchar" | "signed char" => Ok(CharacterAlias(Input::Int8)),
+        "schar" | "signedchar" | "signed char" => Ok(Numeric(Input::Int8)),
         "uint8" | "byte" => Ok(Numeric(Input::UInt8)),
-        "uchar" | "unsignedchar" | "unsigned char" => Ok(CharacterAlias(Input::UInt8)),
+        "uchar" | "unsignedchar" | "unsigned char" => Ok(InputSpelling::UnsignedCharacterAlias),
         "char" => Ok(InputSpelling::Char),
         "int16" | "short" | "integer*2" => Ok(Numeric(Input::Int16)),
         "uint16" | "ushort" | "unsignedshort" | "unsigned short" => Ok(Numeric(Input::UInt16)),

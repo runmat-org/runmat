@@ -140,23 +140,63 @@ fn precision_aliases_repeats_and_character_forms_share_runtime_grammar() {
 
 #[test]
 fn typed_precision_spelling_preserves_exact_character_alias_policy() {
-    for label in [
-        "char",
-        "uchar",
-        "unsignedchar",
-        "unsigned char",
-        "schar",
-        "signedchar",
-        "signed char",
-        "2*char",
-        "3*schar",
+    for (aliases, plain, star) in [
+        (
+            &["schar", "signedchar", "signed char"][..],
+            FreadOutputKind::Numeric(NumericClass::Double),
+            FreadOutputKind::Numeric(NumericClass::Int8),
+        ),
+        (
+            &["uchar", "unsignedchar", "unsigned char"][..],
+            FreadOutputKind::Char,
+            FreadOutputKind::Numeric(NumericClass::UInt8),
+        ),
     ] {
+        for alias in aliases {
+            for label in [alias.to_string(), format!("3*{alias}")] {
+                assert_eq!(
+                    parse_fread_precision(&label).unwrap().output,
+                    plain,
+                    "{label}"
+                );
+            }
+            let starred = format!("*{alias}");
+            assert_eq!(
+                parse_fread_precision(&starred).unwrap().output,
+                star,
+                "{starred}"
+            );
+            let arrow = format!("2*{alias}=>char");
+            assert_eq!(
+                parse_fread_precision(&arrow).unwrap().output,
+                FreadOutputKind::Char,
+                "{arrow}"
+            );
+            let numeric_arrow = format!(
+                "2*{alias}=>{}",
+                if matches!(star, FreadOutputKind::Numeric(NumericClass::Int8)) {
+                    "int8"
+                } else {
+                    "uint8"
+                }
+            );
+            assert_eq!(
+                parse_fread_precision(&numeric_arrow).unwrap().output,
+                star,
+                "{numeric_arrow}"
+            );
+        }
+    }
+    for label in ["char", "2*char"] {
         assert_eq!(
             parse_fread_precision(label).unwrap().output,
-            FreadOutputKind::Char,
-            "{label}"
+            FreadOutputKind::Char
         );
     }
+    assert_eq!(
+        parse_fread_precision("*char").unwrap().output,
+        FreadOutputKind::Char
+    );
     for label in ["uint8", "byte", "int8", "integer*1"] {
         assert_eq!(
             parse_fread_precision(label).unwrap().output,
@@ -164,20 +204,7 @@ fn typed_precision_spelling_preserves_exact_character_alias_policy() {
             "{label}"
         );
     }
-    assert_eq!(
-        parse_fread_precision("*char").unwrap().output,
-        FreadOutputKind::Char
-    );
-    assert_eq!(
-        parse_fread_precision("*schar").unwrap().output,
-        FreadOutputKind::Numeric(NumericClass::Int8)
-    );
-    assert_eq!(
-        parse_fread_precision("2*uchar=>uint16").unwrap().output,
-        FreadOutputKind::Numeric(NumericClass::UInt16)
-    );
 }
-
 #[test]
 fn invalid_fid_and_arity_are_diagnosed_without_false_unknown_error() {
     let bad = inference::infer(
