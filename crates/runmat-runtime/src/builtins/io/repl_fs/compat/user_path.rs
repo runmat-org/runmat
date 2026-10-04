@@ -313,6 +313,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setting_survives_a_later_context_and_restoration_uses_captured_layers() {
+        let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
         let _serial = fs::provider_override_lock();
         #[cfg(windows)]
         let (first, second) = ("C:\\first", "C:\\second");
@@ -436,6 +437,10 @@ mod tests {
         #[cfg(not(windows))]
         let cwd = "/selected";
         let _selected = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(cwd)));
+        #[cfg(windows)]
+        let changed = "C:\\new";
+        #[cfg(not(windows))]
+        let changed = "/new";
         let search = Arc::new(SearchPath::new(String::new()));
         let runtime =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
@@ -445,7 +450,7 @@ mod tests {
                 );
         let error = futures::executor::block_on(run(
             Some(runtime.clone()),
-            vec![super::super::char_value("relative/path")],
+            vec![super::super::char_value(changed)],
         ))
         .expect_err("indeterminate storage outcome");
         assert_eq!(error.identifier(), Some("RunMat:userpath:Storage"));
@@ -480,6 +485,10 @@ mod tests {
         #[cfg(not(windows))]
         let cwd = "/selected";
         let _selected = fs::replace_provider(Arc::new(fs::MemoryFsProvider::with_current_dir(cwd)));
+        #[cfg(windows)]
+        let changed = "C:\\new";
+        #[cfg(not(windows))]
+        let changed = "/new";
         let search = Arc::new(SearchPath::new(String::new()));
         search.install_captured_factory(
             crate::builtins::common::path_state::ResolvedUserPath {
@@ -498,7 +507,7 @@ mod tests {
                 );
         let error = futures::executor::block_on(run(
             Some(runtime.clone()),
-            vec![super::super::char_value("new")],
+            vec![super::super::char_value(changed)],
         ))
         .expect_err("definitive rejection");
         assert_eq!(error.identifier(), Some("RunMat:userpath:Storage"));

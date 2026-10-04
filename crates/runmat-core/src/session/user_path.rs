@@ -159,6 +159,7 @@ mod tests {
         ));
         let settings = Rc::new(IsolatedMemoryPreferenceService::new());
         let mut first_session = RunMatSession::with_options(false, false).expect("first session");
+        first_session.set_compat_mode(runmat_parser::CompatMode::RunMat);
         install_settings(&mut first_session, settings.clone());
         execute(&mut first_session, "userpath('relative/MiXeD');")
             .expect("first session commits the setting");
