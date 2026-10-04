@@ -22,7 +22,7 @@ mod tests {
 
     use super::{
         decode_durable_value, decode_inline_value, encode_durable_value, encode_inline_value,
-        ValueCodecError,
+        validate_durable_preparation, ValueCodecError,
     };
 
     #[test]
