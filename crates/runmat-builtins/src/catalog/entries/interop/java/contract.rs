@@ -89,8 +89,8 @@ pub(super) const FOREIGN_LINK: BuiltinLinkContract = BuiltinLinkContract {
 pub(super) const FOREIGN_CAPABILITIES: &[CapabilityRequirement] =
     &[CapabilityRequirement::ForeignRuntime];
 pub(super) const EDT_CAPABILITIES: &[CapabilityRequirement] = &[
-    CapabilityRequirement::ForeignRuntime,
     CapabilityRequirement::UserInterface,
+    CapabilityRequirement::ForeignRuntime,
 ];
 pub(super) const FOREIGN_EFFECTS: &[EffectKind] = &[
     EffectKind::HostCallback,
@@ -99,11 +99,11 @@ pub(super) const FOREIGN_EFFECTS: &[EffectKind] = &[
     EffectKind::Unknown,
 ];
 pub(super) const EDT_EFFECTS: &[EffectKind] = &[
+    EffectKind::UserInterface,
     EffectKind::HostCallback,
     EffectKind::MaySuspend,
     EffectKind::MayThrow,
     EffectKind::Unknown,
-    EffectKind::UserInterface,
 ];
 pub(super) const CLASSPATH_EFFECTS: &[EffectKind] = &[
     EffectKind::EnvironmentWrite,
