@@ -26,7 +26,7 @@ fn dataset_receiver_retains_session_and_original_filesystem_across_evaluations()
         let _replacement = fs::replace_provider(replacement.clone() as Arc<dyn FsProvider>);
         let second = execute_text_request_for_testing(
             &mut session,
-            "assert(strcmp(Dataset.path(ds), 'session.data')); assert(Dataset.set_attr(ds, 'owner', 'original')); assert(strcmp(Dataset.get_attr(ds, 'owner'), 'original'));",
+            "assert(strcmp(Dataset.path(ds), 'session.data')); Dataset.set_attr(ds, 'discarded', 'kept'); assert(Dataset.set_attr(ds, 'owner', 'original')); assert(strcmp(Dataset.get_attr(ds, 'owner'), 'original')); assert(strcmp(Dataset.get_attr(ds, 'discarded'), 'kept'));",
         )
         .expect("later evaluation through same session");
         assert!(second.error.is_none(), "{:?}", second.error);
