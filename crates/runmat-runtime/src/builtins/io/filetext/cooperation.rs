@@ -112,3 +112,7 @@ fn execution_error(
         other => other.into_runtime_error(),
     }
 }
+
+#[cfg(test)]
+#[path = "cooperation/full_call_tests.rs"]
+mod full_call_tests;
