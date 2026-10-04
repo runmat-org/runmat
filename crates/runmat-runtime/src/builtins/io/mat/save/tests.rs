@@ -23,6 +23,18 @@ fn regexp_followed_by_another_option_has_no_pattern() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn nested_implicit_save_does_not_inherit_outer_captured_status() {
+    let _presentation = crate::output_context::push_output_count(1);
+    let error = block_on(crate::dispatcher::call_builtin_async(
+        "save",
+        &[Value::from("-unsupported")],
+    ))
+    .expect_err("known invalid option");
+    assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn known_invalid_option_does_not_download_prior_resident_argument() {
     let _lock = test_support::accel_test_lock();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));

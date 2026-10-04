@@ -55,10 +55,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    // The dispatcher scopes this count to the current call. Presentation
-    // output context may belong to an enclosing expression, so it is not an
-    // independent upper-bound witness for this invocation.
-    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+    let requested_outputs = match crate::output_count::current_output_scope() {
+        crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
+        crate::output_count::InvocationOutputScope::Implicit => None,
+        crate::output_count::InvocationOutputScope::Unscoped => {
+            crate::output_context::requested_output_count()
+        }
+    };
+    if requested_outputs.is_some_and(|count| count > 1) {
         return Err(load_error_with(
             &LOAD_ERROR_OUTPUT_COUNT,
             "load supports at most one output argument",
@@ -66,13 +70,9 @@ async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let eval = evaluate(&args).await?;
 
-    // The VM sets output_context::requested_output_count() at every call site before
-    // dispatching:
-    //   Some(0) → statement-level call (result is discarded or printed without capture)
-    //             → assign loaded variables directly into the caller's workspace.
-    //   Some(1) → single-output assignment `S = load(...)` → return a struct.
-    //   None    → called outside the VM (e.g. directly from Rust) → return a struct.
-    if crate::output_context::requested_output_count() == Some(0) {
+    // The same invocation-owned output request remains authoritative across
+    // the awaited decode/restoration work.
+    if requested_outputs == Some(0) {
         for (name, value) in eval.variables() {
             crate::workspace::assign(name, value.clone())
                 .map_err(|err| load_error_with(&LOAD_ERROR_WORKSPACE, err))?;

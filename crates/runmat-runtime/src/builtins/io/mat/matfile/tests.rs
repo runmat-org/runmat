@@ -19,6 +19,21 @@ fn known_invalid_writable_pair_does_not_download_resident_filename() {
     assert_eq!(owner.downloads(), 0);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn invalid_read_index_precedes_detached_receiver_authority() {
+    let subscript =
+        crate::object::indexing::standard_substruct_fixture_from_parts("()", Value::Num(1.0))
+            .expect("fixture");
+    let mut path =
+        crate::object::indexing::parse_standard_substruct(&subscript).expect("parsed fixture");
+    let step = path.remove(0);
+    let detached = Value::Object(ObjectInstance::new(MATFILE_CLASS.owned()));
+    let error = futures::executor::block_on(super::matfile_read_step(None, detached, step))
+        .expect_err("partial indexing is unsupported before authority lookup");
+    assert_eq!(error.identifier(), Some("RunMat:matfile:Unsupported"));
+}
+
 async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     super::matfile_builtin(None, filename, rest).await
 }

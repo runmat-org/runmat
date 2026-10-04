@@ -57,10 +57,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::io::mat::save"
 )]
 async fn save_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if crate::output_count::current_output_count()
-        .or_else(crate::output_context::requested_output_count)
-        .is_some_and(|count| count > 0)
-    {
+    let requested_outputs = match crate::output_count::current_output_scope() {
+        crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
+        crate::output_count::InvocationOutputScope::Implicit => None,
+        crate::output_count::InvocationOutputScope::Unscoped => {
+            crate::output_context::requested_output_count()
+        }
+    };
+    if requested_outputs.is_some_and(|count| count > 0) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &runmat_builtins::SAVE_STATUS_EXTENSION,
             BUILTIN_NAME,

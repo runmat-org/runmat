@@ -128,7 +128,6 @@ async fn matfile_read_step(
 ) -> BuiltinResult<Value> {
     let payload = step.selector_value()?;
     let object = into_matfile_object(obj, MATFILE_SUBSREF)?;
-    let owner = resolve_matfile(runtime, &object)?;
     if step.kind() != crate::object::indexing::ObjectIndexKind::Member {
         return Err(matfile_error_with(
             &MATFILE_ERROR_UNSUPPORTED,
@@ -136,6 +135,8 @@ async fn matfile_read_step(
         ));
     }
     let field = member_name(&payload, MATFILE_SUBSREF)?;
+    reject_internal_field(&field)?;
+    let owner = resolve_matfile(runtime, &object)?;
     if field == PROPERTIES_FIELD {
         return object
             .properties
@@ -143,7 +144,6 @@ async fn matfile_read_step(
             .cloned()
             .ok_or_else(|| matfile_error("matfile object is missing Properties"));
     }
-    reject_internal_field(&field)?;
     let entries = read_mat_file_for_builtin_on(&owner.source, BUILTIN_NAME).await?;
     resolve_matfile(runtime, &object)?;
     entries

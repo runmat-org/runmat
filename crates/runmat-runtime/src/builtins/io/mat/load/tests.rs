@@ -24,6 +24,54 @@ fn regexp_followed_by_another_option_has_no_pattern() {
     let error = preflight_known_options(&args).expect_err("missing regexp pattern");
     assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
+    let folder = tempdir().expect("MAT fixture folder");
+    let path = folder.path().join("nested-output.mat");
+    let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+        "x".into(),
+        Value::Num(7.0),
+    )]))
+    .expect("encode fixture");
+    std::fs::write(&path, bytes).expect("write fixture");
+    let _presentation = crate::output_context::push_output_count(0);
+    let value = block_on(crate::dispatcher::call_builtin_async(
+        "load",
+        &[Value::String(path.to_string_lossy().into_owned())],
+    ))
+    .expect("implicit nested load returns a struct");
+    let Value::Struct(result) = value else {
+        panic!("implicit nested load must not publish workspace bindings");
+    };
+    assert_eq!(result.fields.get("x"), Some(&Value::Num(7.0)));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
+    let _workspace = workspace_guard();
+    ensure_test_resolver();
+    set_workspace(&[]);
+    let folder = tempdir().expect("MAT fixture folder");
+    let path = folder.path().join("current-zero.mat");
+    let bytes = block_on(encode_workspace_to_mat_bytes(&[(
+        "x".into(),
+        Value::Num(9.0),
+    )]))
+    .expect("encode fixture");
+    std::fs::write(&path, bytes).expect("write fixture");
+    let _presentation = crate::output_context::push_output_count(1);
+    let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
+        "load",
+        &[Value::String(path.to_string_lossy().into_owned())],
+        0,
+    ))
+    .expect("zero-output statement");
+    assert_eq!(result, Value::OutputList(Vec::new()));
+    TEST_WORKSPACE.with(|slot| assert_eq!(slot.borrow().get("x"), Some(&Value::Num(9.0))));
+}
 use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
 use crate::workspace::WorkspaceResolver;
 use flate2::write::ZlibEncoder;
@@ -50,7 +98,12 @@ fn ensure_test_resolver() {
             entries
         },
         globals: || Vec::new(),
-        assign: None,
+        assign: Some(|name, value| {
+            TEST_WORKSPACE.with(|slot| {
+                slot.borrow_mut().insert(name.to_string(), value);
+            });
+            Ok(())
+        }),
         clear: None,
         remove: None,
     });
