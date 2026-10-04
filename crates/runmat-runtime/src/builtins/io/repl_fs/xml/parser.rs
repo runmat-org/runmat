@@ -127,14 +127,15 @@ impl XmlNode {
             .properties
             .insert("Attributes".to_string(), Value::Struct(attributes));
         let mut children = Vec::new();
-        children.try_reserve(self.element_count()).map_err(|err| {
-            build_runtime_error("xmlread: cannot allocate child-node collection")
-                .with_builtin("xmlread")
-                .with_source(err)
-                .build()
-        })?;
         for item in self.content {
+            cooperation.completed(1).await?;
             if let XmlContent::Element(child) = item {
+                children.try_reserve(1).map_err(|err| {
+                    build_runtime_error("xmlread: cannot allocate child-node collection")
+                        .with_builtin("xmlread")
+                        .with_source(err)
+                        .build()
+                })?;
                 children.push(Value::Object(child.into_object(cooperation).await?));
             }
         }
@@ -175,19 +176,30 @@ pub(super) async fn xml_node_to_struct(
     }
 
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
-    for child in node.content.iter().filter_map(|item| match item {
-        XmlContent::Element(child) => Some(child),
-        _ => None,
-    }) {
+    for item in &node.content {
+        cooperation.completed(1).await?;
+        let XmlContent::Element(child) = item else {
+            continue;
+        };
         let field = xml_struct_field_name(&child.name);
         let value = xml_node_to_struct_value(child, options, cooperation).await?;
-        if let Some((_, values)) = groups.iter_mut().find(|(name, _)| *name == field) {
+        let mut existing = None;
+        for (index, (name, _)) in groups.iter().enumerate() {
+            cooperation.completed(1).await?;
+            if *name == field {
+                existing = Some(index);
+                break;
+            }
+        }
+        if let Some(index) = existing {
+            let values = &mut groups[index].1;
             values.push(value);
         } else {
             groups.push((field, vec![value]));
         }
     }
     for (field, values) in groups {
+        cooperation.completed(1).await?;
         let value = if values.len() == 1 {
             values.into_iter().next().unwrap()
         } else {
@@ -207,7 +219,7 @@ async fn xml_node_to_struct_value(
     options: &ReadStructOptions,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<Value> {
-    if node.attributes.is_empty() && node.element_count() == 0 {
+    if node.attributes.is_empty() && !node.has_element(cooperation).await? {
         return Ok(char_value(node.direct_text(cooperation).await?.trim()));
     }
     xml_node_to_struct(node, options, cooperation)

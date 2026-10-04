@@ -41,6 +41,10 @@ impl XmlNode {
     ) -> BuiltinResult<String> {
         let mut out = String::new();
         for item in &self.content {
+            // Even empty text, child elements, comments, and instructions
+            // have per-item projection work. A document can contain many of
+            // them without any large payload to charge below.
+            cooperation.completed(1).await?;
             let text = match item {
                 XmlContent::Text(text) => text,
                 // The legacy text view discards these ordered nodes. Their
@@ -76,11 +80,17 @@ impl XmlNode {
         Ok(out)
     }
 
-    pub(super) fn element_count(&self) -> usize {
-        self.content
-            .iter()
-            .filter(|item| matches!(item, XmlContent::Element(_)))
-            .count()
+    pub(super) async fn has_element(
+        &self,
+        cooperation: &mut XmlCooperation,
+    ) -> BuiltinResult<bool> {
+        for item in &self.content {
+            cooperation.completed(1).await?;
+            if matches!(item, XmlContent::Element(_)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -91,6 +101,8 @@ mod tests {
     use runmat_execution::cancellation::CancellationSource;
     use runmat_execution::CancellationReason;
     use std::num::NonZeroU64;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[test]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -115,6 +127,66 @@ mod tests {
         let error = futures::executor::block_on(node.direct_text(&mut cooperation))
             .expect_err("projection must yield and observe cancellation");
         assert_eq!(error.identifier(), Some("RunMat:xmlread:Cancelled"));
+        assert!(cooperation.budget_owner().unwrap().borrow().is_some());
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn many_empty_items_charge_projection_work_without_a_text_payload() {
+        let mut node = XmlNode::new("root".into(), BTreeMap::new());
+        for _ in 0..128 {
+            node.push_content(XmlContent::Comment(String::new()))
+                .unwrap();
+            node.push_content(XmlContent::Element(XmlNode::new(
+                "empty".into(),
+                BTreeMap::new(),
+            )))
+            .unwrap();
+        }
+        let turns = Arc::new(AtomicUsize::new(0));
+        let observed = turns.clone();
+        let source = CancellationSource::new();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::XmlRead);
+        let object = futures::executor::block_on(node.into_object(&mut cooperation))
+            .expect("empty ordered items project to element children");
+        let Some(Value::Cell(children)) = object.properties.get("ChildNodes") else {
+            panic!("expected projected children");
+        };
+        assert_eq!(children.data.len(), 128);
+        assert!(turns.load(Ordering::Relaxed) >= 256);
+        assert!(cooperation.budget_owner().unwrap().borrow().is_some());
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn readstruct_leaf_detection_yields_through_non_element_items() {
+        let mut node = XmlNode::new("root".into(), BTreeMap::new());
+        for _ in 0..128 {
+            node.push_content(XmlContent::Comment(String::new()))
+                .unwrap();
+        }
+        let source = CancellationSource::new();
+        let canceller = source.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            source.token(),
+            move || {
+                canceller.cancel(CancellationReason::User);
+                Box::pin(async { Ok(()) })
+            },
+        );
+        let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::ReadStruct);
+        let error = futures::executor::block_on(node.has_element(&mut cooperation))
+            .expect_err("leaf detection must yield even when there are no elements");
+        assert_eq!(error.identifier(), Some("RunMat:readstruct:Cancelled"));
         assert!(cooperation.budget_owner().unwrap().borrow().is_some());
     }
 }
