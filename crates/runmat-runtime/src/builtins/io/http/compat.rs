@@ -26,7 +26,6 @@ use url::Url;
 
 use super::transport::{self, HttpMethod, HttpRequest};
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
-use crate::builtins::io::repl_fs::preferences::session_pref_text;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -365,9 +364,13 @@ async fn websave_builtin(
     type_resolver(crate::builtins::io::type_resolvers::num_type),
     descriptor(crate::builtins::io::http::compat::SENDMAIL_DESCRIPTOR),
     integer_audit(crate::builtins::io::http::compat::SENDMAIL_INTEGER_AUDIT),
+    context = true,
     builtin_path = "crate::builtins::io::http::compat"
 )]
-async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn sendmail_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if args.iter().any(|value| {
         crate::builtins::common::validation::value_contains_native_integer_class(value)
             || value_contains_resident(value)
@@ -377,7 +380,6 @@ async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "sendmail: mail arguments must be text, not numeric or resident values",
         ));
     }
-    let args = gather_args("sendmail", &args).await?;
     let (recipients, subject, body) = parse_sendmail_args(&args)?;
     let message = format_mail_message(&recipients, &subject, &body);
 
@@ -402,8 +404,8 @@ async fn sendmail_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(Value::Num(0.0));
     }
 
-    let smtp_server = session_pref_text("Internet", "SMTP_Server")
-        .or_else(|| session_pref_text("Internet", "SMTPServer"))
+    let smtp_server = read_smtp_server(context)
+        .await?
         .or_else(|| std::env::var("RUNMAT_SMTP_SERVER").ok());
     if let Some(server) = smtp_server.filter(|server| !server.trim().is_empty()) {
         return Err(compat_error(

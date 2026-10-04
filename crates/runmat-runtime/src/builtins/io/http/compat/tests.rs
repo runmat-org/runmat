@@ -179,22 +179,28 @@ fn websave_query_values_preserve_exact_integer_vectors() {
 
 #[test]
 fn sendmail_rejects_integer_payloads_before_transport() {
-    let error = run(sendmail_builtin(vec![
-        Value::String("recipient@example.test".to_string()),
-        Value::String("subject".to_string()),
-        Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
-    ]))
+    let error = run(sendmail_builtin(
+        None,
+        vec![
+            Value::String("recipient@example.test".to_string()),
+            Value::String("subject".to_string()),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        ],
+    ))
     .expect_err("integer message must reject before transport selection");
     assert!(error.message().contains("must be text"));
 
     let nested =
         runmat_value::CellArray::new(vec![Value::Int(runmat_value::IntValue::I8(1))], 1, 1)
             .unwrap();
-    let error = run(sendmail_builtin(vec![
-        Value::Cell(nested),
-        Value::String("subject".to_string()),
-        Value::String("message".to_string()),
-    ]))
+    let error = run(sendmail_builtin(
+        None,
+        vec![
+            Value::Cell(nested),
+            Value::String("subject".to_string()),
+            Value::String("message".to_string()),
+        ],
+    ))
     .expect_err("nested integer recipient must reject before transport selection");
     assert!(error.message().contains("must be text"));
 }
@@ -210,3 +216,6 @@ fn sendmail_two_argument_form_uses_an_empty_message() {
     assert_eq!(subject, "subject");
     assert!(message.is_empty());
 }
+
+#[path = "tests/sendmail_preferences.rs"]
+mod sendmail_preferences;

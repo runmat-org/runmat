@@ -29,6 +29,7 @@
     "Direct integer, numeric-array, nested integer, or resident numeric arguments are not mail text and reject before provider access or transport side effects.",
     "Writes RFC822-style messages to RUNMAT_SENDMAIL_OUTBOX when configured.",
     "On native hosts, uses RUNMAT_SENDMAIL_COMMAND or /usr/sbin/sendmail when available.",
+    "If no outbox or local command is selected, reads the Internet preference group from the application's installed preference service, including SMTP_Server and SMTPServer; missing or failed preference storage is reported rather than replaced with an empty session store.",
     "Reports a clear error when only SMTP preferences are configured because direct TLS SMTP transport is not available in this build."
   ],
   "examples": [],
