@@ -65,9 +65,7 @@ fn pyargs_accepts_effective_character_rows_and_scalar_string_arrays() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn pyargs_rejects_invalid_pairs_before_any_python_service() {
-    let odd = pyargs_builtin(vec![Value::String("x".into())])
-        .err()
-        .expect("odd pair");
+    let odd = pyargs_builtin(vec![Value::String("x".into())]).expect_err("odd pair");
     assert_eq!(odd.identifier(), Some("RunMat:Foreign:InvalidCall"));
     for name in [
         Value::Num(1.0),
@@ -75,9 +73,7 @@ fn pyargs_rejects_invalid_pairs_before_any_python_service() {
         Value::Bool(true),
         Value::String(String::new()),
     ] {
-        let nontext = pyargs_builtin(vec![name, Value::Num(2.0)])
-            .err()
-            .expect("nonempty text name");
+        let nontext = pyargs_builtin(vec![name, Value::Num(2.0)]).expect_err("nonempty text name");
         assert_eq!(nontext.identifier(), Some("RunMat:Foreign:InvalidCall"));
     }
 }

@@ -355,8 +355,7 @@ fn feof_rejects_known_invalid_resident_class_and_shape_before_download() {
                 .is_none()
         );
         let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()))
-            .err()
-            .expect("metadata-invalid identifier");
+            .expect_err("metadata-invalid identifier");
         assert_eq!(error.identifier(), FEOF_ERROR_INVALID_INPUT.identifier);
         assert_eq!(allocation.probe.retirements(), 0);
     }

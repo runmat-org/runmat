@@ -1331,9 +1331,13 @@ mod tests {
         let other = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
         let other_status = other.status_value().unwrap();
         assert_eq!(
-            validate_environment(&other.handles, &other.host_identity, &[original.clone()])
-                .unwrap_err()
-                .identifier(),
+            validate_environment(
+                &other.handles,
+                &other.host_identity,
+                std::slice::from_ref(&original)
+            )
+            .unwrap_err()
+            .identifier(),
             Some("RunMat:Foreign:HandleMetadataMismatch")
         );
         validate_environment(&other.handles, &other.host_identity, &[other_status]).unwrap();
@@ -1348,7 +1352,12 @@ mod tests {
             Some("RunMat:Foreign:StaleHandle")
         );
         let fresh = adapter.status_value().unwrap();
-        validate_environment(&adapter.handles, &adapter.host_identity, &[fresh.clone()]).unwrap();
+        validate_environment(
+            &adapter.handles,
+            &adapter.host_identity,
+            std::slice::from_ref(&fresh),
+        )
+        .unwrap();
         adapter.terminate_value(vec![fresh]).unwrap();
         assert!(adapter.terminated.get());
     }
@@ -1371,7 +1380,12 @@ mod tests {
             Some("RunMat:Foreign:InvalidCall")
         );
         assert!(!adapter.terminated.get());
-        validate_environment(&adapter.handles, &adapter.host_identity, &[valid.clone()]).unwrap();
+        validate_environment(
+            &adapter.handles,
+            &adapter.host_identity,
+            std::slice::from_ref(&valid),
+        )
+        .unwrap();
         let terminated = adapter.terminate_value(vec![valid.clone()]).unwrap();
         assert_eq!(
             validate_environment(&adapter.handles, &adapter.host_identity, &[valid])
@@ -1406,7 +1420,7 @@ mod tests {
         validate_environment(
             &adapter.handles,
             &adapter.host_identity,
-            &[environment.clone()],
+            std::slice::from_ref(&environment),
         )
         .unwrap();
         drop(object);
@@ -1461,7 +1475,12 @@ mod tests {
         );
         assert!(!state.call_active.get());
         assert!(!state.terminated.get());
-        validate_environment(&state.handles, &state.host_identity, &[valid.clone()]).unwrap();
+        validate_environment(
+            &state.handles,
+            &state.host_identity,
+            std::slice::from_ref(&valid),
+        )
+        .unwrap();
         let result = pollster::block_on(terminate_isolated(state, vec![valid.clone()])).unwrap();
         assert!(matches!(result, Value::Object(_)));
         assert_eq!(

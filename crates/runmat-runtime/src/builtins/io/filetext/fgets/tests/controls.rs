@@ -165,8 +165,7 @@ fn invalid_limit_and_resident_geometry_precede_provider_download() {
         &Value::GpuTensor(scalar.handle.clone()),
         &[Value::Num(f64::NAN)],
     )
-    .err()
-    .expect("invalid limit before identifier gather");
+    .expect_err("invalid limit before identifier gather");
     assert_eq!(
         invalid_host_limit.identifier(),
         FGETS_ERROR_INVALID_INPUT.identifier
@@ -174,8 +173,7 @@ fn invalid_limit_and_resident_geometry_precede_provider_download() {
 
     let invalid_resident_limit =
         run_evaluate(&Value::Num(3.0), &[Value::GpuTensor(vector.handle.clone())])
-            .err()
-            .expect("invalid resident geometry before gather");
+            .expect_err("invalid resident geometry before gather");
     assert_eq!(
         invalid_resident_limit.identifier(),
         FGETS_ERROR_INVALID_INPUT.identifier

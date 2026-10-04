@@ -92,8 +92,7 @@ fn fgetl_rejects_known_nonscalar_resident_identifier_before_download() {
     );
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()), &[])
-        .err()
-        .expect("nonscalar identifier");
+        .expect_err("nonscalar identifier");
     assert_eq!(error.identifier(), FGETL_ERROR_INVALID_INPUT.identifier);
     assert_eq!(allocation.probe.retirements(), 0);
 }
@@ -114,9 +113,7 @@ fn fgetl_rejects_cell_containing_resident_identifier_without_gather() {
     let cell = CellArray::new(vec![Value::GpuTensor(allocation.handle.clone())], 1, 1)
         .expect("cell fixture");
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let error = run_evaluate(&Value::Cell(cell), &[])
-        .err()
-        .expect("cell is not a file identifier");
+    let error = run_evaluate(&Value::Cell(cell), &[]).expect_err("cell is not a file identifier");
     assert_eq!(error.identifier(), FGETL_ERROR_INVALID_INPUT.identifier);
     assert_eq!(allocation.probe.retirements(), 0);
 }

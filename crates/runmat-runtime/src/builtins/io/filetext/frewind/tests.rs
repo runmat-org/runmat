@@ -28,8 +28,7 @@ fn resident_logical_identifier_uses_logical_gate_before_download() {
     );
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = run_evaluate(&Value::GpuTensor(allocation.handle.clone()))
-        .err()
-        .expect("resident compatibility gate");
+        .expect_err("resident compatibility gate");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:FrewindResidentIdExtension")

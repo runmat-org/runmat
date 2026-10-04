@@ -118,8 +118,10 @@ fn empty_output_names_keep_the_existing_container_contract() {
 fn invalid_python_controls_do_not_discover_or_start_an_interpreter() {
     use crate::execution::RuntimeExecutionService;
 
-    let mut configuration = PythonRuntimeConfiguration::default();
-    configuration.executable = Some("/runmat/nonexistent-python-for-preflight".into());
+    let configuration = PythonRuntimeConfiguration {
+        executable: Some("/runmat/nonexistent-python-for-preflight".into()),
+        ..PythonRuntimeConfiguration::default()
+    };
     let adapter =
         PythonAdapter::with_configuration(ForeignHandleRegistry::default(), configuration)
             .expect("register host without starting Python");
