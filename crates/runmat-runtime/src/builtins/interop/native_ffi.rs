@@ -1,182 +1,19 @@
 //! Shared-library interoperability builtins backed by the session foreign service.
 
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    CALLLIB_DESCRIPTOR, LIBFUNCTIONS_DESCRIPTOR, LIBISLOADED_DESCRIPTOR, LIBPOINTER_DESCRIPTOR,
+    LIBSTRUCT_DESCRIPTOR, LOADLIBRARY_DESCRIPTOR, NATIVE_FFI_INTEGER_AUDIT, SETDATATYPE_DESCRIPTOR,
+    UNLOADLIBRARY_DESCRIPTOR,
+};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NATIVE_FFI_ERROR_HOST_UNAVAILABLE as ERROR_HOST_UNAVAILABLE,
+    NATIVE_FFI_ERROR_INVALID as ERROR_INVALID, NATIVE_FFI_ERROR_UNAVAILABLE as ERROR_UNAVAILABLE,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
-
-const TEXT: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Library, header, alias, function, or pointer type name.",
-};
-const VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Value passed through the normalized native ABI contract.",
-};
-const VARIADIC: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "arguments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Arguments required by this shared-library operation.",
-};
-const OUTPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "result",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Native return value followed by declared output parameters.",
-};
-
-const LOAD_INPUTS: [BuiltinParamDescriptor; 1] = [VARIADIC];
-const CALL_INPUTS: [BuiltinParamDescriptor; 1] = [VARIADIC];
-const ONE_TEXT_INPUT: [BuiltinParamDescriptor; 1] = [TEXT];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const POINTER_TYPE_INPUT: [BuiltinParamDescriptor; 1] = [TEXT];
-const POINTER_INPUTS: [BuiltinParamDescriptor; 2] = [TEXT, VALUE];
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [OUTPUT];
-
-const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[notfound, warnings] = loadlibrary(library, header, options)",
-    inputs: &LOAD_INPUTS,
-    outputs: &OUTPUTS,
-}];
-const CALL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[outputs] = calllib(library, function, arguments)",
-    inputs: &CALL_INPUTS,
-    outputs: &OUTPUTS,
-}];
-const ONE_TEXT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "result = shared_library_operation(name)",
-    inputs: &ONE_TEXT_INPUT,
-    outputs: &OUTPUTS,
-}];
-const FUNCTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "names = libfunctions(library)",
-        inputs: &ONE_TEXT_INPUT,
-        outputs: &OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "signatures = libfunctions(library, '-full')",
-        inputs: &LOAD_INPUTS,
-        outputs: &OUTPUTS,
-    },
-];
-const POINTER_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "pointer = libpointer()",
-        inputs: &NO_INPUTS,
-        outputs: &OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pointer = libpointer(type)",
-        inputs: &POINTER_TYPE_INPUT,
-        outputs: &OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pointer = libpointer(type, value)",
-        inputs: &POINTER_INPUTS,
-        outputs: &OUTPUTS,
-    },
-];
-const STRUCTURE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "value = libstruct(type)",
-        inputs: &POINTER_TYPE_INPUT,
-        outputs: &OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = libstruct(type, structure)",
-        inputs: &POINTER_INPUTS,
-        outputs: &OUTPUTS,
-    },
-];
-const SETDATATYPE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "setdatatype(pointer, type, dimensions)",
-    inputs: &LOAD_INPUTS,
-    outputs: &[],
-}];
-
-const ERROR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NATIVE_FFI.UNAVAILABLE",
-    identifier: Some("RunMat:Foreign:UnsupportedOnWasm"),
-    when: "The current host cannot load a native shared library.",
-    message: "Native shared libraries are unavailable on this host.",
-};
-const ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NATIVE_FFI.INVALID_CALL",
-    identifier: Some("RunMat:Foreign:InvalidCall"),
-    when: "Arguments do not satisfy the normalized shared-library contract.",
-    message: "Invalid shared-library operation.",
-};
-const ERROR_HOST_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NATIVE_FFI.HOST_UNAVAILABLE",
-    identifier: Some("RunMat:Foreign:HostUnavailable"),
-    when: "A native shared-library operation is invoked without an active runtime context.",
-    message: "Native shared-library operation has no active runtime context.",
-};
-const ERRORS: [BuiltinErrorDescriptor; 3] =
-    [ERROR_UNAVAILABLE, ERROR_INVALID, ERROR_HOST_UNAVAILABLE];
-
-const LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const CALL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CALL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const ONE_TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ONE_TEXT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const FUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FUNCTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const POINTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POINTER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const STRUCTURE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRUCTURE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const SETDATATYPE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SETDATATYPE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Typed integer values retain native storage and are range-checked against the declared C ABI type.",
-};
 
 async fn invoke_native(
     operation: crate::foreign::NativeFfiOperation,
@@ -313,12 +150,7 @@ async fn loadlibrary_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "calllib",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Call a function in a loaded C shared library.",
-    keywords = "calllib,shared library,c,ffi,native",
-    descriptor(crate::builtins::interop::native_ffi::CALL_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn calllib_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -361,12 +193,7 @@ async fn libfunctions_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "libpointer",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Create session-owned typed storage for a native pointer argument.",
-    keywords = "libpointer,pointer,shared library,c,ffi,native",
-    descriptor(crate::builtins::interop::native_ffi::POINTER_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libpointer_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -375,14 +202,7 @@ async fn libpointer_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "setdatatype",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Declare the type and dimensions of an opaque native pointer.",
-    keywords = "setdatatype,libpointer,pointer,shared library,c,ffi,native",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::interop::native_ffi::SETDATATYPE_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -403,12 +223,7 @@ async fn setdatatype_builtin(mut arguments: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "libstruct",
-    execution_stack = "process",
-    category = "interop/native",
-    summary = "Create session-owned storage for a structure declared by a loaded library.",
-    keywords = "libstruct,structure,shared library,c,ffi,native",
-    descriptor(crate::builtins::interop::native_ffi::STRUCTURE_DESCRIPTOR),
-    integer_audit(crate::builtins::interop::native_ffi::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::interop::native_ffi"
 )]
 async fn libstruct_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
