@@ -277,7 +277,7 @@ async fn cancelled_blocked_open_and_corrupt_read_release_exact_connection() {
     let (blocked_tx, blocked_rx) = oneshot::channel();
     let cancellation = CancellationSource::new();
     let cancelled_runtime = runtime().with_cancellation_token(cancellation.token());
-    let mut budget = cancelled_runtime.cpu_cooperation();
+    let budget = cancelled_runtime.cpu_cooperation();
     let mut pending = Box::pin(budget.await_cancellable(connection::open_version(
         &cancelled.namespace,
         2,
