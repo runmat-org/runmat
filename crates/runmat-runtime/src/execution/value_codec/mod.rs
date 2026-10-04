@@ -90,7 +90,10 @@ mod tests {
         let Value::ObjectArray(decoded_array) = &decoded else {
             panic!("object array")
         };
-        assert_eq!(decoded_array.class_name().as_str(), "PreferencePayload");
+        assert_eq!(
+            decoded_array.class_name(),
+            &runmat_types::StaticClassIdentity::new("PreferencePayload").owned()
+        );
         assert_eq!(decoded_array.shape(), &[1, 1, 1]);
         assert_eq!(decoded_array.data().len(), 1);
         let Value::Object(decoded_object) = &decoded_array.data()[0] else {
