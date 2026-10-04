@@ -18,6 +18,7 @@ pub struct ObjectInstance {
 enum NativeObjectPayload {
     ContainersMap(ContainersMapStorage),
     ForeignHostControl(ForeignRef),
+    DatasetAuthority(ForeignRef),
 }
 
 impl Trace for NativeObjectPayload {
@@ -25,6 +26,7 @@ impl Trace for NativeObjectPayload {
         match self {
             Self::ContainersMap(storage) => storage.trace(tracer),
             Self::ForeignHostControl(_) => {}
+            Self::DatasetAuthority(_) => {}
         }
     }
 }
@@ -52,21 +54,41 @@ impl ObjectInstance {
     pub fn foreign_host_control(&self) -> Option<&ForeignRef> {
         match self.native_payload.as_deref() {
             Some(NativeObjectPayload::ForeignHostControl(reference)) => Some(reference),
-            Some(NativeObjectPayload::ContainersMap(_)) | None => None,
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_dataset_authority(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::DatasetAuthority(reference)));
+        self
+    }
+
+    pub fn dataset_authority(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::DatasetAuthority(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | None => None,
         }
     }
 
     pub fn containers_map_payload(&self) -> Option<&ContainersMapStorage> {
         match self.native_payload.as_deref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
-            Some(NativeObjectPayload::ForeignHostControl(_)) | None => None,
+            Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | None => None,
         }
     }
 
     pub fn containers_map_payload_mut(&mut self) -> Option<&mut ContainersMapStorage> {
         match self.native_payload.as_deref_mut() {
             Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
-            Some(NativeObjectPayload::ForeignHostControl(_)) | None => None,
+            Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | None => None,
         }
     }
 
@@ -79,7 +101,9 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ContainersMap(storage)) => {
                 storage.for_each_value(&mut visitor);
             }
-            Some(NativeObjectPayload::ForeignHostControl(_)) | None => {}
+            Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | None => {}
         }
     }
 

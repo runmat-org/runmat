@@ -1,0 +1,268 @@
+//! Sealed, clone-stable filesystem owner for Dataset family receiver values.
+
+use super::data_error;
+use crate::BuiltinResult;
+use runmat_filesystem::FsProvider;
+use runmat_types::{
+    ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity, StaticClassIdentity,
+};
+use runmat_value::{
+    ForeignRef, ForeignResourceKey, ForeignResourceRelease, ObjectInstance, Value, WeakForeignRef,
+};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+pub(crate) const DATA_ARRAY_CLASS: StaticClassIdentity = StaticClassIdentity::new("DataArray");
+pub(crate) const DATA_TRANSACTION_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("DataTransaction");
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum HandleRole {
+    Dataset,
+    Array(String),
+    Transaction(String),
+}
+
+impl HandleRole {
+    fn class(&self) -> StaticClassIdentity {
+        match self {
+            Self::Dataset => runmat_builtins::DATASET_CLASS,
+            Self::Array(_) => DATA_ARRAY_CLASS,
+            Self::Transaction(_) => DATA_TRANSACTION_CLASS,
+        }
+    }
+
+    fn type_name(&self) -> &'static str {
+        match self {
+            Self::Dataset => "Dataset",
+            Self::Array(_) => "DataArray",
+            Self::Transaction(_) => "DataTransaction",
+        }
+    }
+}
+
+pub(crate) struct AuthorizedHandle {
+    pub filesystem: Arc<dyn FsProvider>,
+    pub root: PathBuf,
+    pub public_path: String,
+    pub role: HandleRole,
+    reference: ForeignRef,
+}
+
+impl AuthorizedHandle {
+    pub fn reference(&self) -> &ForeignRef {
+        &self.reference
+    }
+}
+
+struct Record {
+    filesystem: Arc<dyn FsProvider>,
+    root: PathBuf,
+    public_path: String,
+    role: HandleRole,
+    lease: WeakForeignRef,
+}
+
+#[derive(Default)]
+struct State {
+    next_handle: u64,
+    records: BTreeMap<u64, Record>,
+}
+
+const HOST_IDENTITY: &str = "runmat.data.dataset-authority";
+const GENERATION: u64 = 1;
+static REGISTRY: OnceLock<Arc<Mutex<State>>> = OnceLock::new();
+
+fn registry() -> &'static Arc<Mutex<State>> {
+    REGISTRY.get_or_init(|| Arc::new(Mutex::new(State::default())))
+}
+
+struct Release {
+    state: Weak<Mutex<State>>,
+}
+
+impl std::fmt::Debug for Release {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DatasetAuthorityRelease")
+    }
+}
+
+impl ForeignResourceRelease for Release {
+    fn release(&self, key: &ForeignResourceKey) {
+        if key.host_identity != HOST_IDENTITY || key.generation != GENERATION {
+            return;
+        }
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        if let Ok(mut state) = state.lock() {
+            state.records.remove(&key.handle);
+        }
+    }
+}
+
+pub(crate) fn issue_dataset(
+    filesystem: Arc<dyn FsProvider>,
+    root: PathBuf,
+    public_path: String,
+) -> BuiltinResult<ForeignRef> {
+    if !root.is_absolute() {
+        return Err(data_error(
+            "Dataset authority requires an absolute resolved root",
+        ));
+    }
+    issue(filesystem, root, public_path, HandleRole::Dataset)
+}
+
+pub(crate) fn issue_child(
+    parent: &AuthorizedHandle,
+    role: HandleRole,
+) -> BuiltinResult<ForeignRef> {
+    if parent.role != HandleRole::Dataset {
+        return Err(data_error(
+            "Dataset child must derive from a Dataset authority",
+        ));
+    }
+    if matches!(role, HandleRole::Dataset) {
+        return Err(data_error(
+            "Dataset child requires an array or transaction role",
+        ));
+    }
+    issue(
+        parent.filesystem.clone(),
+        parent.root.clone(),
+        parent.public_path.clone(),
+        role,
+    )
+}
+
+fn issue(
+    filesystem: Arc<dyn FsProvider>,
+    root: PathBuf,
+    public_path: String,
+    role: HandleRole,
+) -> BuiltinResult<ForeignRef> {
+    let state = registry();
+    let mut records = state
+        .lock()
+        .map_err(|_| data_error("Dataset authority registry is unavailable"))?;
+    let handle = records
+        .next_handle
+        .checked_add(1)
+        .ok_or_else(|| data_error("Dataset authority handle space is exhausted"))?;
+    records.next_handle = handle;
+    let reference = ForeignRef::managed(
+        ForeignResourceKey {
+            host_identity: HOST_IDENTITY.into(),
+            handle,
+            generation: GENERATION,
+        },
+        ForeignTypeIdentity {
+            family: "runmat.data".into(),
+            name: role.type_name().into(),
+            version: 1,
+        },
+        ForeignOwnership::Shared,
+        ForeignAffinity::OriginProcess,
+        ForeignLifetime::Session,
+        Arc::new(Release {
+            state: Arc::downgrade(state),
+        }),
+    );
+    let lease = reference
+        .downgrade()
+        .expect("newly issued authority has a managed lease");
+    records.records.insert(
+        handle,
+        Record {
+            filesystem,
+            root,
+            public_path,
+            role,
+            lease,
+        },
+    );
+    Ok(reference)
+}
+
+pub(crate) fn resolve_object(
+    value: &Value,
+    expected: HandleRole,
+) -> BuiltinResult<AuthorizedHandle> {
+    let Value::Object(object) = value else {
+        return Err(data_error("Dataset family receiver must be an object"));
+    };
+    if !object.is_class(expected.class()) {
+        return Err(data_error("Dataset family receiver has the wrong class"));
+    }
+    let reference = object
+        .dataset_authority()
+        .ok_or_else(|| data_error("Dataset family receiver has no managed authority"))?;
+    let resolved = resolve(reference)?;
+    if resolved.role != expected || !presentation_matches(object, &resolved) {
+        return Err(data_error(
+            "Dataset family receiver authority does not match its presentation",
+        ));
+    }
+    Ok(resolved)
+}
+
+fn resolve(reference: &ForeignRef) -> BuiltinResult<AuthorizedHandle> {
+    if !reference.is_managed()
+        || reference.host_identity != HOST_IDENTITY
+        || reference.generation != GENERATION
+    {
+        return Err(data_error("Dataset authority is foreign or detached"));
+    }
+    let records = registry()
+        .lock()
+        .map_err(|_| data_error("Dataset authority registry is unavailable"))?;
+    let record = records
+        .records
+        .get(&reference.handle)
+        .ok_or_else(|| data_error("Dataset authority is stale"))?;
+    let issued = record
+        .lease
+        .upgrade()
+        .ok_or_else(|| data_error("Dataset authority lease has expired"))?;
+    if !issued.shares_managed_lease(reference)
+        || issued.resource_key() != reference.resource_key()
+        || reference.type_identity.family != "runmat.data"
+        || reference.type_identity.name != record.role.type_name()
+        || reference.type_identity.version != 1
+        || reference.ownership != ForeignOwnership::Shared
+        || reference.affinity != ForeignAffinity::OriginProcess
+        || reference.lifetime != ForeignLifetime::Session
+    {
+        return Err(data_error(
+            "Dataset authority does not belong to this registry",
+        ));
+    }
+    Ok(AuthorizedHandle {
+        filesystem: record.filesystem.clone(),
+        root: record.root.clone(),
+        public_path: record.public_path.clone(),
+        role: record.role.clone(),
+        reference: reference.clone(),
+    })
+}
+
+#[cfg(test)]
+#[path = "authority/tests.rs"]
+mod tests;
+
+fn presentation_matches(object: &ObjectInstance, handle: &AuthorizedHandle) -> bool {
+    if object.properties.get("__data_path") != Some(&Value::String(handle.public_path.clone())) {
+        return false;
+    }
+    match &handle.role {
+        HandleRole::Dataset => true,
+        HandleRole::Array(name) => {
+            object.properties.get("__array_name") == Some(&Value::String(name.clone()))
+        }
+        HandleRole::Transaction(tx_id) => {
+            object.properties.get("__tx_id") == Some(&Value::String(tx_id.clone()))
+        }
+    }
+}

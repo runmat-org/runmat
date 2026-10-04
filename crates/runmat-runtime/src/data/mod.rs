@@ -21,6 +21,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod cooperation;
 pub(crate) use cooperation::cooperate_data_work;
+pub(crate) mod authority;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataManifest {
