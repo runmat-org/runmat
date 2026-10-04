@@ -191,7 +191,7 @@ async fn save_builtin(
         cooperation.completed(0).await?;
         mat_vars.push(MatVar {
             name,
-            array: convert_value(value).await?,
+            array: convert_value_with_cooperation(value, Some(&mut cooperation)).await?,
         });
         cooperation.completed(0).await?;
     }
@@ -609,7 +609,7 @@ fn normalise_path(path: &Value) -> BuiltinResult<PathBuf> {
 
 mod encoding;
 pub use encoding::encode_workspace_to_mat_bytes;
-use encoding::{convert_value, write_mat_file, MatVar};
+use encoding::{convert_value_with_cooperation, write_mat_file, MatVar};
 
 #[cfg(test)]
 #[path = "save/tests.rs"]

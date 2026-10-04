@@ -1,5 +1,6 @@
 //! Level-5 MAT value conversion and byte encoding.
 
+use super::super::cooperation::MatCodecCooperation;
 use super::super::format::{MatArray, MatClass, MatData};
 use super::{save_error_with, SAVE_ERROR_IO, SAVE_ERROR_SELECTION, SAVE_ERROR_UNSUPPORTED};
 use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
@@ -23,7 +24,25 @@ fn canonical_dims(shape: &[usize]) -> Vec<usize> {
 }
 
 pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResult<MatArray>> {
+    convert_value_with_cooperation(value, None)
+}
+
+async fn completed(
+    cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
+    work: usize,
+) -> BuiltinResult<()> {
+    if let Some(cooperation) = cooperation.as_deref_mut() {
+        cooperation.completed(work).await?;
+    }
+    Ok(())
+}
+
+pub(super) fn convert_value_with_cooperation<'a, 'b>(
+    value: Value,
+    mut cooperation: Option<&'a mut MatCodecCooperation<'b>>,
+) -> LocalBoxFuture<'a, BuiltinResult<MatArray>> {
     Box::pin(async move {
+        completed(&mut cooperation, 0).await?;
         match value {
             Value::Num(n) => Ok(MatArray {
                 class: MatClass::Double,
@@ -160,10 +179,15 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
             }),
             Value::StringArray(sa) => {
                 if sa.data.len() == 1 {
-                    return convert_value(Value::String(sa.data[0].clone())).await;
+                    return convert_value_with_cooperation(
+                        Value::String(sa.data[0].clone()),
+                        cooperation.as_deref_mut(),
+                    )
+                    .await;
                 }
                 let mut elements = Vec::with_capacity(sa.data.len());
                 for text in &sa.data {
+                    completed(&mut cooperation, text.len()).await?;
                     elements.push(MatArray {
                         class: MatClass::Char,
                         dims: vec![1, text.chars().count()],
@@ -181,8 +205,13 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
             Value::Cell(cell) => {
                 let mut elements = Vec::with_capacity(cell.data.len());
                 for element in cell.to_column_major() {
+                    completed(&mut cooperation, 1).await?;
                     let gathered = gather_if_needed_async(&element).await?;
-                    elements.push(convert_value(gathered).await?);
+                    completed(&mut cooperation, 0).await?;
+                    elements.push(
+                        convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
+                            .await?,
+                    );
                 }
                 Ok(MatArray {
                     class: MatClass::Cell,
@@ -194,6 +223,7 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
                 let field_names: Vec<String> = struct_value.fields.keys().cloned().collect();
                 let mut field_values = Vec::with_capacity(field_names.len());
                 for field in &field_names {
+                    completed(&mut cooperation, field.len()).await?;
                     let val = struct_value.fields.get(field).ok_or_else(|| {
                         save_error_with(
                             &SAVE_ERROR_SELECTION,
@@ -201,7 +231,11 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
                         )
                     })?;
                     let gathered = gather_if_needed_async(val).await?;
-                    field_values.push(convert_value(gathered).await?);
+                    completed(&mut cooperation, 0).await?;
+                    field_values.push(
+                        convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
+                            .await?,
+                    );
                 }
                 Ok(MatArray {
                     class: MatClass::Struct,
@@ -222,6 +256,7 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
                 })?;
                 let mut field_values = Vec::with_capacity(capacity);
                 for field in &field_names {
+                    completed(&mut cooperation, field.len()).await?;
                     let column = array.field_values(field).ok_or_else(|| {
                         save_error_with(
                             &SAVE_ERROR_SELECTION,
@@ -229,8 +264,13 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
                         )
                     })?;
                     for value in column {
-                        field_values
-                            .push(convert_value(gather_if_needed_async(value).await?).await?);
+                        completed(&mut cooperation, 1).await?;
+                        let gathered = gather_if_needed_async(value).await?;
+                        completed(&mut cooperation, 0).await?;
+                        field_values.push(
+                            convert_value_with_cooperation(gathered, cooperation.as_deref_mut())
+                                .await?,
+                        );
                     }
                 }
                 Ok(MatArray {
@@ -244,7 +284,8 @@ pub(super) fn convert_value(value: Value) -> LocalBoxFuture<'static, BuiltinResu
             }
             Value::GpuTensor(handle) => {
                 let gathered = gather_if_needed_async(&Value::GpuTensor(handle)).await?;
-                convert_value(gathered).await
+                completed(&mut cooperation, 0).await?;
+                convert_value_with_cooperation(gathered, cooperation.as_deref_mut()).await
             }
             unsupported => Err(save_error_with(
                 &SAVE_ERROR_UNSUPPORTED,
@@ -328,4 +369,54 @@ pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> Built
         });
     }
     write_mat_bytes(&mat_vars)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use futures::executor::block_on;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_value::StringArray;
+    use std::num::NonZeroU64;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn nested_string_cells_cancel_between_elements_without_result() {
+        let cancellation = CancellationSource::new();
+        let turns = Arc::new(AtomicUsize::new(0));
+        let observed = turns.clone();
+        let budget = CpuCooperationBudget::with_test_turn(
+            CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            cancellation.token(),
+            move || {
+                let turn = observed.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    if turn == 0 {
+                        Ok(())
+                    } else {
+                        Err(ExecutionServiceError::Cancelled)
+                    }
+                })
+            },
+        );
+        let mut cooperation =
+            MatCodecCooperation::with_budget(budget, "save", &runmat_builtins::SAVE_ERROR_IO);
+        let strings = Value::StringArray(StringArray {
+            data: vec!["first".into(), "second".into(), "third".into()],
+            shape: vec![1, 3],
+            rows: 1,
+            cols: 3,
+        });
+        let error = block_on(convert_value_with_cooperation(
+            strings,
+            Some(&mut cooperation),
+        ))
+        .expect_err("cancellation before later nested entries");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert_eq!(turns.load(Ordering::SeqCst), 2);
+        assert!(!cancellation.token().is_cancelled());
+    }
 }
