@@ -7,7 +7,7 @@ use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult};
 use std::future::Future;
 
-pub(super) struct MatDecodeCooperation<'a> {
+pub(in crate::builtins::io::mat::load) struct MatDecodeCooperation<'a> {
     budget: Option<CpuCooperationBudget>,
     source: Option<&'a MatFsPath>,
 }
