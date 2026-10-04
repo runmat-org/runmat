@@ -111,13 +111,6 @@ pub(super) const CLASSPATH_EFFECTS: &[EffectKind] = &[
     EffectKind::MaySuspend,
     EffectKind::MayThrow,
 ];
-pub(super) const QUERY_EFFECTS: &[EffectKind] = &[
-    EffectKind::EnvironmentRead,
-    EffectKind::FilesystemRead,
-    EffectKind::MaySuspend,
-    EffectKind::MayThrow,
-];
-
 pub(super) const fn entry(
     provenance: BuiltinCatalogProvenance,
     name: &'static str,
