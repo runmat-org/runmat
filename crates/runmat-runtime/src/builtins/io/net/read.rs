@@ -22,7 +22,8 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
+use super::client_state::{client_handle, CLIENT_HANDLE_FIELD};
+use super::control::configure_stream;
 
 const BUILTIN_NAME: &str = "read";
 
@@ -928,9 +929,8 @@ impl Drop for NonBlockingGuard {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::io::net::accept::{
-        configure_stream, insert_client, remove_client_for_test,
-    };
+    use crate::builtins::io::net::client_state::{insert_client, remove_client_for_test};
+    use crate::builtins::io::net::control::configure_stream;
     use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
@@ -1016,7 +1016,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
+        crate::builtins::io::net::client_state::test_guard()
     }
 
     fn integer_bytes(storage: &IntegerStorage, order: ByteOrder) -> Vec<u8> {

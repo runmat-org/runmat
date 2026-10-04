@@ -1,6 +1,5 @@
 //! MATLAB-compatible `accept` builtin for RunMat networking.
 
-use once_cell::sync::OnceCell;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -12,19 +11,18 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
 
+use super::client_state::{insert_client, CLIENT_HANDLE_FIELD};
+use super::control::{configure_stream, parse_timeout_value};
 use super::tcpserver::{default_user_data, server_handle, TcpServerState, HANDLE_ID_FIELD};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use thiserror::Error;
 
 use runmat_time::Instant;
-use std::collections::HashMap;
 use std::io::{self, ErrorKind};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
 const BUILTIN_NAME: &str = "accept";
@@ -163,161 +161,6 @@ pub const ACCEPT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
         notes: "The timeout crosses one explicit binary64-seconds boundary and must fit std::time::Duration; networking and its returned client handle remain host-only, while resident scalar controls gather before validation.",
     }];
-
-pub(crate) const CLIENT_HANDLE_FIELD: &str = "__tcpclient_id";
-
-type SharedTcpClient = Arc<Mutex<TcpClientState>>;
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct TcpClientState {
-    pub(crate) id: u64,
-    pub(crate) server_id: u64,
-    pub(crate) stream: TcpStream,
-    pub(crate) peer_addr: SocketAddr,
-    pub(crate) timeout: f64,
-    pub(crate) byte_order: String,
-    pub(crate) connected: bool,
-    pub(crate) readline_buffer: Vec<u8>,
-}
-
-#[derive(Default)]
-struct TcpClientRegistry {
-    next_id: u64,
-    clients: HashMap<u64, SharedTcpClient>,
-}
-
-static TCP_CLIENT_REGISTRY: OnceCell<Mutex<TcpClientRegistry>> = OnceCell::new();
-
-#[cfg(test)]
-static TCP_CLIENT_TEST_GUARD: OnceCell<Mutex<()>> = OnceCell::new();
-
-fn client_registry() -> &'static Mutex<TcpClientRegistry> {
-    TCP_CLIENT_REGISTRY.get_or_init(|| Mutex::new(TcpClientRegistry::default()))
-}
-
-#[cfg(test)]
-pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-    TCP_CLIENT_TEST_GUARD
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-}
-
-pub(crate) fn insert_client(
-    stream: TcpStream,
-    server_id: u64,
-    peer_addr: SocketAddr,
-    timeout: f64,
-    byte_order: String,
-) -> u64 {
-    let mut guard = client_registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    guard.next_id = guard.next_id.wrapping_add(1);
-    let id = guard.next_id;
-    let state = TcpClientState {
-        id,
-        server_id,
-        stream,
-        peer_addr,
-        timeout,
-        byte_order,
-        connected: true,
-        readline_buffer: Vec::new(),
-    };
-    let shared = Arc::new(Mutex::new(state));
-    guard.clients.insert(id, shared);
-    id
-}
-
-#[allow(dead_code)]
-pub(crate) fn client_handle(id: u64) -> Option<SharedTcpClient> {
-    client_registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .clients
-        .get(&id)
-        .cloned()
-}
-
-pub(crate) fn close_client(id: u64) -> bool {
-    let entry = {
-        let mut guard = client_registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.clients.remove(&id)
-    };
-
-    if let Some(client) = entry {
-        close_client_state(&client);
-        true
-    } else {
-        false
-    }
-}
-
-pub(crate) fn close_clients_for_server(server_id: u64) -> usize {
-    let mut guard = client_registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-
-    let mut to_close: Vec<(u64, SharedTcpClient)> = Vec::new();
-    for (id, client) in guard.clients.iter() {
-        if let Ok(state) = client.lock() {
-            if state.server_id == server_id {
-                to_close.push((*id, client.clone()));
-            }
-        }
-    }
-
-    for (id, _) in &to_close {
-        guard.clients.remove(id);
-    }
-    drop(guard);
-
-    for (_, client) in &to_close {
-        close_client_state(client);
-    }
-
-    to_close.len()
-}
-
-pub(crate) fn close_all_clients() -> usize {
-    let entries = {
-        let mut guard = client_registry()
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.clients.drain().collect::<Vec<_>>()
-    };
-
-    for (_, client) in &entries {
-        close_client_state(client);
-    }
-
-    entries.len()
-}
-
-fn close_client_state(client: &SharedTcpClient) {
-    if let Ok(mut state) = client.lock() {
-        if state.connected {
-            let _ = state.stream.shutdown(Shutdown::Both);
-            state.connected = false;
-        }
-    }
-}
-
-#[cfg(test)]
-pub(super) fn remove_client_for_test(id: u64) {
-    if let Some(entry) = client_registry()
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .clients
-        .remove(&id)
-    {
-        drop(entry);
-    }
-}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::accept")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -513,48 +356,6 @@ async fn parse_accept_options(rest: Vec<Value>) -> BuiltinResult<AcceptOptions> 
     Ok(options)
 }
 
-#[derive(Debug, Error)]
-pub(crate) enum TimeoutParseError {
-    #[error("Timeout must be a scalar")]
-    NonScalar,
-    #[error("Timeout must be numeric")]
-    NonNumeric,
-    #[error("Timeout must be finite or Inf")]
-    NonFinite,
-    #[error("Timeout must be non-negative")]
-    Negative,
-    #[error("Timeout exceeds the supported host duration range")]
-    OutOfRange,
-}
-
-pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseError> {
-    let timeout = match value {
-        Value::Num(n) => *n,
-        Value::Int(i) => i.to_f64(),
-        Value::Tensor(t) if crate::builtins::common::tensor::is_scalar_tensor(t) => {
-            if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
-                int.to_f64()
-            } else {
-                crate::builtins::common::tensor::tensor_value_f64(t, 0)
-            }
-        }
-        Value::Tensor(_) => {
-            return Err(TimeoutParseError::NonScalar);
-        }
-        _ => return Err(TimeoutParseError::NonNumeric),
-    };
-    if !timeout.is_finite() && !timeout.is_infinite() {
-        return Err(TimeoutParseError::NonFinite);
-    }
-    if timeout.is_sign_negative() {
-        return Err(TimeoutParseError::Negative);
-    }
-    if timeout.is_finite() && Duration::try_from_secs_f64(timeout).is_err() {
-        return Err(TimeoutParseError::OutOfRange);
-    }
-    Ok(timeout)
-}
-
 fn validate_timeout(timeout: f64) -> BuiltinResult<()> {
     if timeout.is_nan() {
         return Err(accept_flow(
@@ -606,17 +407,6 @@ fn accept_with_timeout(
             }
         }
     }
-}
-
-pub(crate) fn configure_stream(stream: &TcpStream, timeout: f64) -> io::Result<()> {
-    let opt = if timeout.is_infinite() || timeout == 0.0 {
-        None
-    } else {
-        Some(Duration::from_secs_f64(timeout))
-    };
-    stream.set_read_timeout(opt)?;
-    stream.set_write_timeout(opt)?;
-    Ok(())
 }
 
 fn build_tcpclient_value(
@@ -711,6 +501,7 @@ fn accept_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>)
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::client_state::remove_client_for_test;
     use super::super::tcpserver::{
         remove_server_for_test, tcpserver_builtin, HANDLE_ID_FIELD as SERVER_FIELD,
     };
@@ -830,7 +621,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        super::test_guard()
+        super::super::client_state::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

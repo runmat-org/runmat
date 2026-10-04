@@ -11,7 +11,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, StructValue, Value};
 
-use super::accept::{configure_stream, insert_client, parse_timeout_value, CLIENT_HANDLE_FIELD};
+use super::client_state::{insert_client, CLIENT_HANDLE_FIELD};
+use super::control::{configure_stream, parse_timeout_value};
 use super::tcpserver::{
     canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
     HANDLE_ID_FIELD,
@@ -780,7 +781,7 @@ fn build_tcpclient_struct(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::accept::remove_client_for_test;
+    use super::super::client_state::remove_client_for_test;
     use super::*;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::net::TcpListener;
@@ -854,7 +855,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
+        crate::builtins::io::net::client_state::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

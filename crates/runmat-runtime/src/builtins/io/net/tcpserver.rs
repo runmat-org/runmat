@@ -870,7 +870,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
+        crate::builtins::io::net::client_state::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

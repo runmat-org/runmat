@@ -9,7 +9,7 @@ use runmat_value::{StructValue, Value};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use super::accept::{
+use super::client_state::{
     close_all_clients, close_client, close_clients_for_server, CLIENT_HANDLE_FIELD,
 };
 use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
@@ -310,7 +310,8 @@ fn value_to_u64(value: &Value) -> Option<u64> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::io::net::accept::{accept_builtin, client_handle};
+    use crate::builtins::io::net::accept::accept_builtin;
+    use crate::builtins::io::net::client_state::client_handle;
     use crate::builtins::io::net::tcpclient::tcpclient_builtin;
     use crate::builtins::io::net::tcpserver::{server_handle, tcpserver_builtin};
     use runmat_value::{
@@ -321,7 +322,7 @@ pub(crate) mod tests {
     use std::time::Duration;
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::accept::test_guard()
+        crate::builtins::io::net::client_state::test_guard()
     }
 
     fn client_id(value: &Value) -> u64 {
