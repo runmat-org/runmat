@@ -1,6 +1,6 @@
 //! MATLAB-compatible `diary` builtin for command-window text logging.
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use runmat_builtins::DIARY_DESCRIPTOR;
 use runmat_builtins::{
     BuiltinErrorDescriptor, DiaryCommand, DIARY_ERROR_ARG_COUNT, DIARY_ERROR_ARG_TYPE,

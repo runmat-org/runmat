@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use runmat_builtins::{DATA_CREATE_DESCRIPTOR, DATA_CREATE_INTEGER_CAPABILITIES};
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
@@ -25,7 +25,7 @@ use runmat_value::{IntValue, NumericScalar, ObjectInstance, StructValue, Tensor,
 use crate::builtins::common::json::int_value_to_json;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::data::authority::{self, AuthorizedHandle, HandleRole};
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use crate::data::dataset_root;
 use crate::data::{
     array_object, data_error, dataset_object, ensure_manifest_sequence, get_object_prop,
