@@ -84,11 +84,16 @@ mod tests {
                 LiteralValue::String("sample.bin".into()),
                 LiteralValue::String("+r".into()),
             ]),
-            ..request
+            ..request.clone()
         };
         assert!(infer(&unsupported, entry)
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "RM-CATALOG-FILEATTRIB-PERMISSION-UNAVAILABLE"));
+        let excessive_outputs = CallRequest {
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
+            ..request
+        };
+        assert!(!infer(&excessive_outputs, entry).diagnostics.is_empty());
     }
 }

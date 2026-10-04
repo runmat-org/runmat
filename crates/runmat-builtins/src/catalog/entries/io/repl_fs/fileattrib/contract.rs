@@ -49,7 +49,13 @@ pub const FILEATTRIB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &[FILEATTRIB_ERROR_TOO_MANY_OUTPUTS],
+};
+pub const FILEATTRIB_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILEATTRIB.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:fileattrib:TooManyOutputs"),
+    when: "More than two outputs are requested.",
+    message: "fileattrib: too many output arguments",
 };
 pub const FILEATTRIB_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
     BuiltinIntegerAuditDescriptor {
