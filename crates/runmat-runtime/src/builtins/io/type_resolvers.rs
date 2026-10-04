@@ -64,10 +64,6 @@ pub fn system_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     ])
 }
 
-pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::tensor(), Type::logical()])

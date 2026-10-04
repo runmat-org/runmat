@@ -93,19 +93,37 @@ pub const GETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: GET_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &[GETPREF_ERROR_TOO_MANY_OUTPUTS],
 };
 pub const ISPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: IS_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &[ISPREF_ERROR_TOO_MANY_OUTPUTS],
 };
 pub const SETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SET_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &[SETPREF_ERROR_TOO_MANY_OUTPUTS],
+};
+pub const GETPREF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETPREF.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:getpref:TooManyOutputs"),
+    when: "More than one result is requested.",
+    message: "getpref: too many output arguments",
+};
+pub const ISPREF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISPREF.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:ispref:TooManyOutputs"),
+    when: "More than one result is requested.",
+    message: "ispref: too many output arguments",
+};
+pub const SETPREF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETPREF.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:setpref:TooManyOutputs"),
+    when: "More than one result is requested.",
+    message: "setpref: too many output arguments",
 };
 pub const GETPREF_GROUP_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "getpref-group-query",

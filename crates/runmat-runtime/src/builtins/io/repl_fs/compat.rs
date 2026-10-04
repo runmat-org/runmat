@@ -16,8 +16,8 @@ use runmat_builtins::{
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntegerStorage, LogicalArray, NumericDType, NumericScalar,
-    ObjectInstance, StructValue, Tensor, Value,
+    CellArray, CharArray, IntegerStorage, NumericDType, NumericScalar, ObjectInstance, StructValue,
+    Tensor, Value,
 };
 
 use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
@@ -260,147 +260,6 @@ pub const FILEATTRIB_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "fileattrib accepts host-text paths and textual controls; numeric and provider-resident values are rejected before any gather, provider access, or filesystem operation, while numeric status and attribute fields are outputs only.",
     };
-const GETPREF_INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "group",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Custom setting group name.",
-    },
-    BuiltinParamDescriptor {
-        name: "pref",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Setting name or cell/string array of setting names.",
-    },
-];
-const GETPREF_INPUTS_THREE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "group",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Custom setting group name.",
-    },
-    BuiltinParamDescriptor {
-        name: "pref",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Setting name or cell/string array of setting names.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Default value, or cell array of defaults for multiple setting names.",
-    },
-];
-const GETPREF_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "value = getpref()",
-        inputs: &INPUTS_NONE,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = getpref(group, pref)",
-        inputs: &GETPREF_INPUTS_TWO,
-        outputs: &OUTPUT_VALUE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "value = getpref(group, pref, value)",
-        inputs: &GETPREF_INPUTS_THREE,
-        outputs: &OUTPUT_VALUE,
-    },
-];
-pub const GETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GETPREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-pub const GETPREF_GROUP_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "getpref-group-query",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "getpref(group) group-structure query is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GetprefGroupQueryExtension"),
-};
-pub const GETPREF_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GETPREF_GROUP_QUERY_EXTENSION];
-
-const GETPREF_INTEGER_DEFAULT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight host integer classes are stored and returned unchanged when used as a missing preference default; group and preference controls remain text-only.",
-    }];
-pub const GETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "value = getpref(group, pref, integer_default)",
-        inputs: &GETPREF_INTEGER_DEFAULT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "A missing preference is stored for the current RunMat preference session as the exact integer scalar or array and returned without floating conversion; an existing preference wins unchanged. Durable cross-session storage remains a general preference-system gap.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "integer_value = getpref(group, pref)",
-        inputs: &[],
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "A host integer scalar or array stored in the current RunMat preference session is returned with its exact class, shape, and value; multiple names wrap values in a shape-preserving cell array. Durable cross-session storage remains a general preference-system gap.",
-    },
-];
-pub const ISPREF_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "ispref accepts text group and preference names; integer host or resident controls are invalid and reject before provider access.",
-};
-const SETPREF_INTEGER_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Preference values may use any MATLAB datatype; all eight integer classes retain their exact native class, shape, and payload.",
-    }];
-pub const SETPREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "setpref(group, preference, integer_value)",
-        inputs: &SETPREF_INTEGER_VALUE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Host values are cloned into the RunMat preference session without conversion; automatic residency gathers exact storage before host persistence. Durable cross-session storage remains a general preference-system gap.",
-    }];
-simple_descriptor!(
-    SETPREF_SIGNATURES,
-    SETPREF_DESCRIPTOR,
-    "setpref(group, preference, value)",
-    &INPUTS_THREE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    ISPREF_SIGNATURES,
-    ISPREF_DESCRIPTOR,
-    "tf = ispref(group, preference)",
-    &INPUTS_TWO,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
 simple_descriptor!(
     REHASH_SIGNATURES,
     REHASH_DESCRIPTOR,
@@ -719,221 +578,6 @@ fn is_hidden_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with('.'))
-}
-
-#[runtime_builtin(
-    name = "getpref",
-    category = "io/repl_fs",
-    summary = "Read RunMat session preferences through getpref-shaped forms.",
-    keywords = "getpref,preference,settings",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::getpref_type),
-    descriptor(crate::builtins::io::repl_fs::compat::GETPREF_DESCRIPTOR),
-    extensions(crate::builtins::io::repl_fs::compat::GETPREF_EXTENSIONS),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::GETPREF_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn getpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    match args.len() {
-        0 => Ok(Value::Struct(super::preferences::all_groups())),
-        1 => {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &GETPREF_GROUP_QUERY_EXTENSION,
-                "getpref",
-            )?;
-            let group = scalar_text(&args[0], "getpref", "group")?;
-            Ok(Value::Struct(super::preferences::group_values(&group)))
-        }
-        2 | 3 => getpref_named(&args),
-        _ => Err(compat_error("getpref", "getpref: too many input arguments")),
-    }
-}
-
-#[derive(Debug)]
-enum PreferenceNames {
-    Scalar(String),
-    Array {
-        names: Vec<String>,
-        shape: Vec<usize>,
-    },
-}
-
-fn getpref_named(args: &[Value]) -> BuiltinResult<Value> {
-    let group = scalar_text(&args[0], "getpref", "group")?;
-    let preferences = preference_names(&args[1], "getpref")?;
-    if args
-        .get(2)
-        .is_some_and(crate::dispatcher::value_contains_gpu)
-    {
-        return Err(compat_error(
-            "getpref",
-            "getpref: provider-resident default values are not supported",
-        ));
-    }
-
-    match preferences {
-        PreferenceNames::Scalar(preference) => {
-            getpref_scalar(&group, &preference, args.get(2).cloned())
-        }
-        PreferenceNames::Array { names, shape } => {
-            let defaults = match args.get(2) {
-                None => None,
-                Some(Value::Cell(cell)) if cell.shape == shape => Some(cell.data.clone()),
-                Some(_) => {
-                    return Err(compat_error(
-                        "getpref",
-                        "getpref: defaults for multiple preferences must be a cell array with matching shape",
-                    ))
-                }
-            };
-            let values = super::preferences::read_many(&group, &names, defaults.as_deref())
-                .map_err(|missing| {
-                    compat_error(
-                        "getpref",
-                        format!(
-                            "getpref: preference '{}/{}' does not exist",
-                            missing.group, missing.name
-                        ),
-                    )
-                })?;
-            CellArray::new_with_shape(values, shape)
-                .map(Value::Cell)
-                .map_err(|err| compat_error("getpref", format!("getpref: {err}")))
-        }
-    }
-}
-
-fn getpref_scalar(group: &str, preference: &str, default: Option<Value>) -> BuiltinResult<Value> {
-    super::preferences::read_or_create(group, preference, default).map_err(|missing| {
-        compat_error(
-            "getpref",
-            format!(
-                "getpref: preference '{}/{}' does not exist",
-                missing.group, missing.name
-            ),
-        )
-    })
-}
-
-fn preference_names(value: &Value, builtin: &'static str) -> BuiltinResult<PreferenceNames> {
-    match value {
-        Value::String(text) => Ok(PreferenceNames::Scalar(text.clone())),
-        Value::CharArray(array) if array.rows == 1 => Ok(PreferenceNames::Scalar(
-            char_row_to_string(array),
-        )),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(PreferenceNames::Scalar(array.data[0].clone()))
-        }
-        Value::StringArray(array) => Ok(PreferenceNames::Array {
-            names: array.data.clone(),
-            shape: array.shape.clone(),
-        }),
-        Value::Cell(cell) => {
-            let mut names = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
-                match value {
-                    Value::CharArray(array) if array.rows == 1 => {
-                        names.push(char_row_to_string(array));
-                    }
-                    _ => {
-                        return Err(compat_error(
-                            builtin,
-                            format!("{builtin}: preference cell entries must be character vectors"),
-                        ))
-                    }
-                }
-            }
-            Ok(PreferenceNames::Array {
-                names,
-                shape: cell.shape.clone(),
-            })
-        }
-        _ => Err(compat_error(
-            builtin,
-            format!("{builtin}: preference must be a character vector, string scalar, cell array of character vectors, or string array"),
-        )),
-    }
-}
-
-#[runtime_builtin(
-    name = "setpref",
-    category = "io/repl_fs",
-    summary = "Set RunMat session preferences.",
-    keywords = "setpref,preference,settings",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::repl_fs::compat::SETPREF_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::SETPREF_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn setpref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 3 {
-        return Err(compat_error(
-            "setpref",
-            "setpref: expected group, preference, and value",
-        ));
-    }
-    let group = scalar_text(&args[0], "setpref", "group")?;
-    let names = preference_names(&args[1], "setpref")?;
-    let entries = match names {
-        PreferenceNames::Scalar(name) => vec![(name, args[2].clone())],
-        PreferenceNames::Array { names, shape } => match &args[2] {
-            Value::Cell(values) if values.shape == shape => {
-                names.into_iter().zip(values.data.iter().cloned()).collect()
-            }
-            _ => return Err(compat_error(
-                "setpref",
-                "setpref: values for multiple preferences must be a cell array with matching shape",
-            )),
-        },
-    };
-    let mut prepared = Vec::with_capacity(entries.len());
-    for (name, value) in entries {
-        let gathered = gather_if_needed_async(&value)
-            .await
-            .map_err(|err| map_control_flow("setpref", err))?;
-        prepared.push((name, gathered));
-    }
-    super::preferences::set_many(group, prepared);
-    Ok(Value::Num(0.0))
-}
-
-#[runtime_builtin(
-    name = "ispref",
-    category = "io/repl_fs",
-    summary = "Return true for existing RunMat session preferences.",
-    keywords = "ispref,preference,settings,predicate",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::bool_type),
-    descriptor(crate::builtins::io::repl_fs::compat::ISPREF_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::ISPREF_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn ispref_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(compat_error(
-            "ispref",
-            "ispref: expected group and optional preference",
-        ));
-    }
-    let group = scalar_text(&args[0], "ispref", "group")?;
-    if args.len() == 1 {
-        return Ok(Value::Bool(super::preferences::has_group(&group)));
-    }
-    match preference_names(&args[1], "ispref")? {
-        PreferenceNames::Scalar(name) => Ok(Value::Bool(super::preferences::has_preference(
-            &group, &name,
-        ))),
-        PreferenceNames::Array { names, shape } => {
-            let values = names
-                .iter()
-                .map(|name| u8::from(super::preferences::has_preference(&group, name)))
-                .collect();
-            LogicalArray::new(values, shape)
-                .map(Value::LogicalArray)
-                .map_err(|err| compat_error("ispref", format!("ispref: {err}")))
-        }
-    }
 }
 
 #[runtime_builtin(
@@ -1579,7 +1223,13 @@ fn query_windows_registry(_root: &str, _key: &str, _value: Option<&str>) -> Buil
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::io::repl_fs::preferences::{
+        getpref_builtin, ispref_builtin, setpref_builtin,
+    };
     use crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK;
+    use runmat_builtins::{
+        GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
+    };
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
@@ -1753,8 +1403,55 @@ mod tests {
     }
 
     #[test]
+    fn preference_output_admission_precedes_storage_and_provider_access() {
+        let group = Value::String("runmatPreferenceOutputAdmission".into());
+        let _count = crate::output_count::push_output_count(Some(2));
+        for call in [
+            run(getpref_builtin(vec![
+                group.clone(),
+                Value::String("name".into()),
+            ])),
+            run(ispref_builtin(vec![group.clone()])),
+            run(setpref_builtin(vec![
+                group.clone(),
+                Value::String("name".into()),
+                unregistered_resident_value(),
+            ])),
+        ] {
+            let error = call.expect_err("too many outputs before effects");
+            assert!(error.message().contains("too many output"));
+        }
+        drop(_count);
+        assert_eq!(
+            run(ispref_builtin(vec![group])).expect("no mutation"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn setpref_status_result_is_a_separately_gated_extension() {
+        let _count = crate::output_count::push_output_count(Some(1));
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let group = Value::String("runmatSetprefStatusAdmission".into());
+        let error = run(setpref_builtin(vec![
+            group.clone(),
+            Value::String("name".into()),
+            unregistered_resident_value(),
+        ]))
+        .expect_err("status extension must reject before gather");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SETPREF_STATUS_EXTENSION.error_identifier
+        );
+        assert_eq!(
+            run(ispref_builtin(vec![group])).expect("no mutation"),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
     fn getpref_descriptor_and_integer_capabilities_cover_documented_forms() {
-        assert_eq!(GETPREF_DESCRIPTOR.signatures.len(), 3);
+        assert_eq!(GETPREF_DESCRIPTOR.signatures.len(), 4);
         assert_eq!(GETPREF_INTEGER_CAPABILITIES.len(), 2);
         assert_eq!(GETPREF_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
         assert_eq!(
