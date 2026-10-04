@@ -99,6 +99,6 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[BuiltinDocumentationFaq { question: "Is a header sufficient to load a library?", answer: "No. The matching native library and its declared interface must both be available; symbols are validated against the prepared manifest." }],
     links: &[], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Prepared native library loading", location: "tests::native_ffi_session" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Prepared native library loading", location: "native_ffi_session::library_and_pointer_state_are_owned_by_one_runtime_session" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

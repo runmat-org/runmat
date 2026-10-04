@@ -66,6 +66,6 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[BuiltinDocumentationFaq { question: "Does libpointer copy a C-returned pointer?", answer: "No. Pointers returned from C keep their borrowed ownership and must be interpreted under the native adapter's handle contract." }],
     links: &[], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Caller-owned pointer storage", location: "tests::native_ffi_session" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Caller-owned pointer storage", location: "native_ffi_session::library_and_pointer_state_are_owned_by_one_runtime_session" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

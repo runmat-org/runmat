@@ -90,6 +90,6 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: BuiltinExampleVerification::Assertions { source: "assert(p.Value == int32(17));" },
     }],
     example_exemption: None, faqs: &[], links: &[], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Borrowed pointer type and extent", location: "tests::native_ffi_session" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Borrowed pointer type and extent", location: "native_ffi_session::library_and_pointer_state_are_owned_by_one_runtime_session" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

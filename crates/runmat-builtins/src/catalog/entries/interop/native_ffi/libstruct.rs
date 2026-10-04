@@ -75,6 +75,6 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: BuiltinExampleVerification::Assertions { source: "assert(record.left == 0 && record.right == 0);" },
     }],
     example_exemption: None, faqs: &[], links: &[], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Manifest-backed structure allocation", location: "tests::native_ffi_session" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Manifest-backed structure allocation", location: "native_ffi_session::library_and_pointer_state_are_owned_by_one_runtime_session" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

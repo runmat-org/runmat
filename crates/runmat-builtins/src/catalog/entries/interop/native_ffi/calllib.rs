@@ -74,6 +74,6 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[BuiltinDocumentationFaq { question: "Can I call an exported symbol absent from the header?", answer: "No. The function must be declared in the prepared interface manifest, even if the library exports its name." }],
     links: &[], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Native ABI calls and callbacks", location: "tests::native_ffi_session" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Native ABI calls and callbacks", location: "native_ffi_session::library_and_pointer_state_are_owned_by_one_runtime_session" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
