@@ -1,0 +1,184 @@
+use super::*;
+
+pub(super) async fn write_delimited_cells(
+    selected: &TabularFsPath,
+    table: &CellTable,
+    options: &WriteCellOptions,
+) -> BuiltinResult<usize> {
+    let path = selected.path();
+    let delimiter = options.resolve_delimiter(path);
+    let line_ending = options.line_ending.as_str();
+    let payload = build_delimited_payload(table, options, &delimiter, line_ending);
+    let write_lock = write_owner::write_lock_for_path(selected)
+        .await
+        .map_err(|source| {
+            writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                "writecell: write authority unavailable",
+                source,
+            )
+        })?;
+    let _write_guard = write_lock.lock().await;
+
+    if options.write_mode == WriteMode::Overwrite {
+        write_owner::safe_replace_file(selected, &payload)
+            .await
+            .map_err(|source| {
+                writecell_error_with_source(
+                    &WRITECELL_ERROR_IO,
+                    "writecell: failed to replace delimited text file",
+                    source,
+                )
+            })?;
+        return Ok(payload.len());
+    }
+
+    let mut open_options = OpenOptions::new();
+    open_options.create(true).write(true).append(true);
+
+    let mut file = selected.open_with(&open_options).await.map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!(
+                "writecell: unable to open \"{}\" for writing ({err})",
+                path.display()
+            ),
+            err,
+        )
+    })?;
+
+    let mut bytes_written = 0usize;
+    if append_needs_line_ending(selected).await? {
+        file.write_all(line_ending.as_bytes()).map_err(|err| {
+            writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                format!("writecell: failed to write append line ending ({err})"),
+                err,
+            )
+        })?;
+        bytes_written += line_ending.len();
+    }
+    file.write_all(&payload).map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: failed to write delimited text ({err})"),
+            err,
+        )
+    })?;
+    bytes_written += payload.len();
+    file.flush_async().await.map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: failed to flush output ({err})"),
+            err,
+        )
+    })?;
+    Ok(bytes_written)
+}
+
+fn build_delimited_payload(
+    table: &CellTable,
+    options: &WriteCellOptions,
+    delimiter: &str,
+    line_ending: &str,
+) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for row in 0..table.rows {
+        for col in 0..table.cols {
+            if col > 0 {
+                payload.extend_from_slice(delimiter.as_bytes());
+            }
+            let rendered = format_cell_for_text(table.get(row, col), options, delimiter);
+            if !rendered.is_empty() {
+                payload.extend_from_slice(rendered.as_bytes());
+            }
+        }
+        payload.extend_from_slice(line_ending.as_bytes());
+    }
+    payload
+}
+
+async fn append_needs_line_ending(selected: &TabularFsPath) -> BuiltinResult<bool> {
+    let path = selected.path();
+    let metadata = match selected.metadata().await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                format!(
+                    "writecell: unable to inspect \"{}\" ({err})",
+                    path.display()
+                ),
+                err,
+            ));
+        }
+    };
+    if metadata.is_empty() {
+        return Ok(false);
+    }
+    let mut file = selected.open_read().await.map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!(
+                "writecell: unable to inspect \"{}\" ({err})",
+                path.display()
+            ),
+            err,
+        )
+    })?;
+    file.seek(SeekFrom::End(-1)).map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: unable to inspect file ending ({err})"),
+            err,
+        )
+    })?;
+    let mut byte = [0u8; 1];
+    file.read_exact(&mut byte).map_err(|err| {
+        writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            format!("writecell: unable to read file ending ({err})"),
+            err,
+        )
+    })?;
+    Ok(!matches!(byte[0], b'\n' | b'\r'))
+}
+
+pub(super) async fn write_spreadsheet_cells(
+    selected: &TabularFsPath,
+    table: &CellTable,
+    options: &WriteCellOptions,
+) -> BuiltinResult<usize> {
+    if options.write_mode == WriteMode::Append {
+        return Err(writecell_error_with(
+            &WRITECELL_ERROR_OPTION,
+            "writecell: WriteMode 'append' is not supported for spreadsheet files",
+        ));
+    }
+    let range_start = options.range_start();
+    let end_row = range_start.row.checked_add(table.rows).ok_or_else(|| {
+        writecell_error_with(&WRITECELL_ERROR_OPTION, "writecell: Range row overflow")
+    })?;
+    let end_col = range_start.col.checked_add(table.cols).ok_or_else(|| {
+        writecell_error_with(&WRITECELL_ERROR_OPTION, "writecell: Range column overflow")
+    })?;
+    if end_row > MAX_EXCEL_ROW_INDEX + 1 || end_col > MAX_EXCEL_COLUMN_INDEX + 1 {
+        return Err(writecell_error_with(
+            &WRITECELL_ERROR_OPTION,
+            "writecell: Range exceeds Excel worksheet limits",
+        ));
+    }
+
+    let bytes = build_xlsx_workbook(table, &options.sheet_name(), range_start)?;
+    write_owner::safe_replace_file(selected, &bytes)
+        .await
+        .map_err(|source| {
+            writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                "writecell: failed to replace spreadsheet file",
+                source,
+            )
+        })?;
+    Ok(bytes.len())
+}

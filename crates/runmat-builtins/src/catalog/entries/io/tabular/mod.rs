@@ -5,12 +5,14 @@ mod csvwrite;
 mod dlmread;
 mod dlmwrite;
 mod writematrix;
+mod writecell;
 
 pub use csvread::*;
 pub use csvwrite::*;
 pub use dlmread::*;
 pub use dlmwrite::*;
 pub use writematrix::*;
+pub use writecell::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &CSVREAD_CATALOG_ENTRY,
@@ -18,4 +20,5 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &DLMREAD_CATALOG_ENTRY,
     &DLMWRITE_CATALOG_ENTRY,
     &WRITEMATRIX_CATALOG_ENTRY,
+    &WRITECELL_CATALOG_ENTRY,
 ];

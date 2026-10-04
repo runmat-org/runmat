@@ -127,7 +127,6 @@ mod tests {
         &[],
         Type::Union(vec![Type::tensor(), Type::logical()])
     );
-    assert_resolver!(writecell_type_resolver, num_type, &[], Type::Num);
     assert_resolver!(
         xlswrite_type_resolver,
         xlswrite_type,

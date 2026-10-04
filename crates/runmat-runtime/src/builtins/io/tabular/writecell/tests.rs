@@ -1,0 +1,436 @@
+use super::*;
+use calamine::{open_workbook_auto, Data, Reader};
+use futures::executor::block_on;
+use runmat_time::unix_timestamp_ms;
+use std::fs;
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Barrier;
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn selected_path(path: &Path) -> TabularFsPath {
+    TabularFsOwner::capture(Some(path))
+        .expect("captured provider")
+        .path(path.to_path_buf())
+        .expect("selected path")
+}
+
+use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, Tensor};
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+fn temp_path(ext: &str) -> PathBuf {
+    let millis = unix_timestamp_ms();
+    let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "runmat_writecell_{}_{}_{}.{}",
+        std::process::id(),
+        millis,
+        unique,
+        ext
+    ));
+    path
+}
+
+fn cell(values: Vec<Value>, rows: usize, cols: usize) -> Value {
+    Value::Cell(CellArray::new(values, rows, cols).expect("cell array"))
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_descriptor_signatures_cover_core_forms() {
+    let labels: Vec<&str> = WRITECELL_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|sig| sig.label)
+        .collect();
+    assert!(labels.contains(&"writecell(C, filename)"));
+    assert!(labels.contains(&"writecell(C, filename, name, optionValue)"));
+    assert!(labels.contains(&"writecell(C, filename, nameValuePairs...)"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_writes_heterogeneous_csv() {
+    let path = temp_path("csv");
+    let filename = path.to_string_lossy().into_owned();
+    let values = cell(
+        vec![
+            Value::Num(1.5),
+            Value::from("alpha"),
+            Value::Bool(true),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor")),
+        ],
+        2,
+        2,
+    );
+
+    block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    assert_eq!(contents, "1.5,\"alpha\"\n1,\n");
+    let _ = fs::remove_file(path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_honours_delimiter_quote_strings_and_append() {
+    let path = temp_path("txt");
+    let filename = path.to_string_lossy().into_owned();
+    let first = cell(vec![Value::from("a,b"), Value::Num(2.0)], 1, 2);
+    let second = cell(vec![Value::from("tail"), Value::Num(3.0)], 1, 2);
+
+    block_on(writecell_builtin(
+        first,
+        vec![
+            Value::from(filename.clone()),
+            Value::from("Delimiter"),
+            Value::from("|"),
+            Value::from("QuoteStrings"),
+            Value::Bool(false),
+        ],
+    ))
+    .expect("initial write");
+    block_on(writecell_builtin(
+        second,
+        vec![
+            Value::from(filename.clone()),
+            Value::from("Delimiter"),
+            Value::from("|"),
+            Value::from("QuoteStrings"),
+            Value::Bool(false),
+            Value::from("WriteMode"),
+            Value::from("append"),
+        ],
+    ))
+    .expect("append write");
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    assert_eq!(contents, "a,b|2\ntail|3\n");
+    let _ = fs::remove_file(path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_append_inserts_missing_row_boundary() {
+    let path = temp_path("txt");
+    fs::write(&path, "existing").expect("seed");
+    let filename = path.to_string_lossy().into_owned();
+    let values = cell(vec![Value::from("tail"), Value::Num(3.0)], 1, 2);
+
+    block_on(writecell_builtin(
+        values,
+        vec![
+            Value::from(filename),
+            Value::from("Delimiter"),
+            Value::from("|"),
+            Value::from("QuoteStrings"),
+            Value::Bool(false),
+            Value::from("WriteMode"),
+            Value::from("append"),
+        ],
+    ))
+    .expect("append write");
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    assert_eq!(contents, "existing\ntail|3\n");
+    let _ = fs::remove_file(path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn writecell_concurrent_appends_share_one_boundary_insertion() {
+    let path = temp_path("txt");
+    fs::write(&path, "existing").expect("seed");
+    let filename = path.to_string_lossy().into_owned();
+    let writers = 8usize;
+    let barrier = Arc::new(Barrier::new(writers));
+    let mut handles = Vec::new();
+    for idx in 0..writers {
+        let barrier = Arc::clone(&barrier);
+        let filename = filename.clone();
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+            let values = cell(
+                vec![Value::from(format!("row{idx}")), Value::Num(idx as f64)],
+                1,
+                2,
+            );
+            block_on(writecell_builtin(
+                values,
+                vec![
+                    Value::from(filename),
+                    Value::from("Delimiter"),
+                    Value::from("|"),
+                    Value::from("QuoteStrings"),
+                    Value::Bool(false),
+                    Value::from("WriteMode"),
+                    Value::from("append"),
+                ],
+            ))
+            .expect("append write");
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("writer thread");
+    }
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    let lines = contents.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), writers + 1);
+    assert_eq!(lines[0], "existing");
+    assert!(lines.iter().all(|line| !line.is_empty()));
+    for idx in 0..writers {
+        let expected = format!("row{idx}|{idx}");
+        assert!(lines.iter().any(|line| *line == expected));
+    }
+    let _ = fs::remove_file(path);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn writecell_overwrite_uses_same_path_write_lock() {
+    let path = temp_path("txt");
+    fs::write(&path, "existing\n").expect("seed");
+    let filename = path.to_string_lossy().into_owned();
+    let lock = block_on(write_owner::write_lock_for_path(&selected_path(&path)))
+        .expect("selected write lock");
+    let guard = block_on(lock.lock());
+    let (tx, rx) = mpsc::channel();
+
+    let handle = thread::spawn(move || {
+        let values = cell(vec![Value::from("replacement")], 1, 1);
+        block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("overwrite write");
+        tx.send(()).expect("send completion");
+    });
+
+    thread::sleep(Duration::from_millis(50));
+    assert!(rx.try_recv().is_err());
+    drop(guard);
+    handle.join().expect("writer thread");
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("overwrite completion");
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    assert_eq!(contents, "\"replacement\"\n");
+    let _ = fs::remove_file(path);
+}
+
+#[cfg(unix)]
+#[test]
+fn writecell_canonical_aliases_share_write_lock() {
+    let path = temp_path("txt");
+    fs::write(&path, "").expect("seed");
+    let mut link = path.clone();
+    link.set_extension("link.txt");
+    std::os::unix::fs::symlink(&path, &link).expect("symlink");
+
+    let direct = block_on(write_owner::write_lock_for_path(&selected_path(&path)))
+        .expect("direct write lock");
+    let alias = block_on(write_owner::write_lock_for_path(&selected_path(&link)))
+        .expect("alias write lock");
+    assert!(Arc::ptr_eq(&direct, &alias));
+
+    let _ = fs::remove_file(link);
+    let _ = fs::remove_file(path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_accepts_scalar_char_tensor_and_logical_cells() {
+    let path = temp_path("csv");
+    let filename = path.to_string_lossy().into_owned();
+    let typed = Tensor::new_integer(IntegerStorage::U16(vec![2026]), vec![1, 1])
+        .expect("typed scalar tensor");
+    let values = cell(
+        vec![
+            Value::CharArray(CharArray::new_row("name")),
+            Value::Tensor(typed),
+            Value::LogicalArray(LogicalArray::new(vec![0], vec![1, 1]).expect("logical")),
+        ],
+        1,
+        3,
+    );
+
+    block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    assert_eq!(contents, "\"name\",2026,0\n");
+    let _ = fs::remove_file(path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_preserves_integer_cell_text_exactly() {
+    let path = temp_path("csv");
+    let filename = path.to_string_lossy().into_owned();
+    let wide = (1_u64 << 53) + 1;
+    let typed =
+        Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
+    let values = cell(
+        vec![Value::Int(IntValue::U64(u64::MAX)), Value::Tensor(typed)],
+        1,
+        2,
+    );
+
+    block_on(writecell_builtin(values, vec![Value::from(filename)])).expect("writecell");
+
+    let contents = fs::read_to_string(&path).expect("read contents");
+    assert_eq!(contents, "18446744073709551615,9007199254740993\n");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+fn writecell_sheet_parser_rejects_unrepresentable_double_boundary() {
+    assert!(parse_sheet(&Value::Num(usize::MAX as f64)).is_err());
+    assert!(parse_sheet(&Value::Num((usize::MAX as f64) + 1.0)).is_err());
+
+    let typed = Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1])
+        .expect("typed sheet");
+    let parsed = parse_sheet(&Value::Tensor(typed));
+    match usize::try_from((1_u64 << 53) + 1) {
+        Ok(expected) => {
+            assert!(matches!(parsed, Ok(SheetSelector::Index(actual)) if actual == expected))
+        }
+        Err(_) => assert!(parsed.is_err()),
+    }
+}
+
+#[test]
+fn writecell_explicit_gpu_input_is_gated_before_filesystem_access() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let original = allocation.handle.wire_descriptor();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let handle = allocation
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("explicit immutable view");
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let data = cell(vec![Value::GpuTensor(handle)], 1, 1);
+
+    let error = block_on(writecell_builtin(data, vec![Value::from("unused.csv")]))
+        .expect_err("strict mode rejects explicit GPU input before gather or file access");
+    assert_eq!(
+        error.identifier(),
+        WRITECELL_EXPLICIT_GPU_EXTENSION.error_identifier
+    );
+    assert_eq!(allocation.handle.wire_descriptor(), original);
+    assert_eq!(
+        allocation.probe.retirements(),
+        0,
+        "caller alias survives nested preflight"
+    );
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn writecell_bytes_output_is_gated_before_filesystem_access() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let _outputs = crate::output_count::push_output_count(Some(1));
+    let data = cell(vec![Value::Num(1.0)], 1, 1);
+
+    let error = block_on(writecell_builtin(
+        data,
+        vec![Value::from("definitely/missing/out.csv")],
+    ))
+    .expect_err("strict mode rejects the bytes-written output before file access");
+    assert_eq!(
+        error.identifier(),
+        WRITECELL_BYTES_OUTPUT_EXTENSION.error_identifier
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_rejects_nested_cells_and_nonscalar_arrays() {
+    let path = temp_path("csv");
+    let filename = path.to_string_lossy().into_owned();
+    let nested = cell(vec![cell(vec![Value::Num(1.0)], 1, 1)], 1, 1);
+    let err = block_on(writecell_builtin(
+        nested,
+        vec![Value::from(filename.clone())],
+    ))
+    .expect_err("nested cell error");
+    assert!(err.message().contains("nested cell arrays"));
+
+    let nonscalar = cell(
+        vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor"),
+        )],
+        1,
+        1,
+    );
+    let err = block_on(writecell_builtin(nonscalar, vec![Value::from(filename)]))
+        .expect_err("nonscalar error");
+    assert!(err.message().contains("unsupported cell value"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_writes_xlsx_with_sheet_and_range() {
+    let path = temp_path("xlsx");
+    let filename = path.to_string_lossy().into_owned();
+    let values = cell(
+        vec![Value::from("Voltage"), Value::Num(1.5), Value::Bool(true)],
+        1,
+        3,
+    );
+
+    block_on(writecell_builtin(
+        values,
+        vec![
+            Value::from(filename),
+            Value::from("Sheet"),
+            Value::from("Measurements"),
+            Value::from("Range"),
+            Value::from("B2"),
+        ],
+    ))
+    .expect("writecell xlsx");
+
+    let mut workbook = open_workbook_auto(&path).expect("open workbook");
+    assert_eq!(workbook.sheet_names()[0], "Measurements");
+    let range = workbook
+        .worksheet_range("Measurements")
+        .expect("worksheet range");
+    assert_eq!(
+        range.get((0, 0)),
+        Some(&Data::String("Voltage".to_string()))
+    );
+    assert_eq!(range.get((0, 1)), Some(&Data::Float(1.5)));
+    assert_eq!(range.get((0, 2)), Some(&Data::Bool(true)));
+    let _ = fs::remove_file(path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn writecell_rejects_unsupported_spreadsheet_extension() {
+    let path = temp_path("xls");
+    let filename = path.to_string_lossy().into_owned();
+    let values = cell(vec![Value::from("A"), Value::Num(1.0)], 1, 2);
+    let err = block_on(writecell_builtin(values, vec![Value::from(filename)]))
+        .expect_err("unsupported extension");
+    assert!(err
+        .message()
+        .contains("unsupported spreadsheet file extension"));
+    let _ = fs::remove_file(path);
+}
