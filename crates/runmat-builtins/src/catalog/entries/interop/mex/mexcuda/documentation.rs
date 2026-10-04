@@ -25,7 +25,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     examples: &[
         BuiltinExample { id: "compile-cuda-gateway", title: "Build a CUDA gateway with the R2018a API", program: "mexcuda('-R2018a', '-output', 'cuda_gateway', 'cuda_gateway.cu');\nmodule = strcat('cuda_gateway.', mexext());\nassert(isfile(module));", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture { id: BuiltinExampleFixtureId { local_name: "mex-cuda-gateway" }, root: BuiltinFilesystemRoot::IsolatedWorkspace, entries: CUDA_SOURCE }), requirements: CUDA_COMPILER, verification: BuiltinExampleVerification::Assertions { source: "assert(isfile(module));" } },
-        BuiltinExample { id: "requires-cuda-source", title: "Require a CUDA translation unit", program: "mexcuda('gateway.cpp');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Native, fixture: BuiltinExampleFixture::None, requirements: NATIVE_TARGET, verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:MEX:InvalidBuildArguments" } },
+        BuiltinExample { id: "requires-source", title: "Require a source argument", program: "mexcuda();", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Native, fixture: BuiltinExampleFixture::None, requirements: NATIVE_TARGET, verification: BuiltinExampleVerification::ExpectedError { identifier: "RunMat:MEX:InvalidBuildArguments" } },
     ],
     example_exemption: None,
     faqs: &[
@@ -34,6 +34,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     links: &[MEX_LINK, EXTENSIONS_LINK, BuiltinDocumentationLink { label: "mex", target: BuiltinDocumentationLinkTarget::Builtin("mex") }, BuiltinDocumentationLink { label: "mexext", target: BuiltinDocumentationLinkTarget::Builtin("mexext") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CUDA source preflight", location: "builtins::interop::mex::tests::mexcuda_requires_a_cuda_translation_unit" }], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: IMPLEMENTATION, verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CUDA source preflight", location: "builtins::interop::mex::tests::mexcuda_requires_a_cuda_translation_unit_on_supported_targets" }], notes: &[] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

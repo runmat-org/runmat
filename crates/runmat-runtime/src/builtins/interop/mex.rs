@@ -188,9 +188,14 @@ mod tests {
     }
 
     #[test]
-    fn build_parser_error_keeps_typed_source() {
+    fn build_error_keeps_typed_source_at_target_or_parser_boundary() {
         let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
-        assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
+        let expected = if runmat_mex::MexTarget::current().is_ok() {
+            "RunMat:MEX:InvalidBuildArguments"
+        } else {
+            "RunMat:MEX:UnsupportedTarget"
+        };
+        assert_eq!(error.identifier(), Some(expected));
         assert!(error.source.is_some());
     }
 
@@ -198,6 +203,10 @@ mod tests {
     fn scalar_numeric_and_logical_build_arguments_still_convert_to_text() {
         assert_eq!(String::try_from(&Value::Num(17.0)).unwrap(), "17");
         assert_eq!(String::try_from(&Value::Bool(true)).unwrap(), "true");
+        assert_eq!(
+            String::try_from(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).unwrap(),
+            u64::MAX.to_string()
+        );
     }
 
     #[cfg(target_family = "wasm")]
@@ -209,12 +218,24 @@ mod tests {
     }
 
     #[test]
-    fn mexcuda_requires_a_cuda_translation_unit() {
+    fn mexcuda_requires_a_cuda_translation_unit_on_supported_targets() {
         let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
-        assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
+        let expected = if runmat_mex::MexTarget::current().is_ok() {
+            "RunMat:MEX:InvalidBuildArguments"
+        } else {
+            "RunMat:MEX:UnsupportedTarget"
+        };
+        assert_eq!(error.identifier(), Some(expected));
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(any(
+        all(
+            target_os = "macos",
+            any(target_arch = "aarch64", target_arch = "x86_64")
+        ),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "x86_64")
+    ))]
     #[test]
     fn mex_builds_source_with_the_shared_adapter_service() {
         let directory = tempfile::tempdir().unwrap();

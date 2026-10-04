@@ -37,6 +37,12 @@ fn all_three_native_mex_identities_have_one_default_binding() {
 
 #[test]
 fn build_inference_retains_accepted_scalar_coercions_and_zero_outputs() {
+    for descriptor in [&MEX_DESCRIPTOR, &MEXCUDA_DESCRIPTOR] {
+        assert_eq!(
+            descriptor.signatures[0].inputs[0].ty,
+            crate::BuiltinParamType::Any
+        );
+    }
     let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
         domain: NumericDomain::Real,
@@ -82,6 +88,39 @@ fn build_inference_rejects_only_definitely_unconvertible_facts() {
         StorageFact::Dense,
     );
     let rejected = infer(request(vec![matrix], 0), &MEX_CATALOG_ENTRY);
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-MEX-ARGUMENT"));
+    let scalar_integer_array = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Dense,
+    );
+    let rejected = infer(request(vec![scalar_integer_array], 0), &MEX_CATALOG_ENTRY);
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-MEX-ARGUMENT"));
+    let scalar_integer = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Real,
+    }));
+    let accepted = infer(request(vec![scalar_integer], 0), &MEX_CATALOG_ENTRY);
+    assert!(
+        accepted.diagnostics.is_empty(),
+        "{:?}",
+        accepted.diagnostics
+    );
+    let logical_array = ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::Scalar,
+        StorageFact::Dense,
+    );
+    let rejected = infer(request(vec![logical_array], 0), &MEX_CATALOG_ENTRY);
     assert!(rejected
         .diagnostics
         .iter()

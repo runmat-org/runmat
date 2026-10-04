@@ -48,6 +48,12 @@ pub(super) fn infer_extension(request: &CallRequest, entry: &BuiltinCatalogEntry
 }
 
 fn definitely_unconvertible_to_build_text(fact: &ValueFact) -> bool {
+    if matches!(
+        fact.residency,
+        ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
+    ) {
+        return true;
+    }
     match &fact.kind {
         ValueKindFact::Unknown => false,
         ValueKindFact::String => fact.shape.is_definitely_nonscalar(),
@@ -62,9 +68,14 @@ fn definitely_unconvertible_to_build_text(fact: &ValueFact) -> bool {
                             .any(|dim| dim.is_some_and(|dim| dim != 1))
                 })
         }
-        ValueKindFact::Logical => fact.shape.is_definitely_nonscalar(),
+        ValueKindFact::Logical => {
+            matches!(fact.storage, StorageFact::Dense | StorageFact::Sparse)
+                || fact.shape.is_definitely_nonscalar()
+        }
         ValueKindFact::Numeric(numeric) => {
-            numeric.domain == NumericDomain::Complex || fact.shape.is_definitely_nonscalar()
+            numeric.domain == NumericDomain::Complex
+                || matches!(fact.storage, StorageFact::Dense | StorageFact::Sparse)
+                || fact.shape.is_definitely_nonscalar()
         }
         _ => true,
     }

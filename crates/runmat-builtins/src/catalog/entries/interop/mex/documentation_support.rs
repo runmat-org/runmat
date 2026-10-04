@@ -26,7 +26,29 @@ pub(super) const EXTENSIONS_LINK: BuiltinDocumentationLink = BuiltinDocumentatio
     label: "Native extension development",
     target: BuiltinDocumentationLinkTarget::Documentation("/docs/development/extensions"),
 };
-pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[BuiltinDocumentationLink {
-    label: "MEX builtin and build adapter",
-    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/interop/mex.rs"),
-}];
+pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
+    BuiltinDocumentationLink {
+        label: "MEX public call and error boundary",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/interop/mex.rs"),
+    },
+    BuiltinDocumentationLink {
+        label: "Build argument and API-pin parser",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-mex/src/build/arguments.rs"),
+    },
+    BuiltinDocumentationLink {
+        label: "Native target admission",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-mex/src/build/target.rs"),
+    },
+    BuiltinDocumentationLink {
+        label: "MEX artifact identity and validation",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-mex/src/build/artifact.rs"),
+    },
+    BuiltinDocumentationLink {
+        label: "C Matrix API array ownership and copy-on-write",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-mex/src/libmx/api.rs"),
+    },
+    BuiltinDocumentationLink {
+        label: "MEX callback host services",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-mex/src/host/services.rs"),
+    },
+];

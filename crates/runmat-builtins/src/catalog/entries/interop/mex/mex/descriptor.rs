@@ -3,10 +3,10 @@ use crate::*;
 
 const INPUTS: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor {
     name: "arguments",
-    ty: BuiltinParamType::StringScalar,
+    ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Variadic,
     default: None,
-    description: "Native source files and compatible MEX build options.",
+    description: "Native source files and MEX options as scalar text; RunMat also converts scalar numeric and logical arguments to text.",
 }];
 const SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
     label: "mex(arguments)",
