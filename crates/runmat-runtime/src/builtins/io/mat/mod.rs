@@ -5,3 +5,5 @@ pub(crate) mod authority;
 pub mod load;
 pub mod matfile;
 pub mod save;
+#[cfg(test)]
+pub(crate) mod tests;
