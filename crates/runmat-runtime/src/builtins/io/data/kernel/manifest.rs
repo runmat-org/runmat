@@ -8,21 +8,22 @@ pub(in crate::builtins::io::data) async fn create_array_in_manifest(
     manifest: &mut DataManifest,
     array_name: &str,
     mut meta: DataArrayMeta,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     if manifest.arrays.contains_key(array_name) {
         return Err(data_error(format!(
             "DataTransaction.create_array: array '{array_name}' already exists"
         )));
     }
     let payload = DataArrayPayload::zeros(meta.dtype.clone(), meta.shape.clone())?;
-    let mut budget = None;
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,
         root,
         array_name,
         &payload,
         &meta.chunk_shape,
-        &mut budget,
+        budget,
     )
     .await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -37,21 +38,22 @@ pub(in crate::builtins::io::data) async fn resize_array_in_manifest(
     manifest: &mut DataManifest,
     array_name: &str,
     shape: Vec<usize>,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let meta = manifest
         .arrays
         .get_mut(array_name)
         .ok_or_else(|| data_error(format!("array '{array_name}' not found")))?;
     meta.shape = shape.clone();
     let payload = DataArrayPayload::zeros(meta.dtype.clone(), shape.clone())?;
-    let mut budget = None;
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,
         root,
         array_name,
         &payload,
         &meta.chunk_shape,
-        &mut budget,
+        budget,
     )
     .await?;
     meta.data_path = make_rel_data_path(root, &payload_path)?;
@@ -66,7 +68,9 @@ pub(in crate::builtins::io::data) async fn fill_array_in_manifest(
     array_name: &str,
     slice_spec: Option<&Value>,
     value: &Value,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let meta: DataArrayMeta = manifest
         .arrays
         .get(array_name)
@@ -86,14 +90,13 @@ pub(in crate::builtins::io::data) async fn fill_array_in_manifest(
     } else {
         DataArrayPayload::filled(payload.dtype.clone(), payload.shape.clone(), value)?
     };
-    let mut budget = None;
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,
         root,
         array_name,
         &next_payload,
         &meta.chunk_shape,
-        &mut budget,
+        budget,
     )
     .await?;
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
@@ -109,7 +112,9 @@ pub(in crate::builtins::io::data) async fn delete_array_in_manifest_on(
     root: &std::path::Path,
     manifest: &mut DataManifest,
     array_name: &str,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let removed = manifest.arrays.remove(array_name);
     if removed.is_none() {
         return Err(data_error(format!(
@@ -119,10 +124,13 @@ pub(in crate::builtins::io::data) async fn delete_array_in_manifest_on(
     let array_dir = root.join("arrays").join(array_name);
     if provider.metadata(&array_dir).await.is_ok() {
         provider.remove_dir_all(&array_dir).await.map_err(|err| {
-            data_error(format!(
-                "DataTransaction.delete_array: failed to remove '{}': {err}",
-                array_dir.display()
-            ))
+            crate::data::data_error_with_source(
+                format!(
+                    "DataTransaction.delete_array: failed to remove '{}': {err}",
+                    array_dir.display()
+                ),
+                err,
+            )
         })?;
     }
     Ok(())

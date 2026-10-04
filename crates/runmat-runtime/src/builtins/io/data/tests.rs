@@ -2,6 +2,9 @@ use super::*;
 use runmat_value::IntValue;
 use runmat_value::{ComplexTensor, IntegerComplexStorage};
 
+#[path = "tests/handle_receipt.rs"]
+mod handle_receipt;
+
 fn tensor_values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }

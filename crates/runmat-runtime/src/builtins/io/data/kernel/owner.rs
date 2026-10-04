@@ -3,16 +3,10 @@
 use super::*;
 
 pub(in crate::builtins::io::data) fn dataset_owner(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: &Value,
 ) -> BuiltinResult<AuthorizedHandle> {
-    authority::resolve_object(base, HandleRole::Dataset)
-}
-
-pub(in crate::builtins::io::data) fn tx_id_from_object(
-    base: &Value,
-    _context: &str,
-) -> BuiltinResult<String> {
-    authority::resolve_transaction(base).map(|(_, tx_id)| tx_id)
+    authority::resolve_object(runtime, base, HandleRole::Dataset)
 }
 
 pub(in crate::builtins::io::data) fn as_object<'a>(

@@ -1115,17 +1115,20 @@ pub async fn read_array_payload_on(
     }
     let payload_path = root.join(&meta.data_path);
     let bytes = provider.read(&payload_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read payload '{}': {err}",
-            payload_path.display()
-        ))
+        data_error_with_source(
+            format!("failed to read payload '{}': {err}", payload_path.display()),
+            err,
+        )
     })?;
     serde_json::from_slice::<DataArrayPayload>(&bytes)
         .map_err(|err| {
-            data_error(format!(
-                "failed to parse payload '{}': {err}",
-                payload_path.display()
-            ))
+            data_error_with_source(
+                format!(
+                    "failed to parse payload '{}': {err}",
+                    payload_path.display()
+                ),
+                err,
+            )
         })?
         .normalize_for_dtype(&meta.dtype)
 }
@@ -1175,16 +1178,22 @@ async fn read_array_payload_chunked_slice_on(
     slice_shape: &[usize],
 ) -> BuiltinResult<DataArrayPayload> {
     let bytes = provider.read(index_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read chunk index '{}': {err}",
-            index_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to read chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
     let index: DataChunkIndex = serde_json::from_slice(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse chunk index '{}': {err}",
-            index_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to parse chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
 
     let mut values =
@@ -1204,17 +1213,23 @@ async fn read_array_payload_chunked_slice_on(
 
         let chunk_path = root.join(&chunk.data_path);
         let bytes = provider.read(&chunk_path).await.map_err(|err| {
-            data_error(format!(
-                "failed to read chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
+            data_error_with_source(
+                format!(
+                    "failed to read chunk payload '{}': {err}",
+                    chunk_path.display()
+                ),
+                err,
+            )
         })?;
         let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
             .map_err(|err| {
-                data_error(format!(
-                    "failed to parse chunk payload '{}': {err}",
-                    chunk_path.display()
-                ))
+                data_error_with_source(
+                    format!(
+                        "failed to parse chunk payload '{}': {err}",
+                        chunk_path.display()
+                    ),
+                    err,
+                )
             })?
             .normalize_for_dtype(&meta.dtype)?;
         if payload.shape != chunk_extent {
@@ -1270,16 +1285,22 @@ async fn read_array_payload_chunked_on(
     index_path: &Path,
 ) -> BuiltinResult<DataArrayPayload> {
     let bytes = provider.read(index_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read chunk index '{}': {err}",
-            index_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to read chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
     let index: DataChunkIndex = serde_json::from_slice(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse chunk index '{}': {err}",
-            index_path.display()
-        ))
+        data_error_with_source(
+            format!(
+                "failed to parse chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
     let mut values =
         DataArrayValues::zeros(&meta.dtype, checked_shape_element_count(&meta.shape)?)?;
@@ -1287,17 +1308,23 @@ async fn read_array_payload_chunked_on(
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
         let bytes = provider.read(&chunk_path).await.map_err(|err| {
-            data_error(format!(
-                "failed to read chunk payload '{}': {err}",
-                chunk_path.display()
-            ))
+            data_error_with_source(
+                format!(
+                    "failed to read chunk payload '{}': {err}",
+                    chunk_path.display()
+                ),
+                err,
+            )
         })?;
         let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
             .map_err(|err| {
-                data_error(format!(
-                    "failed to parse chunk payload '{}': {err}",
-                    chunk_path.display()
-                ))
+                data_error_with_source(
+                    format!(
+                        "failed to parse chunk payload '{}': {err}",
+                        chunk_path.display()
+                    ),
+                    err,
+                )
             })?
             .normalize_for_dtype(&meta.dtype)?;
         let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
@@ -1832,9 +1859,8 @@ pub fn ensure_manifest_sequence(expected: u64, manifest: &DataManifest) -> Built
 }
 
 pub fn array_object(dataset_path: &str, array_name: &str, authority: ForeignRef) -> Value {
-    let mut obj =
-        ObjectInstance::new(runmat_builtins::DATA_ARRAY_CLASS.owned())
-            .with_dataset_authority(authority);
+    let mut obj = ObjectInstance::new(runmat_builtins::DATA_ARRAY_CLASS.owned())
+        .with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),
         Value::String(dataset_path.to_string()),

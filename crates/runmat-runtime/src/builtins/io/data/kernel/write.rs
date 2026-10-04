@@ -8,10 +8,20 @@ pub(in crate::builtins::io::data) async fn write_array_full_on(
     array_name: &str,
     slice_spec: Option<&Value>,
     value: &Value,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let mut manifest = crate::data::read_manifest_on(provider, root).await?;
-    apply_write_to_manifest_on(provider, root, &mut manifest, array_name, slice_spec, value)
-        .await?;
+    apply_write_to_manifest_on(
+        provider,
+        root,
+        &mut manifest,
+        array_name,
+        slice_spec,
+        value,
+        budget,
+    )
+    .await?;
     manifest.updated_at = now_rfc3339();
     manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
     crate::data::write_manifest_on(provider, root, &manifest).await
@@ -24,7 +34,9 @@ pub(in crate::builtins::io::data) async fn apply_write_to_manifest_on(
     array_name: &str,
     slice_spec: Option<&Value>,
     value: &Value,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let meta: DataArrayMeta = manifest
         .arrays
         .get(array_name)
@@ -33,7 +45,7 @@ pub(in crate::builtins::io::data) async fn apply_write_to_manifest_on(
 
     if let Some(slice_spec) = slice_spec {
         if apply_slice_write_chunked_on(
-            provider, root, manifest, array_name, &meta, slice_spec, value,
+            provider, root, manifest, array_name, &meta, slice_spec, value, budget,
         )
         .await?
         {
@@ -48,14 +60,13 @@ pub(in crate::builtins::io::data) async fn apply_write_to_manifest_on(
         DataArrayPayload::from_value(payload.dtype.clone(), value)?
     };
 
-    let mut budget = None;
     let (payload_path, chunk_index_path) = crate::data::write_array_payload_on(
         provider,
         root,
         array_name,
         &next_payload,
         &meta.chunk_shape,
-        &mut budget,
+        budget,
     )
     .await?;
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
@@ -74,7 +85,9 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
     meta: &DataArrayMeta,
     slice_spec: &Value,
     value: &Value,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<bool> {
+    crate::data::cooperate_data_work(budget, 0).await?;
     let Some(index_rel_path) = &meta.chunk_index_path else {
         return Ok(false);
     };
@@ -96,16 +109,22 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
     }
 
     let index_bytes = provider.read(&index_path).await.map_err(|err| {
-        data_error(format!(
-            "failed to read chunk index '{}': {err}",
-            index_path.display()
-        ))
+        crate::data::data_error_with_source(
+            format!(
+                "failed to read chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
     let mut chunk_index: DataChunkIndex = serde_json::from_slice(&index_bytes).map_err(|err| {
-        data_error(format!(
-            "failed to parse chunk index '{}': {err}",
-            index_path.display()
-        ))
+        crate::data::data_error_with_source(
+            format!(
+                "failed to parse chunk index '{}': {err}",
+                index_path.display()
+            ),
+            err,
+        )
     })?;
 
     let mut pos_by_key = HashMap::new();
@@ -116,6 +135,7 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
     let mut upload_batch = Vec::<(DataChunkDescriptor, Vec<u8>)>::new();
 
     for coords in touched {
+        crate::data::cooperate_data_work(budget, 0).await?;
         let key = chunk_key(&coords);
         let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
         let chunk_extent = chunk_extent_for_start(&chunk_start, &meta.chunk_shape, &meta.shape);
@@ -153,6 +173,7 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
             .map(|r| r.end.saturating_sub(r.start))
             .collect();
         loop {
+            crate::data::cooperate_data_work(budget, 1).await?;
             let mut global = Vec::with_capacity(intersection.len());
             for dim in 0..intersection.len() {
                 global.push(intersection[dim].start + local[dim]);
@@ -182,17 +203,24 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
             }
         }
 
-        let chunk_bytes = serde_json::to_vec(&chunk_payload)
-            .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
+        let chunk_bytes = serde_json::to_vec(&chunk_payload).map_err(|err| {
+            crate::data::data_error_with_source(
+                format!("failed to encode chunk payload: {err}"),
+                err,
+            )
+        })?;
         let chunk_path = root.join(&entry.data_path);
         provider
             .write(&chunk_path, &chunk_bytes)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to write chunk payload '{}': {err}",
-                    chunk_path.display()
-                ))
+                crate::data::data_error_with_source(
+                    format!(
+                        "failed to write chunk payload '{}': {err}",
+                        chunk_path.display()
+                    ),
+                    err,
+                )
             })?;
 
         entry.coords = coords.clone();
@@ -218,7 +246,7 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
         ));
     }
 
-    maybe_upload_chunk_batch_on(provider, root, array_name, upload_batch).await?;
+    maybe_upload_chunk_batch_on(provider, root, array_name, upload_batch, budget).await?;
     tracing::info!(
         target: "runmat.data",
         dataset = %root.display(),
@@ -226,16 +254,23 @@ pub(in crate::builtins::io::data) async fn apply_slice_write_chunked_on(
         touched_chunks = chunk_index.chunks.len(),
         "chunked slice write committed"
     );
-    let index_write = serde_json::to_vec(&chunk_index)
-        .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
+    let index_write = serde_json::to_vec(&chunk_index).map_err(|err| {
+        crate::data::data_error_with_source(
+            format!("failed to encode chunk index json: {err}"),
+            err,
+        )
+    })?;
     provider
         .write(&index_path, &index_write)
         .await
         .map_err(|err| {
-            data_error(format!(
-                "failed to write chunk index '{}': {err}",
-                index_path.display()
-            ))
+            crate::data::data_error_with_source(
+                format!(
+                    "failed to write chunk index '{}': {err}",
+                    index_path.display()
+                ),
+                err,
+            )
         })?;
 
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
@@ -252,6 +287,7 @@ pub(in crate::builtins::io::data) async fn maybe_upload_chunk_batch_on(
     root: &std::path::Path,
     array_name: &str,
     batch: Vec<(DataChunkDescriptor, Vec<u8>)>,
+    budget: &mut Option<crate::execution::CpuCooperationBudget>,
 ) -> BuiltinResult<()> {
     if batch.is_empty() {
         return Ok(());
@@ -265,12 +301,14 @@ pub(in crate::builtins::io::data) async fn maybe_upload_chunk_batch_on(
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
-            return Err(data_error(format!(
-                "failed to request data chunk upload targets: {err}"
-            )))
+            return Err(crate::data::data_error_with_source(
+                format!("failed to request data chunk upload targets: {err}"),
+                err,
+            ))
         }
     };
     for (descriptor, bytes) in batch {
+        crate::data::cooperate_data_work(budget, bytes.len() as u64).await?;
         let target = targets
             .iter()
             .find(|t| t.key == descriptor.key)
@@ -284,10 +322,10 @@ pub(in crate::builtins::io::data) async fn maybe_upload_chunk_batch_on(
             .data_upload_chunk(target, &bytes)
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to upload chunk '{}': {err}",
-                    descriptor.key
-                ))
+                crate::data::data_error_with_source(
+                    format!("failed to upload chunk '{}': {err}", descriptor.key),
+                    err,
+                )
             })?;
         tracing::info!(
             target: "runmat.data",
@@ -326,17 +364,17 @@ pub(in crate::builtins::io::data) async fn load_or_init_chunk_on(
             .read(&root.join(&entry.data_path))
             .await
             .map_err(|err| {
-                data_error(format!(
-                    "failed to read chunk payload '{}': {err}",
-                    entry.data_path
-                ))
+                crate::data::data_error_with_source(
+                    format!("failed to read chunk payload '{}': {err}", entry.data_path),
+                    err,
+                )
             })?;
         let payload: DataArrayPayload = serde_json::from_slice::<DataArrayPayload>(&bytes)
             .map_err(|err| {
-                data_error(format!(
-                    "failed to parse chunk payload '{}': {err}",
-                    entry.data_path
-                ))
+                crate::data::data_error_with_source(
+                    format!("failed to parse chunk payload '{}': {err}", entry.data_path),
+                    err,
+                )
             })?
             .normalize_for_dtype(dtype)?;
         return Ok((index, true, entry, payload));

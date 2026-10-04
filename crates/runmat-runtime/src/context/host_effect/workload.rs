@@ -4,7 +4,10 @@ use runmat_builtins::AudioReadDataType;
 use std::path::Path;
 
 mod dataset;
-pub use dataset::DatasetPathOperation;
+pub use dataset::{
+    DatasetHandleInput, DatasetHandleKey, DatasetHandleOperation, DatasetHandleRole,
+    DatasetPathOperation,
+};
 
 /// The requested result is distinct from the committed side effects. No
 /// output still needs a bound for temporary codec and result storage.
@@ -71,6 +74,14 @@ pub enum HostEffectWorkload<'a> {
         destination: Option<&'a Path>,
         output: HostEffectOutput,
     },
+    DatasetHandle {
+        operation: DatasetHandleOperation,
+        root: &'a Path,
+        key: DatasetHandleKey<'a>,
+        role: DatasetHandleRole<'a>,
+        inputs: &'a [DatasetHandleInput],
+        output: HostEffectOutput,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -101,12 +112,33 @@ struct DatasetPathFacts<'a> {
     output: HostEffectOutput,
 }
 
+#[derive(serde::Serialize)]
+struct DatasetHandleFacts<'a> {
+    operation: DatasetHandleOperation,
+    root: &'a [u8],
+    key: DatasetHandleKey<'a>,
+    role: DatasetHandleRole<'a>,
+    inputs: &'a [DatasetHandleInput],
+    output: HostEffectOutput,
+}
+
 impl HostEffectWorkload<'_> {
+    /// An absent scalar digest is not a fabricated reusable identity.
+    pub fn identity_complete(self) -> bool {
+        match self {
+            Self::DatasetHandle { inputs, .. } => {
+                inputs.iter().all(|input| input.scalar_digest.is_some())
+            }
+            _ => true,
+        }
+    }
+
     pub const fn output(self) -> HostEffectOutput {
         match self {
             Self::ArchiveExtract { output, .. }
             | Self::AudioMetadata { output, .. }
             | Self::DatasetPath { output, .. } => output,
+            Self::DatasetHandle { output, .. } => output,
             Self::AudioDecode { output, .. } => output.host_effect_output(),
         }
     }
@@ -165,6 +197,22 @@ impl HostEffectWorkload<'_> {
                 output,
             })
             .expect("typed dataset path facts serialize"),
+            Self::DatasetHandle {
+                operation,
+                root,
+                key,
+                role,
+                inputs,
+                output,
+            } => serde_json::to_vec(&DatasetHandleFacts {
+                operation,
+                root: root.as_os_str().as_encoded_bytes(),
+                key,
+                role,
+                inputs,
+                output,
+            })
+            .expect("typed dataset handle facts serialize"),
         }
     }
 }

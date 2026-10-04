@@ -68,6 +68,7 @@ async fn data_create_builtin(
         };
         crate::data::write_manifest_on(authority.provider(), &root, &manifest).await?;
         let lease = crate::data::authority::issue_dataset(
+            runtime.as_ref(),
             authority.provider_arc().clone(),
             root.clone(),
             path.clone(),
@@ -98,6 +99,7 @@ async fn data_open_builtin(runtime: Option<RuntimeContext>, path: Value) -> Buil
     admission::execute(runtime.as_ref(), receipt, async {
         let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
         let lease = crate::data::authority::issue_dataset(
+            runtime.as_ref(),
             authority.provider_arc().clone(),
             root.clone(),
             path.clone(),
@@ -289,6 +291,7 @@ async fn data_import_builtin(
         copy_dir_recursive_on(authority.provider(), &source_root, &root, &mut budget).await?;
         let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
         let lease = crate::data::authority::issue_dataset(
+            runtime.as_ref(),
             authority.provider_arc().clone(),
             root.clone(),
             path.clone(),

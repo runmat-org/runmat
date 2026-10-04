@@ -6,10 +6,10 @@ use crate::context::host_effect::{
     HostEffectRequest, HostEffectWorkload,
 };
 use crate::context::RuntimeContext;
-use crate::execution::ExecutionServiceError;
-use runmat_execution::{Digest, WholeWorkObservationOutcome};
-use std::future::Future;
+use runmat_execution::Digest;
 use std::path::Path;
+
+pub(super) use super::super::execution::execute;
 
 pub(super) fn facts(value: &impl serde::Serialize) -> Digest {
     Digest::sha256(serde_json::to_vec(value).expect("typed dataset domain facts serialize"))
@@ -42,64 +42,6 @@ pub(super) fn select(
     )
 }
 
-pub(super) async fn execute<T>(
-    runtime: Option<&RuntimeContext>,
-    receipt: Option<HostEffectReceipt>,
-    effect: impl Future<Output = BuiltinResult<T>>,
-) -> BuiltinResult<T> {
-    if let Some(receipt) = receipt.as_ref() {
-        receipt.checkpoint()?;
-    }
-    let mut cancelled = false;
-    let result = if let Some(runtime) = runtime {
-        let mut budget = runtime.cpu_cooperation();
-        match budget.checkpoint(0).await {
-            Ok(()) => match budget.await_cancellable(effect).await {
-                Ok(result) => result,
-                Err(ExecutionServiceError::Cancelled) => {
-                    cancelled = true;
-                    Err(cancelled_error())
-                }
-                Err(error) => Err(error.into_runtime_error()),
-            },
-            Err(ExecutionServiceError::Cancelled) => {
-                cancelled = true;
-                Err(cancelled_error())
-            }
-            Err(error) => Err(error.into_runtime_error()),
-        }
-    } else {
-        effect.await
-    };
-    let result = if result.is_ok() {
-        if let Some(receipt) = receipt.as_ref() {
-            receipt.checkpoint()?;
-        }
-        if let Some(runtime) = runtime {
-            if runtime.is_cancelled() {
-                cancelled = true;
-                Err(cancelled_error())
-            } else {
-                result
-            }
-        } else {
-            result
-        }
-    } else {
-        result
-    };
-    if let Some(receipt) = receipt {
-        receipt.finish(if cancelled {
-            WholeWorkObservationOutcome::Cancelled
-        } else if result.is_ok() {
-            WholeWorkObservationOutcome::Success
-        } else {
-            WholeWorkObservationOutcome::OperationalFailure
-        });
-    }
-    result
-}
-
 fn operation_name(operation: DatasetPathOperation) -> &'static str {
     match operation {
         DatasetPathOperation::Create => "data.create",
@@ -113,8 +55,4 @@ fn operation_name(operation: DatasetPathOperation) -> &'static str {
         DatasetPathOperation::List => "data.list",
         DatasetPathOperation::Inspect => "data.inspect",
     }
-}
-
-fn cancelled_error() -> crate::RuntimeError {
-    crate::runtime_error::semantic_error("RunMat:Cancelled", "data invocation was cancelled")
 }

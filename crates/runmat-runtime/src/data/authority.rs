@@ -1,9 +1,12 @@
 //! Sealed, clone-stable filesystem owner for Dataset family receiver values.
 
 use super::data_error;
+use crate::context::{RuntimeContext, RuntimeContextLocalId};
 use crate::BuiltinResult;
 use runmat_filesystem::FsProvider;
-use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity, StaticClassIdentity};
+use runmat_types::{
+    ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity, StaticClassIdentity,
+};
 use runmat_value::{
     ForeignRef, ForeignResourceKey, ForeignResourceRelease, ObjectInstance, Value, WeakForeignRef,
 };
@@ -34,6 +37,7 @@ pub(crate) struct AuthorizedHandle {
     pub public_path: String,
     pub role: HandleRole,
     reference: ForeignRef,
+    issuer: IssuerScope,
 }
 
 impl AuthorizedHandle {
@@ -48,6 +52,49 @@ struct Record {
     public_path: String,
     role: HandleRole,
     lease: WeakForeignRef,
+    issuer: IssuerScope,
+}
+
+/// A session-issued handle never owns its session. Context-free embedding
+/// issuance is explicitly process-local and remains live while its managed
+/// ForeignRef is retained; it is never silently upgraded to session scope.
+#[derive(Clone)]
+enum IssuerScope {
+    Session {
+        identity: RuntimeContextLocalId,
+        lease: Weak<()>,
+    },
+    Process,
+}
+
+impl IssuerScope {
+    fn from_context(runtime: Option<&RuntimeContext>) -> Self {
+        match runtime {
+            Some(runtime) => Self::Session {
+                identity: runtime.local_identity(),
+                lease: runtime.session_lease(),
+            },
+            None => Self::Process,
+        }
+    }
+
+    fn lifetime(&self) -> ForeignLifetime {
+        match self {
+            Self::Session { .. } => ForeignLifetime::Session,
+            Self::Process => ForeignLifetime::Persistent,
+        }
+    }
+
+    fn admits(&self, runtime: Option<&RuntimeContext>) -> bool {
+        match self {
+            Self::Process => true,
+            Self::Session { identity, lease } => runtime.is_some_and(|runtime| {
+                *identity == runtime.local_identity()
+                    && lease.strong_count() != 0
+                    && Weak::ptr_eq(lease, &runtime.session_lease())
+            }),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -89,6 +136,7 @@ impl ForeignResourceRelease for Release {
 }
 
 pub(crate) fn issue_dataset(
+    runtime: Option<&RuntimeContext>,
     filesystem: Arc<dyn FsProvider>,
     root: PathBuf,
     public_path: String,
@@ -98,7 +146,13 @@ pub(crate) fn issue_dataset(
             "Dataset authority requires an absolute resolved root",
         ));
     }
-    issue(filesystem, root, public_path, HandleRole::Dataset)
+    issue(
+        filesystem,
+        root,
+        public_path,
+        HandleRole::Dataset,
+        IssuerScope::from_context(runtime),
+    )
 }
 
 pub(crate) fn issue_child(
@@ -120,6 +174,20 @@ pub(crate) fn issue_child(
         parent.root.clone(),
         parent.public_path.clone(),
         role,
+        parent.issuer.clone(),
+    )
+}
+
+pub(crate) fn renew_dataset(parent: &AuthorizedHandle) -> BuiltinResult<ForeignRef> {
+    if parent.role != HandleRole::Dataset {
+        return Err(data_error("Dataset refresh requires a Dataset authority"));
+    }
+    issue(
+        parent.filesystem.clone(),
+        parent.root.clone(),
+        parent.public_path.clone(),
+        HandleRole::Dataset,
+        parent.issuer.clone(),
     )
 }
 
@@ -128,6 +196,7 @@ fn issue(
     root: PathBuf,
     public_path: String,
     role: HandleRole,
+    issuer: IssuerScope,
 ) -> BuiltinResult<ForeignRef> {
     let state = registry();
     let mut records = state
@@ -151,7 +220,7 @@ fn issue(
         },
         ForeignOwnership::Shared,
         ForeignAffinity::OriginProcess,
-        ForeignLifetime::Session,
+        issuer.lifetime(),
         Arc::new(Release {
             state: Arc::downgrade(state),
         }),
@@ -167,16 +236,18 @@ fn issue(
             public_path,
             role,
             lease,
+            issuer,
         },
     );
     Ok(reference)
 }
 
 pub(crate) fn resolve_object(
+    runtime: Option<&RuntimeContext>,
     value: &Value,
     expected: HandleRole,
 ) -> BuiltinResult<AuthorizedHandle> {
-    let resolved = resolve_any_object(value)?;
+    let resolved = resolve_any_object(runtime, value)?;
     if resolved.role != expected {
         return Err(data_error(
             "Dataset family receiver has the wrong sealed role",
@@ -185,8 +256,11 @@ pub(crate) fn resolve_object(
     Ok(resolved)
 }
 
-pub(crate) fn resolve_array(value: &Value) -> BuiltinResult<(AuthorizedHandle, String)> {
-    let resolved = resolve_any_object(value)?;
+pub(crate) fn resolve_array(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<(AuthorizedHandle, String)> {
+    let resolved = resolve_any_object(runtime, value)?;
     let HandleRole::Array(name) = &resolved.role else {
         return Err(data_error("DataArray receiver has the wrong sealed role"));
     };
@@ -194,8 +268,11 @@ pub(crate) fn resolve_array(value: &Value) -> BuiltinResult<(AuthorizedHandle, S
     Ok((resolved, name))
 }
 
-pub(crate) fn resolve_transaction(value: &Value) -> BuiltinResult<(AuthorizedHandle, String)> {
-    let resolved = resolve_any_object(value)?;
+pub(crate) fn resolve_transaction(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<(AuthorizedHandle, String)> {
+    let resolved = resolve_any_object(runtime, value)?;
     let HandleRole::Transaction(tx_id) = &resolved.role else {
         return Err(data_error(
             "DataTransaction receiver has the wrong sealed role",
@@ -205,14 +282,17 @@ pub(crate) fn resolve_transaction(value: &Value) -> BuiltinResult<(AuthorizedHan
     Ok((resolved, tx_id))
 }
 
-fn resolve_any_object(value: &Value) -> BuiltinResult<AuthorizedHandle> {
+fn resolve_any_object(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<AuthorizedHandle> {
     let Value::Object(object) = value else {
         return Err(data_error("Dataset family receiver must be an object"));
     };
     let reference = object
         .dataset_authority()
         .ok_or_else(|| data_error("Dataset family receiver has no managed authority"))?;
-    let resolved = resolve(reference)?;
+    let resolved = resolve(runtime, reference)?;
     if !object.is_class(resolved.role.class()) || !presentation_matches(object, &resolved) {
         return Err(data_error(
             "Dataset family receiver authority does not match its presentation",
@@ -221,7 +301,10 @@ fn resolve_any_object(value: &Value) -> BuiltinResult<AuthorizedHandle> {
     Ok(resolved)
 }
 
-fn resolve(reference: &ForeignRef) -> BuiltinResult<AuthorizedHandle> {
+fn resolve(
+    runtime: Option<&RuntimeContext>,
+    reference: &ForeignRef,
+) -> BuiltinResult<AuthorizedHandle> {
     if !reference.is_managed()
         || reference.host_identity != HOST_IDENTITY
         || reference.generation != GENERATION
@@ -235,6 +318,11 @@ fn resolve(reference: &ForeignRef) -> BuiltinResult<AuthorizedHandle> {
         .records
         .get(&reference.handle)
         .ok_or_else(|| data_error("Dataset authority is stale"))?;
+    if !record.issuer.admits(runtime) {
+        return Err(data_error(
+            "Dataset authority belongs to another or ended session",
+        ));
+    }
     let issued = record
         .lease
         .upgrade()
@@ -246,7 +334,7 @@ fn resolve(reference: &ForeignRef) -> BuiltinResult<AuthorizedHandle> {
         || reference.type_identity.version != 1
         || reference.ownership != ForeignOwnership::Shared
         || reference.affinity != ForeignAffinity::OriginProcess
-        || reference.lifetime != ForeignLifetime::Session
+        || reference.lifetime != record.issuer.lifetime()
     {
         return Err(data_error(
             "Dataset authority does not belong to this registry",
@@ -258,6 +346,7 @@ fn resolve(reference: &ForeignRef) -> BuiltinResult<AuthorizedHandle> {
         public_path: record.public_path.clone(),
         role: record.role.clone(),
         reference: reference.clone(),
+        issuer: record.issuer.clone(),
     })
 }
 

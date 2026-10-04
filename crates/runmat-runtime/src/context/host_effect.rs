@@ -24,8 +24,9 @@ pub use stage::{
     HostEffectStageReservation,
 };
 pub use workload::{
-    AudioDecodeOutput, AudioFrameRange, DatasetPathOperation, HostEffectOutput, HostEffectSource,
-    HostEffectWorkload,
+    AudioDecodeOutput, AudioFrameRange, DatasetHandleInput, DatasetHandleKey,
+    DatasetHandleOperation, DatasetHandleRole, DatasetPathOperation, HostEffectOutput,
+    HostEffectSource, HostEffectWorkload,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
@@ -118,6 +119,13 @@ fn select_host_effect_inner(
         .map(|port| port.placement_resources())
         .unwrap_or_default();
     let finite = parallel.memory_available_bytes.is_some();
+    if !request.workload.identity_complete() {
+        return if finite {
+            Err(insufficient("host effect input identity is incomplete"))
+        } else {
+            Ok(None)
+        };
+    }
     let Some(service) = runtime.service_ports().placement() else {
         return if finite {
             Err(insufficient("placement service is absent"))

@@ -155,6 +155,12 @@ impl RuntimeContext {
         self.state.local_identity
     }
 
+    /// Process-local, non-serialized authority for this session's lifetime.
+    /// Values and foreign registries must retain only a weak copy.
+    pub(crate) fn session_lease(&self) -> std::sync::Weak<()> {
+        Arc::downgrade(&self.state.session_lease)
+    }
+
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
     }

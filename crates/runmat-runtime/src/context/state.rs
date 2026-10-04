@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use runmat_types::SourceId;
 use runmat_value::Value;
@@ -16,6 +17,9 @@ use crate::source_context::SourceInfo;
 #[derive(Debug)]
 pub struct RuntimeContextState {
     pub(crate) local_identity: super::RuntimeContextLocalId,
+    /// Non-serialized liveness authority shared by invocation generations of
+    /// this session, but never by a parallel-lab fork or a new context.
+    pub(crate) session_lease: Arc<()>,
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
     pub(crate) output: RefCell<OutputState>,
@@ -47,6 +51,7 @@ impl RuntimeContextState {
     pub fn new(local_identity: super::RuntimeContextLocalId) -> Self {
         Self {
             local_identity,
+            session_lease: Arc::new(()),
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
             output: RefCell::new(OutputState::default()),
