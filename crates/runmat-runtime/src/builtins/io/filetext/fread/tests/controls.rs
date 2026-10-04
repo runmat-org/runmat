@@ -252,8 +252,15 @@ fn fread_resident_like_with_character_precision_does_not_advance_file_position()
 
 #[test]
 fn fread_empty_count_returns_an_empty_column() {
-    let (storage, rows, cols) =
-        finalize_numeric(&SizeSpec::Count(0), 0, NumericStorage::U8(Vec::new()));
+    let mut cooperation =
+        crate::builtins::io::filetext::cooperation::FileCooperation::new(None, BUILTIN_NAME);
+    let (storage, rows, cols) = futures::executor::block_on(finalize_numeric(
+        &SizeSpec::Count(0),
+        0,
+        NumericStorage::U8(Vec::new()),
+        &mut cooperation,
+    ))
+    .expect("empty result");
     assert_eq!((rows, cols), (0, 1));
     assert_eq!(storage.len(), 0);
 }

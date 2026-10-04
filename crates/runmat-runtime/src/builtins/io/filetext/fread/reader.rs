@@ -7,6 +7,7 @@ pub(super) enum ReadFailure {
         source: std::io::Error,
     },
     Semantic(String),
+    Execution(RuntimeError),
 }
 
 impl From<String> for ReadFailure {
@@ -20,6 +21,7 @@ impl std::fmt::Display for ReadFailure {
         match self {
             Self::Io { operation, source } => write!(f, "fread: {operation} ({source})"),
             Self::Semantic(message) => f.write_str(message),
+            Self::Execution(error) => std::fmt::Display::fmt(error, f),
         }
     }
 }
@@ -29,16 +31,18 @@ impl std::error::Error for ReadFailure {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Semantic(_) => None,
+            Self::Execution(error) => Some(error),
         }
     }
 }
 
-pub(super) fn read_from_handle<R: Read + Seek>(
+pub(super) async fn read_from_handle<R: Read + Seek>(
     file: &mut R,
     size_spec: &SizeSpec,
     precision: &PrecisionSpec,
     skip: usize,
     machine: MachineFormat,
+    cooperation: &mut super::super::cooperation::FileCooperation,
 ) -> Result<(FreadEval, bool), ReadFailure> {
     let endianness = machine.to_endianness();
     match precision.output {
@@ -51,8 +55,11 @@ pub(super) fn read_from_handle<R: Read + Seek>(
                 limit,
                 skip,
                 endianness,
-            )?;
-            let (data, rows, cols) = finalize_numeric(size_spec, count, values);
+                cooperation,
+            )
+            .await?;
+            let (data, rows, cols) =
+                finalize_numeric(size_spec, count, values, cooperation).await?;
             let tensor = Tensor::from_numeric_storage(data, vec![rows, cols])
                 .map_err(|e| format!("fread: {e}"))?;
             let tensor = if tensor.numeric_dtype() == output_dtype {
@@ -74,8 +81,11 @@ pub(super) fn read_from_handle<R: Read + Seek>(
                 limit,
                 skip,
                 endianness,
-            )?;
-            let (row_major, rows, cols) = finalize_char(size_spec, count, values);
+                cooperation,
+            )
+            .await?;
+            let (row_major, rows, cols) =
+                finalize_char(size_spec, count, values, cooperation).await?;
             let char_array =
                 CharArray::new(row_major, rows, cols).map_err(|e| format!("fread: {e}"))?;
             Ok((
@@ -86,13 +96,14 @@ pub(super) fn read_from_handle<R: Read + Seek>(
     }
 }
 
-pub(super) fn read_numeric_values<R: Read + Seek>(
+pub(super) async fn read_numeric_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
     repeat: usize,
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
+    cooperation: &mut super::super::cooperation::FileCooperation,
 ) -> Result<(NumericStorage, usize, bool), ReadFailure> {
     if let Some(0) = limit {
         return Ok((
@@ -135,7 +146,8 @@ pub(super) fn read_numeric_values<R: Read + Seek>(
         let value = decode_numeric_scalar(&buffer, input, endianness)?;
         values.push(value);
         count += 1;
-        if skip > 0 && count.is_multiple_of(repeat) {
+        let applied_skip = skip > 0 && count.is_multiple_of(repeat);
+        if applied_skip {
             reader
                 .seek(SeekFrom::Current(skip as i64))
                 .map_err(|source| ReadFailure::Io {
@@ -143,21 +155,26 @@ pub(super) fn read_numeric_values<R: Read + Seek>(
                     source,
                 })?;
         }
+        cooperation
+            .completed(element_size.saturating_add(if applied_skip { skip } else { 0 }))
+            .await
+            .map_err(ReadFailure::Execution)?;
     }
     Ok((
-        numeric_storage_from_scalars(input, values)?,
+        numeric_storage_from_scalars(input, values, cooperation).await?,
         count,
         encountered_eof,
     ))
 }
 
-pub(super) fn read_char_values<R: Read + Seek>(
+pub(super) async fn read_char_values<R: Read + Seek>(
     reader: &mut R,
     input: InputType,
     repeat: usize,
     limit: Option<usize>,
     skip: usize,
     endianness: Endianness,
+    cooperation: &mut super::super::cooperation::FileCooperation,
 ) -> Result<(Vec<char>, usize, bool), ReadFailure> {
     if let Some(0) = limit {
         return Ok((Vec::new(), 0, false));
@@ -196,7 +213,8 @@ pub(super) fn read_char_values<R: Read + Seek>(
         let ch = decode_to_char(&buffer, input, endianness)?;
         values.push(ch);
         count += 1;
-        if skip > 0 && count.is_multiple_of(repeat) {
+        let applied_skip = skip > 0 && count.is_multiple_of(repeat);
+        if applied_skip {
             reader
                 .seek(SeekFrom::Current(skip as i64))
                 .map_err(|source| ReadFailure::Io {
@@ -204,6 +222,10 @@ pub(super) fn read_char_values<R: Read + Seek>(
                     source,
                 })?;
         }
+        cooperation
+            .completed(element_size.saturating_add(if applied_skip { skip } else { 0 }))
+            .await
+            .map_err(ReadFailure::Execution)?;
     }
 
     Ok((values, count, encountered_eof))

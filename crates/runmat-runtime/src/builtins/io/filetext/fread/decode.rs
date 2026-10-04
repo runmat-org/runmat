@@ -25,18 +25,25 @@ pub(super) fn decode_numeric_scalar(
     })
 }
 
-pub(super) fn numeric_storage_from_scalars(
+pub(super) async fn numeric_storage_from_scalars(
     input: InputType,
     values: Vec<NumericScalar>,
-) -> Result<NumericStorage, String> {
+    cooperation: &mut super::super::cooperation::FileCooperation,
+) -> Result<NumericStorage, ReadFailure> {
     macro_rules! collect_variant {
         ($scalar_variant:ident, $storage_variant:ident) => {{
             let mut output = Vec::with_capacity(values.len());
             for value in values {
                 let NumericScalar::$scalar_variant(value) = value else {
-                    return Err("fread: decoded numeric source class mismatch".to_string());
+                    return Err(ReadFailure::Semantic(
+                        "fread: decoded numeric source class mismatch".to_string(),
+                    ));
                 };
                 output.push(value);
+                cooperation
+                    .completed(std::mem::size_of::<NumericScalar>())
+                    .await
+                    .map_err(ReadFailure::Execution)?;
             }
             NumericStorage::$storage_variant(output)
         }};

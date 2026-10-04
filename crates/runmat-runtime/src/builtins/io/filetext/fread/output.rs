@@ -223,116 +223,165 @@ pub(super) fn convert_to_logical_value(data: Value) -> Result<Value, String> {
     }
 }
 
-pub(super) fn finalize_numeric(
+// Limits a single synchronous Vec fill/transposition run; the execution
+// service, not this value, decides when a charged chunk yields a turn.
+const STORAGE_FILL_CHUNK: usize = 4096;
+
+pub(super) async fn finalize_numeric(
     size_spec: &SizeSpec,
     count_read: usize,
     mut values: NumericStorage,
-) -> (NumericStorage, usize, usize) {
-    match size_spec {
-        SizeSpec::All | SizeSpec::Count(_) => {
-            let rows = count_read;
-            let cols = 1;
-            (values, rows, cols)
-        }
+    cooperation: &mut super::super::cooperation::FileCooperation,
+) -> Result<(NumericStorage, usize, usize), ReadFailure> {
+    let (rows, cols, target) = match size_spec {
+        SizeSpec::All | SizeSpec::Count(_) => (count_read, 1, count_read),
         SizeSpec::Matrix {
             rows,
             cols: Some(c),
-        } => {
-            let target = rows.saturating_mul(*c);
-            resize_numeric_storage(&mut values, target);
-            (values, *rows, *c)
-        }
+        } => (*rows, *c, rows.saturating_mul(*c)),
         SizeSpec::Matrix { rows, cols: None } => {
             if *rows == 0 {
-                resize_numeric_storage(&mut values, 0);
-                (values, 0, 0)
+                (0, 0, 0)
             } else {
                 let cols = if count_read == 0 {
                     0
                 } else {
                     count_read.div_ceil(*rows)
                 };
-                let target = rows.saturating_mul(cols);
-                resize_numeric_storage(&mut values, target);
-                (values, *rows, cols)
+                (*rows, cols, rows.saturating_mul(cols))
             }
         }
-    }
+    };
+    resize_numeric_storage(&mut values, target, cooperation).await?;
+    Ok((values, rows, cols))
 }
 
-pub(super) fn resize_numeric_storage(storage: &mut NumericStorage, len: usize) {
+pub(super) async fn resize_numeric_storage(
+    storage: &mut NumericStorage,
+    len: usize,
+    cooperation: &mut super::super::cooperation::FileCooperation,
+) -> Result<(), ReadFailure> {
     macro_rules! resize {
-        ($values:expr, $zero:expr) => {{
-            $values.resize(len, $zero);
+        ($values:expr, $zero:expr, $width:expr) => {{
+            if $values.len() < len {
+                $values.try_reserve(len - $values.len()).map_err(|error| {
+                    ReadFailure::Execution(
+                        build_runtime_error("fread: output storage cannot be allocated")
+                            .with_builtin(BUILTIN_NAME)
+                            .with_source(error)
+                            .build(),
+                    )
+                })?;
+                while $values.len() < len {
+                    let end = len.min($values.len().saturating_add(STORAGE_FILL_CHUNK));
+                    let added = end - $values.len();
+                    $values.resize(end, $zero);
+                    cooperation
+                        .completed(added.saturating_mul($width))
+                        .await
+                        .map_err(ReadFailure::Execution)?;
+                }
+            } else {
+                $values.truncate(len);
+            }
         }};
     }
     match storage {
-        NumericStorage::F64(values) => resize!(values, 0.0),
-        NumericStorage::F32(values) => resize!(values, 0.0),
-        NumericStorage::I8(values) => resize!(values, 0),
-        NumericStorage::I16(values) => resize!(values, 0),
-        NumericStorage::I32(values) => resize!(values, 0),
-        NumericStorage::I64(values) => resize!(values, 0),
-        NumericStorage::U8(values) => resize!(values, 0),
-        NumericStorage::U16(values) => resize!(values, 0),
-        NumericStorage::U32(values) => resize!(values, 0),
-        NumericStorage::U64(values) => resize!(values, 0),
+        NumericStorage::F64(values) => resize!(values, 0.0, 8),
+        NumericStorage::F32(values) => resize!(values, 0.0, 4),
+        NumericStorage::I8(values) => resize!(values, 0, 1),
+        NumericStorage::I16(values) => resize!(values, 0, 2),
+        NumericStorage::I32(values) => resize!(values, 0, 4),
+        NumericStorage::I64(values) => resize!(values, 0, 8),
+        NumericStorage::U8(values) => resize!(values, 0, 1),
+        NumericStorage::U16(values) => resize!(values, 0, 2),
+        NumericStorage::U32(values) => resize!(values, 0, 4),
+        NumericStorage::U64(values) => resize!(values, 0, 8),
     }
+    Ok(())
 }
 
-pub(super) fn finalize_char(
+pub(super) async fn finalize_char(
     size_spec: &SizeSpec,
     count_read: usize,
     mut column_major: Vec<char>,
-) -> (Vec<char>, usize, usize) {
-    match size_spec {
-        SizeSpec::All | SizeSpec::Count(_) => {
-            let rows = count_read;
-            let cols = 1;
-            let row_major = column_to_row_major(&column_major, rows, cols);
-            (row_major, rows, cols)
-        }
+    cooperation: &mut super::super::cooperation::FileCooperation,
+) -> Result<(Vec<char>, usize, usize), ReadFailure> {
+    let (rows, cols, target) = match size_spec {
+        SizeSpec::All | SizeSpec::Count(_) => (count_read, 1, count_read),
         SizeSpec::Matrix {
             rows,
             cols: Some(c),
-        } => {
-            let target = rows.saturating_mul(*c);
-            if column_major.len() < target {
-                column_major.resize(target, '\0');
-            } else if column_major.len() > target {
-                column_major.truncate(target);
-            }
-            let row_major = column_to_row_major(&column_major, *rows, *c);
-            (row_major, *rows, *c)
-        }
+        } => (*rows, *c, rows.saturating_mul(*c)),
         SizeSpec::Matrix { rows, cols: None } => {
             if *rows == 0 {
-                column_major.clear();
-                (Vec::new(), 0, 0)
+                (0, 0, 0)
             } else {
                 let cols = if count_read == 0 {
                     0
                 } else {
                     count_read.div_ceil(*rows)
                 };
-                let target = rows.saturating_mul(cols);
-                if column_major.len() < target {
-                    column_major.resize(target, '\0');
-                } else if column_major.len() > target {
-                    column_major.truncate(target);
-                }
-                let row_major = column_to_row_major(&column_major, *rows, cols);
-                (row_major, *rows, cols)
+                (*rows, cols, rows.saturating_mul(cols))
             }
         }
+    };
+    if column_major.len() < target {
+        column_major
+            .try_reserve(target - column_major.len())
+            .map_err(|error| {
+                ReadFailure::Execution(
+                    build_runtime_error("fread: character storage cannot be allocated")
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(error)
+                        .build(),
+                )
+            })?;
+        while column_major.len() < target {
+            let end = target.min(column_major.len().saturating_add(STORAGE_FILL_CHUNK));
+            let added = end - column_major.len();
+            column_major.resize(end, '\0');
+            cooperation
+                .completed(added.saturating_mul(std::mem::size_of::<char>()))
+                .await
+                .map_err(ReadFailure::Execution)?;
+        }
+    } else {
+        column_major.truncate(target);
     }
+    let row_major = column_to_row_major(&column_major, rows, cols, cooperation).await?;
+    Ok((row_major, rows, cols))
 }
 
-pub(super) fn column_to_row_major(data: &[char], rows: usize, cols: usize) -> Vec<char> {
+pub(super) async fn column_to_row_major(
+    data: &[char],
+    rows: usize,
+    cols: usize,
+    cooperation: &mut super::super::cooperation::FileCooperation,
+) -> Result<Vec<char>, ReadFailure> {
     if rows == 0 || cols == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut output = vec!['\0'; rows * cols];
+    let target = rows.saturating_mul(cols);
+    let mut output = Vec::new();
+    output.try_reserve(target).map_err(|error| {
+        ReadFailure::Execution(
+            build_runtime_error("fread: transposed characters cannot be allocated")
+                .with_builtin(BUILTIN_NAME)
+                .with_source(error)
+                .build(),
+        )
+    })?;
+    while output.len() < target {
+        let end = target.min(output.len().saturating_add(STORAGE_FILL_CHUNK));
+        let added = end - output.len();
+        output.resize(end, '\0');
+        cooperation
+            .completed(added.saturating_mul(std::mem::size_of::<char>()))
+            .await
+            .map_err(ReadFailure::Execution)?;
+    }
+    let mut mapped = 0usize;
     for c in 0..cols {
         for r in 0..rows {
             let src = c * rows + r;
@@ -340,7 +389,19 @@ pub(super) fn column_to_row_major(data: &[char], rows: usize, cols: usize) -> Ve
             if let Some(ch) = data.get(src) {
                 output[dst] = *ch;
             }
+            mapped += 1;
+            if mapped == STORAGE_FILL_CHUNK {
+                cooperation
+                    .completed(mapped)
+                    .await
+                    .map_err(ReadFailure::Execution)?;
+                mapped = 0;
+            }
         }
     }
-    output
+    cooperation
+        .completed(mapped)
+        .await
+        .map_err(ReadFailure::Execution)?;
+    Ok(output)
 }

@@ -20,19 +20,132 @@ impl std::io::Seek for FailingBinaryRead {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn binary_read_failure_keeps_operational_source() {
-    let error = read_numeric_values(
+    let mut cooperation =
+        crate::builtins::io::filetext::cooperation::FileCooperation::new(None, BUILTIN_NAME);
+    let error = futures::executor::block_on(read_numeric_values(
         &mut FailingBinaryRead,
         InputType::UInt8,
         1,
         Some(1),
         0,
         Endianness::Little,
-    )
+        &mut cooperation,
+    ))
     .unwrap_err();
     assert!(
         matches!(&error, ReadFailure::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied)
     );
     assert!(std::error::Error::source(&error).is_some());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn binary_read_yield_cancellation_stops_before_next_byte() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::task::{Context, Poll};
+
+    let cancellation = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).expect("quantum")),
+        cancellation.token(),
+        || {
+            Box::pin(async {
+                futures::future::pending::<()>().await;
+                Ok(())
+            })
+        },
+    );
+    let mut cooperation = crate::builtins::io::filetext::cooperation::FileCooperation::with_budget(
+        budget,
+        BUILTIN_NAME,
+    );
+    let mut file = std::io::Cursor::new(vec![11u8, 22, 33]);
+    let mut read = Box::pin(read_numeric_values(
+        &mut file,
+        InputType::UInt8,
+        1,
+        None,
+        0,
+        Endianness::Little,
+        &mut cooperation,
+    ));
+    assert!(matches!(
+        read.as_mut()
+            .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+        Poll::Pending
+    ));
+    cancellation.cancel(CancellationReason::User);
+    let error = futures::executor::block_on(read).expect_err("cancelled read");
+    assert!(matches!(
+        error,
+        ReadFailure::Execution(ref error) if error.identifier() == Some("RunMat:Cancelled")
+    ));
+    assert_eq!(file.position(), 1, "later bytes were not read after yield");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn dropped_yielding_read_restores_exact_fid_handle() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::task::{Context, Poll};
+
+    let _guard = registry_guard();
+    registry::reset_for_tests();
+    let path = unique_path("fread_yield_drop");
+    let mut file = File::create(&path).expect("fixture create");
+    file.write_all(&[11, 22, 33]).expect("fixture bytes");
+    drop(file);
+    let opened = run_fopen(&[
+        Value::from(path.to_string_lossy().to_string()),
+        Value::from("rb"),
+    ])
+    .expect("open fixture");
+    let fid = opened.as_open().expect("open form").fid as i32;
+    let original = registry::shared_handle(fid).expect("registered handle");
+    let mut operation = registry::acquire_file_in(fid, None).expect("checked-out FID");
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).expect("quantum")),
+        CancellationSource::new().token(),
+        || {
+            Box::pin(async {
+                futures::future::pending::<()>().await;
+                Ok(())
+            })
+        },
+    );
+    let mut cooperation = crate::builtins::io::filetext::cooperation::FileCooperation::with_budget(
+        budget,
+        BUILTIN_NAME,
+    );
+    let mut read = Box::pin(read_numeric_values(
+        operation.file_mut(),
+        InputType::UInt8,
+        1,
+        None,
+        0,
+        Endianness::Little,
+        &mut cooperation,
+    ));
+    assert!(matches!(
+        read.as_mut()
+            .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+        Poll::Pending
+    ));
+    drop(read);
+    assert_eq!(operation.file_mut().seek(SeekFrom::Current(0)).unwrap(), 1);
+    drop(operation);
+    let restored = registry::shared_handle(fid).expect("restored handle");
+    assert!(std::sync::Arc::ptr_eq(&original, &restored));
+    assert!(restored.lock().expect("handle slot").is_some());
+    run_fclose(&[Value::Num(fid as f64)]).expect("close fixture");
+    test_support::fs::remove_file(path).expect("remove fixture");
 }
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]

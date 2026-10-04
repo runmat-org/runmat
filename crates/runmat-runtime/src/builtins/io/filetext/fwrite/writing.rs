@@ -3,12 +3,13 @@ use super::*;
 mod elements;
 pub(super) use elements::{borrow_elements, WriteElement};
 
-pub(super) fn write_elements<W: Write + Seek>(
+pub(super) async fn write_elements<W: Write + Seek>(
     file: &mut W,
     values: impl IntoIterator<Item = WriteElement>,
     spec: WriteSpec,
     skip: usize,
     machine: MachineFormat,
+    cooperation: &mut super::super::cooperation::FileCooperation,
 ) -> BuiltinResult<usize> {
     let endianness = machine.to_endianness();
     let skip_offset = skip as i64;
@@ -97,6 +98,9 @@ pub(super) fn write_elements<W: Write + Seek>(
             })?;
         }
         count += 1;
+        cooperation
+            .completed(spec.input.byte_len().saturating_add(skip))
+            .await?;
     }
     Ok(count)
 }

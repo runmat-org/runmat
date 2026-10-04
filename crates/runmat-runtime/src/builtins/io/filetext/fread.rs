@@ -137,8 +137,9 @@ pub async fn evaluate_in(
     fid_value: &Value,
     rest: &[Value],
 ) -> BuiltinResult<FreadEval> {
+    let mut cooperation = super::cooperation::FileCooperation::new(runtime, BUILTIN_NAME);
     let prepared = PreparedFreadCall::new(fid_value, rest)?;
-    let fid = super::cooperation::await_io(runtime, BUILTIN_NAME, prepared.resolve_fid()).await??;
+    let fid = cooperation.await_io(prepared.resolve_fid()).await??;
 
     let mut operation = registry::acquire_file_in(fid, runtime).map_err(|err| match err {
         registry::FileOperationError::InvalidIdentifier
@@ -164,12 +165,9 @@ pub async fn evaluate_in(
         ));
     }
     let like = prepared.like;
-    let controls = super::cooperation::await_io(
-        runtime,
-        BUILTIN_NAME,
-        prepared.resolve_controls(&operation.info.machinefmt),
-    )
-    .await??;
+    let controls = cooperation
+        .await_io(prepared.resolve_controls(&operation.info.machinefmt))
+        .await??;
 
     operation.check_authority(runtime).map_err(|source| {
         let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
@@ -180,7 +178,7 @@ pub async fn evaluate_in(
         }
         builder.build()
     })?;
-    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
+    cooperation.completed(0).await?;
 
     let (mut eval, encountered_eof) = read_from_handle(
         operation.file_mut(),
@@ -188,17 +186,23 @@ pub async fn evaluate_in(
         &controls.precision,
         controls.skip,
         controls.machine,
+        &mut cooperation,
     )
-    .map_err(|error| {
-        let detail = error.to_string();
-        let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
-        let mut builder = build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(error);
-        if let Some(identifier) = FREAD_ERROR_IO.identifier {
-            builder = builder.with_identifier(identifier);
+    .await
+    .map_err(|error| match error {
+        ReadFailure::Execution(source) => source,
+        other => {
+            let detail = other.to_string();
+            let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
+            let mut builder =
+                build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(other);
+            if let Some(identifier) = FREAD_ERROR_IO.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
         }
-        builder.build()
     })?;
     operation.check_authority(runtime).map_err(|source| {
         let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
@@ -222,7 +226,7 @@ pub async fn evaluate_in(
         }
         builder.build()
     })?;
-    super::cooperation::checkpoint(runtime, BUILTIN_NAME).await?;
+    cooperation.completed(0).await?;
     Ok(eval)
 }
 

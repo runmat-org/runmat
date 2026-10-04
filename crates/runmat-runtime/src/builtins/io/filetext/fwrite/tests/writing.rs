@@ -2,6 +2,57 @@ use super::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn binary_write_yield_cancellation_stops_before_next_element() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::task::{Context, Poll};
+
+    let cancellation = CancellationSource::new();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).expect("quantum")),
+        cancellation.token(),
+        || {
+            Box::pin(async {
+                futures::future::pending::<()>().await;
+                Ok(())
+            })
+        },
+    );
+    let mut cooperation = crate::builtins::io::filetext::cooperation::FileCooperation::with_budget(
+        budget,
+        BUILTIN_NAME,
+    );
+    let mut file = std::io::Cursor::new(Vec::new());
+    let mut writing = Box::pin(write_elements(
+        &mut file,
+        [
+            WriteElement::Integer(IntValue::U8(11)),
+            WriteElement::Integer(IntValue::U8(22)),
+        ],
+        WriteSpec {
+            input: InputType::UInt8,
+        },
+        0,
+        MachineFormat::Native,
+        &mut cooperation,
+    ));
+    assert!(matches!(
+        writing
+            .as_mut()
+            .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+        Poll::Pending
+    ));
+    cancellation.cancel(CancellationReason::User);
+    let error = futures::executor::block_on(writing).expect_err("cancelled write");
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(file.into_inner(), [11], "later element was not written");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn nd_character_payload_flattens_every_page_in_column_first_order() {
     let chars =
         runmat_value::CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])

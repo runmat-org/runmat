@@ -356,6 +356,17 @@ pub(super) enum InputType {
     Float64,
 }
 
+impl InputType {
+    pub(super) const fn byte_len(self) -> usize {
+        match self {
+            Self::UInt8 | Self::Int8 => 1,
+            Self::UInt16 | Self::Int16 => 2,
+            Self::UInt32 | Self::Int32 | Self::Float32 => 4,
+            Self::UInt64 | Self::Int64 | Self::Float64 => 8,
+        }
+    }
+}
+
 pub(super) fn parse_input_label(label: &str) -> Result<InputType, String> {
     match label {
         "double" | "float64" | "real*8" => Ok(InputType::Float64),
