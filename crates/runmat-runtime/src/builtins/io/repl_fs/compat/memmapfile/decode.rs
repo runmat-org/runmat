@@ -1,6 +1,6 @@
-use super::super::compat_error;
 use super::{
-    memmap_field_bytes, MemmapDataType, MemmapField, MemmapFormat, MemmapFormatPresentation,
+    format_error, memmap_field_bytes, MemmapDataType, MemmapField, MemmapFormat,
+    MemmapFormatPresentation,
 };
 use crate::BuiltinResult;
 use runmat_value::{CharArray, IntegerStorage, NumericDType, StructValue, Tensor, Value};
@@ -19,7 +19,7 @@ impl MemmapFormat {
             .shape
             .iter()
             .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
-            .ok_or_else(|| compat_error("memmapfile", "memmapfile: Format shape is too large"))?;
+            .ok_or_else(|| format_error("memmapfile: Format shape is too large"))?;
         let record_bytes = self.validate_layout(repeat)?;
         let available_records = bytes.len() / record_bytes;
         let record_count = repeat.unwrap_or(available_records).min(available_records);
@@ -36,8 +36,7 @@ impl MemmapFormat {
                 .map(|byte| char::from(*byte))
                 .collect();
             return Ok(Value::CharArray(
-                CharArray::from_column_major(characters, shape)
-                    .map_err(|error| compat_error("memmapfile", error))?,
+                CharArray::from_column_major(characters, shape).map_err(format_error)?,
             ));
         }
         let tensor = if let Some(storage) = decode_integer_storage(self.dtype, bytes, total_values)
@@ -56,7 +55,7 @@ impl MemmapFormat {
                 .collect();
             Tensor::new(values, shape)
         }
-        .map_err(|error| compat_error("memmapfile", error))?;
+        .map_err(format_error)?;
         let tensor = Value::Tensor(tensor);
         Ok(tensor)
     }
@@ -100,12 +99,10 @@ impl MemmapFormat {
                     )
                     .collect();
             return Ok(Value::StructArray(
-                runmat_value::StructArray::empty(names, vec![0, 1])
-                    .map_err(|error| compat_error("memmapfile", error))?,
+                runmat_value::StructArray::empty(names, vec![0, 1]).map_err(format_error)?,
             ));
         }
-        runmat_value::StructArray::normalize(elements, vec![records, 1])
-            .map_err(|error| compat_error("memmapfile", error))
+        runmat_value::StructArray::normalize(elements, vec![records, 1]).map_err(format_error)
     }
 }
 

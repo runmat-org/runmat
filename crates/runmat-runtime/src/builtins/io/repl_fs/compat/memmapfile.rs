@@ -1,6 +1,53 @@
-use super::{char_value, compat_error, scalar_text};
-use crate::BuiltinResult;
+use super::{char_value, scalar_text};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_async::GpuGatherRetry;
+use runmat_builtins::{
+    BuiltinErrorDescriptor, MEMMAPFILE_ERROR_INVALID_CONTROL, MEMMAPFILE_ERROR_INVALID_FORMAT,
+    MEMMAPFILE_ERROR_INVALID_OPTION,
+};
 use runmat_value::{CellArray, IntegerStorage, NumericDType, NumericScalar, Tensor, Value};
+
+pub(super) fn typed_error(
+    descriptor: &BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("memmapfile")
+        .with_identifier(descriptor.identifier.expect("typed memmapfile error"))
+        .with_gpu_gather_retry(GpuGatherRetry::Never)
+        .build()
+}
+
+pub(super) fn format_error(message: impl Into<String>) -> RuntimeError {
+    typed_error(&MEMMAPFILE_ERROR_INVALID_FORMAT, message)
+}
+
+fn control_error(message: impl Into<String>) -> RuntimeError {
+    typed_error(&MEMMAPFILE_ERROR_INVALID_CONTROL, message)
+}
+
+fn option_error(message: impl Into<String>) -> RuntimeError {
+    typed_error(&MEMMAPFILE_ERROR_INVALID_OPTION, message)
+}
+
+fn text_with_category(
+    value: &Value,
+    argument: &str,
+    descriptor: &BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
+    scalar_text(value, "memmapfile", argument).map_err(|source| {
+        build_runtime_error(source.message().to_owned())
+            .with_builtin("memmapfile")
+            .with_identifier(descriptor.identifier.expect("typed memmapfile error"))
+            .with_gpu_gather_retry(GpuGatherRetry::Never)
+            .with_source(source)
+            .build()
+    })
+}
+
+fn compat_error(_name: &str, message: impl Into<String>) -> RuntimeError {
+    format_error(message)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MemmapDataType {
@@ -57,16 +104,15 @@ pub(super) enum MemmapOption {
 
 impl MemmapOption {
     pub(super) fn from_value(value: &Value) -> BuiltinResult<Self> {
-        let name = scalar_text(value, "memmapfile", "option")?;
+        let name = text_with_category(value, "option", &MEMMAPFILE_ERROR_INVALID_OPTION)?;
         match name.to_ascii_lowercase().as_str() {
             "writable" => Ok(Self::Writable),
             "offset" => Ok(Self::Offset),
             "format" => Ok(Self::Format),
             "repeat" => Ok(Self::Repeat),
-            _ => Err(compat_error(
-                "memmapfile",
-                format!("memmapfile: unsupported option '{name}'"),
-            )),
+            _ => Err(option_error(format!(
+                "memmapfile: unsupported option '{name}'"
+            ))),
         }
     }
 
@@ -146,9 +192,9 @@ impl MemmapFormat {
                 })?;
         }
         if let Some(count) = repeat {
-            count.checked_mul(record_bytes).ok_or_else(|| {
-                compat_error("memmapfile", "memmapfile: Repeat exceeds addressable size")
-            })?;
+            count
+                .checked_mul(record_bytes)
+                .ok_or_else(|| control_error("memmapfile: Repeat exceeds addressable size"))?;
         }
         Ok(record_bytes)
     }
@@ -156,7 +202,11 @@ impl MemmapFormat {
     pub(super) fn from_value(value: &Value) -> BuiltinResult<Self> {
         match value {
             Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => Ok(Self {
-                dtype: MemmapDataType::parse(&scalar_text(value, "memmapfile", "Format")?)?,
+                dtype: MemmapDataType::parse(&text_with_category(
+                    value,
+                    "Format",
+                    &MEMMAPFILE_ERROR_INVALID_FORMAT,
+                )?)?,
                 ..Self::default()
             }),
             Value::Cell(cell) => {
@@ -176,10 +226,10 @@ impl MemmapFormat {
                         "memmapfile: Format must be a three-column format table",
                     ));
                 }
-                let dtype = MemmapDataType::parse(&scalar_text(
+                let dtype = MemmapDataType::parse(&text_with_category(
                     &cell.data[0],
-                    "memmapfile",
                     "Format type",
+                    &MEMMAPFILE_ERROR_INVALID_FORMAT,
                 )?)?;
                 let shape = if cell.cols >= 2 {
                     shape_from_value(&cell.data[1])?
@@ -187,7 +237,11 @@ impl MemmapFormat {
                     vec![1, 1]
                 };
                 let field = if cell.cols == 3 {
-                    Some(scalar_text(&cell.data[2], "memmapfile", "Format field")?)
+                    Some(text_with_category(
+                        &cell.data[2],
+                        "Format field",
+                        &MEMMAPFILE_ERROR_INVALID_FORMAT,
+                    )?)
                 } else {
                     None
                 };
@@ -195,13 +249,17 @@ impl MemmapFormat {
                 for row in 1..cell.rows {
                     let start = row * 3;
                     additional_fields.push(MemmapField {
-                        dtype: MemmapDataType::parse(&scalar_text(
+                        dtype: MemmapDataType::parse(&text_with_category(
                             &cell.data[start],
-                            "memmapfile",
                             "Format type",
+                            &MEMMAPFILE_ERROR_INVALID_FORMAT,
                         )?)?,
                         shape: shape_from_value(&cell.data[start + 1])?,
-                        name: scalar_text(&cell.data[start + 2], "memmapfile", "Format field")?,
+                        name: text_with_category(
+                            &cell.data[start + 2],
+                            "Format field",
+                            &MEMMAPFILE_ERROR_INVALID_FORMAT,
+                        )?,
                     });
                 }
                 Ok(Self {
@@ -376,15 +434,13 @@ mod tests;
 
 pub(super) fn numeric_usize(value: &Value, name: &str, arg: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Num(v) => nonnegative_platform_usize(*v).ok_or_else(|| {
-            compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
-        }),
-        Value::Int(v) => v.try_to_usize().ok_or_else(|| {
-            compat_error(name, format!("{name}: {arg} must be a nonnegative integer"))
-        }),
-        _ => Err(compat_error(
-            name,
-            format!("{name}: {arg} must be a nonnegative integer"),
-        )),
+        Value::Num(v) => nonnegative_platform_usize(*v)
+            .ok_or_else(|| control_error(format!("{name}: {arg} must be a nonnegative integer"))),
+        Value::Int(v) => v
+            .try_to_usize()
+            .ok_or_else(|| control_error(format!("{name}: {arg} must be a nonnegative integer"))),
+        _ => Err(control_error(format!(
+            "{name}: {arg} must be a nonnegative integer"
+        ))),
     }
 }

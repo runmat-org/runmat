@@ -35,6 +35,59 @@ fn character_format_returns_character_class_and_column_major_shape() {
     assert_eq!(chars.to_column_major(), vec!['A', 'B', 'C', 'D']);
 }
 
+#[test]
+fn format_and_filename_errors_keep_owning_identifiers_and_causes() {
+    use std::error::Error;
+
+    let invalid_format = MemmapFormat::from_value(&Value::String("unknown-type".into()))
+        .expect_err("unsupported format");
+    assert_eq!(
+        invalid_format.identifier(),
+        Some("RunMat:memmapfile:InvalidFormat")
+    );
+
+    let invalid_filename =
+        futures::executor::block_on(super::super::memmapfile_builtin(vec![Value::Num(7.0)]))
+            .expect_err("filename must be text");
+    assert_eq!(
+        invalid_filename.identifier(),
+        Some("RunMat:memmapfile:InvalidFilename")
+    );
+    assert!(invalid_filename.source().is_some());
+
+    let invalid_option = MemmapOption::from_value(&Value::Num(1.0)).unwrap_err();
+    assert_eq!(
+        invalid_option.identifier(),
+        Some("RunMat:memmapfile:InvalidOption")
+    );
+    assert!(invalid_option.source().is_some());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn selected_file_read_failure_retains_provider_cause() {
+    use std::error::Error;
+    use std::sync::Arc;
+
+    let _lock = super::super::vfs::provider_override_lock();
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-memmap-read-cause");
+    #[cfg(target_arch = "wasm32")]
+    let root = std::path::PathBuf::from("/runmat-memmap-read-cause");
+    let provider = Arc::new(super::super::vfs::MemoryFsProvider::with_current_dir(
+        root.clone(),
+    ));
+    let _selected = super::super::vfs::replace_provider(provider);
+    super::super::vfs::set_current_dir(&root).unwrap();
+    let missing =
+        futures::executor::block_on(super::super::memmapfile_builtin(vec![Value::String(
+            "missing.bin".into(),
+        )]))
+        .expect_err("missing selected file");
+    assert_eq!(missing.identifier(), Some("RunMat:memmapfile:ReadFailed"));
+    assert!(missing.source().is_some());
+}
+
 #[cfg(target_pointer_width = "64")]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]

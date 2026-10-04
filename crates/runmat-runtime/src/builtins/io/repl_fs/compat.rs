@@ -10,7 +10,10 @@ use runmat_builtins::{
     BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor, RehashMode, FILEATTRIB_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_CLASS,
-    MEMMAPFILE_DESCRIPTOR, MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+    MEMMAPFILE_DESCRIPTOR,
+    MEMMAPFILE_ERROR_INVALID_CALL, MEMMAPFILE_ERROR_INVALID_CONTROL,
+    MEMMAPFILE_ERROR_INVALID_FILENAME, MEMMAPFILE_ERROR_READ_FAILED,
+    MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
     MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
 };
 use runmat_filesystem as vfs;
@@ -483,16 +486,26 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )?;
     }
     if args.is_empty() {
-        return Err(compat_error(
-            "memmapfile",
+        return Err(memmapfile::typed_error(
+            &MEMMAPFILE_ERROR_INVALID_CALL,
             "memmapfile: filename is required",
         ));
     }
-    let filename = value_to_path(&args[0], "memmapfile", "filename")?;
+    let filename = value_to_path(&args[0], "memmapfile", "filename").map_err(|source| {
+        build_runtime_error(source.message().to_owned())
+            .with_builtin("memmapfile")
+            .with_identifier(
+                MEMMAPFILE_ERROR_INVALID_FILENAME
+                    .identifier
+                    .expect("typed filename error"),
+            )
+            .with_source(source)
+            .build()
+    })?;
     let option_args = &args[1..];
     if option_args.len() % 2 != 0 {
-        return Err(compat_error(
-            "memmapfile",
+        return Err(memmapfile::typed_error(
+            &MEMMAPFILE_ERROR_INVALID_CALL,
             "memmapfile: name-value options must be paired",
         ));
     }
@@ -510,7 +523,17 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         options.push((option, &pair[1]));
     }
-    let input = CapturedFsPath::capture(filename, "memmapfile")?;
+    let input = CapturedFsPath::capture(filename, "memmapfile").map_err(|source| {
+        build_runtime_error(source.message().to_owned())
+            .with_builtin("memmapfile")
+            .with_identifier(
+                MEMMAPFILE_ERROR_READ_FAILED
+                    .identifier
+                    .expect("typed source access error"),
+            )
+            .with_source(source)
+            .build()
+    })?;
     let mut writable = false;
     let mut offset = 0usize;
     let mut format = MemmapFormat::default();
@@ -532,12 +555,17 @@ async fn memmapfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let bytes = input.read().await.map_err(|source| {
         build_runtime_error(format!("memmapfile: {source}"))
             .with_builtin("memmapfile")
+            .with_identifier(
+                MEMMAPFILE_ERROR_READ_FAILED
+                    .identifier
+                    .expect("typed read error"),
+            )
             .with_source(source)
             .build()
     })?;
     if offset > bytes.len() {
-        return Err(compat_error(
-            "memmapfile",
+        return Err(memmapfile::typed_error(
+            &MEMMAPFILE_ERROR_INVALID_CONTROL,
             "memmapfile: Offset exceeds file size",
         ));
     }
