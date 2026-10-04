@@ -41,7 +41,7 @@ impl std::fmt::Display for XmlSourceEncodingError {
 
 impl std::error::Error for XmlSourceEncodingError {}
 
-pub(super) async fn decode_document_bytes(
+pub(in crate::builtins::io::repl_fs::xml) async fn decode_document_bytes(
     bytes: &[u8],
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<String> {

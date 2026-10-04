@@ -7,7 +7,7 @@ use quick_xml::Reader;
 use super::reader::CooperativeXmlBuf;
 use super::{attributes, decode};
 
-pub(super) async fn parse_xml_document_with_context(
+pub(in crate::builtins::io::repl_fs::xml) async fn parse_xml_document_with_context(
     text: &str,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<XmlNode> {

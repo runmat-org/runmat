@@ -14,7 +14,7 @@ pub(super) async fn parse(
     declaration: &BytesDecl<'_>,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<XmlDeclaration> {
-    let raw = declaration.as_ref();
+    let raw: &[u8] = declaration.as_ref();
     if raw.contains(&b'&') {
         return Err(malformed(
             "references are not allowed in XML declaration values",
@@ -63,7 +63,7 @@ fn malformed(reason: &str) -> RuntimeError {
 /// The public file form writes UTF-8. Rebuild only a leading, typed XML
 /// declaration; never publish UTF-8 bytes still labelled as UTF-16 or a
 /// legacy source encoding. The returned text form follows the same policy.
-pub(super) async fn normalize_utf8_output(
+pub(in crate::builtins::io::repl_fs::xml) async fn normalize_utf8_output(
     source: String,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<String> {
@@ -97,7 +97,7 @@ pub(super) async fn normalize_utf8_output(
 
 /// A Document's tree is the serialization authority. Its retained Text may
 /// contribute only a parsed declaration, never a stale copy of its body.
-pub(super) async fn document_declaration_prefix(
+pub(in crate::builtins::io::repl_fs::xml) async fn document_declaration_prefix(
     source: &str,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<Option<String>> {
