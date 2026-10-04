@@ -99,13 +99,13 @@ fn invalid_path_or_revoked_lease_does_not_call_provider_open() {
     .err()
     .expect("relative path rejected");
     assert_eq!(relative.kind(), ErrorKind::InvalidInput);
-    let revoked = block_on(capture_mapped_backing_on(
-        erased,
-        std::env::temp_dir().join("mapped-file"),
-        false,
-    ))
-    .err()
-    .expect("revoked lease rejected");
+    #[cfg(target_arch = "wasm32")]
+    let absolute = PathBuf::from("/mapped-file");
+    #[cfg(not(target_arch = "wasm32"))]
+    let absolute = std::env::temp_dir().join("mapped-file");
+    let revoked = block_on(capture_mapped_backing_on(erased, absolute, false))
+        .err()
+        .expect("revoked lease rejected");
     assert_eq!(revoked.kind(), ErrorKind::PermissionDenied);
     assert_eq!(provider.0.load(Ordering::SeqCst), 0);
 }
