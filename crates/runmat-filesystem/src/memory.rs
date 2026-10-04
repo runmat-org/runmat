@@ -268,9 +268,14 @@ impl FsProvider for MemoryFsProvider {
 
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let path = normalize_path(path)?;
-        let existing_entry = {
+        let (existing_entry, existing_version) = {
             let guard = self.inner.lock().expect("memory filesystem lock poisoned");
-            guard.entries.get(&path).cloned()
+            let entry = guard.entries.get(&path);
+            let version = match entry {
+                Some(MemoryEntry::File { identity, .. }) => Some(identity.load(Ordering::SeqCst)),
+                Some(MemoryEntry::Directory) | None => None,
+            };
+            (entry.cloned(), version)
         };
         if flags.create_new && existing_entry.is_some() {
             return Err(io::Error::new(
@@ -306,7 +311,7 @@ impl FsProvider for MemoryFsProvider {
             || Arc::new(AtomicU64::new(0)),
             |(_, identity)| identity.clone(),
         );
-        let opened_version = identity.load(Ordering::SeqCst);
+        let opened_version = existing_version.unwrap_or(0);
         let bytes = if flags.truncate {
             Vec::new()
         } else {

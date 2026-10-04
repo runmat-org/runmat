@@ -1,5 +1,5 @@
 use crate::mapped_backing::check_range;
-use crate::{FsMappedBacking, FsMappedWriteFailure};
+use crate::{FsMappedBacking, FsMappedWriteFailure, FsMappedWriteOutcome};
 use async_trait::async_trait;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -61,7 +61,11 @@ impl FsMappedBacking for NativeMappedBacking {
         self.file.read(buffer)
     }
 
-    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<usize, FsMappedWriteFailure> {
+    async fn write_at(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<FsMappedWriteOutcome, FsMappedWriteFailure> {
         check_range(offset, bytes.len(), self.extent)
             .map_err(FsMappedWriteFailure::before_effect)?;
         if !self.writable {
@@ -95,8 +99,13 @@ impl FsMappedBacking for NativeMappedBacking {
                 "native mapped write seek returned a different offset",
             )));
         }
-        self.file
+        let accepted_bytes = self
+            .file
             .write(bytes)
-            .map_err(|source| FsMappedWriteFailure::indeterminate(bytes.len(), source))
+            .map_err(|source| FsMappedWriteFailure::indeterminate(bytes.len(), source))?;
+        Ok(FsMappedWriteOutcome {
+            accepted_bytes,
+            requested_bytes: bytes.len(),
+        })
     }
 }

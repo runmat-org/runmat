@@ -26,7 +26,11 @@ pub trait FsMappedBacking: Send {
     /// callers own retries and must not assume a multi-write transaction.
     /// An implementation may return `BeforeEffect` only when it proves no
     /// bytes committed; uncertain provider errors must be `Indeterminate`.
-    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<usize, FsMappedWriteFailure>;
+    async fn write_at(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<FsMappedWriteOutcome, FsMappedWriteFailure>;
 }
 
 /// Strongly retains the selected provider, CWD-resolved path, and its opened
@@ -89,29 +93,26 @@ impl CapturedMappedBacking {
         self.check_current()
             .map_err(FsMappedWriteFailure::before_effect)?;
         let result = self.backing.write_at(offset, bytes).await;
-        let count = result?;
-        if count > bytes.len() {
+        let outcome = result.map_err(|failure| failure.validate_for_request(bytes.len()))?;
+        if outcome.requested_bytes != bytes.len() || outcome.accepted_bytes > bytes.len() {
             return Err(FsMappedWriteFailure::indeterminate(
                 bytes.len(),
                 io::Error::new(
                     ErrorKind::InvalidData,
-                    "mapped provider write reported more than the supplied slice",
+                    "mapped provider write reported an impossible byte count",
                 ),
             ));
         }
         // A revoked post-write owner reports failure, not rollback. Bytes may
         // already have committed; the caller must not replay this operation.
         self.check_current().map_err(|source| {
-            if count == 0 {
+            if outcome.accepted_bytes == 0 {
                 FsMappedWriteFailure::before_effect(source)
             } else {
-                FsMappedWriteFailure::committed(count, source)
+                FsMappedWriteFailure::committed(outcome.accepted_bytes, source)
             }
         })?;
-        Ok(FsMappedWriteOutcome {
-            accepted_bytes: count,
-            requested_bytes: bytes.len(),
-        })
+        Ok(outcome)
     }
 }
 

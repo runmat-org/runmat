@@ -11,6 +11,7 @@ use std::sync::Mutex;
 struct RevokedAfterWrite {
     current: Arc<AtomicBool>,
     committed: Arc<Mutex<Vec<u8>>>,
+    fabricated_committed_count: Option<usize>,
 }
 
 #[async_trait(?Send)]
@@ -39,17 +40,27 @@ impl FsMappedBacking for RevokedAfterWrite {
         &mut self,
         _offset: u64,
         bytes: &[u8],
-    ) -> Result<usize, FsMappedWriteFailure> {
+    ) -> Result<FsMappedWriteOutcome, FsMappedWriteFailure> {
+        if let Some(count) = self.fabricated_committed_count {
+            return Err(FsMappedWriteFailure::committed(
+                count,
+                io::Error::new(ErrorKind::BrokenPipe, "provider failure cause"),
+            ));
+        }
         let accepted = bytes.len().min(2);
         self.committed
             .lock()
             .unwrap()
             .extend_from_slice(&bytes[..accepted]);
         self.current.store(false, Ordering::SeqCst);
-        Ok(accepted)
+        Ok(FsMappedWriteOutcome {
+            accepted_bytes: accepted,
+            requested_bytes: bytes.len(),
+        })
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn post_write_revocation_reports_committed_partial_bytes_and_cause() {
     let current = Arc::new(AtomicBool::new(true));
@@ -60,6 +71,7 @@ fn post_write_revocation_reports_committed_partial_bytes_and_cause() {
         backing: Box::new(RevokedAfterWrite {
             current: current.clone(),
             committed: committed.clone(),
+            fabricated_committed_count: None,
         }),
     };
     let failure = block_on(backing.write_at(0, b"abcd")).unwrap_err();
@@ -70,6 +82,26 @@ fn post_write_revocation_reports_committed_partial_bytes_and_cause() {
     assert_eq!(failure.io_error().kind(), ErrorKind::PermissionDenied);
     assert_eq!(&*committed.lock().unwrap(), b"ab");
     assert!(!current.load(Ordering::SeqCst));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn impossible_provider_committed_count_retains_cause_as_indeterminate() {
+    let mut backing = CapturedMappedBacking {
+        provider: Arc::new(MemoryFsProvider::new()),
+        path: PathBuf::from("/fixture"),
+        backing: Box::new(RevokedAfterWrite {
+            current: Arc::new(AtomicBool::new(true)),
+            committed: Arc::new(Mutex::new(Vec::new())),
+            fabricated_committed_count: Some(5),
+        }),
+    };
+    let failure = block_on(backing.write_at(0, b"abcd")).unwrap_err();
+    assert_eq!(
+        failure.disposition(),
+        FsMappedWriteDisposition::Indeterminate { attempted_bytes: 4 }
+    );
+    assert_eq!(failure.io_error().kind(), ErrorKind::BrokenPipe);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -209,7 +241,10 @@ fn old_memory_snapshot_handle_cannot_overwrite_mapped_write_or_replacement() {
     let mut mapped = block_on(provider.open_mapped_backing(path, true))
         .unwrap()
         .expect("memory mapped owner");
-    assert_eq!(block_on(mapped.write_at(0, b"Q")).unwrap(), 1);
+    assert_eq!(
+        block_on(mapped.write_at(0, b"Q")).unwrap().accepted_bytes,
+        1
+    );
     assert_eq!(old.flush().unwrap_err().kind(), ErrorKind::PermissionDenied);
     drop(old);
     assert_eq!(provider.read_project_path(path).unwrap(), b"Qbcdef");
@@ -235,7 +270,13 @@ fn native_backing_writes_only_inside_its_opened_extent() {
         .unwrap()
         .expect("native opened range backing");
     assert_eq!(backing.opened_extent(), 4);
-    assert_eq!(block_on(backing.write_at(1, b"XY")).unwrap(), 2);
+    assert_eq!(
+        block_on(backing.write_at(1, b"XY")).unwrap(),
+        FsMappedWriteOutcome {
+            accepted_bytes: 2,
+            requested_bytes: 2
+        }
+    );
     assert_eq!(std::fs::read(&path).unwrap(), b"aXYd");
     assert_eq!(
         block_on(backing.write_at(4, b"Z"))
@@ -261,7 +302,13 @@ fn native_backing_pins_opened_file_and_exposes_external_in_place_edits() {
         .expect("native opened range backing");
     std::fs::rename(&original, &moved).unwrap();
     std::fs::write(&original, b"wrong!").unwrap();
-    assert_eq!(block_on(backing.write_at(2, b"XY")).unwrap(), 2);
+    assert_eq!(
+        block_on(backing.write_at(2, b"XY")).unwrap(),
+        FsMappedWriteOutcome {
+            accepted_bytes: 2,
+            requested_bytes: 2
+        }
+    );
     assert_eq!(std::fs::read(&moved).unwrap(), b"abXYef");
     assert_eq!(std::fs::read(&original).unwrap(), b"wrong!");
     std::fs::write(&moved, b"123456").unwrap();

@@ -1,6 +1,6 @@
 use super::{bump_identity, normalize_path, MemoryEntry, MemoryFsProvider};
 use crate::mapped_backing::check_range;
-use crate::{FsMappedBacking, FsMappedWriteFailure};
+use crate::{FsMappedBacking, FsMappedWriteFailure, FsMappedWriteOutcome};
 use async_trait::async_trait;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -132,7 +132,11 @@ impl FsMappedBacking for MemoryMappedBacking {
         })
     }
 
-    async fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<usize, FsMappedWriteFailure> {
+    async fn write_at(
+        &mut self,
+        offset: u64,
+        bytes: &[u8],
+    ) -> Result<FsMappedWriteOutcome, FsMappedWriteFailure> {
         if !self.writable {
             return Err(FsMappedWriteFailure::before_effect(io::Error::new(
                 ErrorKind::PermissionDenied,
@@ -178,6 +182,9 @@ impl FsMappedBacking for MemoryMappedBacking {
         }
         bump_identity(identity).map_err(FsMappedWriteFailure::before_effect)?;
         target[start..end].copy_from_slice(bytes);
-        Ok(bytes.len())
+        Ok(FsMappedWriteOutcome {
+            accepted_bytes: bytes.len(),
+            requested_bytes: bytes.len(),
+        })
     }
 }

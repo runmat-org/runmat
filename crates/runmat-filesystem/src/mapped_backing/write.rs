@@ -49,6 +49,24 @@ impl FsMappedWriteFailure {
     pub fn io_error(&self) -> &io::Error {
         &self.source
     }
+
+    pub(crate) fn validate_for_request(self, requested_bytes: usize) -> Self {
+        match self.disposition {
+            FsMappedWriteDisposition::Committed { accepted_bytes }
+                if accepted_bytes > requested_bytes =>
+            {
+                Self::indeterminate(requested_bytes, self.source)
+            }
+            FsMappedWriteDisposition::Indeterminate { attempted_bytes }
+                if attempted_bytes > requested_bytes =>
+            {
+                Self::indeterminate(requested_bytes, self.source)
+            }
+            FsMappedWriteDisposition::BeforeEffect
+            | FsMappedWriteDisposition::Committed { .. }
+            | FsMappedWriteDisposition::Indeterminate { .. } => self,
+        }
+    }
 }
 
 impl Display for FsMappedWriteFailure {
