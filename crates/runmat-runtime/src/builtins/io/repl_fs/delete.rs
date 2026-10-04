@@ -5,69 +5,26 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use glob::{Pattern, PatternError};
+#[cfg(test)]
+use runmat_builtins::DELETE_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    DeleteOption, DELETE_ERROR_EMPTY_FILENAME, DELETE_ERROR_FILE_NOT_FOUND,
+    DELETE_ERROR_INVALID_HANDLE, DELETE_ERROR_INVALID_INPUT, DELETE_ERROR_INVALID_PATTERN,
+    DELETE_ERROR_IS_DIRECTORY, DELETE_ERROR_OS_ERROR, DELETE_ERROR_RUNTIME_CONTEXT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path, path_to_string};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "delete",
-    op_kind: GpuOpKind::Custom("io"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Host-only filesystem operation. Resident arguments are rejected before provider access.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "delete",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes:
-        "Filesystem side-effects are executed immediately; metadata registered for completeness.",
-};
-
-#[path = "delete/contract.rs"]
-mod contract;
-use contract::*;
-pub use contract::{DELETE_DESCRIPTOR, DELETE_INTEGER_CAPABILITIES};
+#[path = "delete/error.rs"]
+mod error;
+use error::*;
 
 #[runtime_builtin(
     name = "delete",
-    category = "io/repl_fs",
-    summary = "Remove files.",
-    keywords = "delete,remove file,wildcard delete,cleanup,temporary files,MATLAB delete",
-    accel = "cpu",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::delete_type),
-    descriptor(crate::builtins::io::repl_fs::delete::DELETE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::repl_fs::delete::DELETE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

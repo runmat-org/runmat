@@ -1,15 +1,13 @@
-use super::*;
+use crate::*;
 
-pub(super) const BUILTIN_NAME: &str = "delete";
-
-pub(super) const DELETE_INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+pub const DELETE_INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Filename/pattern string, string array, char matrix, cell array of path strings, or handle input.",
 }];
-pub(super) const DELETE_INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
+pub const DELETE_INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "filename1",
         ty: BuiltinParamType::Any,
@@ -25,7 +23,7 @@ pub(super) const DELETE_INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
         description: "Additional filename/pattern/handle inputs.",
     },
 ];
-pub(super) const DELETE_INPUTS_SYMLINK: [BuiltinParamDescriptor; 3] = [
+pub const DELETE_INPUTS_SYMLINK: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "filename",
         ty: BuiltinParamType::Any,
@@ -48,7 +46,7 @@ pub(super) const DELETE_INPUTS_SYMLINK: [BuiltinParamDescriptor; 3] = [
         description: "Scalar logical or numeric zero/one selecting link-target deletion.",
     },
 ];
-pub(super) const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+pub const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "delete(filename)",
         inputs: &DELETE_INPUTS_ONE,
@@ -66,10 +64,10 @@ pub(super) const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     },
 ];
 
-pub(super) const DELETE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
+pub const DELETE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "ResolveSymbolicLinks",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "The documented numeric/logical flag accepts only exact scalar zero or one; MATLAB's numeric category includes every built-in integer class.",
@@ -86,55 +84,55 @@ pub const DELETE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "The flag is read exactly from authoritative integer storage before any filesystem access; deletion has no MATLAB-facing output.",
     }];
-pub(super) const DELETE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.INVALID_INPUT",
     identifier: Some("RunMat:delete:InvalidInput"),
     when: "Input arguments are missing or contain unsupported filename value types.",
     message: "delete: invalid input",
 };
-pub(super) const DELETE_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.INVALID_HANDLE",
     identifier: Some("RunMat:delete:InvalidHandle"),
     when: "Handle deletion inputs are mixed with filename inputs or contain unsupported handle values.",
     message: "delete: invalid handle input",
 };
-pub(super) const DELETE_ERROR_EMPTY_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_EMPTY_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.EMPTY_FILENAME",
     identifier: Some("RunMat:delete:EmptyFilename"),
     when: "A filename input is empty after trimming.",
     message: "delete: filename cannot be empty",
 };
-pub(super) const DELETE_ERROR_INVALID_PATTERN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_INVALID_PATTERN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.INVALID_PATTERN",
     identifier: Some("RunMat:delete:InvalidPattern"),
     when: "Wildcard pattern parsing or structure validation fails.",
     message: "delete: invalid wildcard pattern",
 };
-pub(super) const DELETE_ERROR_FILE_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_FILE_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.FILE_NOT_FOUND",
     identifier: Some("RunMat:DELETE:FileNotFound"),
     when: "Target path does not exist or pattern matches no files.",
     message: "delete: file not found",
 };
-pub(super) const DELETE_ERROR_IS_DIRECTORY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_IS_DIRECTORY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.IS_DIRECTORY",
     identifier: Some("RunMat:delete:Directories"),
     when: "Target path is a directory instead of a file.",
     message: "delete: cannot delete directories",
 };
-pub(super) const DELETE_ERROR_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.OS_ERROR",
     identifier: Some("RunMat:DELETE:PermissionDenied"),
     when: "Underlying filesystem operation fails while deleting files.",
     message: "delete: filesystem deletion failed",
 };
-pub(super) const DELETE_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub const DELETE_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DELETE.RUNTIME_CONTEXT",
     identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
     when: "Pool deletion is requested without an active runtime context.",
     message: "delete: no active runtime context",
 };
-pub(super) const DELETE_ERRORS: [BuiltinErrorDescriptor; 8] = [
+pub const DELETE_ERRORS: [BuiltinErrorDescriptor; 8] = [
     DELETE_ERROR_INVALID_INPUT,
     DELETE_ERROR_INVALID_HANDLE,
     DELETE_ERROR_EMPTY_FILENAME,
@@ -151,24 +149,4 @@ pub const DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &DELETE_ERRORS,
 };
 
-pub(super) fn delete_error_with(
-    error: &'static BuiltinErrorDescriptor,
-    message: impl Into<String>,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-pub(super) fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
+pub const DELETE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "File and handle targets do not perform integer arithmetic. ResolveSymbolicLinks accepts every built-in integer class only at exact scalar zero or one before effects." };

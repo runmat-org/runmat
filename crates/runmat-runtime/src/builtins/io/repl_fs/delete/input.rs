@@ -2,10 +2,9 @@ use super::*;
 
 pub(super) fn parse_delete_options(args: &[Value]) -> BuiltinResult<(&[Value], Option<bool>)> {
     if args.len() >= 2
-        && args
-            .last()
-            .and_then(option_name)
-            .is_some_and(|name| name.eq_ignore_ascii_case("ResolveSymbolicLinks"))
+        && args.last().and_then(option_name).is_some_and(|name| {
+            DeleteOption::from_name(&name) == Some(DeleteOption::ResolveSymbolicLinks)
+        })
     {
         return Err(delete_error_with(
             &DELETE_ERROR_INVALID_INPUT,
@@ -14,7 +13,7 @@ pub(super) fn parse_delete_options(args: &[Value]) -> BuiltinResult<(&[Value], O
     }
     if args.len() >= 3 {
         if let Some(name) = option_name(&args[args.len() - 2]) {
-            if name.eq_ignore_ascii_case("ResolveSymbolicLinks") {
+            if DeleteOption::from_name(&name) == Some(DeleteOption::ResolveSymbolicLinks) {
                 return Ok((
                     &args[..args.len() - 2],
                     Some(exact_zero_one(&args[args.len() - 1])?),
