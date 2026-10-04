@@ -94,6 +94,24 @@ fn malformed_shape_and_complex_storage_reject_before_encoded_publication() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn later_zero_extent_keeps_empty_mat_payload_valid() {
+    let bytes = write_mat_bytes(&[MatVar {
+        name: "empty".into(),
+        array: MatArray {
+            class: MatClass::Double,
+            dims: vec![i32::MAX as usize, i32::MAX as usize, 0],
+            data: MatData::Numeric {
+                real: NumericStorage::F64(Vec::new()),
+                imag: None,
+            },
+        },
+    }])
+    .expect("zero cardinality despite earlier large dimensions");
+    assert!(bytes.len() > MAT_HEADER_LEN);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn struct_field_width_includes_nul_and_nested_cardinality_is_checked() {
     let scalar = MatArray {
         class: MatClass::Double,
