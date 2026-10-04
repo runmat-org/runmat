@@ -29,11 +29,6 @@ pub fn read_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::tensor()])
 }
 
-pub fn readline_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::tensor()])
-}
-
 pub fn tcpclient_type(args: &[Type], ctx: &ResolveContext) -> Type {
     struct_type(args, ctx)
 }
@@ -75,12 +70,6 @@ mod tests {
     assert_resolver!(
         read_type_resolver,
         read_type,
-        &[],
-        Type::Union(vec![Type::String, Type::tensor()])
-    );
-    assert_resolver!(
-        readline_type_resolver,
-        readline_type,
         &[],
         Type::Union(vec![Type::String, Type::tensor()])
     );

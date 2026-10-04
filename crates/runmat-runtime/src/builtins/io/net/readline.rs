@@ -1,105 +1,21 @@
 //! MATLAB-compatible `readline` builtin for TCP/IP clients in RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, READLINE_ERROR_INTERNAL, READLINE_ERROR_INVALID_ARGUMENTS,
+    READLINE_ERROR_INVALID_CLIENT, READLINE_ERROR_NOT_CONNECTED,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{StructValue, Tensor, Value};
 use std::io::{self, Read};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::client_state::{client_handle, CLIENT_HANDLE_FIELD};
 use super::control::configure_stream;
 
 const BUILTIN_NAME: &str = "readline";
-
-const READLINE_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "line",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Line text without terminator, empty string, or 0x0 double on timeout.",
-}];
-const READLINE_INPUTS_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "client",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tcpclient handle struct.",
-}];
-const READLINE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "line = readline(client)",
-    inputs: &READLINE_INPUTS_CLIENT,
-    outputs: &READLINE_OUTPUT_TEXT,
-}];
-
-const READLINE_ERROR_INVALID_CLIENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READLINE.INVALID_CLIENT",
-    identifier: Some("RunMat:readline:InvalidTcpClient"),
-    when: "Client handle is missing, malformed, invalid, or stale.",
-    message: "readline: invalid tcpclient handle",
-};
-const READLINE_ERROR_NOT_CONNECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READLINE.NOT_CONNECTED",
-    identifier: Some("RunMat:readline:NotConnected"),
-    when: "Client has no active socket connection.",
-    message: "readline: tcpclient is disconnected",
-};
-const READLINE_ERROR_INVALID_ARGUMENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READLINE.INVALID_ARGUMENTS",
-    identifier: Some("RunMat:readline:InvalidArguments"),
-    when: "Unexpected additional positional arguments are provided.",
-    message: "readline: invalid argument list",
-};
-const READLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READLINE.INTERNAL",
-    identifier: Some("RunMat:readline:InternalError"),
-    when: "Internal socket/control-flow conversion fails.",
-    message: "readline: internal socket error",
-};
-const READLINE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    READLINE_ERROR_INVALID_CLIENT,
-    READLINE_ERROR_NOT_CONNECTED,
-    READLINE_ERROR_INVALID_ARGUMENTS,
-    READLINE_ERROR_INTERNAL,
-];
-pub const READLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &READLINE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &READLINE_ERRORS,
-};
-pub const READLINE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "The documented input is a tcpclient object and the output is text or the documented empty double timeout sentinel. Integer host or resident values are invalid clients and are rejected without numeric conversion or provider dispatch.",
-    };
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "readline",
-    op_kind: GpuOpKind::Custom("network"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Networking occurs on the host CPU; GPU providers are not involved.",
-};
 
 fn readline_error_with_message(
     message: impl Into<String>,
@@ -139,25 +55,9 @@ fn map_readline_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) 
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::readline")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "readline",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Networking builtin executed eagerly on the CPU.",
-};
-
 #[runtime_builtin(
     name = "readline",
-    category = "io/net",
-    summary = "Read ASCII text until the terminator from a TCP/IP client.",
-    keywords = "readline,tcpclient,networking",
-    type_resolver(crate::builtins::io::type_resolvers::readline_type),
-    descriptor(crate::builtins::io::net::readline::READLINE_DESCRIPTOR),
-    integer_audit(crate::builtins::io::net::readline::READLINE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::net::readline"
 )]
 async fn readline_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -369,6 +269,7 @@ pub(crate) mod tests {
         client_handle, insert_client, remove_client_for_test,
     };
     use crate::builtins::io::net::control::configure_stream;
+    use runmat_builtins::READLINE_DESCRIPTOR;
     use runmat_value::{IntValue, StructValue, Value};
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
