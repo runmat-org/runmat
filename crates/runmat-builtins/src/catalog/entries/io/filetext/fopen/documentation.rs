@@ -128,7 +128,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Open and query owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fopen.rs") }, BuiltinDocumentationLink { label: "Shared handle registry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/registry.rs") }],
+        implementation: &[
+            BuiltinDocumentationLink { label: "Open and query owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fopen.rs") },
+            BuiltinDocumentationLink { label: "Permission grammar", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fopen/permission.rs") },
+            BuiltinDocumentationLink { label: "Open, query, and list outputs", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fopen/output.rs") },
+            BuiltinDocumentationLink { label: "Shared handle registry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/registry.rs") },
+        ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Open and query", location: "builtins::io::filetext::fopen::tests::fopen_query_returns_metadata" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "List open handles", location: "builtins::io::filetext::fopen::tests::fopen_all_lists_handles" }],
         notes: &[],
     },

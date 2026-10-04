@@ -52,6 +52,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "File write owner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite.rs") },
+            BuiltinDocumentationLink { label: "Write options", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite/options.rs") },
+            BuiltinDocumentationLink { label: "Captured filesystem target", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite/target.rs") },
             BuiltinDocumentationLink { label: "Payload conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/filewrite/payload.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Write content and options", location: "builtins::io::filetext::filewrite::tests::filewrite_writes_text_content" }],
