@@ -81,7 +81,7 @@ pub(super) fn prepare_writable_options(rest: Vec<Value>) -> BuiltinResult<Prepar
 }
 
 impl PreparedWritableOptions {
-    fn identity_controls(&self) -> Vec<MatHandleControl> {
+    pub(super) fn identity_controls(&self) -> Vec<MatHandleControl> {
         self.0
             .iter()
             .map(|pair| match &pair.value {
@@ -93,7 +93,10 @@ impl PreparedWritableOptions {
             .collect()
     }
 
-    async fn resolve(self, cooperation: &mut MatCodecCooperation<'_>) -> BuiltinResult<bool> {
+    pub(super) async fn resolve(
+        self,
+        cooperation: &mut MatCodecCooperation<'_>,
+    ) -> BuiltinResult<bool> {
         let mut writable = false;
         for pair in self.0 {
             writable = match pair.value {
