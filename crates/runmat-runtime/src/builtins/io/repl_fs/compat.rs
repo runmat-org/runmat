@@ -799,7 +799,7 @@ mod tests {
             Value::Int(runmat_value::IntValue::I64(i64::MIN)),
             unregistered_resident_value(),
         ] {
-            let error = run(userpath_builtin(vec![invalid])).expect_err("invalid path text");
+            let error = run(userpath_builtin(None, vec![invalid])).expect_err("invalid path text");
             assert!(error.message().contains("must be host text"));
             assert!(!error.message().to_ascii_lowercase().contains("provider"));
         }
