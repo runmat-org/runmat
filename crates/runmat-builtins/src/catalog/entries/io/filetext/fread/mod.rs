@@ -4,10 +4,12 @@ use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement}
 mod contract;
 mod documentation;
 mod inference;
+mod precision;
 #[cfg(test)]
 mod tests;
 
 pub use contract::*;
+pub use precision::{parse_fread_precision, FreadInputType, FreadOutputKind, FreadPrecisionSpec};
 
 pub const FREAD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

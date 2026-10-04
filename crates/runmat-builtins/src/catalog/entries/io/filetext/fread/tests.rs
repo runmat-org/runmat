@@ -89,6 +89,56 @@ fn literal_precision_and_unknown_like_do_not_guess_dimensions_or_class() {
 }
 
 #[test]
+fn precision_aliases_repeats_and_character_forms_share_runtime_grammar() {
+    for (label, expected) in [
+        (
+            "REAL*4",
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+        ),
+        (
+            "3*uint16=>ushort",
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::UInt16,
+                domain: NumericDomain::Real,
+            }),
+        ),
+        (
+            "*integer*8",
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Int64,
+                domain: NumericDomain::Real,
+            }),
+        ),
+        ("2*uint8=>char", ValueKindFact::Character),
+    ] {
+        let inferred = inference::infer(
+            &request(
+                vec![number(), ValueFact::scalar(ValueKindFact::String)],
+                vec![LiteralValue::Unknown, LiteralValue::String(label.into())],
+                1,
+            ),
+            &FREAD_CATALOG_ENTRY,
+        );
+        assert_eq!(inferred.outputs[0].kind, expected, "{label}");
+    }
+    let invalid = inference::infer(
+        &request(
+            vec![number(), ValueFact::scalar(ValueKindFact::String)],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("3*uint16=>notaclass".into()),
+            ],
+            1,
+        ),
+        &FREAD_CATALOG_ENTRY,
+    );
+    assert!(matches!(invalid.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
 fn invalid_fid_and_arity_are_diagnosed_without_false_unknown_error() {
     let bad = inference::infer(
         &request(

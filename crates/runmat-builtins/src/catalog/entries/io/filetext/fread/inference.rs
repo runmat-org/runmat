@@ -1,6 +1,8 @@
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::*;
 
+use super::precision::{parse_fread_precision, FreadOutputKind};
+
 #[derive(Clone, Copy)]
 enum ProvenOutput {
     Numeric(NumericClass),
@@ -104,23 +106,12 @@ fn proven_output(request: &CallRequest) -> ProvenOutput {
     let Some(label) = request.literals.literal_string_at(index) else {
         return ProvenOutput::Dynamic;
     };
-    let normalized = label.trim().to_ascii_lowercase();
-    let output = normalized
-        .split_once("=>")
-        .map(|(_, output)| output.trim())
-        .or_else(|| normalized.strip_prefix('*'));
-    let Some(output) = output else {
-        if normalized == "char" {
-            return ProvenOutput::Character;
-        }
-        return ProvenOutput::Numeric(NumericClass::Double);
-    };
-    if output == "char" {
-        ProvenOutput::Character
-    } else if let Some(class) = NumericClass::from_class_name(output) {
-        ProvenOutput::Numeric(class)
-    } else {
-        ProvenOutput::Dynamic
+    match parse_fread_precision(label) {
+        Ok(spec) => match spec.output {
+            FreadOutputKind::Numeric(class) => ProvenOutput::Numeric(class),
+            FreadOutputKind::Char => ProvenOutput::Character,
+        },
+        Err(_) => ProvenOutput::Dynamic,
     }
 }
 
