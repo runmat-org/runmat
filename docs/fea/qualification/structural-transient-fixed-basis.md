@@ -69,3 +69,24 @@ checks confirm the summary and mesh remain borrowed. These are work-count assert
 or memory measurements. Existing transient physical, support-motion, block/recovery, resource,
 and strict-lint tests must also pass before retaining the change. No accuracy tolerance, refinement
 gate, integration formula, or checkpoint authority is weakened to make this evidence pass.
+
+## Effective-solve input ownership
+
+Ordinary, affine and multiplier linear solves now share a borrowed numerical input
+view containing only the operator, DOF count and resolved constraint references.
+Existing public assembly-summary entrypoints construct this view and use the same
+solver, preparation, admission, backend and diagnostic paths.
+
+Initial-acceleration, Newmark and normalized equilibrium-correction systems own
+only their required numerical matrices and homogeneous constraints. They no longer
+clone the complete physical assembly summary and overwrite its operator. Original
+material/recovery/source inventories remain with the source assembly, which still
+owns physical balance and original output recovery. Matrix and vector workspace
+remains admitted under the existing bounds; no resource reservation or cap is reduced.
+
+The refactor passes the existing 25 transient and 88 constraint tests, including
+restartable segments, physical oscillator convergence, affine and multiplier
+channels, curved normal support and reaction recovery. It changes ownership, not
+formulas, tolerances, constraint enforcement, accepted history or publication identity.
+The preceding isolated full numerical run finished with 1,663 passing and 14 failing tests; it predates this
+ownership refactor. Original rod and other scientific failures remain open.

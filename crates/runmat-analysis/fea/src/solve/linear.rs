@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 mod admission;
+mod input;
+pub(crate) use input::{solve_structural_system, StructuralLinearSystemView};
 mod diagnostics;
 mod settings;
 use diagnostics::SuccessfulDiagnostic;
@@ -22,11 +24,7 @@ use crate::{
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
-        affine::{solve_affine_constraint_system, solve_affine_constraint_system_with_execution},
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
-        multiplier::{
-            solve_multiplier_constraint_system, solve_multiplier_constraint_system_with_execution,
-        },
     },
 };
 
@@ -53,26 +51,8 @@ pub fn solve_linear_system(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
-    if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
-        return solve_affine_constraint_system(
-            summary,
-            reduction,
-            backend_kind,
-            algebra_backend,
-            initial_guess,
-        );
-    }
-    if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        return solve_multiplier_constraint_system(
-            summary,
-            matrix,
-            backend_kind,
-            algebra_backend,
-            initial_guess,
-        );
-    }
-    solve_operator_system(
-        &summary.operator,
+    input::solve_structural_system(
+        &input::StructuralLinearSystemView::from(summary),
         preconditioner_kind,
         backend_kind,
         algebra_backend,
@@ -110,35 +90,14 @@ pub(crate) fn solve_linear_system_with_execution_admitted(
     plan: LocalExecutionPlan,
     admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
-    if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
-        return solve_affine_constraint_system_with_execution(
-            summary,
-            reduction,
-            backend_kind,
-            algebra_backend,
-            initial_guess,
-            plan,
-            admission,
-        );
-    }
-    if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        return solve_multiplier_constraint_system_with_execution(
-            summary,
-            matrix,
-            backend_kind,
-            algebra_backend,
-            initial_guess,
-            plan,
-            admission,
-        );
-    }
-    solve_operator_system_scoped(
-        &summary.operator,
+    input::solve_structural_system_with_execution(
+        &input::StructuralLinearSystemView::from(summary),
         preconditioner_kind,
         backend_kind,
         algebra_backend,
         initial_guess,
-        ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
+        plan,
+        admission,
     )
 }
 

@@ -1,17 +1,17 @@
 use crate::{
     algebra::{apply_k, dot_scoped, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
-    assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
+    solve::linear::StructuralLinearSystemView,
     solve::{backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult},
 };
 
 use super::backend::linear_algebra::LinearAlgebraBackend;
 
 pub(super) fn solve_affine_constraint_system(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
@@ -24,7 +24,7 @@ pub(super) fn solve_affine_constraint_system(
         algebra_backend,
         initial_guess,
         (
-            |full: &[f64]| Ok(apply_k(&summary.operator, full)),
+            |full: &[f64]| Ok(apply_k(summary.operator, full)),
             |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
             None,
         ),
@@ -34,7 +34,7 @@ pub(super) fn solve_affine_constraint_system(
 }
 
 pub(super) fn solve_affine_constraint_system_with_execution(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
@@ -51,7 +51,7 @@ pub(super) fn solve_affine_constraint_system_with_execution(
         (
             |full: &[f64]| {
                 if plan.is_serial() {
-                    Ok(apply_k(&summary.operator, full))
+                    Ok(apply_k(summary.operator, full))
                 } else {
                     spmv_scoped(summary.operator.operators().stiffness(), full, plan)
                 }
@@ -70,7 +70,7 @@ pub(super) fn solve_affine_constraint_system_with_execution(
 }
 
 fn solve_affine_constraint_system_with_apply(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     reduction: &AffineConstraintReduction,
     requested_backend: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
@@ -300,7 +300,10 @@ fn solve_affine_constraint_system_with_apply(
     })
 }
 
-fn rejected_affine_system(summary: &AssemblySummary, message: &str) -> LinearSolveResult {
+fn rejected_affine_system(
+    summary: &StructuralLinearSystemView<'_>,
+    message: &str,
+) -> LinearSolveResult {
     LinearSolveResult {
         iterations: 0,
         residual_norm: summary

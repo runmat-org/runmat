@@ -1,7 +1,5 @@
 //! Material stiffness integration for affine and curved isoparametric Tet10 solids.
 
-use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
-
 use crate::topology::quadrature::{
     tensor_tetrahedron_rule, GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT,
     GAUSS_LEGENDRE_TWELVE_UNIT, TETRAHEDRON_FOUR_POINT_RULE,
@@ -13,6 +11,7 @@ use super::{
         physical_shape_gradients_and_measure, validate_nodes, Tetrahedron10ElementError,
         Tetrahedron10ElementGeometry, Tetrahedron10Matrix30, TETRAHEDRON10_ELEMENT_DOF_COUNT,
     },
+    tetrahedron10_geometry::is_affine,
     SolidMaterial,
 };
 
@@ -88,18 +87,6 @@ fn converged(previous: &Tetrahedron10Matrix30, next: &Tetrahedron10Matrix30) -> 
             .flatten()
             .zip(next.iter().flatten())
             .all(|(left, right)| (left - right).abs() <= 1.0e-8 * scale)
-}
-
-pub(crate) fn is_affine(geometry: Tetrahedron10ElementGeometry) -> bool {
-    TETRAHEDRON_MIDSIDE_EDGE_CORNERS
-        .iter()
-        .enumerate()
-        .all(|(edge, [left, right])| {
-            (0..3).all(|axis| {
-                geometry.nodes_m[4 + edge][axis]
-                    == 0.5 * (geometry.nodes_m[*left][axis] + geometry.nodes_m[*right][axis])
-            })
-        })
 }
 
 fn add_point(

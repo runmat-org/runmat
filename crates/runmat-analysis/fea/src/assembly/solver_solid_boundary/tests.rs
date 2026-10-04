@@ -142,6 +142,16 @@ fn face_resultant_uses_consistent_nonuniform_tri3_and_tri6_surface_measure() {
                 let evidence = &projected.evidence[0];
                 evidence.validate().unwrap();
                 assert!(evidence.accepted);
+                let crate::excitation::SpatialProjectionBalance::VectorResultant {
+                    requested_resultant,
+                    requested_moment,
+                    ..
+                } = evidence.balance
+                else {
+                    panic!("face force must retain vector balance evidence");
+                };
+                assert_eq!(requested_resultant.real, expected);
+                assert_eq!(requested_moment.real, [0.0; 3]);
                 assert_eq!(
                     evidence.integration_rule,
                     SpatialIntegrationRule::BoundaryDunavantSeven

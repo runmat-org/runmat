@@ -14,9 +14,9 @@ pub use tetrahedron10::{
     Tetrahedron10ElementError, Tetrahedron10ElementGeometry, Tetrahedron10Matrix30,
     TETRAHEDRON10_ELEMENT_DOF_COUNT, TETRAHEDRON10_ELEMENT_NODE_COUNT,
 };
+pub(crate) use tetrahedron10_geometry::is_affine as tetrahedron10_is_affine;
 pub use tetrahedron10_mass::consistent_mass_matrix as tetrahedron10_consistent_mass_matrix;
 pub use tetrahedron10_stiffness::global_stiffness_matrix as tetrahedron10_global_stiffness_matrix;
-pub(crate) use tetrahedron10_stiffness::is_affine as tetrahedron10_is_affine;
 pub use tetrahedron4::{
     consistent_mass_matrix as tetrahedron4_consistent_mass_matrix, elasticity_matrix,
     global_stiffness_matrix, strain_displacement_matrix, Tetrahedron4ElementError,

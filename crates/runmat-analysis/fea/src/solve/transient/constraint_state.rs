@@ -13,7 +13,7 @@ const KINEMATIC_RELATIVE_TOLERANCE: f64 = 1.0e-10;
 /// Recovers dependent accelerations through the exact homogeneous constraint transform after an
 /// iterative solve. Direct prescriptions are the degenerate case and have zero acceleration.
 pub(super) fn canonicalize_homogeneous_solution(
-    summary: &AssemblySummary,
+    summary: &crate::solve::linear::StructuralLinearSystemView<'_>,
     solution: &mut Vec<f64>,
 ) -> Result<(), EffectiveDynamicsSolveError> {
     if let Some(matrix) = summary.constraint_matrix.as_ref() {

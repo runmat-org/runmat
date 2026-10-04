@@ -26,3 +26,31 @@ This correction does not retrospectively change stored numerical artifacts or qu
 arbitrary geometry. Prior aligned tests could mask the defect. In particular the new
 local-radiation envelope still fails a separate coarse Tet10 velocity-convergence gate;
 passing rotation checks does not promote that formulation or Stage 8.
+
+## Exact affine Jacobians in the structural Tet10 element
+
+The classical structural Tet10 element now derives its Jacobian from the three
+corner differences when every midside coordinate is exactly the arithmetic midpoint
+of its corners. The existing exact predicate is owned by element geometry and shared
+with stiffness integration. There is no curvature tolerance: even a dyadic midside
+perturbation of `2^-40` remains on the full isoparametric path.
+
+This avoids cancellation when evaluating the derivatives of quadratic shape
+functions for an exactly affine map. It affects the shared classical Tet10 geometry
+used by stiffness, mass and recovery, separately from the canonical topology inverse
+correction above. Original curved-element and independent physical regressions remain
+mandatory; this is not a change to the integration rule or accuracy criteria.
+
+Independent analytic simplex-derivative tests pass at dyadic and canonical non-dyadic
+recovery points, three scales and three origins,
+including a dyadic translation of `2^40`. The original heterogeneous Tet10 constitutive
+comparison passes with its unchanged `1e-10` criterion. A source-projection rounding
+change exposed that comparison's sensitivity; the exact affine Jacobian resolves it
+without changing the reference. The full isolated numerical candidate finished with 1,663 passing and 14 failing
+tests. Original scientific and resource gates remain open; no whole-suite pass or
+production promotion is claimed. That run predates the solver-ownership refactor.
+
+The cantilever refinement test contains two independent gates. Its stress-recovery
+estimator decreases from about 373 to 270 to 196, satisfying the original estimator
+criterion. Its peak-displacement changes still fail the original 0.25 ratio criterion
+(actual about 0.272). This remains an open displacement-convergence gate.

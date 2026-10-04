@@ -31,63 +31,15 @@ use crate::{
 
 const TETRAHEDRON_FACES: [[usize; 3]; 4] = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]];
 
+#[path = "qualification_tests/cantilever_refinement.rs"]
+mod cantilever_refinement;
+
 #[path = "qualification_tests/interface.rs"]
 mod interface;
 
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
-    let mut errors = Vec::new();
-    let mut peak_displacements = Vec::new();
-    for divisions in [1, 2, 3] {
-        let mesh = structured_cantilever(divisions, ElementOrder::Tet10);
-        let result = crate::run_linear_static_with_options(
-            &model,
-            ComputeBackend::Cpu,
-            LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-                solver_mesh: Some(mesh.clone()),
-                require_solver_mesh_for_solid: true,
-                ..LinearStaticSolveOptions::default()
-            },
-        )
-        .expect("the refined physical Tet10 cantilever must solve");
-        let stress = result
-            .field(FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS)
-            .expect("the solved field must retain physical integration-point stress");
-        peak_displacements.push(
-            result
-                .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-                .unwrap()
-                .as_host_f64()
-                .unwrap()
-                .iter()
-                .map(|value| value.abs())
-                .fold(0.0_f64, f64::max),
-        );
-        assert_eq!(
-            stress.shape,
-            vec![mesh.topology.volume_elements.len() * 4, 6]
-        );
-        errors.push(
-            estimate_structural_recovery_error(
-                &mesh,
-                "elements",
-                stress,
-                StructuralRecoveryEstimatorOptions::default(),
-            )
-            .expect("the solved point field must drive the estimator")
-            .total_error,
-        );
-    }
-
-    assert!(
-        errors.windows(2).all(|pair| pair[1] < 0.9 * pair[0]),
-        "{errors:?}"
-    );
-    let coarse_change = (peak_displacements[1] - peak_displacements[0]).abs();
-    let fine_change = (peak_displacements[2] - peak_displacements[1]).abs();
-    assert!(fine_change < 0.25 * coarse_change, "{peak_displacements:?}");
+    cantilever_refinement::qualify();
 }
 
 #[test]
@@ -665,7 +617,8 @@ fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_constitutive_
             ];
             let actual = &stress_values[(element_index * 4 + point) * 6..][..6];
             for (&actual, &expected) in actual.iter().zip(&expected) {
-                assert!((actual - expected).abs() <= 1.0e-10 * expected.abs().max(1.0));
+                assert!((actual - expected).abs() <= 1.0e-10 * expected.abs().max(1.0),
+                    "element={element_index} point={point} actual={actual:e} expected={expected:e} difference={:e}", (actual - expected).abs());
                 peak_stress = peak_stress.max(actual.abs());
             }
             reference_energy += expected

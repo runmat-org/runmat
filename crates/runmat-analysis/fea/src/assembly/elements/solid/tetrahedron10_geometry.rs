@@ -4,7 +4,9 @@ use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 
 use super::{
     jacobian_certificate::{certify_positive_jacobian, CertificateFailure},
-    tetrahedron10::{Tetrahedron10ElementError, TETRAHEDRON10_ELEMENT_NODE_COUNT},
+    tetrahedron10::{
+        Tetrahedron10ElementError, Tetrahedron10ElementGeometry, TETRAHEDRON10_ELEMENT_NODE_COUNT,
+    },
 };
 
 const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
@@ -97,6 +99,16 @@ fn jacobian(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
     reference: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 ) -> [[f64; 3]; 3] {
+    // Exactly affine Tet10 nodes have a constant Jacobian. Deriving it from
+    // corner differences avoids cancellation of quadratic shape derivatives,
+    // and does not approximate or discard any curved geometry.
+    if is_affine(Tetrahedron10ElementGeometry { nodes_m }) {
+        return std::array::from_fn(|reference_axis| {
+            std::array::from_fn(|physical_axis| {
+                nodes_m[reference_axis + 1][physical_axis] - nodes_m[0][physical_axis]
+            })
+        });
+    }
     std::array::from_fn(|reference_axis| {
         std::array::from_fn(|physical_axis| {
             (0..TETRAHEDRON10_ELEMENT_NODE_COUNT)
@@ -104,6 +116,18 @@ fn jacobian(
                 .sum()
         })
     })
+}
+
+pub(crate) fn is_affine(geometry: Tetrahedron10ElementGeometry) -> bool {
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS
+        .iter()
+        .enumerate()
+        .all(|(edge, [left, right])| {
+            (0..3).all(|axis| {
+                geometry.nodes_m[4 + edge][axis]
+                    == 0.5 * (geometry.nodes_m[*left][axis] + geometry.nodes_m[*right][axis])
+            })
+        })
 }
 
 pub(super) fn validate_nodes(
@@ -134,3 +158,6 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
         left[0] * right[1] - left[1] * right[0],
     ]
 }
+
+#[cfg(test)]
+mod tests;

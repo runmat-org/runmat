@@ -1,16 +1,13 @@
 use thiserror::Error;
 
 use crate::{
-    algebra::{
-        spmv, AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
-        RealSparseMatrix, RealSystemError,
-    },
+    algebra::{spmv, MatrixProperties, OperatorRole, RealSparseMatrix, RealSystemError},
     assembly::AssemblySummary,
     constraints::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix},
     contracts::StructuralDynamicBalanceSnapshot,
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
-        linear::{solve_linear_system, LinearSolveResult},
+        linear::{solve_structural_system, LinearSolveResult},
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -24,6 +21,9 @@ use super::{
     newmark::{prepare_average_acceleration_step, NewmarkError},
     state::{SecondOrderState, SecondOrderStateError},
 };
+
+mod system;
+use system::{effective_system, reduced_effective_system, EffectiveLinearSystem};
 
 const MAXIMUM_EQUILIBRIUM_REFINEMENTS: usize = 4;
 
@@ -48,7 +48,7 @@ struct EquilibriumRefinement<'a> {
 }
 
 struct NormalizedCorrectionEquation {
-    summary: AssemblySummary,
+    summary: EffectiveLinearSystem,
     solution_scale: f64,
     expansion: Option<AffineConstraintReduction>,
 }
@@ -144,7 +144,7 @@ pub(super) fn solve_initial_acceleration(
         MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
     )
     .map_err(|_| EffectiveDynamicsSolveError::InvalidSolution)?;
-    let effective_summary = effective_summary(summary, mass_operator.clone(), right_hand_side)?;
+    let effective_summary = effective_system(summary, mass_operator.clone(), right_hand_side)?;
     let linear_solve = solve_effective_system(
         &effective_summary,
         backend,
@@ -152,7 +152,7 @@ pub(super) fn solve_initial_acceleration(
         SpdPreconditionerKind::Jacobi,
     )?;
     let mut acceleration = linear_solve.solution.clone();
-    canonicalize_homogeneous_solution(&effective_summary, &mut acceleration)?;
+    canonicalize_homogeneous_solution(&effective_summary.view(), &mut acceleration)?;
     EquilibriumRefinement {
         summary,
         physical_load: &physical_load,
@@ -188,7 +188,7 @@ pub(super) fn solve_average_acceleration_step(
         &physical_load,
     )
     .map_err(EffectiveDynamicsSolveError::Newmark)?;
-    let effective_summary = effective_summary(
+    let effective_summary = effective_system(
         summary,
         step.effective_operator().clone(),
         step.right_hand_side().to_vec(),
@@ -200,7 +200,7 @@ pub(super) fn solve_average_acceleration_step(
         SpdPreconditionerKind::Jacobi,
     )?;
     let mut acceleration = linear_solve.solution.clone();
-    canonicalize_homogeneous_solution(&effective_summary, &mut acceleration)?;
+    canonicalize_homogeneous_solution(&effective_summary.view(), &mut acceleration)?;
     EquilibriumRefinement {
         summary,
         physical_load: &physical_load,
@@ -267,7 +267,7 @@ impl EquilibriumRefinement<'_> {
                     .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?,
                 None => correction.solution.clone(),
             };
-            canonicalize_homogeneous_solution(self.summary, &mut correction_values)?;
+            canonicalize_homogeneous_solution(&self.summary.into(), &mut correction_values)?;
             add_scaled_correction(
                 &mut acceleration,
                 &correction_values,
@@ -357,43 +357,15 @@ fn normalize_correction_equation(
         .map(|value| value / operator_scale / solution_scale)
         .collect::<Vec<_>>();
     let normalized_summary = if let Some(reduction) = reduction.as_ref() {
-        reduced_effective_summary(summary, reduction, normalized_operator, normalized_rhs)?
+        reduced_effective_system(summary, reduction, normalized_operator, normalized_rhs)?
     } else {
-        effective_summary(summary, normalized_operator, normalized_rhs)?
+        effective_system(summary, normalized_operator, normalized_rhs)?
     };
     Ok(NormalizedCorrectionEquation {
         summary: normalized_summary,
         solution_scale,
         expansion: reduction,
     })
-}
-
-fn reduced_effective_summary(
-    source: &AssemblySummary,
-    reduction: &AffineConstraintReduction,
-    effective_operator: RealSparseMatrix,
-    right_hand_side: Vec<f64>,
-) -> Result<AssemblySummary, EffectiveDynamicsSolveError> {
-    let mass = reduction
-        .reduce_sparse_operator(source.operator.operators().mass())
-        .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?;
-    let damping = reduction
-        .reduce_sparse_operator(source.operator.operators().damping())
-        .map_err(EffectiveDynamicsSolveError::InvalidConstraintState)?;
-    let operators = CanonicalRealOperators::try_new(effective_operator, mass, damping)
-        .map_err(EffectiveDynamicsSolveError::InvalidEffectiveSystem)?;
-    let operator = AssembledRealSystem::try_new(
-        operators,
-        vec![false; reduction.reduced_dof_count],
-        right_hand_side,
-    )
-    .map_err(EffectiveDynamicsSolveError::InvalidEffectiveSystem)?;
-    let mut reduced = source.clone();
-    reduced.dof_count = reduction.reduced_dof_count;
-    reduced.operator = operator;
-    reduced.constraint_matrix = None;
-    reduced.affine_constraint_reduction = None;
-    Ok(reduced)
 }
 
 fn active_correction_scales(
@@ -466,13 +438,13 @@ fn add_scaled_correction(
 }
 
 fn solve_effective_system(
-    summary: &AssemblySummary,
+    summary: &EffectiveLinearSystem,
     backend: LinearAlgebraBackendKind,
     initial_guess: Option<&[f64]>,
     preconditioner: SpdPreconditionerKind,
 ) -> Result<LinearSolveResult, EffectiveDynamicsSolveError> {
-    let result = solve_linear_system(
-        summary,
+    let result = solve_structural_system(
+        &summary.view(),
         preconditioner,
         backend,
         &CpuReferenceBackend,
@@ -483,49 +455,12 @@ fn solve_effective_system(
             residual_norm: result.residual_norm,
         });
     }
-    if result.solution.len() != summary.dof_count
+    if result.solution.len() != summary.view().dof_count
         || result.solution.iter().any(|value| !value.is_finite())
     {
         return Err(EffectiveDynamicsSolveError::InvalidSolution);
     }
     Ok(result)
-}
-
-fn effective_summary(
-    source: &AssemblySummary,
-    effective_operator: RealSparseMatrix,
-    right_hand_side: Vec<f64>,
-) -> Result<AssemblySummary, EffectiveDynamicsSolveError> {
-    let (constraint_matrix, affine_constraint_reduction) = homogeneous_constraints(source)?;
-    let mut constrained_load = right_hand_side;
-    for (dof, constrained) in source
-        .operator
-        .constrained_dofs()
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        if constrained {
-            constrained_load[dof] = 0.0;
-        }
-    }
-    let operators = CanonicalRealOperators::try_new(
-        effective_operator,
-        source.operator.operators().mass().clone(),
-        source.operator.operators().damping().clone(),
-    )
-    .map_err(EffectiveDynamicsSolveError::InvalidEffectiveSystem)?;
-    let operator = AssembledRealSystem::try_new(
-        operators,
-        source.operator.constrained_dofs().to_vec(),
-        constrained_load,
-    )
-    .map_err(EffectiveDynamicsSolveError::InvalidEffectiveSystem)?;
-    let mut effective = source.clone();
-    effective.operator = operator;
-    effective.constraint_matrix = constraint_matrix;
-    effective.affine_constraint_reduction = affine_constraint_reduction;
-    Ok(effective)
 }
 
 fn project_residual(

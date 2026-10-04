@@ -5,11 +5,11 @@ use crate::{
         apply_k, axpy_scoped, dot_scoped, scale_scoped, spmv_scoped, PreparedRealLinearSystem,
         ScopedSpmvError,
     },
-    assembly::AssemblySummary,
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
+    solve::linear::StructuralLinearSystemView,
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         krylov::{restarted_gmres, restarted_gmres_scoped, GmresPolicy},
@@ -23,7 +23,7 @@ struct MultiplierExecution<'a> {
 }
 
 pub(super) fn solve_multiplier_constraint_system(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     constraints: &ResolvedConstraintMatrix,
     requested_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
@@ -34,7 +34,7 @@ pub(super) fn solve_multiplier_constraint_system(
         constraints,
         requested_backend,
         initial_guess,
-        |physical| Ok(apply_k(&summary.operator, physical)),
+        |physical| Ok(apply_k(summary.operator, physical)),
         |left, right| Ok(algebra.dot(left, right)),
         MultiplierExecution {
             vector_plan: None,
@@ -45,7 +45,7 @@ pub(super) fn solve_multiplier_constraint_system(
 }
 
 pub(super) fn solve_multiplier_constraint_system_with_execution(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     constraints: &ResolvedConstraintMatrix,
     requested_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
@@ -60,7 +60,7 @@ pub(super) fn solve_multiplier_constraint_system_with_execution(
         initial_guess,
         |physical| {
             if plan.is_serial() {
-                Ok(apply_k(&summary.operator, physical))
+                Ok(apply_k(summary.operator, physical))
             } else {
                 spmv_scoped(summary.operator.operators().stiffness(), physical, plan)
             }
@@ -80,7 +80,7 @@ pub(super) fn solve_multiplier_constraint_system_with_execution(
 }
 
 fn solve_multiplier_constraint_system_with_apply(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     constraints: &ResolvedConstraintMatrix,
     requested_backend: LinearAlgebraBackendKind,
     initial_guess: Option<&[f64]>,
@@ -258,7 +258,10 @@ fn solve_multiplier_constraint_system_with_apply(
     })
 }
 
-fn rejected_multiplier_system(summary: &AssemblySummary, message: &str) -> LinearSolveResult {
+fn rejected_multiplier_system(
+    summary: &StructuralLinearSystemView<'_>,
+    message: &str,
+) -> LinearSolveResult {
     LinearSolveResult {
         iterations: 0,
         residual_norm: summary
@@ -286,7 +289,7 @@ fn rejected_multiplier_system(summary: &AssemblySummary, message: &str) -> Linea
 }
 
 fn apply_saddle(
-    summary: &AssemblySummary,
+    summary: &StructuralLinearSystemView<'_>,
     constraints: &ResolvedConstraintMatrix,
     value: &[f64],
     equation_scale: f64,
@@ -323,7 +326,7 @@ fn apply_saddle(
     Ok(physical)
 }
 
-fn representative_stiffness(summary: &AssemblySummary) -> f64 {
+fn representative_stiffness(summary: &StructuralLinearSystemView<'_>) -> f64 {
     summary
         .operator
         .operators()
