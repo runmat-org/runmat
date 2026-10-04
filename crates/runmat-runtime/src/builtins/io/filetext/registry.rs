@@ -330,11 +330,6 @@ pub(crate) fn snapshot_file(fid: i32) -> Option<RegisteredFileSnapshot> {
     })
 }
 
-#[cfg(test)]
-pub(crate) fn eof_encountered(fid: i32) -> Option<bool> {
-    eof_encountered_in(fid, None)
-}
-
 pub(crate) fn eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> Option<bool> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
     guard
@@ -342,11 +337,6 @@ pub(crate) fn eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> 
         .get(&fid)
         .filter(|entry| entry_visible(entry, runtime))
         .map(|entry| entry.eof_encountered)
-}
-
-#[cfg(test)]
-pub(crate) fn mark_eof_encountered(fid: i32) -> bool {
-    mark_eof_encountered_in(fid, None)
 }
 
 pub(crate) fn mark_eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> bool {
@@ -359,11 +349,6 @@ pub(crate) fn mark_eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>
     }
     entry.eof_encountered = true;
     true
-}
-
-#[cfg(test)]
-pub(crate) fn clear_eof_encountered(fid: i32) -> bool {
-    clear_eof_encountered_in(fid, None)
 }
 
 pub(crate) fn clear_eof_encountered_in(fid: i32, runtime: Option<&RuntimeContext>) -> bool {
