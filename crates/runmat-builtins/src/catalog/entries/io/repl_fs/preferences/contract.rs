@@ -95,6 +95,7 @@ pub const GETPREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
         GETPREF_ERROR_TOO_MANY_OUTPUTS,
+        GETPREF_ERROR_MISSING,
         GETPREF_ERROR_SERVICE_UNAVAILABLE,
         GETPREF_ERROR_STORAGE,
     ],
@@ -124,6 +125,12 @@ pub const GETPREF_ERROR_SERVICE_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErr
     identifier: Some("RunMat:RuntimeContext:CapabilityUnavailable"),
     when: "The host has not installed an application preference service.",
     message: "getpref: application preference service is unavailable",
+};
+pub const GETPREF_ERROR_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETPREF.MISSING",
+    identifier: None,
+    when: "A named preference does not exist and no default was supplied.",
+    message: "getpref: preference '<group>/<name>' does not exist",
 };
 pub const ISPREF_ERROR_SERVICE_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ISPREF.SERVICE_UNAVAILABLE",

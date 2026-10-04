@@ -7,7 +7,7 @@ use runmat_value::{CellArray, Value};
 use super::controls::{error, preference_names, scalar_text, PreferenceNames};
 use super::service;
 use crate::context::{PreferenceServiceError, RuntimeContext};
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runtime_builtin(
     name = "getpref",
@@ -93,7 +93,7 @@ async fn named(runtime: Option<RuntimeContext>, args: &[Value]) -> BuiltinResult
     let values = preferences
         .read_or_create_many(runtime, group, names.clone(), defaults)
         .await
-        .map_err(|source| service::service_error("getpref", source))?;
+        .map_err(named_service_error)?;
     if values.len() != names.len() {
         return Err(service::service_error(
             "getpref",
@@ -114,5 +114,23 @@ async fn named(runtime: Option<RuntimeContext>, args: &[Value]) -> BuiltinResult
         Some(shape) => CellArray::new_with_shape(values, shape)
             .map(Value::Cell)
             .map_err(|reason| error("getpref", format!("getpref: {reason}"))),
+    }
+}
+
+fn named_service_error(source: PreferenceServiceError) -> RuntimeError {
+    match source {
+        PreferenceServiceError::Missing { group, name } => {
+            let cause = PreferenceServiceError::Missing {
+                group: group.clone(),
+                name: name.clone(),
+            };
+            build_runtime_error(format!(
+                "getpref: preference '{group}/{name}' does not exist"
+            ))
+            .with_builtin("getpref")
+            .with_source(cause)
+            .build()
+        }
+        source => service::service_error("getpref", source),
     }
 }

@@ -16,6 +16,21 @@ fn preference_context() -> RuntimeContext {
 }
 
 #[test]
+fn missing_named_preference_preserves_public_diagnostic_and_typed_cause() {
+    let error = run(getpref_builtin(
+        Some(preference_context()),
+        vec![Value::String("app".into()), Value::String("absent".into())],
+    ))
+    .expect_err("a missing named preference has no implicit default");
+    assert_eq!(
+        error.message(),
+        "getpref: preference 'app/absent' does not exist"
+    );
+    assert_eq!(error.identifier(), None);
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
 fn preference_base_forms_use_matlab_identity_with_explicit_runmat_extensions() {
     for name in ["getpref", "ispref", "setpref"] {
         let entry = runmat_builtins::builtin_catalog_entry_by_name(name).expect("catalog entry");
