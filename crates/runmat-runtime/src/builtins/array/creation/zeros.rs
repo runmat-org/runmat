@@ -23,8 +23,9 @@ use crate::builtins::common::spec::{
     FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
     ShapeRequirements,
 };
+#[cfg(test)]
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::{
-    gpu_helpers,
     random_args::{
         extract_constructor_dimensions, normalize_constructor_shape,
         validate_constructor_gpu_output,
