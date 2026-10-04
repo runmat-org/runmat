@@ -132,6 +132,9 @@ async fn data_array_read_builtin(
     base: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(data_error("DataArray.read expects at most one slice"));
+    }
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     let inputs = rest.iter().collect::<Vec<_>>();
     handle_admission::execute(runtime.as_ref(), &owner, Op::ArrayRead, &inputs, async {
@@ -211,8 +214,13 @@ async fn data_array_resize_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     new_shape: Value,
-    _rest: Vec<Value>,
+    rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(data_error(
+            "DataArray.resize does not accept trailing options",
+        ));
+    }
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     let shape = parse_shape_from_value(&new_shape)?;
     handle_admission::execute(
@@ -286,8 +294,13 @@ async fn data_array_fill_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     value: Value,
-    _rest: Vec<Value>,
+    rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(data_error(
+            "DataArray.fill does not accept trailing options",
+        ));
+    }
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::ArrayFill, &[&value], async {
         let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);

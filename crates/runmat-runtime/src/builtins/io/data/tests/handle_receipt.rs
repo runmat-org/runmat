@@ -77,6 +77,128 @@ fn sealed_transaction_queue_revision_invalidates_prior_admission_identity() {
 }
 
 #[test]
+fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
+    use crate::dispatcher::call_builtin;
+
+    let _serial = fs::provider_override_lock();
+    let root = fixture_root();
+    let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(&root));
+    let _provider = fs::replace_provider(provider.clone() as Arc<dyn FsProvider>);
+    let mut meta = StructValue::new();
+    meta.insert("dtype", Value::String("f64".into()));
+    meta.insert(
+        "shape",
+        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+    );
+    let mut arrays = StructValue::new();
+    arrays.insert("sample", Value::Struct(meta));
+    let mut schema = StructValue::new();
+    schema.insert("arrays", Value::Struct(arrays));
+    let dataset = call_builtin(
+        "data.create",
+        &[Value::String("arity.data".into()), Value::Struct(schema)],
+    )
+    .unwrap();
+    let array = call_builtin(
+        "Dataset.array",
+        &[dataset.clone(), Value::String("sample".into())],
+    )
+    .unwrap();
+    let transaction = call_builtin("Dataset.begin", std::slice::from_ref(&dataset)).unwrap();
+    let manifest_path = root.join("arity.data/manifest.json");
+    let before = provider.read_project_path(&manifest_path).unwrap();
+    for (name, arguments) in [
+        (
+            "Dataset.get_attr",
+            vec![
+                dataset.clone(),
+                Value::String("k".into()),
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ],
+        ),
+        (
+            "Dataset.begin",
+            vec![dataset.clone(), Value::String("ignored".into())],
+        ),
+        (
+            "Dataset.snapshot",
+            vec![
+                dataset.clone(),
+                Value::String("label".into()),
+                Value::String("ignored".into()),
+            ],
+        ),
+        (
+            "DataArray.read",
+            vec![
+                array.clone(),
+                Value::String(":".into()),
+                Value::String(":".into()),
+            ],
+        ),
+        (
+            "DataArray.resize",
+            vec![
+                array.clone(),
+                Value::Num(2.0),
+                Value::String("ignored".into()),
+            ],
+        ),
+        (
+            "DataArray.fill",
+            vec![
+                array.clone(),
+                Value::Num(2.0),
+                Value::String("ignored".into()),
+            ],
+        ),
+        (
+            "DataTransaction.write",
+            vec![
+                transaction.clone(),
+                Value::String("sample".into()),
+                Value::String(":".into()),
+                Value::Num(2.0),
+                Value::String("ignored".into()),
+            ],
+        ),
+        (
+            "DataTransaction.resize",
+            vec![
+                transaction.clone(),
+                Value::String("sample".into()),
+                Value::Num(2.0),
+                Value::String("ignored".into()),
+            ],
+        ),
+        (
+            "DataTransaction.fill",
+            vec![
+                transaction.clone(),
+                Value::String("sample".into()),
+                Value::Num(2.0),
+                Value::String(":".into()),
+                Value::String("ignored".into()),
+            ],
+        ),
+    ] {
+        let error = call_builtin(name, &arguments).expect_err("unknown control must reject");
+        assert!(!error.message().is_empty(), "{name}");
+        assert_eq!(
+            provider.read_project_path(&manifest_path).unwrap(),
+            before,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        call_builtin("DataTransaction.status", std::slice::from_ref(&transaction)).unwrap(),
+        Value::String("open".into())
+    );
+    assert!(call_builtin("DataTransaction.abort", &[transaction]).is_ok());
+}
+
+#[test]
 fn finite_uncertified_receiver_write_rejects_before_mutation() {
     let _serial = fs::provider_override_lock();
     let root = fixture_root();

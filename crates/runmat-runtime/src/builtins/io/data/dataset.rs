@@ -169,6 +169,11 @@ async fn dataset_get_attr_builtin(
     key: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(data_error(
+            "Dataset.get_attr expects at most one default value",
+        ));
+    }
     let owner = dataset_owner(runtime.as_ref(), &base)?;
     let key_text = parse_string(&key, "Dataset.get_attr key")?;
     let mut inputs = vec![&key];
@@ -270,8 +275,11 @@ async fn dataset_set_attrs_builtin(
 async fn dataset_begin_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-    _rest: Vec<Value>,
+    rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(data_error("Dataset.begin does not accept trailing options"));
+    }
     let owner = dataset_owner(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::DatasetBegin, &[], async {
         let manifest =
@@ -305,8 +313,13 @@ async fn dataset_snapshot_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     label: Value,
-    _rest: Vec<Value>,
+    rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(data_error(
+            "Dataset.snapshot does not accept trailing options",
+        ));
+    }
     let owner = dataset_owner(runtime.as_ref(), &base)?;
     let label_text = parse_string(&label, "Dataset.snapshot label")?;
     handle_admission::execute(

@@ -45,6 +45,31 @@ fn dataset_identities_are_unique_sorted_and_source_linked() {
 }
 
 #[test]
+fn optional_default_and_nonexistent_trailing_options_have_exact_arity() {
+    let receiver = super::super::inference::dataset();
+    let control = ValueFact::scalar(ValueKindFact::String);
+    for (entry, valid, invalid) in [
+        (&DATASET_GET_ATTR_CATALOG_ENTRY, 3, 4),
+        (&DATASET_SNAPSHOT_CATALOG_ENTRY, 2, 3),
+        (&DATASET_BEGIN_CATALOG_ENTRY, 1, 2),
+    ] {
+        let args = [
+            receiver.clone(),
+            control.clone(),
+            control.clone(),
+            control.clone(),
+        ];
+        assert!(call(entry, args[..valid].to_vec(), 1)
+            .diagnostics
+            .is_empty());
+        assert!(call(entry, args[..invalid].to_vec(), 1)
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-DATA-HANDLE-ARITY"));
+    }
+}
+
+#[test]
 fn attribute_and_lifecycle_forms_preserve_integer_and_effect_boundaries() {
     let receiver = super::super::inference::dataset();
     let text = ValueFact::scalar(ValueKindFact::String);

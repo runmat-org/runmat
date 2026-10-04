@@ -56,6 +56,25 @@ fn all_ten_array_identities_are_sorted_source_linked_and_bound() {
 }
 
 #[test]
+fn read_slice_and_mutation_controls_do_not_admit_ignored_extras() {
+    let value = ValueFact::unknown(DynamicReason::RuntimeValue);
+    for (entry, valid, invalid) in [
+        (&DATAARRAY_READ_CATALOG_ENTRY, 2, 3),
+        (&DATAARRAY_RESIZE_CATALOG_ENTRY, 2, 3),
+        (&DATAARRAY_FILL_CATALOG_ENTRY, 2, 3),
+    ] {
+        let args = [receiver(), value.clone(), value.clone()];
+        assert!(call(entry, args[..valid].to_vec(), 1)
+            .diagnostics
+            .is_empty());
+        assert!(call(entry, args[..invalid].to_vec(), 1)
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-DATA-ARRAY-ARITY"));
+    }
+}
+
+#[test]
 fn metadata_and_payload_facts_do_not_guess_stored_dtype() {
     let shape = call(&DATAARRAY_SHAPE_CATALOG_ENTRY, vec![receiver()], 1);
     assert_eq!(shape.outputs[0].shape, ShapeFact::from(vec![Some(1), None]));

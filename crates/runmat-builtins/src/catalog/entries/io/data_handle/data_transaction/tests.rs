@@ -54,6 +54,29 @@ fn all_transaction_identities_and_commit_alias_are_unique_and_sorted() {
 }
 
 #[test]
+fn queue_forms_admit_one_real_optional_slice_but_no_ignored_controls() {
+    let value = ValueFact::unknown(DynamicReason::RuntimeValue);
+    for (entry, valid, invalid) in [
+        (&DATATX_WRITE_CATALOG_ENTRY, 4, 5),
+        (&DATATX_RESIZE_CATALOG_ENTRY, 3, 4),
+        (&DATATX_FILL_CATALOG_ENTRY, 4, 5),
+    ] {
+        let args = [
+            receiver(),
+            value.clone(),
+            value.clone(),
+            value.clone(),
+            value.clone(),
+        ];
+        assert!(call(entry, args[..valid].to_vec()).diagnostics.is_empty());
+        assert!(call(entry, args[..invalid].to_vec())
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-DATA-TRANSACTION-ARITY"));
+    }
+}
+
+#[test]
 fn queue_and_commit_have_distinct_effects_and_exact_output_facts() {
     let key = ValueFact::scalar(ValueKindFact::String);
     let value = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {

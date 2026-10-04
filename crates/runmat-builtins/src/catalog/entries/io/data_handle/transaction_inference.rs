@@ -48,8 +48,9 @@ pub(super) fn infer(
         TransactionForm::Id | TransactionForm::Status | TransactionForm::Abort => (1, 1),
         TransactionForm::SetAttr | TransactionForm::CreateArray => (3, 3),
         TransactionForm::SetAttrs | TransactionForm::DeleteArray => (2, 2),
-        TransactionForm::Write => (4, usize::MAX),
-        TransactionForm::Resize | TransactionForm::Fill => (3, usize::MAX),
+        TransactionForm::Write => (4, 4),
+        TransactionForm::Resize => (3, 3),
+        TransactionForm::Fill => (3, 4),
         TransactionForm::Commit => (1, 2),
     };
     if count < minimum || count > maximum {

@@ -30,8 +30,13 @@ async fn data_tx_write_builtin(
     array_name: Value,
     slice: Value,
     values: Value,
-    _rest: Vec<Value>,
+    rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(data_error(
+            "DataTransaction.write does not accept trailing options",
+        ));
+    }
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.write arrayName")?;
     let facts = [
@@ -156,8 +161,13 @@ async fn data_tx_resize_builtin(
     base: Value,
     array_name: Value,
     new_shape: Value,
-    _rest: Vec<Value>,
+    rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if !rest.is_empty() {
+        return Err(data_error(
+            "DataTransaction.resize does not accept trailing options",
+        ));
+    }
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.resize arrayName")?;
     let shape = parse_shape_from_value(&new_shape)?;
@@ -203,6 +213,9 @@ async fn data_tx_fill_builtin(
     value: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(data_error("DataTransaction.fill expects at most one slice"));
+    }
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     let array_name_text = parse_string(&array_name, "DataTransaction.fill arrayName")?;
     let mut facts = vec![
