@@ -9,6 +9,7 @@ use std::{
 };
 
 mod rename;
+mod staged;
 
 #[derive(Clone, Debug)]
 pub struct MemoryFsProvider {
@@ -222,6 +223,13 @@ impl MemoryFsProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for MemoryFsProvider {
+    fn begin_staged_replace(
+        &self,
+        destination: &Path,
+    ) -> io::Result<Option<Box<dyn crate::FsStagedOutput>>> {
+        staged::begin(self.clone(), destination).map(Some)
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(self.default_current_dir.clone())
     }

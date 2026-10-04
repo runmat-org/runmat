@@ -14,11 +14,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use url::Url;
 
+#[path = "native/staged.rs"]
+mod staged;
+
 #[derive(Default)]
 pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    fn begin_staged_replace(
+        &self,
+        destination: &Path,
+    ) -> io::Result<Option<Box<dyn crate::FsStagedOutput>>> {
+        staged::begin(destination).map(Some)
+    }
+
     fn acquire_native_path(
         &self,
         path: &Path,

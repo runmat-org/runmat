@@ -14,6 +14,7 @@ mod memory;
 mod native_path;
 mod native_path_intent;
 mod resource;
+mod staged_output;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
@@ -40,6 +41,7 @@ pub use resource::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox::SandboxFsProvider;
+pub use staged_output::FsStagedOutput;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
@@ -368,6 +370,18 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Acquire an exclusive provider-owned staging object for one already
+    /// resolved absolute destination. The returned owner must abort on Drop,
+    /// including when a write, flush, or publication future is abandoned.
+    /// `None` means this provider cannot supply that guarantee; callers must
+    /// not reconstruct it from a public temporary path and `remove_file`.
+    fn begin_staged_replace(
+        &self,
+        _resolved_absolute_destination: &Path,
+    ) -> io::Result<Option<Box<dyn FsStagedOutput>>> {
+        Ok(None)
+    }
+
     /// Opt in to direct OS-path access by a native library. The path is
     /// absolute and resolved with this provider's captured working directory.
     /// `None` means the provider has no safe direct native-path route; callers
@@ -1158,6 +1172,46 @@ mod tests {
     }
 
     struct UnsupportedProvider;
+
+    #[test]
+    fn unqualified_provider_cannot_claim_a_staged_replacement() {
+        assert!(UnsupportedProvider
+            .begin_staged_replace(Path::new("/report.csv"))
+            .expect("capability query")
+            .is_none());
+    }
+
+    #[test]
+    fn retained_stage_uses_issuing_provider_after_ambient_swap() {
+        let _lock = test_lock();
+        let original = Arc::new(MemoryFsProvider::with_current_dir("/reports"));
+        original
+            .write_project_path("/reports/data.csv", b"original")
+            .expect("original file");
+        let replacement = Arc::new(MemoryFsProvider::with_current_dir("/reports"));
+        replacement
+            .write_project_path("/reports/data.csv", b"unrelated")
+            .expect("replacement file");
+        let _original = replace_provider(original.clone());
+        let mut stage = original
+            .begin_staged_replace(Path::new("/reports/data.csv"))
+            .expect("stage acquisition")
+            .expect("memory stage");
+        let _replacement = replace_provider(replacement.clone());
+        assert_eq!(
+            futures::executor::block_on(stage.write_chunk(b"published")).unwrap(),
+            9
+        );
+        futures::executor::block_on(stage.publish()).expect("publish on original provider");
+        assert_eq!(
+            original.read_project_path("/reports/data.csv").unwrap(),
+            b"published"
+        );
+        assert_eq!(
+            replacement.read_project_path("/reports/data.csv").unwrap(),
+            b"unrelated"
+        );
+    }
 
     #[test]
     fn read_capability_metadata_is_queried_outside_the_provider_lock() {
