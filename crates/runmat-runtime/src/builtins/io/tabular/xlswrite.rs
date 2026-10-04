@@ -269,15 +269,12 @@ fn normalize_spreadsheet_path(text: &str) -> BuiltinResult<String> {
 }
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(xlswrite_error_with(
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        xlswrite_error_with(
             &XLSWRITE_ERROR_INVALID_ARGUMENT,
             "xlswrite: expected a string scalar or character vector",
-        )),
-    }
+        )
+    })
 }
 
 fn sanitize_sheet_name(value: &str) -> String {

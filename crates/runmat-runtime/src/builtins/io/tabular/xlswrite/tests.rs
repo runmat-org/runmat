@@ -26,6 +26,19 @@ fn cancellation_is_not_converted_to_spreadsheet_status() {
     )));
 }
 
+#[test]
+fn scalar_text_geometry_rejects_paged_filename_before_file_access() {
+    let paged = CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2])
+        .expect("paged character array");
+    assert!(resolve_path(&Value::CharArray(paged)).is_err());
+    let trailing_singleton = CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1])
+        .expect("trailing singleton character row");
+    assert_eq!(
+        value_to_string_scalar(&Value::CharArray(trailing_singleton)).expect("scalar text"),
+        "ab"
+    );
+}
+
 fn temp_path(ext: &str) -> PathBuf {
     let millis = unix_timestamp_ms();
     let unique = NEXT_ID.fetch_add(1, Ordering::Relaxed);
