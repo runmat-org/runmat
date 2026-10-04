@@ -7,6 +7,9 @@ use std::sync::Arc;
 
 use runmat_filesystem::{self as fs, CapturedFsResourceLease, FsProvider};
 
+mod handle;
+pub(crate) use handle::{issue_matfile, resolve_matfile, AuthorizedMatFile};
+
 pub(crate) struct MatFsPath {
     provider: Arc<dyn FsProvider>,
     path: PathBuf,
@@ -33,7 +36,7 @@ impl MatFsPath {
         &self.path
     }
 
-    fn check_current(&self) -> io::Result<()> {
+    pub(crate) fn check_current(&self) -> io::Result<()> {
         if self
             .resource
             .as_ref()

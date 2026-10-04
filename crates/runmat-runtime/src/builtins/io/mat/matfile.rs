@@ -8,11 +8,11 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
-use runmat_filesystem::{metadata_async, write_async};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
 
-use super::load::read_mat_file_for_builtin;
+use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
+use super::load::read_mat_file_for_builtin_on;
 use super::save::encode_workspace_to_mat_bytes;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -24,15 +24,13 @@ use crate::{
 };
 
 const BUILTIN_NAME: &str = "matfile";
-const MATFILE_CLASS: runmat_types::StaticClassIdentity =
+pub(super) const MATFILE_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("matlab.io.MatFile");
 const MATFILE_SUBSREF: &str = "matlab.io.MatFile.subsref";
 const MATFILE_SUBSASGN: &str = "matlab.io.MatFile.subsasgn";
-const PROPERTIES_FIELD: &str = "Properties";
-const SOURCE_FIELD: &str = "Source";
-const WRITABLE_FIELD: &str = "Writable";
-const PATH_FIELD: &str = "__runmat_matfile_path";
-const WRITABLE_STATE_FIELD: &str = "__runmat_matfile_writable";
+pub(super) const PROPERTIES_FIELD: &str = "Properties";
+pub(super) const SOURCE_FIELD: &str = "Source";
+pub(super) const WRITABLE_FIELD: &str = "Writable";
 
 static MATFILE_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(MATFILE_CLASS);
@@ -229,6 +227,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "matfile",
+    binding_variant = "default",
+    context = true,
     category = "io/mat",
     summary = "Create a MAT-file object for whole-variable reads and writes.",
     keywords = "matfile,mat,MAT-file,Writable",
@@ -236,17 +236,35 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     descriptor(crate::builtins::io::mat::matfile::MATFILE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::matfile"
 )]
-pub async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn matfile_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
     let host_filename = gather_if_needed_async(&filename).await?;
     let host_rest = gather_rest(rest).await?;
     let writable = parse_writable_option(&host_rest)?;
     let path = normalise_path(&host_filename)?;
-    Ok(Value::Object(matfile_object(path, writable)))
+    let source = std::sync::Arc::new(MatFsPath::capture(path).map_err(|err| {
+        matfile_error_with_source(
+            &MATFILE_ERROR_IO,
+            format!("matfile: failed to resolve path: {err}"),
+            err,
+        )
+    })?);
+    let reference = issue_matfile(runtime.as_ref(), source.clone(), writable)?;
+    Ok(Value::Object(matfile_object(
+        source.path(),
+        writable,
+        reference,
+    )))
 }
 
 #[runtime_builtin(
     name = "matlab.io.MatFile.subsref",
+    binding_variant = "default",
+    context = true,
     category = "io/mat",
     summary = "Read MAT-file object properties or whole variables.",
     keywords = "matfile,subsref,MAT-file",
@@ -254,18 +272,31 @@ pub async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult
     descriptor(crate::builtins::io::mat::matfile::MATFILE_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::matfile"
 )]
-pub async fn matfile_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
+pub async fn matfile_subsref(
+    runtime: Option<crate::context::RuntimeContext>,
+    obj: Value,
+    subscript: Value,
+) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsref(obj, path, matfile_read_step, None).await
+    let read_runtime = runtime.clone();
+    crate::object::protocol::execute_owned_subsref(
+        obj,
+        path,
+        move |obj, step| async move { matfile_read_step(read_runtime.as_ref(), obj, step).await },
+        None,
+    )
+    .await
 }
 
 async fn matfile_read_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
 ) -> BuiltinResult<Value> {
     let payload = step.selector_value()?;
     let object = into_matfile_object(obj, MATFILE_SUBSREF)?;
+    let owner = resolve_matfile(runtime, &object)?;
     if step.kind() != crate::object::indexing::ObjectIndexKind::Member {
         return Err(matfile_error_with(
             &MATFILE_ERROR_UNSUPPORTED,
@@ -281,8 +312,8 @@ async fn matfile_read_step(
             .ok_or_else(|| matfile_error("matfile object is missing Properties"));
     }
     reject_internal_field(&field)?;
-    let path = object_path(&object)?;
-    let entries = read_mat_file_for_builtin(&path, BUILTIN_NAME).await?;
+    let entries = read_mat_file_for_builtin_on(&owner.source, BUILTIN_NAME).await?;
+    resolve_matfile(runtime, &object)?;
     entries
         .into_iter()
         .find(|(name, _)| name == &field)
@@ -292,7 +323,7 @@ async fn matfile_read_step(
                 &MATFILE_ERROR_SELECTION,
                 format!(
                     "matfile: variable '{field}' was not found in '{}'",
-                    path.display()
+                    owner.source.path().display()
                 ),
             )
         })
@@ -300,6 +331,8 @@ async fn matfile_read_step(
 
 #[runtime_builtin(
     name = "matlab.io.MatFile.subsasgn",
+    binding_variant = "default",
+    context = true,
     category = "io/mat",
     summary = "Write whole variables through a writable MAT-file object.",
     keywords = "matfile,subsasgn,MAT-file,Writable",
@@ -307,19 +340,25 @@ async fn matfile_read_step(
     descriptor(crate::builtins::io::mat::matfile::MATFILE_SUBSASGN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::matfile"
 )]
-pub async fn matfile_subsasgn(obj: Value, subscript: Value, rhs: Value) -> BuiltinResult<Value> {
+pub async fn matfile_subsasgn(
+    runtime: Option<crate::context::RuntimeContext>,
+    obj: Value,
+    subscript: Value,
+    rhs: Value,
+) -> BuiltinResult<Value> {
     ensure_matfile_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    let read_runtime = runtime.clone();
     crate::object::protocol::execute_owned_subsasgn(
         obj,
         path,
         vec![rhs],
-        matfile_read_step,
-        |obj, step, mut values| async move {
+        move |obj, step| async move { matfile_read_step(read_runtime.as_ref(), obj, step).await },
+        move |obj, step, mut values| async move {
             let rhs = values
                 .pop()
                 .ok_or_else(|| matfile_error("matfile assignment value is missing"))?;
-            matfile_write_step(obj, step, rhs).await
+            matfile_write_step(runtime.as_ref(), obj, step, rhs).await
         },
         None,
     )
@@ -327,6 +366,7 @@ pub async fn matfile_subsasgn(obj: Value, subscript: Value, rhs: Value) -> Built
 }
 
 async fn matfile_write_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
@@ -348,22 +388,26 @@ async fn matfile_write_step(
     }
     reject_internal_field(&field)?;
     validate_variable_name(&field, MATFILE_SUBSASGN)?;
-    if !object_writable(&object)? {
+    let owner = resolve_matfile(runtime, &object)?;
+    if !owner.writable {
         return Err(matfile_error_with(
             &MATFILE_ERROR_UNSUPPORTED,
             "matfile: object is not writable; construct it with matfile(filename, 'Writable', true)",
         ));
     }
 
-    let path = object_path(&object)?;
-    let mut entries = read_existing_entries_for_assignment(&path).await?;
+    let mut entries = read_existing_entries_for_assignment(&owner.source).await?;
     let value = gather_if_needed_async(&rhs).await?;
     replace_or_append(&mut entries, field, value);
     let bytes = encode_workspace_to_mat_bytes(&entries).await?;
-    write_async(&path, &bytes).await.map_err(|err| {
+    resolve_matfile(runtime, &object)?;
+    owner.source.write(&bytes).await.map_err(|err| {
         matfile_error_with_source(
             &MATFILE_ERROR_IO,
-            format!("matfile: failed to write '{}': {err}", path.display()),
+            format!(
+                "matfile: failed to write '{}': {err}",
+                owner.source.path().display()
+            ),
             err,
         )
     })?;
@@ -421,15 +465,13 @@ pub fn ensure_matfile_class_registered() {
     });
 }
 
-fn matfile_object(path: PathBuf, writable: bool) -> ObjectInstance {
+fn matfile_object(
+    path: &Path,
+    writable: bool,
+    authority: runmat_value::ForeignRef,
+) -> ObjectInstance {
     let source = path.to_string_lossy().to_string();
-    let mut object = ObjectInstance::new(MATFILE_CLASS.to_string());
-    object
-        .properties
-        .insert(PATH_FIELD.to_string(), Value::String(source.clone()));
-    object
-        .properties
-        .insert(WRITABLE_STATE_FIELD.to_string(), Value::Bool(writable));
+    let mut object = ObjectInstance::new(MATFILE_CLASS.owned()).with_matfile_authority(authority);
     object.properties.insert(
         PROPERTIES_FIELD.to_string(),
         properties_struct(source, writable),
@@ -454,27 +496,18 @@ fn into_matfile_object(value: Value, builtin: &str) -> BuiltinResult<ObjectInsta
     }
 }
 
-fn object_path(object: &ObjectInstance) -> BuiltinResult<PathBuf> {
-    let Some(Value::String(path)) = object.properties.get(PATH_FIELD) else {
-        return Err(matfile_error("matfile object is missing source path"));
-    };
-    Ok(PathBuf::from(path))
-}
-
-fn object_writable(object: &ObjectInstance) -> BuiltinResult<bool> {
-    let Some(Value::Bool(writable)) = object.properties.get(WRITABLE_STATE_FIELD) else {
-        return Err(matfile_error("matfile object is missing writable state"));
-    };
-    Ok(*writable)
-}
-
-async fn read_existing_entries_for_assignment(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
-    match metadata_async(path).await {
-        Ok(_) => read_mat_file_for_builtin(path, BUILTIN_NAME).await,
+async fn read_existing_entries_for_assignment(
+    path: &MatFsPath,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    match path.metadata().await {
+        Ok(_) => read_mat_file_for_builtin_on(path, BUILTIN_NAME).await,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(err) => Err(matfile_error_with_source(
             &MATFILE_ERROR_IO,
-            format!("matfile: failed to inspect '{}': {err}", path.display()),
+            format!(
+                "matfile: failed to inspect '{}': {err}",
+                path.path().display()
+            ),
             err,
         )),
     }
@@ -606,7 +639,7 @@ fn value_to_bool_scalar(value: &Value) -> Option<bool> {
     }
 }
 
-fn matfile_error(message: impl Into<String>) -> RuntimeError {
+pub(super) fn matfile_error(message: impl Into<String>) -> RuntimeError {
     matfile_error_with(&MATFILE_ERROR_INVALID_ARGUMENT, message)
 }
 
@@ -624,9 +657,8 @@ fn matfile_error_with(
 fn matfile_error_with_source(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
-    source: impl std::fmt::Display,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
-    let source = std::io::Error::new(std::io::ErrorKind::Other, source.to_string());
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_source(source);
@@ -638,12 +670,17 @@ fn matfile_error_with_source(
 
 #[cfg(test)]
 mod tests {
+    use super::super::load::read_mat_file_for_builtin;
     use super::*;
+
+    async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        super::matfile_builtin(None, filename, rest).await
+    }
 
     async fn matfile_subsref(obj: Value, kind: String, payload: Value) -> BuiltinResult<Value> {
         let subscript =
             crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
-        super::matfile_subsref(obj, subscript).await
+        super::matfile_subsref(None, obj, subscript).await
     }
 
     async fn matfile_subsasgn(
@@ -654,7 +691,7 @@ mod tests {
     ) -> BuiltinResult<Value> {
         let subscript =
             crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
-        super::matfile_subsasgn(obj, subscript, rhs).await
+        super::matfile_subsasgn(None, obj, subscript, rhs).await
     }
     use crate::builtins::io::mat::save::encode_workspace_to_mat_bytes;
     use futures::executor::block_on;
@@ -744,13 +781,26 @@ mod tests {
             panic!("expected matfile object");
         };
         assert_eq!(
-            object.properties.get(PATH_FIELD),
+            object
+                .properties
+                .get(PROPERTIES_FIELD)
+                .and_then(|value| match value {
+                    Value::Struct(props) => props.fields.get(SOURCE_FIELD),
+                    _ => None,
+                }),
             Some(&Value::String(expected_path.to_string_lossy().into_owned()))
         );
         assert_eq!(
-            object.properties.get(WRITABLE_STATE_FIELD),
+            object
+                .properties
+                .get(PROPERTIES_FIELD)
+                .and_then(|value| match value {
+                    Value::Struct(props) => props.fields.get(WRITABLE_FIELD),
+                    _ => None,
+                }),
             Some(&Value::Bool(true))
         );
+        assert!(object.matfile_authority().is_some());
     }
 
     #[test]

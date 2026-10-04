@@ -19,6 +19,7 @@ enum NativeObjectPayload {
     ContainersMap(ContainersMapStorage),
     ForeignHostControl(ForeignRef),
     DatasetAuthority(ForeignRef),
+    MatFileAuthority(ForeignRef),
 }
 
 impl Trace for NativeObjectPayload {
@@ -27,6 +28,7 @@ impl Trace for NativeObjectPayload {
             Self::ContainersMap(storage) => storage.trace(tracer),
             Self::ForeignHostControl(_) => {}
             Self::DatasetAuthority(_) => {}
+            Self::MatFileAuthority(_) => {}
         }
     }
 }
@@ -56,6 +58,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ForeignHostControl(reference)) => Some(reference),
             Some(NativeObjectPayload::ContainersMap(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
             | None => None,
         }
     }
@@ -70,6 +73,22 @@ impl ObjectInstance {
             Some(NativeObjectPayload::DatasetAuthority(reference)) => Some(reference),
             Some(NativeObjectPayload::ContainersMap(_))
             | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_matfile_authority(mut self, reference: ForeignRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::MatFileAuthority(reference)));
+        self
+    }
+
+    pub fn matfile_authority(&self) -> Option<&ForeignRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::MatFileAuthority(reference)) => Some(reference),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
             | None => None,
         }
     }
@@ -79,6 +98,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
             | None => None,
         }
     }
@@ -88,6 +108,7 @@ impl ObjectInstance {
             Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
             | None => None,
         }
     }
@@ -103,6 +124,7 @@ impl ObjectInstance {
             }
             Some(NativeObjectPayload::ForeignHostControl(_))
             | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
             | None => {}
         }
     }
