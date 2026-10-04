@@ -139,6 +139,46 @@ fn precision_aliases_repeats_and_character_forms_share_runtime_grammar() {
 }
 
 #[test]
+fn typed_precision_spelling_preserves_exact_character_alias_policy() {
+    for label in [
+        "char",
+        "uchar",
+        "unsignedchar",
+        "unsigned char",
+        "schar",
+        "signedchar",
+        "signed char",
+        "2*char",
+        "3*schar",
+    ] {
+        assert_eq!(
+            parse_fread_precision(label).unwrap().output,
+            FreadOutputKind::Char,
+            "{label}"
+        );
+    }
+    for label in ["uint8", "byte", "int8", "integer*1"] {
+        assert_eq!(
+            parse_fread_precision(label).unwrap().output,
+            FreadOutputKind::Numeric(NumericClass::Double),
+            "{label}"
+        );
+    }
+    assert_eq!(
+        parse_fread_precision("*char").unwrap().output,
+        FreadOutputKind::Char
+    );
+    assert_eq!(
+        parse_fread_precision("*schar").unwrap().output,
+        FreadOutputKind::Numeric(NumericClass::Int8)
+    );
+    assert_eq!(
+        parse_fread_precision("2*uchar=>uint16").unwrap().output,
+        FreadOutputKind::Numeric(NumericClass::UInt16)
+    );
+}
+
+#[test]
 fn invalid_fid_and_arity_are_diagnosed_without_false_unknown_error() {
     let bad = inference::infer(
         &request(

@@ -72,47 +72,65 @@ pub fn parse_fread_precision(raw: &str) -> Result<FreadPrecisionSpec, String> {
     if let Some(rest) = lower.strip_prefix('*') {
         parse_star_precision(rest.trim())
     } else if let Some((lhs, rhs)) = lower.split_once("=>") {
-        let (repeat, input) = parse_repeated_input_label(lhs.trim())?;
+        let (repeat, spelling) = parse_repeated_input_label(lhs.trim())?;
         let output = parse_output_label(rhs.trim())?;
         Ok(FreadPrecisionSpec {
-            input,
+            input: spelling.input(),
             output,
             repeat,
         })
     } else {
-        let (repeat, input) = parse_repeated_input_label(lower.trim())?;
-        let wants_char =
-            lower == "char" || (matches!(input, FreadInputType::UInt8) && lower.contains("char"));
-        let output = if wants_char {
-            FreadOutputKind::Char
-        } else {
-            FreadOutputKind::Numeric(NumericClass::Double)
-        };
+        let (repeat, spelling) = parse_repeated_input_label(lower.trim())?;
         Ok(FreadPrecisionSpec {
-            input,
-            output,
+            input: spelling.input(),
+            output: spelling.plain_output(),
             repeat,
         })
     }
 }
 
 fn parse_star_precision(label: &str) -> Result<FreadPrecisionSpec, String> {
-    if label == "char" {
-        return Ok(FreadPrecisionSpec {
-            input: FreadInputType::UInt8,
-            output: FreadOutputKind::Char,
-            repeat: 1,
-        });
-    }
-    let input = parse_input_label(label)?;
+    let spelling = parse_input_label(label)?;
     Ok(FreadPrecisionSpec {
-        input,
-        output: FreadOutputKind::Numeric(input.numeric_class()),
+        input: spelling.input(),
+        output: spelling.star_output(),
         repeat: 1,
     })
 }
 
-fn parse_repeated_input_label(label: &str) -> Result<(usize, FreadInputType), String> {
+#[derive(Clone, Copy)]
+enum InputSpelling {
+    Numeric(FreadInputType),
+    CharacterAlias(FreadInputType),
+    Char,
+}
+
+impl InputSpelling {
+    fn input(self) -> FreadInputType {
+        match self {
+            Self::Numeric(input) | Self::CharacterAlias(input) => input,
+            Self::Char => FreadInputType::UInt8,
+        }
+    }
+
+    fn plain_output(self) -> FreadOutputKind {
+        match self {
+            Self::Numeric(_) => FreadOutputKind::Numeric(NumericClass::Double),
+            Self::CharacterAlias(_) | Self::Char => FreadOutputKind::Char,
+        }
+    }
+
+    fn star_output(self) -> FreadOutputKind {
+        match self {
+            Self::Char => FreadOutputKind::Char,
+            Self::Numeric(input) | Self::CharacterAlias(input) => {
+                FreadOutputKind::Numeric(input.numeric_class())
+            }
+        }
+    }
+}
+
+fn parse_repeated_input_label(label: &str) -> Result<(usize, InputSpelling), String> {
     if let Some((repeat, source)) = label.split_once('*') {
         if repeat.trim().chars().all(|ch| ch.is_ascii_digit()) {
             let repeat = repeat
@@ -127,22 +145,25 @@ fn parse_repeated_input_label(label: &str) -> Result<(usize, FreadInputType), St
     Ok((1, parse_input_label(label)?))
 }
 
-fn parse_input_label(label: &str) -> Result<FreadInputType, String> {
+fn parse_input_label(label: &str) -> Result<InputSpelling, String> {
+    use FreadInputType as Input;
+    use InputSpelling::{CharacterAlias, Numeric};
     match label {
-        "double" | "float64" | "real*8" => Ok(FreadInputType::Float64),
-        "single" | "float" | "float32" | "real*4" => Ok(FreadInputType::Float32),
-        "int8" | "schar" | "signedchar" | "signed char" | "integer*1" => Ok(FreadInputType::Int8),
-        "uint8" | "uchar" | "unsignedchar" | "unsigned char" | "char" | "byte" => {
-            Ok(FreadInputType::UInt8)
-        }
-        "int16" | "short" | "integer*2" => Ok(FreadInputType::Int16),
-        "uint16" | "ushort" | "unsignedshort" | "unsigned short" => Ok(FreadInputType::UInt16),
-        "int32" | "int" | "integer*4" | "long" => Ok(FreadInputType::Int32),
+        "double" | "float64" | "real*8" => Ok(Numeric(Input::Float64)),
+        "single" | "float" | "float32" | "real*4" => Ok(Numeric(Input::Float32)),
+        "int8" | "integer*1" => Ok(Numeric(Input::Int8)),
+        "schar" | "signedchar" | "signed char" => Ok(CharacterAlias(Input::Int8)),
+        "uint8" | "byte" => Ok(Numeric(Input::UInt8)),
+        "uchar" | "unsignedchar" | "unsigned char" => Ok(CharacterAlias(Input::UInt8)),
+        "char" => Ok(InputSpelling::Char),
+        "int16" | "short" | "integer*2" => Ok(Numeric(Input::Int16)),
+        "uint16" | "ushort" | "unsignedshort" | "unsigned short" => Ok(Numeric(Input::UInt16)),
+        "int32" | "int" | "integer*4" | "long" => Ok(Numeric(Input::Int32)),
         "uint32" | "uint" | "unsignedint" | "unsigned int" | "unsignedlong" | "unsigned long" => {
-            Ok(FreadInputType::UInt32)
+            Ok(Numeric(Input::UInt32))
         }
-        "int64" | "integer*8" | "longlong" | "long long" => Ok(FreadInputType::Int64),
-        "uint64" | "unsignedlonglong" | "unsigned long long" => Ok(FreadInputType::UInt64),
+        "int64" | "integer*8" | "longlong" | "long long" => Ok(Numeric(Input::Int64)),
+        "uint64" | "unsignedlonglong" | "unsigned long long" => Ok(Numeric(Input::UInt64)),
         other => Err(format!("unsupported precision '{other}'")),
     }
 }
