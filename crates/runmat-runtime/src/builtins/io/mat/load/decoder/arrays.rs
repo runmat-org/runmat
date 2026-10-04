@@ -1,8 +1,8 @@
 //! Level-5 matrix layouts and nested array payloads.
 
 use super::super::super::format::{
-    MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MI_INT16, MI_INT32, MI_INT64, MI_INT8,
-    MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8, MI_UTF16,
+    MatArray, MatClass, MatData, FLAG_COMPLEX, FLAG_LOGICAL, MI_DOUBLE, MI_INT16, MI_INT32,
+    MI_INT64, MI_INT8, MI_MATRIX, MI_SINGLE, MI_UINT16, MI_UINT32, MI_UINT64, MI_UINT8, MI_UTF16,
 };
 use super::super::load_error;
 use super::{
@@ -110,12 +110,15 @@ fn parse_numeric_array(
 ) -> BuiltinResult<MatArray> {
     let real_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: numeric array missing real component"))?;
+    let expected = shape_elements(&dims)?;
+    ensure_numeric_count(&real_elem, expected)?;
     if class_is_integer(class) {
         let storage = decode_integer_storage(&real_elem, class, endian)?;
         let imag = if has_imag {
             let imag_elem = read_tagged(cursor, false, endian)?.ok_or_else(|| {
                 load_error("load: complex integer array missing imaginary component")
             })?;
+            ensure_numeric_count(&imag_elem, expected)?;
             Some(decode_integer_storage(&imag_elem, class, endian)?)
         } else {
             None
@@ -135,6 +138,7 @@ fn parse_numeric_array(
     let imag = if has_imag {
         let imag_elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: numeric array missing imaginary component"))?;
+        ensure_numeric_count(&imag_elem, expected)?;
         Some(decode_numeric_storage(&imag_elem, class, endian)?)
     } else {
         None
@@ -264,6 +268,7 @@ fn parse_logical_array(
 ) -> BuiltinResult<MatArray> {
     let elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: logical array missing data block"))?;
+    ensure_numeric_count(&elem, shape_elements(&dims)?)?;
     let data = decode_numeric_values(&elem, endian)?
         .into_iter()
         .map(|v| if v != 0.0 { 1 } else { 0 })
@@ -396,6 +401,22 @@ fn shape_elements(dims: &[usize]) -> BuiltinResult<usize> {
         .ok_or_else(|| load_error("load: MAT array shape exceeds platform limits"))
 }
 
+fn ensure_numeric_count(element: &TaggedData, expected: usize) -> BuiltinResult<()> {
+    let width = match element.data_type {
+        MI_INT8 | MI_UINT8 => 1,
+        MI_INT16 | MI_UINT16 => 2,
+        MI_INT32 | MI_UINT32 | MI_SINGLE => 4,
+        MI_INT64 | MI_UINT64 | MI_DOUBLE => 8,
+        _ => return Err(load_error("load: unsupported numeric MAT payload type")),
+    };
+    if element.data.len() % width != 0 || element.data.len() / width != expected {
+        return Err(load_error(
+            "load: numeric payload length does not match declared array shape",
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_remaining_element_headers(cursor: &Cursor<&[u8]>, count: usize) -> BuiltinResult<()> {
     let remaining = cursor
         .get_ref()
@@ -421,6 +442,21 @@ mod geometry_tests {
             .err()
             .expect("missing million element headers");
         assert!(error.message().contains("more elements"));
+    }
+
+    #[test]
+    fn malformed_numeric_geometry_rejects_before_native_storage_decode() {
+        let element = TaggedData {
+            data_type: MI_DOUBLE,
+            data: 7f64.to_le_bytes().to_vec(),
+        };
+        assert!(ensure_numeric_count(&element, 2).is_err());
+        let malformed = TaggedData {
+            data_type: MI_DOUBLE,
+            data: vec![0; 7],
+        };
+        assert!(ensure_numeric_count(&malformed, 1).is_err());
+        assert!(ensure_numeric_count(&element, 1).is_ok());
     }
 
     #[test]
