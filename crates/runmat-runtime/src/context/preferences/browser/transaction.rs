@@ -1,7 +1,7 @@
 //! Browser-owned read-modify-write transaction; request success is not commit.
 
 use super::connection::{OwnedDatabase, DOCUMENT_KEY, DOCUMENT_STORE};
-use super::store::{decode_document, request_error, transaction_error};
+use super::store::{decode_document, transaction_error};
 use super::{browser_error, BrowserPreferenceError};
 use crate::context::preferences::document::{apply_mutation, DocumentMutation};
 use crate::context::UserPathSnapshot;

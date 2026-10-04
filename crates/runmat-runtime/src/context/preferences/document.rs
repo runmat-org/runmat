@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 
 #[path = "document/mutation.rs"]
 mod mutation;
-pub(super) use mutation::{
-    apply as apply_mutation, DocumentMutation, DocumentMutationError, DocumentPrepared,
-};
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) use mutation::DocumentPrepared;
+pub(super) use mutation::{apply as apply_mutation, DocumentMutation, DocumentMutationError};
 
 pub(super) const PREFERENCE_DOCUMENT_VERSION: u32 = 1;
 pub(super) type EncodedGroups = BTreeMap<String, BTreeMap<String, ValuePayload>>;

@@ -7,6 +7,7 @@ use runmat_execution::CancellationReason;
 use runmat_value::IntValue;
 use std::cell::RefCell;
 use std::future::Future;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};

@@ -18,7 +18,6 @@ use crate::execution::CpuCooperationBudget;
 use futures::lock::Mutex;
 use runmat_value::Value;
 use std::fmt;
-use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
