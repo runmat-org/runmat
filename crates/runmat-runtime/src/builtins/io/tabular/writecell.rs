@@ -154,7 +154,16 @@ async fn writecell_builtin(
             )
             .await?
         }
-        OutputFileType::Spreadsheet => write_spreadsheet_cells(&selected, &table, &options).await?,
+        OutputFileType::Spreadsheet => {
+            write_spreadsheet_cells(
+                runtime.as_ref(),
+                &mut cooperation,
+                &selected,
+                &table,
+                &options,
+            )
+            .await?
+        }
     };
     cooperation.completed(0).await?;
     selected.check().map_err(|source| {

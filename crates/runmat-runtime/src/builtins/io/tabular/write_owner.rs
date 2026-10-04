@@ -1,14 +1,15 @@
 //! One selected-provider writer authority shared by cell and spreadsheet sinks.
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use futures::lock::Mutex as AsyncMutex;
-use runmat_filesystem::OpenOptions;
-
+use super::cooperation::{await_io, TabularCooperation};
 use super::path::TabularFsPath;
+use crate::context::RuntimeContext;
+use crate::RuntimeError;
+use futures::lock::Mutex as AsyncMutex;
 
 pub(super) type WriteLock = Arc<AsyncMutex<()>>;
 type WeakWriteLock = Weak<AsyncMutex<()>>;
@@ -82,46 +83,77 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-pub(super) async fn safe_replace_file(selected: &TabularFsPath, bytes: &[u8]) -> io::Result<()> {
-    let temp_path = temporary_sibling_path(selected.path());
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    let mut file = selected.open_sibling_with(&temp_path, &options).await?;
-    let staged = async {
-        for chunk in bytes.chunks(4096) {
-            selected.check()?;
-            file.write_all(chunk)?;
-        }
-        selected.check()?;
-        file.flush_async().await?;
-        selected.check()?;
-        file.sync_all_async().await?;
-        selected.check()
-    }
-    .await;
-    drop(file);
-    if let Err(source) = staged {
-        let _ = selected.remove_sibling(&temp_path).await;
-        return Err(source);
-    }
-    if let Err(source) = selected.replace_from_sibling(&temp_path).await {
-        let _ = selected.remove_sibling(&temp_path).await;
-        return Err(source);
-    }
-    Ok(())
+#[derive(Debug)]
+pub(super) enum StagedWriteError {
+    Io(io::Error),
+    Control(RuntimeError),
 }
 
-fn temporary_sibling_path(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("tabular");
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    parent.join(format!(".{name}.runmat-tmp-{}-{nanos}", std::process::id()))
+pub(super) async fn safe_replace_file(
+    runtime: Option<&RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
+    builtin: &'static str,
+    selected: &TabularFsPath,
+    bytes: &[u8],
+) -> Result<(), StagedWriteError> {
+    let mut stage = selected
+        .begin_staged_replace()
+        .map_err(StagedWriteError::Io)?
+        .ok_or_else(|| {
+            StagedWriteError::Io(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "selected filesystem provider cannot stage a tabular replacement",
+            ))
+        })?;
+    for chunk in bytes.chunks(4096) {
+        let mut remaining = chunk;
+        while !remaining.is_empty() {
+            cooperation
+                .completed(remaining.len())
+                .await
+                .map_err(StagedWriteError::Control)?;
+            selected.check().map_err(StagedWriteError::Io)?;
+            let written = await_io(runtime, builtin, stage.write_chunk(remaining))
+                .await
+                .map_err(StagedWriteError::Control)?;
+            match written {
+                Ok(0) => {
+                    return Err(StagedWriteError::Io(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "staged tabular write made no progress",
+                    )))
+                }
+                Ok(n) if n > remaining.len() => {
+                    return Err(StagedWriteError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "staged tabular write reported excess progress",
+                    )))
+                }
+                Ok(n) => remaining = &remaining[n..],
+                Err(source) if source.kind() == io::ErrorKind::Interrupted => continue,
+                Err(source) => return Err(StagedWriteError::Io(source)),
+            }
+        }
+    }
+    cooperation
+        .completed(0)
+        .await
+        .map_err(StagedWriteError::Control)?;
+    selected.check().map_err(StagedWriteError::Io)?;
+    await_io(runtime, builtin, stage.flush_and_sync())
+        .await
+        .map_err(StagedWriteError::Control)?
+        .map_err(StagedWriteError::Io)?;
+    cooperation
+        .completed(0)
+        .await
+        .map_err(StagedWriteError::Control)?;
+    selected.check().map_err(StagedWriteError::Io)?;
+    await_io(runtime, builtin, stage.publish())
+        .await
+        .map_err(StagedWriteError::Control)?
+        .map_err(StagedWriteError::Io)?;
+    selected.check().map_err(StagedWriteError::Io)
 }
 
 #[cfg(test)]
@@ -171,8 +203,15 @@ mod tests {
                 .expect("replacement lock");
         assert!(!Arc::ptr_eq(&original_lock, &replacement_lock));
 
-        futures::executor::block_on(safe_replace_file(&selected, b"new\n"))
-            .expect("replace with selected owner");
+        let mut cooperation = TabularCooperation::new(None, "writecell");
+        futures::executor::block_on(safe_replace_file(
+            None,
+            &mut cooperation,
+            "writecell",
+            &selected,
+            b"new\n",
+        ))
+        .expect("replace with selected owner");
         assert_eq!(
             original.read_project_path(&destination).expect("original"),
             b"new\n"

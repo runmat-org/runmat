@@ -27,14 +27,15 @@ pub(super) async fn write_delimited_cells(
 
     if options.write_mode == WriteMode::Overwrite {
         let payload = build_delimited_payload(table, options, &delimiter, line_ending);
-        write_owner::safe_replace_file(selected, &payload)
+        write_owner::safe_replace_file(runtime, cooperation, BUILTIN_NAME, selected, &payload)
             .await
-            .map_err(|source| {
-                writecell_error_with_source(
+            .map_err(|source| match source {
+                write_owner::StagedWriteError::Control(error) => error,
+                write_owner::StagedWriteError::Io(source) => writecell_error_with_source(
                     &WRITECELL_ERROR_IO,
                     "writecell: failed to replace delimited text file",
                     source,
-                )
+                ),
             })?;
         return Ok(payload.len());
     }
@@ -293,6 +294,8 @@ async fn append_needs_line_ending(selected: &TabularFsPath) -> BuiltinResult<boo
 }
 
 pub(super) async fn write_spreadsheet_cells(
+    runtime: Option<&crate::context::RuntimeContext>,
+    cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
     table: &CellTable,
     options: &WriteCellOptions,
@@ -318,14 +321,15 @@ pub(super) async fn write_spreadsheet_cells(
     }
 
     let bytes = build_xlsx_workbook(table, &options.sheet_name(), range_start)?;
-    write_owner::safe_replace_file(selected, &bytes)
+    write_owner::safe_replace_file(runtime, cooperation, BUILTIN_NAME, selected, &bytes)
         .await
-        .map_err(|source| {
-            writecell_error_with_source(
+        .map_err(|source| match source {
+            write_owner::StagedWriteError::Control(error) => error,
+            write_owner::StagedWriteError::Io(source) => writecell_error_with_source(
                 &WRITECELL_ERROR_IO,
                 "writecell: failed to replace spreadsheet file",
                 source,
-            )
+            ),
         })?;
     Ok(bytes.len())
 }

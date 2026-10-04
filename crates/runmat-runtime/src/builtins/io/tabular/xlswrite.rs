@@ -22,6 +22,7 @@ use crate::builtins::common::fs::expand_user_path;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+use super::cooperation::TabularCooperation;
 use super::path::{TabularFsOwner, TabularFsPath};
 use super::write_owner;
 use super::writecell::{self, CellTable, CellValue, RangeStart};
@@ -115,14 +116,16 @@ async fn write_spreadsheet(filename: Value, data: Value, rest: Vec<Value>) -> Bu
     let mut workbook = load_workbook_or_new(&selected).await?;
     workbook.overlay(&request, table)?;
     let bytes = workbook.to_xlsx_bytes()?;
-    write_owner::safe_replace_file(&selected, &bytes)
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    write_owner::safe_replace_file(None, &mut cooperation, BUILTIN_NAME, &selected, &bytes)
         .await
-        .map_err(|source| {
-            xlswrite_error_with_source(
+        .map_err(|source| match source {
+            write_owner::StagedWriteError::Control(error) => error,
+            write_owner::StagedWriteError::Io(source) => xlswrite_error_with_source(
                 &XLSWRITE_ERROR_IO,
                 "xlswrite: failed to replace spreadsheet file",
                 source,
-            )
+            ),
         })?;
     Ok(bytes.len())
 }
