@@ -5,8 +5,12 @@ mod response_mode;
 mod webread;
 mod websave;
 mod webwrite;
+mod weboptions;
+mod route;
 
 pub use self::response_mode::*;
+pub use self::route::*;
+pub use self::weboptions::*;
 pub use self::webread::*;
 pub use self::websave::*;
 pub use self::webwrite::*;
@@ -15,4 +19,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(webread::ENTRIES.iter().copied());
     values.extend(websave::ENTRIES.iter().copied());
     values.extend(webwrite::ENTRIES.iter().copied());
+    values.extend(weboptions::ENTRIES.iter().copied());
 }
