@@ -1,4 +1,6 @@
+use super::names::XmlName;
 use super::*;
+
 #[async_recursion::async_recursion(?Send)]
 pub(super) async fn serialize_xml_value(
     value: &Value,
@@ -49,34 +51,39 @@ async fn serialize_xml_element_object(
         .or_else(|| object.properties.get("NodeName"))
         .ok_or_else(|| compat_error("xmlwrite", "xmlwrite: element object is missing TagName"))
         .and_then(|value| scalar_text(value, "xmlwrite", "TagName"))?;
-    let attrs = object
-        .properties
-        .get("Attributes")
-        .and_then(|value| match value {
-            Value::Struct(st) => Some(st),
-            _ => None,
-        });
-    let text = object
-        .properties
-        .get("TextContent")
-        .and_then(|value| scalar_text(value, "xmlwrite", "TextContent").ok())
-        .unwrap_or_default();
-    let children = object
-        .properties
-        .get("ChildNodes")
-        .and_then(|value| match value {
-            Value::Cell(cell) => Some(cell.data.as_slice()),
-            _ => None,
-        })
-        .unwrap_or(&[]);
-    let mut out = format!("<{}", xml_name(&name)?);
+    let attrs = match object.properties.get("Attributes") {
+        None => None,
+        Some(Value::Struct(st)) => Some(st),
+        Some(_) => {
+            return Err(compat_error(
+                "xmlwrite",
+                "xmlwrite: Attributes must be a scalar struct",
+            ))
+        }
+    };
+    let text = match object.properties.get("TextContent") {
+        None => String::new(),
+        Some(value) => scalar_text(value, "xmlwrite", "TextContent")?,
+    };
+    let children = match object.properties.get("ChildNodes") {
+        None => &[][..],
+        Some(Value::Cell(cell)) => cell.data.as_slice(),
+        Some(_) => {
+            return Err(compat_error(
+                "xmlwrite",
+                "xmlwrite: ChildNodes must be a cell array",
+            ))
+        }
+    };
+    let name = XmlName::parse(&name)?;
+    let mut out = format!("<{name}");
     if let Some(attrs) = attrs {
         for (name, value) in &attrs.fields {
             cooperation.completed(name.len()).await?;
             let value = scalar_text(value, "xmlwrite", "attribute value")?;
             out.push_str(&format!(
                 " {}=\"{}\"",
-                xml_name(name)?,
+                XmlName::parse(name)?,
                 xml_attr_escape(&value, cooperation).await?
             ));
         }
@@ -90,7 +97,7 @@ async fn serialize_xml_element_object(
     for child in children {
         out.push_str(&serialize_xml_value(child, cooperation).await?);
     }
-    out.push_str(&format!("</{}>", xml_name(&name)?));
+    out.push_str(&format!("</{name}>"));
     Ok(out)
 }
 
@@ -99,7 +106,7 @@ async fn serialize_xml_struct(
     st: &StructValue,
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<String> {
-    let root = xml_name(root_name)?;
+    let root = XmlName::parse(root_name)?;
     let mut out = format!("<{root}>");
     for (name, value) in &st.fields {
         out.push_str(&serialize_xml_struct_field(name, value, cooperation).await?);
@@ -115,7 +122,7 @@ async fn serialize_xml_struct_field(
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<String> {
     cooperation.completed(name.len()).await?;
-    let name = xml_name(name)?;
+    let name = XmlName::parse(name)?;
     match value {
         Value::Struct(st) => {
             let mut out = format!("<{name}>");
@@ -130,7 +137,7 @@ async fn serialize_xml_struct_field(
         Value::Cell(cell) => {
             let mut out = String::new();
             for value in &cell.data {
-                out.push_str(&serialize_xml_struct_field(&name, value, cooperation).await?);
+                out.push_str(&serialize_xml_struct_field(name.as_str(), value, cooperation).await?);
             }
             Ok(out)
         }
@@ -143,9 +150,9 @@ async fn serialize_xml_struct_field(
 
 pub(super) fn scalar_xml_text(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            scalar_text(value, "xmlwrite", "struct field")
+        }
         Value::Num(number) => Ok(number.to_string()),
         Value::Int(number) => Ok(number.decimal_string()),
         Value::Bool(flag) => Ok(flag.to_string()),
@@ -154,13 +161,6 @@ pub(super) fn scalar_xml_text(value: &Value) -> BuiltinResult<String> {
             "xmlwrite: struct XML fields must contain scalar text or nested structs",
         )),
     }
-}
-
-fn xml_name(name: &str) -> BuiltinResult<String> {
-    if name.is_empty() || name.chars().any(char::is_whitespace) {
-        return Err(compat_error("xmlwrite", "xmlwrite: invalid XML name"));
-    }
-    Ok(name.to_string())
 }
 
 async fn xml_text_escape(value: &str, cooperation: &mut XmlCooperation) -> BuiltinResult<String> {
@@ -204,3 +204,7 @@ async fn xml_attr_escape(value: &str, cooperation: &mut XmlCooperation) -> Built
     cooperation.completed(completed).await?;
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "serialize/tests.rs"]
+mod tests;

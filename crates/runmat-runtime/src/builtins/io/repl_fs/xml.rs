@@ -322,6 +322,9 @@ mod serialize;
 use serialize::scalar_xml_text;
 use serialize::serialize_xml_value;
 
+#[path = "xml/names.rs"]
+mod names;
+
 #[cfg(test)]
 #[path = "xml/tests.rs"]
 mod tests;
