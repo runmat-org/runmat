@@ -1,11 +1,11 @@
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, ValueLimits,
-    ValuePayload,
+    CallableValue, DenseValue, DurablePlainObject, ElementType, ExceptionValue, InlineValue,
+    SparseValue, ValueLimits, ValuePayload,
 };
 use runmat_value::{
-    CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, MException, ObjectInstance, SparseTensor, StringArray, StructValue, Tensor,
-    Value,
+    CellArray, CharArray, Closure, ComplexTensor, DynamicPropertyDef, IntValue,
+    IntegerComplexStorage, IntegerStorage, LogicalArray, MException, ObjectArray, ObjectInstance,
+    SparseTensor, StringArray, StructArray, StructValue, Tensor, Value,
 };
 
 use super::ValueCodecError;
@@ -13,6 +13,15 @@ use super::ValueCodecError;
 pub fn decode_inline_value(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
     payload
         .validate(ValueLimits::default())
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    decode(payload, "$")
+}
+
+pub(super) fn decode_durable_inline_value(
+    payload: &ValuePayload,
+) -> Result<Value, ValueCodecError> {
+    payload
+        .validate_for_durable_storage(ValueLimits::default())
         .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
     decode(payload, "$")
 }
@@ -58,10 +67,10 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
                 .map_err(|error| ValueCodecError::invalid(path, error))?,
         )),
         InlineValue::Char { shape, code_points } => {
-            if shape.len() != 2 {
+            if shape.len() < 2 {
                 return Err(ValueCodecError::invalid(
                     path,
-                    "char arrays require exactly two dimensions",
+                    "char arrays require at least two dimensions",
                 ));
             }
             let shape = usize_shape(shape, path)?;
@@ -73,7 +82,7 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
                 })
                 .collect::<Result<_, _>>()?;
             Ok(Value::CharArray(
-                CharArray::new(chars, shape[0], shape[1])
+                CharArray::new_with_shape(chars, shape)
                     .map_err(|error| ValueCodecError::invalid(path, error))?,
             ))
         }
@@ -141,7 +150,84 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
                 .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
             Ok(Value::Object(object))
         }
+        InlineValue::DurablePlainObject(value) => {
+            Ok(Value::Object(decode_plain_object(value, path)?))
+        }
+        InlineValue::DurableStructArray(value) => {
+            let names = value
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect();
+            let values = value
+                .fields
+                .iter()
+                .flat_map(|field| {
+                    field
+                        .values
+                        .iter()
+                        .enumerate()
+                        .map(move |(index, item)| (field.name.as_str(), index, item))
+                })
+                .map(|(name, index, item)| {
+                    decode(item, &format!("{}[{index}]", field_path(path, name)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            StructArray::normalize_field_major(names, values, usize_shape(&value.shape, path)?)
+                .map_err(|error| ValueCodecError::invalid(path, error))
+        }
+        InlineValue::DurableObjectArray(value) => {
+            let objects = value
+                .elements
+                .iter()
+                .enumerate()
+                .map(|(index, item)| decode_plain_object(item, &format!("{path}[{index}]")))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::ObjectArray(
+                ObjectArray::from_objects(
+                    value.class_identity.clone(),
+                    objects,
+                    usize_shape(&value.shape, path)?,
+                )
+                .map_err(|error| ValueCodecError::invalid(path, error))?,
+            ))
+        }
     }
+}
+
+fn decode_plain_object(
+    value: &DurablePlainObject,
+    path: &str,
+) -> Result<ObjectInstance, ValueCodecError> {
+    let mut object = ObjectInstance::new(value.class_identity.clone());
+    for field in &value.properties {
+        object.properties.insert(
+            field.name.clone(),
+            decode(&field.value, &field_path(path, &field.name))?,
+        );
+    }
+    for definition in &value.dynamic_properties {
+        let property = DynamicPropertyDef {
+            name: definition.name.clone(),
+            defining_class: definition.defining_class.clone(),
+            metadata_handle: None,
+            get_access: definition.get_access.clone(),
+            set_access: definition.set_access.clone(),
+            dependent: definition.dependent,
+            hidden: definition.hidden,
+            transient: definition.transient,
+            non_copyable: definition.non_copyable,
+            abort_set: definition.abort_set,
+            set_observable: definition.set_observable,
+            get_observable: definition.get_observable,
+            description: definition.description.clone(),
+        };
+        object
+            .dynamic_properties
+            .get_or_insert_with(Default::default)
+            .insert(definition.name.clone(), property);
+    }
+    Ok(object)
 }
 
 fn decode_dense(value: &DenseValue, path: &str) -> Result<Value, ValueCodecError> {

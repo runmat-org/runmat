@@ -5,6 +5,11 @@ use crate::ContractError;
 
 mod identity;
 mod validation;
+mod durable_aggregate;
+pub use durable_aggregate::{
+    DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
+    DurableStructArrayField,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValueLimits {
@@ -41,6 +46,12 @@ pub enum ValuePayload {
 impl ValuePayload {
     pub fn validate(&self, limits: ValueLimits) -> Result<(), ContractError> {
         validation::validate(self, limits)
+    }
+
+    /// Preference-document payloads may contain durable aggregate tags that
+    /// the V2 execution transport deliberately rejects.
+    pub fn validate_for_durable_storage(&self, limits: ValueLimits) -> Result<(), ContractError> {
+        validation::validate_for_durable_storage(self, limits)
     }
 
     pub fn logical_digest(&self) -> Result<Digest, ContractError> {
@@ -135,6 +146,9 @@ pub enum InlineValue {
     Exception(ExceptionValue),
     Callable(CallableValue),
     ImmutableValueClass(RegisteredData),
+    DurablePlainObject(DurablePlainObject),
+    DurableStructArray(DurableStructArray),
+    DurableObjectArray(DurableObjectArray),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

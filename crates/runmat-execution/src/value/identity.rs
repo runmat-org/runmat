@@ -206,6 +206,12 @@ fn encode_inline(
             encode_payloads(encoder, &value.captures)
         }
         InlineValue::ImmutableValueClass(value) => encode_registered(encoder, 23, value),
+        InlineValue::DurablePlainObject(_)
+        | InlineValue::DurableStructArray(_)
+        | InlineValue::DurableObjectArray(_) => Err(ContractError::invalid(
+            "V2 execution value",
+            "durable preference aggregates require a preference document",
+        )),
     }
 }
 

@@ -1,6 +1,7 @@
 use super::{
-    DenseValue, ExceptionValue, InlineValue, RegisteredData, StructField, ValueLimits,
-    ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
+    DenseValue, DurableObjectArray, DurablePlainObject, DurableStructArray, ExceptionValue,
+    InlineValue, RegisteredData, StructField, ValueLimits, ValuePayload, ValueRef, ValueRefKind,
+    ValueTransportContext,
 };
 use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 
@@ -8,6 +9,23 @@ pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<()
     ValidationBudget {
         limits,
         transport: None,
+        durable: false,
+        nodes: 0,
+        inline_bytes: 0,
+        elements: 0,
+        text_bytes: 0,
+    }
+    .payload(payload, 0)
+}
+
+pub(super) fn validate_for_durable_storage(
+    payload: &ValuePayload,
+    limits: ValueLimits,
+) -> Result<(), ContractError> {
+    ValidationBudget {
+        limits,
+        transport: None,
+        durable: true,
         nodes: 0,
         inline_bytes: 0,
         elements: 0,
@@ -24,6 +42,7 @@ pub(super) fn validate_for_transport(
     ValidationBudget {
         limits,
         transport: Some(context),
+        durable: false,
         nodes: 0,
         inline_bytes: 0,
         elements: 0,
@@ -35,6 +54,7 @@ pub(super) fn validate_for_transport(
 struct ValidationBudget<'a> {
     limits: ValueLimits,
     transport: Option<ValueTransportContext<'a>>,
+    durable: bool,
     nodes: u64,
     inline_bytes: u64,
     elements: u64,
@@ -127,6 +147,23 @@ impl ValidationBudget<'_> {
                 }
             }
             InlineValue::Struct(fields) => self.fields(fields, depth)?,
+            InlineValue::DurablePlainObject(value) if self.durable => {
+                self.plain_object(value, depth)?
+            }
+            InlineValue::DurableStructArray(value) if self.durable => {
+                self.struct_array(value, depth)?
+            }
+            InlineValue::DurableObjectArray(value) if self.durable => {
+                self.object_array(value, depth)?
+            }
+            InlineValue::DurablePlainObject(_)
+            | InlineValue::DurableStructArray(_)
+            | InlineValue::DurableObjectArray(_) => {
+                return Err(ContractError::invalid(
+                    "V2 execution value",
+                    "durable preference aggregate tags are not admitted by V2 transport",
+                ));
+            }
             InlineValue::Symbolic(value) | InlineValue::ImmutableValueClass(value) => {
                 self.registered(value, depth)?;
             }
@@ -195,6 +232,114 @@ impl ValidationBudget<'_> {
             "struct fields",
             depth,
         )
+    }
+
+    fn plain_object(
+        &mut self,
+        value: &DurablePlainObject,
+        depth: u16,
+    ) -> Result<(), ContractError> {
+        self.class_identity(&value.class_identity)?;
+        self.fields(&value.properties, depth)?;
+        if value.dynamic_properties.len() > self.limits.max_fields as usize {
+            return Err(ContractError::Limit {
+                field: "dynamic object properties",
+                limit: self.limits.max_fields.into(),
+            });
+        }
+        let mut previous: Option<&str> = None;
+        for property in &value.dynamic_properties {
+            self.text(&property.name)?;
+            if previous.is_some_and(|previous| previous >= property.name.as_str()) {
+                return Err(ContractError::invalid(
+                    "dynamic object properties",
+                    "names must be unique and sorted",
+                ));
+            }
+            previous = Some(&property.name);
+            self.class_identity(&property.defining_class)?;
+            self.text(&property.description)?;
+        }
+        Ok(())
+    }
+
+    fn struct_array(
+        &mut self,
+        value: &DurableStructArray,
+        depth: u16,
+    ) -> Result<(), ContractError> {
+        if value.shape.len() < 2 {
+            return Err(ContractError::invalid(
+                "structure array",
+                "shape requires at least two dimensions",
+            ));
+        }
+        let count = checked_product(&value.shape)?;
+        self.elements(count)?;
+        if value.fields.len() > self.limits.max_fields as usize {
+            return Err(ContractError::Limit {
+                field: "structure array fields",
+                limit: self.limits.max_fields.into(),
+            });
+        }
+        let mut previous: Option<&str> = None;
+        for field in &value.fields {
+            self.text(&field.name)?;
+            if previous.is_some_and(|previous| previous >= field.name.as_str())
+                || field.values.len() as u64 != count
+            {
+                return Err(ContractError::invalid(
+                    "structure array",
+                    "field names or column lengths are invalid",
+                ));
+            }
+            previous = Some(&field.name);
+            for item in &field.values {
+                self.payload(item, depth + 1)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn object_array(
+        &mut self,
+        value: &DurableObjectArray,
+        depth: u16,
+    ) -> Result<(), ContractError> {
+        if value.shape.len() < 2 {
+            return Err(ContractError::invalid(
+                "object array",
+                "shape requires at least two dimensions",
+            ));
+        }
+        self.class_identity(&value.class_identity)?;
+        let count = checked_product(&value.shape)?;
+        if count != value.elements.len() as u64 {
+            return Err(ContractError::invalid(
+                "object array",
+                "element count does not match shape",
+            ));
+        }
+        self.elements(count)?;
+        for element in &value.elements {
+            if element.class_identity != value.class_identity {
+                return Err(ContractError::invalid(
+                    "object array",
+                    "element class does not match array class",
+                ));
+            }
+            self.plain_object(element, depth + 1)?;
+        }
+        Ok(())
+    }
+
+    fn class_identity(
+        &mut self,
+        identity: &runmat_types::ClassIdentity,
+    ) -> Result<(), ContractError> {
+        runmat_types::ClassIdentity::new(identity.display_name())
+            .map_err(|_| ContractError::invalid("class identity", "invalid class name"))?;
+        self.text(identity.display_name())
     }
 
     fn registered(&mut self, value: &RegisteredData, depth: u16) -> Result<(), ContractError> {

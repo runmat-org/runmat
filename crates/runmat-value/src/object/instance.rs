@@ -22,6 +22,17 @@ enum NativeObjectPayload {
     MatFileAuthority(ForeignRef),
 }
 
+/// Whether a value object carries host- or session-owned native state.
+/// Serialization must match this exhaustive classification, not class text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectPersistencePayloadKind {
+    PlainValue,
+    ContainersMap,
+    ForeignHostControl,
+    DatasetAuthority,
+    MatFileAuthority,
+}
+
 impl Trace for NativeObjectPayload {
     fn trace(&self, tracer: &mut dyn Tracer) {
         match self {
@@ -34,6 +45,32 @@ impl Trace for NativeObjectPayload {
 }
 
 impl ObjectInstance {
+    pub fn persistence_payload_kind(&self) -> ObjectPersistencePayloadKind {
+        match self.native_payload.as_deref() {
+            None => ObjectPersistencePayloadKind::PlainValue,
+            Some(NativeObjectPayload::ContainersMap(_)) => {
+                ObjectPersistencePayloadKind::ContainersMap
+            }
+            Some(NativeObjectPayload::ForeignHostControl(_)) => {
+                ObjectPersistencePayloadKind::ForeignHostControl
+            }
+            Some(NativeObjectPayload::DatasetAuthority(_)) => {
+                ObjectPersistencePayloadKind::DatasetAuthority
+            }
+            Some(NativeObjectPayload::MatFileAuthority(_)) => {
+                ObjectPersistencePayloadKind::MatFileAuthority
+            }
+        }
+    }
+
+    pub fn dynamic_property_definitions(
+        &self,
+    ) -> impl Iterator<Item = (&String, &DynamicPropertyDef)> {
+        self.dynamic_properties
+            .iter()
+            .flat_map(|properties| properties.iter())
+    }
+
     pub fn new(class_name: impl Into<ClassIdentity>) -> Self {
         Self {
             class_name: class_name.into(),

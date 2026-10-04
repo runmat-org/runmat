@@ -1,8 +1,10 @@
 mod decode;
+mod durable;
 mod encode;
 mod error;
 
 pub use decode::decode_inline_value;
+pub use durable::{decode_durable_value, encode_durable_value};
 pub use encode::encode_inline_value;
 pub use error::ValueCodecError;
 
@@ -17,7 +19,75 @@ mod tests {
 
     use runmat_execution::value::{InlineValue, ValuePayload};
 
-    use super::{decode_inline_value, encode_inline_value, ValueCodecError};
+    use super::{
+        decode_durable_value, decode_inline_value, encode_durable_value, encode_inline_value,
+        ValueCodecError,
+    };
+
+    #[test]
+    fn durable_nested_values_keep_character_pages_and_reject_context_bound_callables() {
+        let chars = Value::CharArray(
+            CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1])
+                .expect("character page"),
+        );
+        let value = Value::Cell(CellArray::new(vec![chars], 1, 1).unwrap());
+        assert_eq!(
+            decode_durable_value(&encode_durable_value(&value).unwrap()).unwrap(),
+            value
+        );
+
+        let context_bound = Value::Cell(
+            CellArray::new(vec![Value::FunctionHandle("local_function".into())], 1, 1).unwrap(),
+        );
+        let error = encode_durable_value(&context_bound).unwrap_err();
+        assert!(matches!(error, ValueCodecError::Unsupported { ref path, .. } if path == "$[0]"));
+    }
+
+    #[test]
+    fn preference_aggregates_are_durable_only_and_keep_plain_object_bits() {
+        let mut object = runmat_value::ObjectInstance::new("PreferencePayload");
+        object
+            .properties
+            .insert("revision".into(), Value::Int(IntValue::U64(u64::MAX)));
+        object.properties.insert(
+            "nan".into(),
+            Value::Num(f64::from_bits(0x7ff8_0000_0000_0042)),
+        );
+        let value = Value::Object(object.clone());
+        assert!(encode_inline_value(&value).is_err());
+        let payload = encode_durable_value(&value).expect("plain object is durable");
+        assert!(
+            decode_inline_value(&payload).is_err(),
+            "V2 decoder rejects durable tag"
+        );
+        assert!(payload
+            .validate(runmat_execution::value::ValueLimits::default())
+            .is_err());
+        let Value::Object(decoded) = decode_durable_value(&payload).unwrap() else {
+            panic!("plain object")
+        };
+        assert_eq!(decoded.class_name, object.class_name);
+        assert_eq!(
+            decoded.properties["revision"],
+            Value::Int(IntValue::U64(u64::MAX))
+        );
+        let Value::Num(nan) = decoded.properties["nan"] else {
+            panic!("NaN")
+        };
+        assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0042);
+
+        let array = Value::ObjectArray(
+            runmat_value::ObjectArray::from_objects(
+                "PreferencePayload",
+                vec![object],
+                vec![1, 1, 1],
+            )
+            .unwrap(),
+        );
+        let payload = encode_durable_value(&array).unwrap();
+        assert_eq!(decode_durable_value(&payload).unwrap(), array);
+        assert!(decode_inline_value(&payload).is_err());
+    }
 
     #[test]
     fn portable_value_roundtrip_is_centralized_and_bit_exact() {
