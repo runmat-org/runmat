@@ -319,10 +319,12 @@ use writer::*;
 
 #[path = "writecell/xlsx.rs"]
 mod xlsx;
+#[cfg(test)]
+pub(super) use xlsx::build_sheet_xml;
 pub(super) use xlsx::{
     append_escaped_xml_text_character, append_sheet_cell_xml, append_sheet_text_end,
-    append_sheet_text_start, build_sheet_xml, build_xlsx_workbook, write_xlsx_part,
-    SHEET_XML_FOOTER, SHEET_XML_HEADER,
+    append_sheet_text_start, build_xlsx_workbook, write_xlsx_part, SHEET_XML_FOOTER,
+    SHEET_XML_HEADER,
 };
 
 fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter: &str) -> String {

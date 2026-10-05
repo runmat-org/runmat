@@ -24,7 +24,7 @@ impl XlsTable {
                     if !matches!(member, Value::GpuTensor(_)) {
                         admit_cell_value(member)?;
                     }
-                    if (index + 1) % 1024 == 0 {
+                    if (index + 1).is_multiple_of(1024) {
                         cooperation.completed(1024).await?;
                     }
                 }

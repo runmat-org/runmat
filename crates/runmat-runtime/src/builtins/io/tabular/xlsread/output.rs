@@ -284,7 +284,7 @@ async fn rectangular_shape(
     let mut col_count = 0;
     for (index, row) in rows.iter().enumerate() {
         col_count = col_count.max(row.len());
-        if (index + 1) % 1024 == 0 {
+        if (index + 1).is_multiple_of(1024) {
             checkpoint_cells(cooperation, selected, 1024).await?;
         }
     }
