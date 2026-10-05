@@ -46,6 +46,10 @@ fn permit(limit: usize) -> Permit {
     }
 }
 
+fn floating_charge(payload_and_shape: usize) -> usize {
+    payload_and_shape + std::mem::size_of::<RustExactRelease>()
+}
+
 #[test]
 fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
     let shape_bytes = 2 * std::mem::size_of::<usize>();
@@ -92,7 +96,7 @@ fn exact_two_dimensional_shape_rejects_count_overflow_without_a_claim() {
 
 #[test]
 fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
-    let total = 3 * std::mem::size_of::<f32>() + 2 * std::mem::size_of::<usize>();
+    let total = floating_charge(3 * std::mem::size_of::<f32>() + 2 * std::mem::size_of::<usize>());
     let quota = permit(total);
     let mut allocation = ExactHostTensor2dAllocation::new(NumericDType::F32, 3, 1, &quota).unwrap();
     allocation
@@ -110,8 +114,30 @@ fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
 }
 
 #[test]
+fn exact_float_release_owner_is_precharged_before_payload_allocation() {
+    let payload_and_shape = 8 + 2 * std::mem::size_of::<usize>();
+    let denied = permit(floating_charge(payload_and_shape) - 1);
+    assert!(matches!(
+        ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 1, &denied),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
+    let admitted = permit(floating_charge(payload_and_shape));
+    let output = ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 1, &admitted)
+        .unwrap()
+        .into_tensor()
+        .unwrap();
+    assert_eq!(
+        admitted.retained.load(Ordering::SeqCst),
+        floating_charge(payload_and_shape)
+    );
+    drop(output);
+    assert_eq!(admitted.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation() {
-    let float_quota = permit(16 + 2 * std::mem::size_of::<usize>());
+    let float_quota = permit(floating_charge(16 + 2 * std::mem::size_of::<usize>()));
     let mut floats = ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 2, &float_quota)
         .expect("exact floating owner");
     let float_pointer = floats.as_f64_slice_mut().unwrap().as_ptr();
@@ -132,7 +158,7 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
     drop(tensor);
     assert_eq!(float_quota.retained.load(Ordering::SeqCst), 0);
 
-    let single_quota = permit(4 + 2 * std::mem::size_of::<usize>());
+    let single_quota = permit(floating_charge(4 + 2 * std::mem::size_of::<usize>()));
     let mut singles = ExactHostTensor2dAllocation::new(NumericDType::F32, 1, 1, &single_quota)
         .expect("exact single owner");
     let single_pointer = singles.as_f32_slice_mut().unwrap().as_ptr();
@@ -176,9 +202,9 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
 
 #[test]
 fn exact_float32_allocation_moves_into_tensor_without_payload_copy() {
-    let permit = permit(12);
+    let permit = permit(floating_charge(12));
     let mut owned = ExactHostNumericAllocation::new(NumericDType::F32, 3, &permit).unwrap();
-    assert_eq!(permit.retained.load(Ordering::SeqCst), 12);
+    assert_eq!(permit.retained.load(Ordering::SeqCst), floating_charge(12));
     assert_eq!(owned.capacity_bytes(), 12);
     owned
         .as_f32_slice_mut()
@@ -315,7 +341,7 @@ fn sole_owner_integer_mutation_keeps_block_and_materialization_releases_claim() 
 
 #[test]
 fn exact_double_and_empty_allocations_have_exact_reported_capacity() {
-    let double_permit = permit(16);
+    let double_permit = permit(floating_charge(16));
     let mut double = ExactHostNumericAllocation::new(NumericDType::F64, 2, &double_permit).unwrap();
     double
         .as_f64_slice_mut()
@@ -324,7 +350,8 @@ fn exact_double_and_empty_allocations_have_exact_reported_capacity() {
     let tensor = Tensor::from_host_buffer(double.into_host_buffer(), vec![1, 2]).unwrap();
     assert_eq!(tensor.as_f64_slice(), Some([1.0, 2.0].as_slice()));
 
-    let empty = ExactHostNumericAllocation::new(NumericDType::F32, 0, &permit(0)).unwrap();
+    let empty =
+        ExactHostNumericAllocation::new(NumericDType::F32, 0, &permit(floating_charge(0))).unwrap();
     assert_eq!(empty.capacity_bytes(), 0);
     let tensor = Tensor::from_host_buffer(empty.into_host_buffer(), vec![0, 1]).unwrap();
     assert!(tensor.is_empty());
@@ -332,9 +359,9 @@ fn exact_double_and_empty_allocations_have_exact_reported_capacity() {
 
 #[test]
 fn rejected_shape_and_unfinished_owner_release_reservation() {
-    let quota = permit(8);
+    let quota = permit(floating_charge(8));
     let owned = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 8);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), floating_charge(8));
     assert!(Tensor::from_host_buffer(owned.into_host_buffer(), vec![2, 1]).is_err());
     assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
 
@@ -345,18 +372,18 @@ fn rejected_shape_and_unfinished_owner_release_reservation() {
 
 #[test]
 fn shared_clone_retains_reservation_until_original_allocation_drops() {
-    let quota = permit(8);
+    let quota = permit(floating_charge(8));
     let mut owned = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
     owned.as_f64_slice_mut().unwrap()[0] = 3.0;
     let original = Tensor::from_host_buffer(owned.into_host_buffer(), vec![1, 1]).unwrap();
     let mut clone = original.clone();
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 8);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), floating_charge(8));
     clone.set2(0, 0, 4.0).unwrap();
     // Copy-on-write creates a new allocation outside the original call. Its
     // resource admission belongs to that later mutation, not this permit.
     assert_eq!(clone.as_f64_slice(), Some([4.0].as_slice()));
     assert_eq!(original.as_f64_slice(), Some([3.0].as_slice()));
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 8);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), floating_charge(8));
     drop(original);
     assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
 }
@@ -381,16 +408,19 @@ fn exact_allocation_rejects_over_budget_and_overflow_without_leaking() {
 
 #[test]
 fn simultaneous_reservations_are_charged_until_each_owner_drops() {
-    let permit = permit(16);
+    let permit = permit(floating_charge(8) * 2);
     let first = ExactHostNumericAllocation::new(NumericDType::F64, 1, &permit).unwrap();
     let second = ExactHostNumericAllocation::new(NumericDType::F32, 2, &permit).unwrap();
-    assert_eq!(permit.retained.load(Ordering::SeqCst), 16);
+    assert_eq!(
+        permit.retained.load(Ordering::SeqCst),
+        floating_charge(8) * 2
+    );
     assert!(matches!(
         ExactHostNumericAllocation::new(NumericDType::F32, 1, &permit),
         Err(ExactHostNumericAllocationError::ExceedsPermit)
     ));
     drop(first);
-    assert_eq!(permit.retained.load(Ordering::SeqCst), 8);
+    assert_eq!(permit.retained.load(Ordering::SeqCst), floating_charge(8));
     drop(second);
     assert_eq!(permit.retained.load(Ordering::SeqCst), 0);
 }

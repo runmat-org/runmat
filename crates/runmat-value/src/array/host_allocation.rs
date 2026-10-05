@@ -30,7 +30,29 @@ pub trait HostAllocationRelease: fmt::Debug + Send + Sync {
 pub struct AdoptedHostAllocation {
     pointer: NonNull<u8>,
     provenance: HostAllocationProvenance,
-    release: Arc<dyn HostAllocationRelease>,
+    release: ReleaseAuthority,
+}
+
+enum ReleaseAuthority {
+    Shared(Arc<dyn HostAllocationRelease>),
+    Owned(Box<dyn HostAllocationRelease>),
+}
+
+impl fmt::Debug for ReleaseAuthority {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReleaseAuthority")
+            .finish_non_exhaustive()
+    }
+}
+
+impl ReleaseAuthority {
+    unsafe fn release(&self, pointer: NonNull<u8>) {
+        match self {
+            Self::Shared(authority) => unsafe { authority.release(pointer) },
+            Self::Owned(authority) => unsafe { authority.release(pointer) },
+        }
+    }
 }
 
 impl AdoptedHostAllocation {
@@ -48,7 +70,23 @@ impl AdoptedHostAllocation {
         Self {
             pointer,
             provenance,
-            release,
+            release: ReleaseAuthority::Shared(release),
+        }
+    }
+
+    /// # Safety
+    /// The same unique pointer, layout, and release obligations as `new`
+    /// apply. The caller owns this exact-layout Box for the full allocation
+    /// lifetime; it must reserve the Box's requested bytes before creating it.
+    pub unsafe fn new_owned(
+        pointer: NonNull<u8>,
+        provenance: HostAllocationProvenance,
+        release: Box<dyn HostAllocationRelease>,
+    ) -> Self {
+        Self {
+            pointer,
+            provenance,
+            release: ReleaseAuthority::Owned(release),
         }
     }
 

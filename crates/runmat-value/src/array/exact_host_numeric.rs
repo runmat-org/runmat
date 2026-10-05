@@ -180,6 +180,14 @@ impl ExactHostNumericAllocation {
             .size()
             .checked_add(shape_bytes)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let release_bytes = if dtype.integer_class().is_some() {
+            0
+        } else {
+            Layout::new::<RustExactRelease>().size()
+        };
+        let charged = charged
+            .checked_add(release_bytes)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
         let reservation = permit.reserve_exact(charged)?;
         if dtype.integer_class().is_some() {
             return Ok(Self {
@@ -199,7 +207,7 @@ impl ExactHostNumericAllocation {
             capacity_bytes: layout.size(),
             alignment: layout.align(),
         };
-        let release = Arc::new(RustExactRelease {
+        let release = Box::new(RustExactRelease {
             layout,
             _reservation: reservation,
         });
@@ -217,7 +225,7 @@ impl ExactHostNumericAllocation {
         };
         // SAFETY: the pointer has exactly the recorded layout and the release
         // authority owns that layout until the final host buffer is dropped.
-        let allocation = unsafe { AdoptedHostAllocation::new(pointer, provenance, release) };
+        let allocation = unsafe { AdoptedHostAllocation::new_owned(pointer, provenance, release) };
         Ok(Self {
             allocation: ExactAllocation::Floating(allocation),
             dtype,
