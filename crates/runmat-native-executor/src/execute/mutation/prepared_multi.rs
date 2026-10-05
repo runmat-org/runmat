@@ -119,14 +119,23 @@ impl PreparedMultiAssignment {
                             "prepared fixed output target has no assigned value".into(),
                         )
                     })?;
-                    let local = target::root_local(&place)?;
-                    let root = match self.roots.get(&local) {
-                        Some(reference) => state.arena.get(*reference)?.clone(),
-                        None => root_local_value(state, &place)?,
+                    let (local, reference) = match &place {
+                        // A plain output initializes its local; unlike a
+                        // nested mutation, it has no previous receiver to read.
+                        MirPlace::Local(local) => (*local, state.arena.insert(rhs)),
+                        _ => {
+                            let local = target::root_local(&place)?;
+                            let root = match self.roots.get(&local) {
+                                Some(reference) => state.arena.get(*reference)?.clone(),
+                                None => root_local_value(state, &place)?,
+                            };
+                            let (local, updated) = continuation::assign_to_root(
+                                state, &place, root, rhs, false, true,
+                            )?;
+                            (local, state.arena.insert(updated))
+                        }
                     };
-                    let (local, updated) =
-                        continuation::assign_to_root(state, &place, root, rhs, false, true)?;
-                    self.roots.insert(local, state.arena.insert(updated));
+                    self.roots.insert(local, reference);
                 }
                 PreparedTarget::Sequence { root, destination } => {
                     let current = match self.roots.get(&root) {
