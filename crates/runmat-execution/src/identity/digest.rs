@@ -53,10 +53,10 @@ impl Digest {
     /// Hash the existing JSON identity encoding without retaining a second
     /// serialized buffer. This does not certify allocations in the caller or
     /// in a placement service consuming the resulting digest.
-    pub fn sha256_serialized<T: Serialize>(value: &T) -> Self {
+    pub fn sha256_serialized<T: Serialize>(value: &T) -> serde_json::Result<Self> {
         let mut writer = DigestStream::new();
-        serde_json::to_writer(&mut writer, value).expect("typed digest identity serializes");
-        writer.finish()
+        serde_json::to_writer(&mut writer, value)?;
+        Ok(writer.finish())
     }
 
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
@@ -109,7 +109,14 @@ impl Serialize for Digest {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut text = [0_u8; 71];
+        text[..7].copy_from_slice(b"sha256:");
+        for (index, byte) in self.0.iter().copied().enumerate() {
+            text[7 + index * 2] = HEX[usize::from(byte >> 4)];
+            text[8 + index * 2] = HEX[usize::from(byte & 0x0f)];
+        }
+        serializer.serialize_str(std::str::from_utf8(&text).expect("ASCII digest encoding"))
     }
 }
 
@@ -132,6 +139,31 @@ mod tests {
     fn streaming_json_keeps_existing_digest_schema() {
         let value = ("host", Digest::sha256(b"source"), 17_u64);
         let legacy = Digest::sha256(serde_json::to_vec(&value).unwrap());
-        assert_eq!(Digest::sha256_serialized(&value), legacy);
+        assert_eq!(Digest::sha256_serialized(&value).unwrap(), legacy);
+    }
+
+    #[test]
+    fn serialized_digest_retains_exact_lowercase_presentation() {
+        let value = Digest::sha256(b"no allocation in digest presentation");
+        assert_eq!(
+            serde_json::to_string(&value).unwrap(),
+            serde_json::to_string(&value.to_string()).unwrap()
+        );
+    }
+
+    #[test]
+    fn generic_streaming_serialization_preserves_failure() {
+        use serde::ser::Error as _;
+
+        struct Fails;
+        impl Serialize for Fails {
+            fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(S::Error::custom("deliberate serialization failure"))
+            }
+        }
+        assert!(Digest::sha256_serialized(&Fails).is_err());
     }
 }

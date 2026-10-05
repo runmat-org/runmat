@@ -61,7 +61,7 @@ pub use placement::{
     ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
     ResourceBoundUnavailable, ResourceByteBound, SelectedExecutionCandidate, WholeWorkCandidate,
     WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind, WholeWorkObservation,
-    WholeWorkObservationOutcome, WholeWorkPlacementRequest,
+    WholeWorkObservationOutcome, WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
 };
 pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};

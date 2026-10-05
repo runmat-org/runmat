@@ -527,6 +527,14 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         PlacementSession::select_whole_work(self, request).map_err(runtime_error)
     }
 
+    fn select_whole_work_borrowed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
+    {
+        PlacementSession::select_whole_work_borrowed(self, request).map_err(runtime_error)
+    }
+
     fn observed_candidate_duration(
         &self,
         signature: &PlacementSignature,

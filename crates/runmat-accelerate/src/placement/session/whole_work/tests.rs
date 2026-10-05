@@ -10,6 +10,26 @@ use runmat_runtime::context::RuntimePlacementService;
 use super::*;
 
 #[test]
+fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() {
+    let multi = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
+    let single = WholeWorkPlacementRequestRef {
+        signature: &multi.signature,
+        constraint: multi.constraint,
+        candidates: std::slice::from_ref(&multi.candidates[0]),
+        resources: &multi.resources,
+        deterministic: multi.deterministic,
+        require_transactional_results: multi.require_transactional_results,
+    };
+    let owned = PlacementSession::default()
+        .select_whole_work(multi.clone())
+        .expect("owned route");
+    let fixed = PlacementSession::default()
+        .select_whole_work_borrowed(single)
+        .expect("fixed-size route");
+    assert_eq!(fixed.decision, owned.decision);
+}
+
+#[test]
 fn session_preserves_native_send_affinity_with_local_probe_lease() {
     fn assert_send<T: Send>() {}
     assert_send::<PlacementSession>();

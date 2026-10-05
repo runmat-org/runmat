@@ -29,4 +29,5 @@ pub use resource::{PlacementResourceSnapshot, ProviderResourceSnapshot};
 pub use whole_work::{
     WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind,
     WholeWorkObservation, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
+    WholeWorkPlacementRequestRef,
 };

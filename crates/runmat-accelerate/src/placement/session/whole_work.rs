@@ -2,6 +2,7 @@
 //! resource admission. Unknown durations are learned by executing a real call,
 //! never by replaying effects or inserting a synthetic graph cost.
 
+use smallvec::SmallVec;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -10,7 +11,7 @@ use runmat_execution::{
     ExecutionCandidateDescriptor, ExecutionCandidateKind, PlacementGraph, PlacementGraphCandidate,
     PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest, ResourceByteBound,
     SelectedExecutionCandidate, WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision,
-    WholeWorkDecisionKind, WholeWorkPlacementRequest,
+    WholeWorkDecisionKind, WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
 };
 use runmat_runtime::context::{RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection};
 
@@ -49,23 +50,59 @@ struct Admitted<'a> {
     observation: CandidateObservationEvidence,
 }
 
+struct SelectionDraft {
+    selected: SelectedExecutionCandidate,
+    kind: WholeWorkDecisionKind,
+    predicted_total_ns: Option<u64>,
+    probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    /// The compared graph already owns its validated signature. Other routes
+    /// take the caller's original signature without an intermediate clone.
+    compared_signature: Option<runmat_execution::PlacementSignature>,
+}
+
 impl PlacementSession {
     pub fn select_whole_work(
         &self,
         request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
-        let mut selected = self.select_whole_work_untracked(request)?;
+        let draft = self.select_whole_work_untracked(request.as_ref())?;
+        Ok(self.finish_whole_work_selection(draft, request.signature))
+    }
+
+    pub fn select_whole_work_borrowed(
+        &self,
+        request: WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
+        let draft = self.select_whole_work_untracked(request)?;
+        Ok(self.finish_whole_work_selection(draft, (*request.signature).clone()))
+    }
+
+    fn finish_whole_work_selection(
+        &self,
+        draft: SelectionDraft,
+        signature: runmat_execution::PlacementSignature,
+    ) -> RuntimeWholeWorkSelection {
+        let mut selected = RuntimeWholeWorkSelection {
+            decision: WholeWorkDecision {
+                signature: draft.compared_signature.unwrap_or(signature),
+                selected: draft.selected,
+                kind: draft.kind,
+                predicted_total_ns: draft.predicted_total_ns,
+            },
+            probe: draft.probe,
+            observation_permit: None,
+        };
         selected.observation_permit = Some(
             self.observation_permits
                 .register(&selected.decision.signature),
         );
-        Ok(selected)
+        selected
     }
 
     fn select_whole_work_untracked(
         &self,
-        request: WholeWorkPlacementRequest,
-    ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
+        request: WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<SelectionDraft, PlacementPlanError> {
         request.validate().map_err(invalid_request)?;
         if request.resources.cancellation_requested {
             return Err(PlacementPlanError {
@@ -74,9 +111,9 @@ impl PlacementSession {
             });
         }
         self.drain_observations();
-        let mut admitted = Vec::new();
+        let mut admitted: SmallVec<[Admitted<'_>; 1]> = SmallVec::new();
         let mut insufficient_resource_evidence = false;
-        for candidate in &request.candidates {
+        for candidate in request.candidates {
             let demand = candidate.resources;
             if let Err(reason) = single_candidate_resources_admitted(
                 CandidateResourceFacts {
@@ -87,7 +124,7 @@ impl PlacementSession {
                     demand,
                     transactional_results: candidate.transactional_results,
                 },
-                &request.resources,
+                request.resources,
                 request.require_transactional_results,
             ) {
                 insufficient_resource_evidence |=
@@ -96,7 +133,7 @@ impl PlacementSession {
             }
             let selected = candidate.selected(&request.signature.operation);
             let observed = self.observed_candidate_duration(
-                &request.signature,
+                request.signature,
                 &selected.candidate,
                 selected.kind,
             );
@@ -167,30 +204,27 @@ impl PlacementSession {
                 })
                 .or_else(|| admitted.first())
                 .expect("nonempty admitted whole-work candidates");
-            return Ok(RuntimeWholeWorkSelection {
-                decision: WholeWorkDecision {
-                    signature: request.signature,
-                    selected: item.selected.clone(),
-                    kind: if matches!(
-                        request.constraint,
-                        WholeWorkConstraint::ProviderRequired { .. }
-                    ) {
-                        WholeWorkDecisionKind::ProviderRequired
-                    } else {
-                        WholeWorkDecisionKind::Uncompared
-                    },
-                    predicted_total_ns: item
-                        .cost
-                        .estimate()
-                        .and_then(|cost| cost.checked_total_ns()),
+            return Ok(SelectionDraft {
+                selected: item.selected.clone(),
+                kind: if matches!(
+                    request.constraint,
+                    WholeWorkConstraint::ProviderRequired { .. }
+                ) {
+                    WholeWorkDecisionKind::ProviderRequired
+                } else {
+                    WholeWorkDecisionKind::Uncompared
                 },
+                predicted_total_ns: item
+                    .cost
+                    .estimate()
+                    .and_then(|cost| cost.checked_total_ns()),
                 probe: None,
-                observation_permit: None,
+                compared_signature: None,
             });
         }
 
         if matches!(request.constraint, WholeWorkConstraint::AnyLegal) {
-            if let Some(index) = exploration_candidate(&admitted, &self.whole_work_probes, &request)
+            if let Some(index) = exploration_candidate(&admitted, &self.whole_work_probes, request)
             {
                 let item = &admitted[index];
                 let key = (
@@ -199,18 +233,15 @@ impl PlacementSession {
                     item.selected.kind,
                 );
                 lock_probes(&self.whole_work_probes).insert(key.clone());
-                return Ok(RuntimeWholeWorkSelection {
-                    decision: WholeWorkDecision {
-                        signature: request.signature,
-                        selected: item.selected.clone(),
-                        kind: WholeWorkDecisionKind::Exploratory,
-                        predicted_total_ns: None,
-                    },
+                return Ok(SelectionDraft {
+                    selected: item.selected.clone(),
+                    kind: WholeWorkDecisionKind::Exploratory,
+                    predicted_total_ns: None,
                     probe: Some(Box::new(ProbeLease {
                         active: Arc::clone(&self.whole_work_probes),
                         key,
                     })),
-                    observation_permit: None,
+                    compared_signature: None,
                 });
             }
         }
@@ -223,7 +254,7 @@ impl PlacementSession {
             })
             .collect();
         if estimated.is_empty() {
-            return unmeasured_host(&request, &admitted);
+            return unmeasured_host(&admitted);
         }
         // A measured host route is required before the ordinary numeric graph
         // can compare it with provider candidates. Unmeasured host routes are
@@ -232,7 +263,7 @@ impl PlacementSession {
             .iter()
             .any(|(item, _)| !item.candidate.kind.is_provider())
         {
-            return unmeasured_host(&request, &admitted);
+            return unmeasured_host(&admitted);
         }
         let node = PlacementGraphNode {
             identity: request.signature.operation.clone(),
@@ -256,53 +287,44 @@ impl PlacementSession {
                 .collect(),
         };
         let plan = self.plan(PlacementPlanRequest {
-            signature: request.signature,
+            signature: (*request.signature).clone(),
             graph: PlacementGraph {
                 nodes: vec![node],
                 edges: Vec::new(),
             },
             limits: PlacementGraphLimits::default(),
-            resources: request.resources,
+            resources: (*request.resources).clone(),
             deterministic: request.deterministic,
             require_transactional_results: request.require_transactional_results,
         })?;
-        Ok(RuntimeWholeWorkSelection {
-            decision: WholeWorkDecision {
-                signature: plan.signature,
-                selected: plan.selections.into_iter().next().expect("one-node graph"),
-                kind: WholeWorkDecisionKind::Compared,
-                predicted_total_ns: Some(plan.predicted_total_ns),
-            },
+        Ok(SelectionDraft {
+            selected: plan.selections.into_iter().next().expect("one-node graph"),
+            kind: WholeWorkDecisionKind::Compared,
+            predicted_total_ns: Some(plan.predicted_total_ns),
             probe: None,
-            observation_permit: None,
+            compared_signature: Some(plan.signature),
         })
     }
 }
 
-fn unmeasured_host(
-    request: &WholeWorkPlacementRequest,
-    admitted: &[Admitted<'_>],
-) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
+fn unmeasured_host(admitted: &[Admitted<'_>]) -> Result<SelectionDraft, PlacementPlanError> {
     let item = admitted
         .iter()
         .find(|item| !item.candidate.kind.is_provider())
         .ok_or_else(no_legal_candidate)?;
-    Ok(RuntimeWholeWorkSelection {
-        decision: WholeWorkDecision {
-            signature: request.signature.clone(),
-            selected: item.selected.clone(),
-            kind: WholeWorkDecisionKind::Unmeasured,
-            predicted_total_ns: None,
-        },
+    Ok(SelectionDraft {
+        selected: item.selected.clone(),
+        kind: WholeWorkDecisionKind::Unmeasured,
+        predicted_total_ns: None,
         probe: None,
-        observation_permit: None,
+        compared_signature: None,
     })
 }
 
 fn exploration_candidate(
     admitted: &[Admitted<'_>],
     active: &Arc<Mutex<BTreeSet<ProbeKey>>>,
-    request: &WholeWorkPlacementRequest,
+    request: WholeWorkPlacementRequestRef<'_>,
 ) -> Option<usize> {
     let active = lock_probes(active);
     let signature = request.signature.cache_key();

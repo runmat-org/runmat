@@ -48,7 +48,7 @@ impl PlacementSignature {
     }
 
     pub fn cache_key(&self) -> Digest {
-        Digest::sha256_serialized(self)
+        Digest::sha256_serialized(self).expect("placement signature serializes")
     }
 }
 

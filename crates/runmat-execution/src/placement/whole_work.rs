@@ -167,6 +167,35 @@ pub struct WholeWorkPlacementRequest {
 
 impl WholeWorkPlacementRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
+        self.as_ref().validate()
+    }
+
+    pub fn as_ref(&self) -> WholeWorkPlacementRequestRef<'_> {
+        WholeWorkPlacementRequestRef {
+            signature: &self.signature,
+            constraint: self.constraint,
+            candidates: &self.candidates,
+            resources: &self.resources,
+            deterministic: self.deterministic,
+            require_transactional_results: self.require_transactional_results,
+        }
+    }
+}
+
+/// Borrowed policy input. A caller with one route can pass a stack array,
+/// while the portable owned request remains the serialization/wire carrier.
+#[derive(Clone, Copy)]
+pub struct WholeWorkPlacementRequestRef<'a> {
+    pub signature: &'a PlacementSignature,
+    pub constraint: WholeWorkConstraint,
+    pub candidates: &'a [WholeWorkCandidate],
+    pub resources: &'a PlacementResourceSnapshot,
+    pub deterministic: bool,
+    pub require_transactional_results: bool,
+}
+
+impl WholeWorkPlacementRequestRef<'_> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         self.signature.validate()?;
         self.resources.validate()?;
         let limits = PlacementGraphLimits::default();
@@ -179,7 +208,7 @@ impl WholeWorkPlacementRequest {
             return Err("whole-work candidate count is invalid");
         }
         let mut identities = BTreeSet::new();
-        for candidate in &self.candidates {
+        for candidate in self.candidates {
             candidate.validate()?;
             if let WholeWorkConstraint::ProviderRequired { device_id } = self.constraint {
                 if candidate.execution_location
@@ -188,7 +217,9 @@ impl WholeWorkPlacementRequest {
                     return Err("provider-required work contains a host or foreign-device route");
                 }
             }
-            if !identities.insert(candidate.selected(&self.signature.operation).candidate) {
+            if self.candidates.len() > 1
+                && !identities.insert(candidate.selected(&self.signature.operation).candidate)
+            {
                 return Err("whole-work candidate route identity is duplicated");
             }
         }
@@ -263,6 +294,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn streamed_placement_signature_keeps_legacy_cache_key() {
+        let mut value = signature();
+        let old = Digest::sha256(serde_json::to_vec(&value).unwrap());
+        assert_eq!(value.cache_key(), old);
+        value.region = Some(runmat_types::RegionId {
+            function: runmat_types::ProgramFunctionId(3),
+            ordinal: 11,
+        });
+        value.runtime_facts = Digest::sha256(b"different shape and residency");
+        value.revision.authority = crate::PlacementExecutionAuthorityRevision::HostService(
+            Digest::sha256(b"host service"),
+        );
+        assert_eq!(
+            value.cache_key(),
+            Digest::sha256(serde_json::to_vec(&value).unwrap())
+        );
+    }
+
     fn candidate(kind: ExecutionCandidateKind, route: &[u8]) -> WholeWorkCandidate {
         let provider = kind.is_provider();
         WholeWorkCandidate {
@@ -286,42 +336,158 @@ mod tests {
         }
     }
 
-    #[test]
-    fn streamed_candidate_identity_preserves_legacy_bytes() {
-        let host = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
-        let provider = candidate(ExecutionCandidateKind::ProviderGraph, b"device");
-        for route in [host, provider] {
-            let mut legacy = b"runmat.whole-work.candidate.v2\0".to_vec();
-            legacy.push(match route.kind {
-                ExecutionCandidateKind::SharedRuntime => 0,
-                ExecutionCandidateKind::ProviderGraph => 7,
-                _ => unreachable!("fixture kind"),
-            });
-            match route.execution_location {
-                CandidateExecutionLocation::Host => legacy.push(0),
-                CandidateExecutionLocation::Provider { device_id } => {
-                    legacy.push(1);
-                    legacy.extend_from_slice(&device_id.to_le_bytes());
-                }
+    fn legacy_candidate_identity(route: &WholeWorkCandidate) -> String {
+        let mut legacy = b"runmat.whole-work.candidate.v2\0".to_vec();
+        legacy.push(match route.kind {
+            ExecutionCandidateKind::SharedRuntime => 0,
+            ExecutionCandidateKind::GenericNativeCpu => 1,
+            ExecutionCandidateKind::SpecializedNativeCpu => 2,
+            ExecutionCandidateKind::VectorizedNativeCpu => 3,
+            ExecutionCandidateKind::CpuLibrary => 4,
+            ExecutionCandidateKind::ProviderOperation => 5,
+            ExecutionCandidateKind::ProviderLibrary => 6,
+            ExecutionCandidateKind::ProviderGraph => 7,
+            ExecutionCandidateKind::ProviderFusion => 8,
+        });
+        match route.execution_location {
+            CandidateExecutionLocation::Host => legacy.push(0),
+            CandidateExecutionLocation::Provider { device_id } => {
+                legacy.push(1);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
             }
-            legacy.push(1); // Warm preparation.
-            match route.output_residency {
-                CandidateOutputResidency::Host => legacy.push(0),
-                CandidateOutputResidency::Provider { device_id } => {
-                    legacy.push(1);
-                    legacy.extend_from_slice(&device_id.to_le_bytes());
-                }
-                _ => unreachable!("fixture residency"),
-            }
-            let presentation = serde_json::to_vec(&route.presentation).unwrap();
-            legacy.extend_from_slice(&(presentation.len() as u64).to_le_bytes());
-            legacy.extend_from_slice(&presentation);
-            legacy.extend_from_slice(route.route_facts.bytes());
-            assert_eq!(
-                route.selected("readmatrix").candidate,
-                Digest::sha256(legacy).to_string()
-            );
         }
+        legacy.push(match route.preparation {
+            CandidatePreparationState::Ready => 0,
+            CandidatePreparationState::Warm => 1,
+            CandidatePreparationState::Cold => 2,
+            CandidatePreparationState::Preparing => 3,
+            CandidatePreparationState::Unknown => 4,
+        });
+        match route.output_residency {
+            CandidateOutputResidency::Host => legacy.push(0),
+            CandidateOutputResidency::Provider { device_id } => {
+                legacy.push(1);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateOutputResidency::Mirrored { device_id } => {
+                legacy.push(2);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateOutputResidency::Unknown => legacy.push(3),
+            CandidateOutputResidency::ConditionalHostOrProvider {
+                device_id,
+                host_bytes,
+            } => {
+                legacy.push(4);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
+                legacy.extend_from_slice(&serde_json::to_vec(&host_bytes).unwrap());
+            }
+        }
+        let presentation = serde_json::to_vec(&route.presentation).unwrap();
+        legacy.extend_from_slice(&(presentation.len() as u64).to_le_bytes());
+        legacy.extend_from_slice(&presentation);
+        legacy.extend_from_slice(route.route_facts.bytes());
+        Digest::sha256(legacy).to_string()
+    }
+
+    #[test]
+    fn streamed_candidate_identity_preserves_legacy_bytes_for_every_fixed_tag() {
+        let kinds = [
+            ExecutionCandidateKind::SharedRuntime,
+            ExecutionCandidateKind::GenericNativeCpu,
+            ExecutionCandidateKind::SpecializedNativeCpu,
+            ExecutionCandidateKind::VectorizedNativeCpu,
+            ExecutionCandidateKind::CpuLibrary,
+            ExecutionCandidateKind::ProviderOperation,
+            ExecutionCandidateKind::ProviderLibrary,
+            ExecutionCandidateKind::ProviderGraph,
+            ExecutionCandidateKind::ProviderFusion,
+        ];
+        let preparations = [
+            CandidatePreparationState::Ready,
+            CandidatePreparationState::Warm,
+            CandidatePreparationState::Cold,
+            CandidatePreparationState::Preparing,
+            CandidatePreparationState::Unknown,
+        ];
+        let residencies = [
+            CandidateOutputResidency::Host,
+            CandidateOutputResidency::Provider { device_id: 7 },
+            CandidateOutputResidency::Mirrored { device_id: 7 },
+            CandidateOutputResidency::Unknown,
+            CandidateOutputResidency::ConditionalHostOrProvider {
+                device_id: 7,
+                host_bytes: ResourceByteBound::Known(37),
+            },
+            CandidateOutputResidency::ConditionalHostOrProvider {
+                device_id: 7,
+                host_bytes: ResourceByteBound::Unavailable(
+                    crate::ResourceBoundUnavailable::NoRetainedValueBound,
+                ),
+            },
+        ];
+        for kind in kinds {
+            for preparation in preparations {
+                for output_residency in residencies {
+                    let mut route = candidate(kind, b"exact-route");
+                    route.preparation = preparation;
+                    route.output_residency = output_residency;
+                    assert_eq!(
+                        route.selected("readmatrix").candidate,
+                        legacy_candidate_identity(&route),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn streamed_candidate_identity_preserves_nontrivial_presentation() {
+        let mut route = candidate(ExecutionCandidateKind::ProviderOperation, b"presentation");
+        route.presentation = CandidateOutputPresentation::ProviderDownload {
+            device_id: 7,
+            provider_scratch_bytes: ResourceByteBound::Known(8192),
+            queue_slots: 2,
+        };
+        assert_eq!(
+            route.selected("download").candidate,
+            legacy_candidate_identity(&route)
+        );
+        route.presentation = CandidateOutputPresentation::ProviderUpload {
+            device_id: 7,
+            transfer_bytes: Some(128),
+            host_result_bytes: Some(ResourceByteBound::Known(128)),
+            host_scratch_bytes: ResourceByteBound::Known(7),
+            provider_scratch_bytes: ResourceByteBound::Known(11),
+            queue_slots: 1,
+            preparation: CandidatePreparationState::Cold,
+        };
+        assert_eq!(
+            route.selected("upload").candidate,
+            legacy_candidate_identity(&route)
+        );
+    }
+
+    #[test]
+    fn borrowed_single_route_matches_owned_validation_without_candidate_vec() {
+        let multi = WholeWorkPlacementRequest {
+            signature: signature(),
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: vec![candidate(ExecutionCandidateKind::SharedRuntime, b"host")],
+            resources: PlacementResourceSnapshot::default(),
+            deterministic: true,
+            require_transactional_results: false,
+        };
+        let single = WholeWorkPlacementRequestRef {
+            signature: &multi.signature,
+            constraint: multi.constraint,
+            candidates: std::slice::from_ref(&multi.candidates[0]),
+            resources: &multi.resources,
+            deterministic: multi.deterministic,
+            require_transactional_results: multi.require_transactional_results,
+        };
+        assert_eq!(single.validate(), multi.validate());
+        assert_eq!(single.candidates.len(), 1);
     }
 
     #[test]

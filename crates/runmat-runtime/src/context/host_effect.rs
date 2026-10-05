@@ -10,6 +10,7 @@ use runmat_execution::{
     CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementExecutionAuthorityRevision,
     PlacementResourceSnapshot, PlacementSignature, ResourceByteBound, WholeWorkCandidate,
     WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
+    WholeWorkPlacementRequestRef,
 };
 use runmat_time::{duration_ns_saturating, Instant};
 use std::sync::{
@@ -24,7 +25,7 @@ mod output_permit;
 mod final_facts;
 mod exact_bytes;
 pub(crate) fn hash_serializable<T: serde::Serialize>(facts: &T) -> Digest {
-    Digest::sha256_serialized(facts)
+    Digest::sha256_serialized(facts).expect("typed host effect facts serialize")
 }
 pub use exact_bytes::ExactHostEffectBytes;
 pub use final_facts::HostEffectFinalFacts;
@@ -323,21 +324,33 @@ fn select_host_effect_inner(
         providers: Vec::new(),
         epoch: u64::from_le_bytes(epoch_digest.bytes()[..8].try_into().expect("digest length")),
     };
-    let selected = service.select_whole_work(WholeWorkPlacementRequest {
-        signature: signature.clone(),
-        constraint: WholeWorkConstraint::AnyLegal,
-        candidates: vec![candidate.clone()],
-        resources,
-        // Planner alternates are disabled for a side-effecting single route;
-        // this is not a claim that filesystem or HTTP payloads repeat.
-        deterministic: true,
-        require_transactional_results: false,
-    })?;
+    let expected_candidate = candidate.selected(request.operation);
+    let selected = if stage.is_some() {
+        let candidates = [candidate];
+        service.select_whole_work_borrowed(WholeWorkPlacementRequestRef {
+            signature: &signature,
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: &candidates,
+            resources: &resources,
+            // Planner alternates are disabled for a side-effecting single
+            // route; this does not assert that the effect can be replayed.
+            deterministic: true,
+            require_transactional_results: false,
+        })?
+    } else {
+        service.select_whole_work(WholeWorkPlacementRequest {
+            signature: signature.clone(),
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: vec![candidate],
+            resources,
+            deterministic: true,
+            require_transactional_results: false,
+        })?
+    };
     if !admission.liveness_lease.is_current() {
         return Err(stale_resource());
     }
-    if selected.decision.signature != signature
-        || selected.decision.selected != candidate.selected(request.operation)
+    if selected.decision.signature != signature || selected.decision.selected != expected_candidate
     {
         return Err(
             build_runtime_error("placement selected an unadmitted host effect route")

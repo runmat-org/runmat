@@ -371,6 +371,21 @@ pub trait RuntimePlacementService {
         )
     }
 
+    /// Select already admitted routes borrowed from their owning invocation.
+    /// A one-route caller can pass a stack array. Services lacking this
+    /// contract fail closed; silently converting to the owned multi-route
+    /// request would conceal allocations from finite host-effect admission.
+    fn select_whole_work_borrowed(
+        &self,
+        _request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+        Err(
+            crate::build_runtime_error("borrowed whole-work placement is unavailable")
+                .with_identifier("RunMat:Placement:Unavailable")
+                .build(),
+        )
+    }
+
     /// A cancelled or abandoned invocation is not a failure observation.
     fn observe_whole_work(
         &self,
