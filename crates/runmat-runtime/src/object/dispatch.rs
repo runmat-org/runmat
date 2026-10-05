@@ -1,6 +1,7 @@
 use crate::call::closures::method_access_permitted;
 use crate::call::descriptor::{
-    execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
+    execute_callable_descriptor, execute_callable_descriptor_in_context,
+    try_execute_callable_descriptor, try_execute_callable_descriptor_in_context, CallableCallKind,
     CallableDescriptor,
 };
 use crate::call::identity::external_qualified_identity;
@@ -66,40 +67,47 @@ fn is_operator_overload_method(name: &runmat_types::MethodName) -> bool {
 }
 
 async fn call_identity_with_policy(
+    runtime: Option<&crate::context::RuntimeContext>,
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
-    Box::pin(execute_callable_descriptor(CallableDescriptor::resolved(
+    let descriptor = CallableDescriptor::resolved(
         identity,
         args,
         requested_outputs,
         fallback_policy,
         CallableCallKind::Direct,
-    )))
-    .await
+    );
+    match runtime {
+        Some(runtime) => execute_callable_descriptor_in_context(runtime, descriptor).await,
+        None => execute_callable_descriptor(descriptor).await,
+    }
 }
 
 async fn try_call_identity_with_policy(
+    runtime: Option<&crate::context::RuntimeContext>,
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
-    Box::pin(try_execute_callable_descriptor(
-        CallableDescriptor::resolved(
-            identity,
-            args,
-            requested_outputs,
-            fallback_policy,
-            CallableCallKind::Direct,
-        ),
-    ))
-    .await
+    let descriptor = CallableDescriptor::resolved(
+        identity,
+        args,
+        requested_outputs,
+        fallback_policy,
+        CallableCallKind::Direct,
+    );
+    match runtime {
+        Some(runtime) => try_execute_callable_descriptor_in_context(runtime, descriptor).await,
+        None => try_execute_callable_descriptor(descriptor).await,
+    }
 }
 
 async fn call_member_index_on_object_like(
+    runtime: Option<&crate::context::RuntimeContext>,
     receiver: Value,
     class_name: &ClassIdentity,
     name: String,
@@ -119,13 +127,29 @@ async fn call_member_index_on_object_like(
                 &access,
             )?
         {
-            return crate::object::protocol::invoke_resolved_object_protocol(
-                &crate::object::protocol::ProtocolResolution::Method(method),
-                receiver,
-                ObjectSubscriptPath::single(ObjectSubscript::member(name)),
-                requested_outputs,
-            )
-            .await;
+            let resolution = crate::object::protocol::ProtocolResolution::Method(method);
+            let path = ObjectSubscriptPath::single(ObjectSubscript::member(name));
+            return match runtime {
+                Some(runtime) => {
+                    crate::object::protocol::invoke_resolved_object_protocol_in_context(
+                        runtime,
+                        &resolution,
+                        receiver,
+                        path,
+                        requested_outputs,
+                    )
+                    .await
+                }
+                None => {
+                    crate::object::protocol::invoke_resolved_object_protocol(
+                        &resolution,
+                        receiver,
+                        path,
+                        requested_outputs,
+                    )
+                    .await
+                }
+            };
         }
     }
     let method_name = runmat_types::MethodName::from(name.as_str());
@@ -150,6 +174,7 @@ async fn call_member_index_on_object_like(
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
         return call_identity_with_policy(
+            runtime,
             bound.callable,
             full_args,
             requested_outputs,
@@ -163,6 +188,7 @@ async fn call_member_index_on_object_like(
     method_args.extend(args.iter().cloned());
     let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
     if let Some(v) = try_call_identity_with_policy(
+        runtime,
         qualified_identity.clone(),
         method_args.clone(),
         requested_outputs,
@@ -177,6 +203,7 @@ async fn call_member_index_on_object_like(
     // fallback instead of resolving unqualified operator names at runtime.
     if is_operator_overload_method(&method_name) {
         return call_identity_with_policy(
+            runtime,
             qualified_identity,
             method_args,
             requested_outputs,
@@ -189,6 +216,7 @@ async fn call_member_index_on_object_like(
         .map(|identity| (identity, CallableFallbackPolicy::None))
         .unwrap_or_else(|| runtime_named_identity(&name));
     if let Some(v) = try_call_identity_with_policy(
+        runtime,
         name_identity.clone(),
         method_args.clone(),
         requested_outputs,
@@ -252,6 +280,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
             ));
         }
         return call_identity_with_policy(
+            None,
             bound.callable,
             method_args,
             requested_outputs,
@@ -262,6 +291,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
 
     let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
     call_identity_with_policy(
+        None,
         qualified_identity,
         method_args,
         requested_outputs,
@@ -482,6 +512,35 @@ pub async fn call_method_or_member_index_with_outputs(
     .await
 }
 
+pub async fn call_method_or_member_index_with_outputs_in_context(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    identity: CallableIdentity,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+    _fallback_policy: CallableFallbackPolicy,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    let name = method_member_name(&identity).ok_or_else(|| {
+        semantic_error(
+            "MethodCallCalleeInvalid",
+            format!(
+                "method/member-index call requires method-like callable identity, got {identity:?}"
+            ),
+        )
+    })?;
+    call_method_or_member_index_with_fallback_in_context(
+        runtime,
+        base,
+        name,
+        args,
+        requested_outputs,
+        caller_function_name,
+        None,
+    )
+    .await
+}
+
 pub async fn call_method_or_member_index_named_with_outputs(
     base: Value,
     name: String,
@@ -510,10 +569,53 @@ pub async fn call_method_or_member_index_with_fallback(
     caller_function_name: Option<&str>,
     semantic_fallback: Option<CallableIdentity>,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_method_or_member_index_with_fallback_with_context(
+        None,
+        base,
+        name,
+        args,
+        requested_outputs,
+        caller_function_name,
+        semantic_fallback,
+    )
+    .await
+}
+
+pub async fn call_method_or_member_index_with_fallback_in_context(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+    semantic_fallback: Option<CallableIdentity>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_method_or_member_index_with_fallback_with_context(
+        Some(runtime),
+        base,
+        name,
+        args,
+        requested_outputs,
+        caller_function_name,
+        semantic_fallback,
+    )
+    .await
+}
+
+async fn call_method_or_member_index_with_fallback_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+    semantic_fallback: Option<CallableIdentity>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();
             Box::pin(call_member_index_on_object_like(
+                runtime,
                 Value::Object(obj),
                 &class_name,
                 name,
@@ -527,6 +629,7 @@ pub async fn call_method_or_member_index_with_fallback(
         Value::ObjectArray(array) => {
             let class_name = array.class_name().clone();
             Box::pin(call_member_index_on_object_like(
+                runtime,
                 Value::ObjectArray(array),
                 &class_name,
                 name,
@@ -540,6 +643,7 @@ pub async fn call_method_or_member_index_with_fallback(
         Value::HandleObject(handle) => {
             let class_name = handle.class_name.clone();
             Box::pin(call_member_index_on_object_like(
+                runtime,
                 Value::HandleObject(handle),
                 &class_name,
                 name,
@@ -567,6 +671,7 @@ pub async fn call_method_or_member_index_with_fallback(
                 }
                 let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
                 return call_identity_with_policy(
+                    runtime,
                     identity,
                     args,
                     requested_outputs,
@@ -583,6 +688,7 @@ pub async fn call_method_or_member_index_with_fallback(
 
             let qualified_identity = external_qualified_identity(cls.display_name(), &name);
             call_identity_with_policy(
+                runtime,
                 qualified_identity,
                 args,
                 requested_outputs,
@@ -599,6 +705,7 @@ pub async fn call_method_or_member_index_with_fallback(
                 full_args.push(other);
                 full_args.extend(args);
                 return call_identity_with_policy(
+                    runtime,
                     identity,
                     full_args,
                     requested_outputs,

@@ -142,8 +142,8 @@ fn read_inner(
             let _roots = roots;
             let sequence = runtime
                 .scope(
-                    runmat_runtime::object::protocol::read_subscript_path_sequence_with_access(
-                        root, path, request,
+                    runmat_runtime::object::protocol::read_subscript_path_sequence_with_access_in_context(
+                        &runtime, root, path, request,
                     ),
                 )
                 .await?;

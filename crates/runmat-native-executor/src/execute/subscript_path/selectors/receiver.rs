@@ -62,8 +62,8 @@ fn prepare_receiver_inner(
             let _roots = roots;
             runtime
                 .scope(
-                    runmat_runtime::object::protocol::prepare_subscript_receiver(
-                        root, prefix, access,
+                    runmat_runtime::object::protocol::prepare_subscript_receiver_in_context(
+                        &runtime, root, prefix, access,
                     ),
                 )
                 .await

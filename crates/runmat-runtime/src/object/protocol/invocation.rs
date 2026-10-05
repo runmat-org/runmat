@@ -165,6 +165,23 @@ pub async fn invoke_prepared_object_end(
     component_index: usize,
     component_count: usize,
 ) -> Result<Value, RuntimeError> {
+    invoke_prepared_object_end_with_context(
+        None,
+        method,
+        receiver,
+        component_index,
+        component_count,
+    )
+    .await
+}
+
+pub(super) async fn invoke_prepared_object_end_with_context(
+    runtime: Option<&RuntimeContext>,
+    method: &ResolvedObjectMethod,
+    receiver: Value,
+    component_index: usize,
+    component_count: usize,
+) -> Result<Value, RuntimeError> {
     let k = component_index.checked_add(1).ok_or_else(|| {
         semantic_error(
             "ObjectEndIndexOverflow",
@@ -190,7 +207,8 @@ pub async fn invoke_prepared_object_end(
             "object end component metadata exceeds exact double range",
         ));
     }
-    let mut values = invoke_resolved_object_method(
+    let mut values = invoke_resolved_object_method_with_context(
+        runtime,
         method,
         vec![
             receiver,

@@ -49,16 +49,54 @@ pub(crate) async fn dispatch_subsasgn(
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
+    dispatch_subsasgn_with_context(None, obj, subscript, rhs).await
+}
+
+async fn dispatch_subsasgn_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    obj: Value,
+    subscript: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::assign_subscript_path(obj, path, vec![rhs], None).await
+    match runtime {
+        Some(runtime) => {
+            crate::object::protocol::assign_subscript_path_in_context(
+                runtime,
+                obj,
+                path,
+                vec![rhs],
+                None,
+            )
+            .await
+        }
+        None => crate::object::protocol::assign_subscript_path(obj, path, vec![rhs], None).await,
+    }
 }
 
 #[runtime_builtin(
     name = "subsref",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
+pub async fn subsref_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    obj: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<Value> {
+    subsref_with_context(runtime.as_ref(), obj, subscript).await
+}
+
 pub async fn subsref_builtin(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+    subsref_with_context(None, obj, subscript).await
+}
+
+async fn subsref_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    obj: Value,
+    subscript: Value,
+) -> crate::BuiltinResult<Value> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     let requested = crate::output_count::current_output_count();
     let access = crate::object::protocol::ObjectAccessContext::default();
@@ -67,9 +105,18 @@ pub async fn subsref_builtin(obj: Value, subscript: Value) -> crate::BuiltinResu
         Some(count) => crate::object::protocol::SubscriptReadRequest::select_outputs(count, access),
     };
     let usage = request.sequence_use;
-    let sequence =
-        crate::object::protocol::read_subscript_path_sequence_with_access(obj, path, request)
-            .await?;
+    let sequence = match runtime {
+        Some(runtime) => {
+            crate::object::protocol::read_subscript_path_sequence_with_access_in_context(
+                runtime, obj, path, request,
+            )
+            .await?
+        }
+        None => {
+            crate::object::protocol::read_subscript_path_sequence_with_access(obj, path, request)
+                .await?
+        }
+    };
     let mut values =
         sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
     if requested.is_some() {
@@ -83,9 +130,28 @@ pub async fn subsref_builtin(obj: Value, subscript: Value) -> crate::BuiltinResu
 #[runtime_builtin(
     name = "subsasgn",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
+pub async fn subsasgn_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    obj: Value,
+    subscript: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
+    subsasgn_with_context(runtime.as_ref(), obj, subscript, rhs).await
+}
+
 pub async fn subsasgn_builtin(
+    obj: Value,
+    subscript: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
+    subsasgn_with_context(None, obj, subscript, rhs).await
+}
+
+async fn subsasgn_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
     rhs: Value,
@@ -95,7 +161,7 @@ pub async fn subsasgn_builtin(
         &runmat_builtins::SUBSASGN_ERROR_OUTPUTS,
         "subsasgn",
     )?;
-    dispatch_subsasgn(obj, subscript, rhs).await
+    dispatch_subsasgn_with_context(runtime, obj, subscript, rhs).await
 }
 
 #[runtime_builtin(
@@ -139,7 +205,7 @@ use cardinality::*;
 pub use cardinality::{
     brace_assignment_cardinality, member_assignment_cardinality,
     object_path_assignment_cardinality, object_path_cardinality,
-    PreparedObjectAssignmentCardinality,
+    object_path_cardinality_in_context, PreparedObjectAssignmentCardinality,
 };
 pub(crate) use context::ensure_indexing_context_classes_registered;
 use context::*;

@@ -581,6 +581,33 @@ pub async fn store_member_sequence_traced(
     values: Vec<Value>,
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
+    store_member_sequence_traced_with_context(None, base, field, values, caller_function_name).await
+}
+
+pub async fn store_member_sequence_traced_in_context(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    field: String,
+    values: Vec<Value>,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    store_member_sequence_traced_with_context(
+        Some(runtime),
+        base,
+        field,
+        values,
+        caller_function_name,
+    )
+    .await
+}
+
+async fn store_member_sequence_traced_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    values: Vec<Value>,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
     match base {
         Value::StructArray(array) => crate::aggregate::structure::assign_member_values(
             array,
@@ -606,15 +633,23 @@ pub async fn store_member_sequence_traced(
                 caller_function_name,
             )?;
             if let crate::object::protocol::ProtocolResolution::Method(method) = resolution {
-                return crate::object::protocol::invoke_resolved_object_assignment(
-                    &method,
-                    aggregate,
-                    crate::object::indexing::ObjectSubscriptPath::single(
-                        crate::object::indexing::ObjectSubscript::member(field),
-                    ),
-                    values,
-                )
-                .await;
+                let path = crate::object::indexing::ObjectSubscriptPath::single(
+                    crate::object::indexing::ObjectSubscript::member(field),
+                );
+                return match runtime {
+                    Some(runtime) => {
+                        crate::object::protocol::invoke_resolved_object_assignment_in_context(
+                            runtime, &method, aggregate, path, values,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::object::protocol::invoke_resolved_object_assignment(
+                            &method, aggregate, path, values,
+                        )
+                        .await
+                    }
+                };
             }
             let Value::ObjectArray(array) = aggregate else {
                 unreachable!("aggregate was constructed as an object array")

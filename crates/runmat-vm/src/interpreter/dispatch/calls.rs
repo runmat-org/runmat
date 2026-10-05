@@ -723,6 +723,7 @@ pub async fn handle_workspace_first_prepared_call(
 }
 
 pub async fn handle_method_or_member_index_multi_call(
+    runtime: &runmat_runtime::context::RuntimeContext,
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
@@ -731,6 +732,7 @@ pub async fn handle_method_or_member_index_multi_call(
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
     handle_method_or_member_index_call_inner(
+        runtime,
         stack,
         identity,
         fallback_policy,
@@ -742,6 +744,7 @@ pub async fn handle_method_or_member_index_multi_call(
 }
 
 async fn handle_method_or_member_index_call_inner(
+    runtime: &runmat_runtime::context::RuntimeContext,
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
@@ -757,7 +760,8 @@ async fn handle_method_or_member_index_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let outputs = Box::pin(
-        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
+            runtime,
             base,
             identity,
             args,
@@ -797,7 +801,8 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let outputs = Box::pin(
-        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+        runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
+            context.runtime,
             base,
             context.identity,
             args,

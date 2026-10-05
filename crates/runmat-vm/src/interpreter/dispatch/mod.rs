@@ -2164,6 +2164,7 @@ pub async fn dispatch_instruction(
             out_count,
         } => {
             let handling = handle_method_or_member_index_multi_call(
+                runtime,
                 stack,
                 identity.clone(),
                 *fallback_policy,

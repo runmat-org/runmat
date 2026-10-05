@@ -57,6 +57,27 @@ pub async fn object_path_cardinality(
     indexing_context: IndexingContext,
     access: &crate::object::protocol::ObjectAccessContext,
 ) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    object_path_cardinality_with_context(None, target, path, indexing_context, access).await
+}
+
+pub async fn object_path_cardinality_in_context(
+    runtime: &crate::context::RuntimeContext,
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+    indexing_context: IndexingContext,
+    access: &crate::object::protocol::ObjectAccessContext,
+) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    object_path_cardinality_with_context(Some(runtime), target, path, indexing_context, access)
+        .await
+}
+
+async fn object_path_cardinality_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+    indexing_context: IndexingContext,
+    access: &crate::object::protocol::ObjectAccessContext,
+) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
     ensure_indexing_context_classes_registered();
     let descriptor = path.to_standard_substruct_value()?;
     let context = indexing_context_value(indexing_context);
@@ -66,12 +87,19 @@ pub async fn object_path_cardinality(
         access,
     )?;
     if let crate::object::protocol::ProtocolResolution::Method(method) = resolution {
-        let value = crate::object::protocol::invoke_resolved_object_method(
-            &method,
-            vec![target.clone(), descriptor.clone(), context],
-            1,
-        )
-        .await?;
+        let arguments = vec![target.clone(), descriptor.clone(), context];
+        let value = match runtime {
+            Some(runtime) => {
+                crate::object::protocol::invoke_resolved_object_method_in_context(
+                    runtime, &method, arguments, 1,
+                )
+                .await?
+            }
+            None => {
+                crate::object::protocol::invoke_resolved_object_method(&method, arguments, 1)
+                    .await?
+            }
+        };
         return Ok(PreparedObjectAssignmentCardinality {
             count: exact_output_count(&require_single_sequence(value)?)?,
             method: Some(method),

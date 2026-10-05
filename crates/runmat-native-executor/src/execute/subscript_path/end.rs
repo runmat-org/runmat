@@ -56,11 +56,14 @@ fn resolve_end_inner(
         Box::pin(async move {
             let _roots = roots;
             let value = runtime
-                .scope(runmat_runtime::object::protocol::resolve_subscript_end(
-                    &prepared,
-                    component,
-                    component_count,
-                ))
+                .scope(
+                    runmat_runtime::object::protocol::resolve_subscript_end_in_context(
+                        &runtime,
+                        &prepared,
+                        component,
+                        component_count,
+                    ),
+                )
                 .await?;
             Ok(vec![value])
         }),

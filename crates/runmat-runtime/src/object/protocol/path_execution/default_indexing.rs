@@ -14,6 +14,7 @@ mod errors;
 use errors::{invalid_base, invalid_path, invalid_selector, single_value_error};
 
 pub(super) async fn read_default_step_sequence(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: &ObjectSubscript,
     caller: Option<&str>,
@@ -24,7 +25,7 @@ pub(super) async fn read_default_step_sequence(
                 return Err(invalid_selector());
             };
             crate::object::resolve::read_member_sequence_with_context(
-                None,
+                runtime,
                 base,
                 member.0.clone(),
                 false,
@@ -41,7 +42,7 @@ pub(super) async fn read_default_step_sequence(
             .await?,
         )
         .map_err(crate::sequence::sequence_error_to_runtime)?),
-        ObjectIndexKind::Paren => read_default_step(base, step, caller)
+        ObjectIndexKind::Paren => read_default_step(runtime, base, step, caller)
             .await
             .and_then(|value| {
                 ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)
@@ -50,6 +51,7 @@ pub(super) async fn read_default_step_sequence(
 }
 
 pub(super) fn assign_default_steps<'a>(
+    runtime: Option<&'a crate::context::RuntimeContext>,
     base: Value,
     mut steps: VecDeque<ObjectSubscript>,
     values: Vec<Value>,
@@ -58,16 +60,23 @@ pub(super) fn assign_default_steps<'a>(
     Box::pin(async move {
         let step = steps.pop_front().ok_or_else(invalid_path)?;
         if steps.is_empty() {
-            return write_default_step(base, step, values, caller).await;
+            return write_default_step(runtime, base, step, values, caller).await;
         }
-        let child = read_default_step(base.clone(), &step, caller).await?;
+        let child = read_default_step(runtime, base.clone(), &step, caller).await?;
         let remaining = ObjectSubscriptPath::new(steps.into_iter().collect())?;
-        let updated = super::assign_subscript_path(child, remaining, values, caller).await?;
-        write_default_step(base, step, vec![updated], caller).await
+        let updated = match runtime {
+            Some(runtime) => {
+                super::assign_subscript_path_in_context(runtime, child, remaining, values, caller)
+                    .await?
+            }
+            None => super::assign_subscript_path(child, remaining, values, caller).await?,
+        };
+        write_default_step(runtime, base, step, vec![updated], caller).await
     })
 }
 
 pub(super) async fn read_default_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: &ObjectSubscript,
     caller: Option<&str>,
@@ -78,7 +87,7 @@ pub(super) async fn read_default_step(
                 return Err(invalid_selector());
             };
             let mut values = crate::object::resolve::read_member_sequence_with_context(
-                None,
+                runtime,
                 base,
                 member.0.clone(),
                 false,
@@ -112,6 +121,7 @@ pub(super) async fn read_default_step(
 }
 
 async fn write_default_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: ObjectSubscript,
     values: Vec<Value>,
@@ -122,13 +132,27 @@ async fn write_default_step(
             let ObjectIndexSelector::Member(member) = step.selector() else {
                 return Err(invalid_selector());
             };
-            crate::object::resolve::store_member_sequence_traced(
-                base,
-                member.0.clone(),
-                values,
-                caller,
-            )
-            .await
+            match runtime {
+                Some(runtime) => {
+                    crate::object::resolve::store_member_sequence_traced_in_context(
+                        runtime,
+                        base,
+                        member.0.clone(),
+                        values,
+                        caller,
+                    )
+                    .await
+                }
+                None => {
+                    crate::object::resolve::store_member_sequence_traced(
+                        base,
+                        member.0.clone(),
+                        values,
+                        caller,
+                    )
+                    .await
+                }
+            }
         }
         ObjectIndexKind::Paren => {
             let [rhs] = values.as_slice() else {

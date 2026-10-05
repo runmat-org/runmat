@@ -12,6 +12,7 @@ use crate::sequence::ValueSequence;
 use crate::RuntimeError;
 
 pub(super) async fn try_execute(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     steps: &mut VecDeque<ObjectSubscript>,
     request: &SubscriptReadRequest,
@@ -41,12 +42,25 @@ pub(super) async fn try_execute(
         let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
         call_arguments.push(base);
         call_arguments.extend(arguments);
-        crate::object::protocol::invoke_resolved_object_method(
-            &method,
-            call_arguments,
-            requested_outputs,
-        )
-        .await?
+        match runtime {
+            Some(runtime) => {
+                crate::object::protocol::invoke_resolved_object_method_in_context(
+                    runtime,
+                    &method,
+                    call_arguments,
+                    requested_outputs,
+                )
+                .await?
+            }
+            None => {
+                crate::object::protocol::invoke_resolved_object_method(
+                    &method,
+                    call_arguments,
+                    requested_outputs,
+                )
+                .await?
+            }
+        }
     } else if crate::object::resolve::has_stored_member(&base, &member)?
         == crate::object::resolve::MemberPresence::Absent
         && (matches!(
@@ -56,18 +70,35 @@ pub(super) async fn try_execute(
     {
         // This is a structural decision, not an exception-driven retry: a
         // missing member may use the established method-style callable route.
-        crate::object::dispatch::call_method_or_member_index_with_fallback(
-            base,
-            member.0,
-            call_arguments(components)?,
-            requested_outputs,
-            caller_function_name,
-            semantic_fallback,
-        )
-        .await?
+        let arguments = call_arguments(components)?;
+        match runtime {
+            Some(runtime) => {
+                crate::object::dispatch::call_method_or_member_index_with_fallback_in_context(
+                    runtime,
+                    base,
+                    member.0,
+                    arguments,
+                    requested_outputs,
+                    caller_function_name,
+                    semantic_fallback,
+                )
+                .await?
+            }
+            None => {
+                crate::object::dispatch::call_method_or_member_index_with_fallback(
+                    base,
+                    member.0,
+                    arguments,
+                    requested_outputs,
+                    caller_function_name,
+                    semantic_fallback,
+                )
+                .await?
+            }
+        }
     } else {
         let member_sequence = crate::object::resolve::read_member_sequence_with_context(
-            None,
+            runtime,
             base,
             member.0,
             false,
@@ -78,20 +109,27 @@ pub(super) async fn try_execute(
         if is_callable_value(&member_value) {
             let arguments = call_arguments(components)?;
             let resolver = RuntimeFunctionResolver;
-            crate::call::descriptor::execute_callable_descriptor(
-                crate::call::descriptor::CallableDescriptor::from_feval_value(
-                    member_value,
-                    arguments,
-                    requested_outputs,
-                    &resolver,
-                ),
-            )
-            .await?
+            let descriptor = crate::call::descriptor::CallableDescriptor::from_feval_value(
+                member_value,
+                arguments,
+                requested_outputs,
+                &resolver,
+            );
+            match runtime {
+                Some(runtime) => {
+                    crate::call::descriptor::execute_callable_descriptor_in_context(
+                        runtime, descriptor,
+                    )
+                    .await?
+                }
+                None => crate::call::descriptor::execute_callable_descriptor(descriptor).await?,
+            }
         } else {
             let step =
                 ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components });
             ValueSequence::single(
-                super::read_default_step(member_value, &step, caller_function_name).await?,
+                super::read_default_step(runtime, member_value, &step, caller_function_name)
+                    .await?,
             )
             .map_err(crate::sequence::sequence_error_to_runtime)?
         }

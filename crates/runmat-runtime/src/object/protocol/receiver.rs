@@ -29,10 +29,37 @@ pub async fn prepare_subscript_receiver(
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
 ) -> Result<PreparedSubscriptReceiver, RuntimeError> {
+    prepare_subscript_receiver_with_context(None, root, materialized_prefix, access).await
+}
+
+pub async fn prepare_subscript_receiver_in_context(
+    runtime: &crate::context::RuntimeContext,
+    root: Value,
+    materialized_prefix: Option<ObjectSubscriptPath>,
+    access: ObjectAccessContext,
+) -> Result<PreparedSubscriptReceiver, RuntimeError> {
+    prepare_subscript_receiver_with_context(Some(runtime), root, materialized_prefix, access).await
+}
+
+async fn prepare_subscript_receiver_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    root: Value,
+    materialized_prefix: Option<ObjectSubscriptPath>,
+    access: ObjectAccessContext,
+) -> Result<PreparedSubscriptReceiver, RuntimeError> {
     let receiver = match materialized_prefix {
-        Some(prefix) => {
-            super::read_subscript_path_with_access(root, prefix, access.clone()).await?
-        }
+        Some(prefix) => match runtime {
+            Some(runtime) => {
+                super::read_subscript_path_with_access_in_context(
+                    runtime,
+                    root,
+                    prefix,
+                    access.clone(),
+                )
+                .await?
+            }
+            None => super::read_subscript_path_with_access(root, prefix, access.clone()).await?,
+        },
         None => root,
     };
     let end = super::resolve_object_protocol(&receiver, ObjectProtocol::End, &access)?;
@@ -44,8 +71,28 @@ pub async fn resolve_subscript_end(
     component_index: usize,
     component_count: usize,
 ) -> Result<Value, RuntimeError> {
+    resolve_subscript_end_with_context(None, prepared, component_index, component_count).await
+}
+
+pub async fn resolve_subscript_end_in_context(
+    runtime: &crate::context::RuntimeContext,
+    prepared: &PreparedSubscriptReceiver,
+    component_index: usize,
+    component_count: usize,
+) -> Result<Value, RuntimeError> {
+    resolve_subscript_end_with_context(Some(runtime), prepared, component_index, component_count)
+        .await
+}
+
+async fn resolve_subscript_end_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    prepared: &PreparedSubscriptReceiver,
+    component_index: usize,
+    component_count: usize,
+) -> Result<Value, RuntimeError> {
     if let ProtocolResolution::Method(method) = &prepared.end {
-        return super::invoke_prepared_object_end(
+        return super::invoke_prepared_object_end_with_context(
+            runtime,
             method,
             prepared.receiver.clone(),
             component_index,

@@ -85,7 +85,8 @@ pub async fn dispatch_object(
                 crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
             })?;
             let (root, path) = materialize_subscript_path(stack[start..].to_vec(), prefix)?;
-            let prepared = runmat_runtime::object::protocol::prepare_subscript_receiver(
+            let prepared = runmat_runtime::object::protocol::prepare_subscript_receiver_in_context(
+                runtime,
                 root,
                 path,
                 frame_access(bytecode)?,
@@ -100,7 +101,8 @@ pub async fn dispatch_object(
             component,
             component_count,
         } => {
-            let value = runmat_runtime::object::protocol::resolve_subscript_end(
+            let value = runmat_runtime::object::protocol::resolve_subscript_end_in_context(
+                runtime,
                 sequence_register.subscript_receiver()?,
                 *component,
                 *component_count,
@@ -738,10 +740,11 @@ async fn execute_subscript_path(
         indexing_context: read.indexing,
         access: read.access,
     };
-    let sequence = runmat_runtime::object::protocol::read_subscript_path_sequence_with_access(
-        root, path, request,
-    )
-    .await?;
+    let sequence =
+        runmat_runtime::object::protocol::read_subscript_path_sequence_with_access_in_context(
+            runtime, root, path, request,
+        )
+        .await?;
     sequence.resolve(read.selection, sequence_context)
 }
 

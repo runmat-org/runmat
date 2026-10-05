@@ -59,6 +59,7 @@ fn evaluate_inner(
                     runmat_runtime::class_registry::class_context_for_function(&caller);
                 let _access = class_context
                     .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+                let runtime = state.runtime.clone();
                 let value = complete_call(
                     state,
                     embedded.cloned(),
@@ -66,7 +67,8 @@ fn evaluate_inner(
                         let identity = identity.clone();
                         let fallback_policy = call.fallback_policy;
                         async move {
-                            runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
+                            runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
+                                &runtime,
                                 base,
                                 identity,
                                 arguments,
