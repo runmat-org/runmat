@@ -67,9 +67,11 @@ impl Error for FsPublicationFailure {
 ///
 /// `publish` has one provider-defined commit point. A provider must report
 /// whether failure left the old destination intact, occurred after commit, or
-/// cannot be determined. Dropping an uncommitted stage aborts it. Providers
-/// must not detach a commit task from this owner; distributed transports need
-/// an explicit status/commit protocol before they can opt in.
+/// cannot be determined. Dropping a stage before commit dispatch aborts its
+/// private bytes. Dropping an in-flight remote publication may leave a server
+/// commit underway; it must never be treated as proof of rollback. Providers
+/// must not detach a local commit task from this owner, and distributed
+/// transports need an explicit status/commit protocol before they can opt in.
 #[async_trait(?Send)]
 pub trait FsStagedOutput: Send {
     /// Write at most `bytes.len()` bytes; zero is permitted only for empty input.

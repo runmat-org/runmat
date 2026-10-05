@@ -109,11 +109,7 @@ impl FsProvider for PublicationProvider {
 }
 
 fn fixture_root() -> &'static str {
-    if cfg!(windows) {
-        r"C:\publication"
-    } else {
-        "/publication"
-    }
+    "/publication"
 }
 
 fn public_call(
