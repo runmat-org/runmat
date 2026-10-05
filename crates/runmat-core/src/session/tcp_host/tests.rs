@@ -12,7 +12,10 @@ fn cleanup_registration_initializes_once_without_retaining_session() {
     let service = LazyNativeTcpService::default();
     assert!(service.service.get().is_none());
     let runtime = runtime();
-    let lease = runtime.session_lease();
+    let RuntimeTcpIssuer::Session { lease, .. } = RuntimeTcpIssuer::from_context(Some(&runtime))
+    else {
+        panic!("context-backed TCP issuer must carry a session lease");
+    };
     service
         .register_session_cleanup(&runtime)
         .expect("register session before its first socket operation");
