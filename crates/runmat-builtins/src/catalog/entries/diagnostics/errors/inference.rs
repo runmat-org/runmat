@@ -1,6 +1,7 @@
 use crate::catalog::inference::{argument_error, finish_fixed_outputs, known_invalid_text_scalar};
+use crate::diagnostic_identifier::is_qualified;
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, InferenceDiagnostic, ValueKindFact};
+use runmat_types::{CallInference, CallRequest, InferenceDiagnostic, LiteralValue, ValueKindFact};
 
 pub(super) fn error(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -18,6 +19,48 @@ pub(super) fn error(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             "error expects text, an MException, or a message struct",
             0,
         ));
+    }
+    if let Some(first) = request.arguments.first() {
+        if matches!(
+            first.kind,
+            ValueKindFact::Exception(_) | ValueKindFact::Struct(_)
+        ) && request.arguments.len() > 1
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-ERROR-PAYLOAD-ARITY",
+                "error exception and message-struct forms accept no additional arguments",
+                1,
+            ));
+        }
+        if matches!(first.kind, ValueKindFact::String | ValueKindFact::Character)
+            && first.shape.element_count().is_some_and(|count| count > 1)
+            && known_invalid_text_scalar(first)
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-ERROR-MESSAGE",
+                "error message or identifier must be a string scalar or character row",
+                0,
+            ));
+        }
+        if request.arguments.len() >= 2
+            && request
+                .literals
+                .literal_args
+                .first()
+                .is_some_and(|literal| match literal {
+                    LiteralValue::String(text) | LiteralValue::Character(text) => {
+                        is_qualified(text)
+                    }
+                    _ => false,
+                })
+            && known_invalid_text_scalar(&request.arguments[1])
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-ERROR-MESSAGE",
+                "error message template must be a string scalar or character row",
+                1,
+            ));
+        }
     }
     finish_fixed_outputs(entry, request, Vec::new(), diagnostics)
 }

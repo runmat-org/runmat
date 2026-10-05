@@ -50,6 +50,26 @@ fn error_inference_checks_arity_and_requested_outputs() {
     assert!(!inference::error(&requested, &ERROR_CATALOG_ENTRY)
         .diagnostics
         .is_empty());
+
+    let mut exception_extra = request(
+        vec![
+            ValueFact::scalar(ValueKindFact::Exception(ExceptionFact { identifier: None })),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        RequestedOutputCount::Zero,
+    );
+    assert!(inference::error(&exception_extra, &ERROR_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ERROR-PAYLOAD-ARITY"));
+
+    exception_extra.arguments[0] = ValueFact::scalar(ValueKindFact::String);
+    exception_extra.arguments[1].shape = runmat_types::ShapeFact::from(vec![Some(1), Some(2)]);
+    exception_extra.literals.literal_args[0] = LiteralValue::String("Acme:badInput".into());
+    assert!(inference::error(&exception_extra, &ERROR_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ERROR-MESSAGE"));
 }
 
 #[test]

@@ -87,4 +87,15 @@ fn warning_inference_keeps_option_dependent_output_facts() {
     all_query.literals.literal_args[1] = LiteralValue::String("all".into());
     let all = inference::infer(&all_query, &WARNING_CATALOG_ENTRY);
     assert!(matches!(all.outputs[0].kind, ValueKindFact::Cell(_)));
+
+    let mut extra_mode = all_query;
+    extra_mode.literals.literal_args[0] = LiteralValue::String("off".into());
+    extra_mode
+        .arguments
+        .push(ValueFact::scalar(ValueKindFact::String));
+    extra_mode.literals.literal_args.push(LiteralValue::Unknown);
+    assert!(inference::infer(&extra_mode, &WARNING_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-WARNING-MODE-ARITY"));
 }

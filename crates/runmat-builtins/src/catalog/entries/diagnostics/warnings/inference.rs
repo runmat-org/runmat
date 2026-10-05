@@ -27,7 +27,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else if let Some(command) = request.literals.literal_args.first().and_then(literal_text) {
         let target = request.literals.literal_args.get(1).and_then(literal_text);
         match command.trim().to_ascii_lowercase().as_str() {
-            "on" | "off" | "once" | "error" => state_struct(),
+            "on" | "off" | "once" | "error" => {
+                if request.arguments.len() > 2 {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-WARNING-MODE-ARITY",
+                        "warning mode accepts at most one target",
+                        2,
+                    ));
+                }
+                state_struct()
+            }
             "reset" => {
                 if request.arguments.len() != 1 {
                     diagnostics.push(argument_error(
@@ -80,6 +89,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             _ => default_double_scalar(),
         }
     } else if matches!(request.arguments[0].kind, ValueKindFact::Exception(_)) {
+        if request.arguments.len() != 1 {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-WARNING-EXCEPTION-ARITY",
+                "warning exception form accepts exactly one argument",
+                1,
+            ));
+        }
         default_double_scalar()
     } else {
         ValueFact::unknown(DynamicReason::RuntimeValue)
