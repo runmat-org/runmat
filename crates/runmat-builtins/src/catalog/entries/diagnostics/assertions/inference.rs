@@ -1,4 +1,5 @@
 use crate::catalog::inference::{argument_error, finish_fixed_outputs, known_invalid_text_scalar};
+use crate::diagnostic_identifier::{is_qualified, is_unqualified_field};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, LiteralValue, ValueFact, ValueKindFact};
 
@@ -59,7 +60,7 @@ fn infer_failure_payload(
         && request.arguments.len() >= 3;
     let replacement_start = if qualified {
         if let Some(text) = literal.and_then(literal_text) {
-            if !valid_qualified_identifier(text.trim()) {
+            if !is_qualified(text) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-ASSERT-IDENTIFIER",
                     "assert error identifier must contain valid colon-separated fields",
@@ -80,7 +81,7 @@ fn infer_failure_payload(
         // mode, so its following argument has mode-dependent meaning.
         if literal
             .and_then(literal_text)
-            .is_some_and(valid_identifier_field)
+            .is_some_and(is_unqualified_field)
             && request.arguments.len() >= 3
         {
             return;
@@ -103,18 +104,6 @@ fn literal_text(value: &LiteralValue) -> Option<&str> {
         LiteralValue::String(text) | LiteralValue::Character(text) => Some(text),
         _ => None,
     }
-}
-
-fn valid_qualified_identifier(value: &str) -> bool {
-    value.split(':').count() >= 2 && value.split(':').all(valid_identifier_field)
-}
-
-fn valid_identifier_field(value: &str) -> bool {
-    let mut chars = value.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 fn invalid_text(value: &ValueFact) -> bool {

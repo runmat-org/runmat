@@ -1,5 +1,9 @@
 //! MATLAB-compatible `assert` builtin that mirrors MATLAB diagnostic semantics.
 
+use runmat_builtins::diagnostic_identifier::{
+    is_qualified as is_message_identifier,
+    is_unqualified_field as looks_like_unqualified_identifier,
+};
 use runmat_builtins::{
     BuiltinErrorDescriptor, ASSERT_COMPLEX_CONDITION_EXTENSION, ASSERT_ERROR_ASSERTION_FAILED,
     ASSERT_ERROR_INVALID_CONDITION, ASSERT_ERROR_INVALID_INPUT, ASSERT_ERROR_NOT_ENOUGH_INPUTS,
@@ -398,28 +402,6 @@ fn normalize_identifier(raw: &str) -> String {
     } else {
         format!("RunMat:{trimmed}")
     }
-}
-
-fn is_message_identifier(text: &str) -> bool {
-    let trimmed = text.trim();
-    let fields: Vec<&str> = trimmed.split(':').collect();
-    if fields.len() < 2 {
-        return false;
-    }
-    fields.into_iter().all(is_identifier_field)
-}
-
-fn looks_like_unqualified_identifier(text: &str) -> bool {
-    let trimmed = text.trim();
-    !trimmed.contains(':') && is_identifier_field(trimmed)
-}
-
-fn is_identifier_field(field: &str) -> bool {
-    let mut chars = field.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResult<String> {

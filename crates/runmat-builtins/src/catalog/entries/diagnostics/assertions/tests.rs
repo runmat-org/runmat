@@ -121,4 +121,11 @@ fn assertion_failure_payload_inference_uses_only_known_false_condition() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-ASSERT-MESSAGE"));
+
+    request.arguments[2] = ValueFact::scalar(ValueKindFact::String);
+    request.literals.literal_args[1] = LiteralValue::String(" good_2 ".into());
+    assert!(!inference::infer(&request, &ASSERT_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ASSERT-REPLACEMENT"));
 }
