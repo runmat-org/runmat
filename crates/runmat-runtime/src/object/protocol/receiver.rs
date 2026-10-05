@@ -47,6 +47,16 @@ async fn prepare_subscript_receiver_with_context(
     materialized_prefix: Option<ObjectSubscriptPath>,
     access: ObjectAccessContext,
 ) -> Result<PreparedSubscriptReceiver, RuntimeError> {
+    let work = prepare_subscript_receiver_in_scope(runtime, root, materialized_prefix, access);
+    super::context::scope(runtime, work).await
+}
+
+async fn prepare_subscript_receiver_in_scope(
+    runtime: Option<&crate::context::RuntimeContext>,
+    root: Value,
+    materialized_prefix: Option<ObjectSubscriptPath>,
+    access: ObjectAccessContext,
+) -> Result<PreparedSubscriptReceiver, RuntimeError> {
     let receiver = match materialized_prefix {
         Some(prefix) => match runtime {
             Some(runtime) => {
@@ -85,6 +95,16 @@ pub async fn resolve_subscript_end_in_context(
 }
 
 async fn resolve_subscript_end_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    prepared: &PreparedSubscriptReceiver,
+    component_index: usize,
+    component_count: usize,
+) -> Result<Value, RuntimeError> {
+    let work = resolve_subscript_end_in_scope(runtime, prepared, component_index, component_count);
+    super::context::scope(runtime, work).await
+}
+
+async fn resolve_subscript_end_in_scope(
     runtime: Option<&crate::context::RuntimeContext>,
     prepared: &PreparedSubscriptReceiver,
     component_index: usize,

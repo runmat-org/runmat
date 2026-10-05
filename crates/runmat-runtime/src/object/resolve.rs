@@ -96,6 +96,26 @@ pub async fn read_member_sequence_with_context(
     allow_init: bool,
     caller_function_name: Option<&str>,
 ) -> Result<crate::sequence::ValueSequence, RuntimeError> {
+    let work = read_member_sequence_in_scope(
+        context,
+        base,
+        field,
+        allow_init,
+        caller_function_name,
+    );
+    match context {
+        Some(context) => context.scope(work).await,
+        None => work.await,
+    }
+}
+
+async fn read_member_sequence_in_scope(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+) -> Result<crate::sequence::ValueSequence, RuntimeError> {
     match base {
         Value::StructArray(array) => crate::aggregate::structure::gather_member(array, &field),
         Value::ObjectArray(array) => {
@@ -516,6 +536,33 @@ async fn store_member_with_context<OnWrite>(
     rhs: Value,
     allow_init: bool,
     caller_function_name: Option<&str>,
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    let work = store_member_in_scope(
+        context,
+        base,
+        field,
+        rhs,
+        allow_init,
+        caller_function_name,
+        on_write,
+    );
+    match context {
+        Some(context) => context.scope(work).await,
+        None => work.await,
+    }
+}
+
+async fn store_member_in_scope<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    rhs: Value,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
     mut on_write: OnWrite,
 ) -> Result<Value, RuntimeError>
 where
@@ -711,6 +758,26 @@ pub async fn store_member_sequence_traced_in_context(
 }
 
 async fn store_member_sequence_traced_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    values: Vec<Value>,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    let work = store_member_sequence_traced_in_scope(
+        runtime,
+        base,
+        field,
+        values,
+        caller_function_name,
+    );
+    match runtime {
+        Some(runtime) => runtime.scope(work).await,
+        None => work.await,
+    }
+}
+
+async fn store_member_sequence_traced_in_scope(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     field: String,

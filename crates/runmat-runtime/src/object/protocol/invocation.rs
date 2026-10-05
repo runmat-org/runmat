@@ -44,6 +44,23 @@ async fn invoke_resolved_object_protocol_with_context(
     path: ObjectSubscriptPath,
     requested_outputs: usize,
 ) -> Result<ValueSequence, RuntimeError> {
+    let work = invoke_resolved_object_protocol_in_scope(
+        runtime,
+        resolution,
+        base,
+        path,
+        requested_outputs,
+    );
+    super::context::scope(runtime, work).await
+}
+
+async fn invoke_resolved_object_protocol_in_scope(
+    runtime: Option<&RuntimeContext>,
+    resolution: &ProtocolResolution,
+    base: Value,
+    path: ObjectSubscriptPath,
+    requested_outputs: usize,
+) -> Result<ValueSequence, RuntimeError> {
     let ProtocolResolution::Method(method) = resolution else {
         return Err(semantic_error(
             "MissingObjectProtocol",
@@ -77,6 +94,17 @@ pub async fn invoke_resolved_object_assignment_in_context(
 }
 
 async fn invoke_resolved_object_assignment_with_context(
+    runtime: Option<&RuntimeContext>,
+    method: &ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    let work = invoke_resolved_object_assignment_in_scope(runtime, method, base, path, values);
+    super::context::scope(runtime, work).await
+}
+
+async fn invoke_resolved_object_assignment_in_scope(
     runtime: Option<&RuntimeContext>,
     method: &ResolvedObjectMethod,
     base: Value,
@@ -118,6 +146,16 @@ pub async fn invoke_resolved_object_method_in_context(
 }
 
 async fn invoke_resolved_object_method_with_context(
+    runtime: Option<&RuntimeContext>,
+    method: &ResolvedObjectMethod,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<ValueSequence, RuntimeError> {
+    let work = invoke_resolved_object_method_in_scope(runtime, method, arguments, requested_outputs);
+    super::context::scope(runtime, work).await
+}
+
+async fn invoke_resolved_object_method_in_scope(
     runtime: Option<&RuntimeContext>,
     method: &ResolvedObjectMethod,
     arguments: Vec<Value>,
@@ -171,6 +209,23 @@ pub async fn invoke_object_end_in_context(
 }
 
 async fn invoke_object_end_with_context(
+    runtime: Option<&RuntimeContext>,
+    receiver: Value,
+    component_index: usize,
+    component_count: usize,
+    access: &super::ObjectAccessContext,
+) -> Result<Option<Value>, RuntimeError> {
+    let work = invoke_object_end_in_scope(
+        runtime,
+        receiver,
+        component_index,
+        component_count,
+        access,
+    );
+    super::context::scope(runtime, work).await
+}
+
+async fn invoke_object_end_in_scope(
     runtime: Option<&RuntimeContext>,
     receiver: Value,
     component_index: usize,

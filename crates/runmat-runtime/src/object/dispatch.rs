@@ -287,6 +287,28 @@ async fn call_rhs_operator_method_ordered_with_context(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    let work = call_rhs_operator_method_ordered_in_scope(
+        runtime,
+        lhs,
+        rhs,
+        name,
+        requested_outputs,
+        caller_function_name,
+    );
+    match runtime {
+        Some(runtime) => runtime.scope(work).await,
+        None => work.await,
+    }
+}
+
+async fn call_rhs_operator_method_ordered_in_scope(
+    runtime: Option<&crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+    name: String,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let class_name = match &rhs {
         Value::Object(obj) => obj.class_name.clone(),
         Value::HandleObject(handle) => handle.class_name.clone(),
@@ -732,6 +754,30 @@ pub async fn call_method_or_member_index_with_fallback_in_context(
 }
 
 async fn call_method_or_member_index_with_fallback_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+    semantic_fallback: Option<CallableIdentity>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    let work = call_method_or_member_index_with_fallback_in_scope(
+        runtime,
+        base,
+        name,
+        args,
+        requested_outputs,
+        caller_function_name,
+        semantic_fallback,
+    );
+    match runtime {
+        Some(runtime) => runtime.scope(work).await,
+        None => work.await,
+    }
+}
+
+async fn call_method_or_member_index_with_fallback_in_scope(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     name: String,
