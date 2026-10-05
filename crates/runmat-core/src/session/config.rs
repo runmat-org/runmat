@@ -119,6 +119,21 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
     }
 
+    /// Install one host-owned complete-call resource evidence service. The
+    /// service must use the same managed allocation authority exposed by the
+    /// installed parallel port; this does not create a separate quota.
+    pub fn install_host_effect_resource_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::context::RuntimeHostEffectResourceService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_host_effect_resources(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
     /// Return the bounded, portable feedback profile owned by this session.
     /// The profile contains operation/candidate identities, digests, and
     /// aggregate counts/timings only; persistence remains an explicit host
@@ -488,7 +503,8 @@ mod tests {
 
     use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
     use runmat_runtime::context::{
-        ParallelCapability, RuntimeParallelResources, RuntimeParallelService,
+        ParallelCapability, RuntimeHostEffectResourceService, RuntimeParallelResources,
+        RuntimeParallelService,
     };
 
     use super::RunMatSession;
@@ -496,6 +512,18 @@ mod tests {
     struct FixedAllocation;
 
     struct ManagedAllocation(ManagedHostEffectLedger);
+
+    struct NoEvidence;
+
+    impl RuntimeHostEffectResourceService for NoEvidence {
+        fn admission(
+            &self,
+            _: &runmat_runtime::context::host_effect::HostEffectRequest<'_>,
+            _: &runmat_runtime::context::RuntimeContext,
+        ) -> Option<runmat_runtime::context::host_effect::HostEffectResourceAdmission> {
+            None
+        }
+    }
 
     impl RuntimeParallelService for ManagedAllocation {
         fn supports(&self, _capability: ParallelCapability) -> bool {
@@ -545,6 +573,40 @@ mod tests {
         assert_eq!(resources.cpu_millicores_available, 250);
         assert_eq!(resources.memory_available_bytes, Some(4_096));
         assert_eq!(resources.epoch, 7);
+    }
+
+    #[test]
+    fn host_resource_installation_preserves_parallel_and_placement_ports() {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let ledger = ManagedHostEffectLedger::new_with_epoch(16, 5);
+        let parallel: Rc<dyn RuntimeParallelService> = Rc::new(ManagedAllocation(ledger.clone()));
+        session.install_parallel_service(parallel.clone());
+        let previous_placement = session
+            .runtime_context()
+            .service_ports()
+            .placement()
+            .cloned();
+        let resources: Rc<dyn RuntimeHostEffectResourceService> = Rc::new(NoEvidence);
+        session.install_host_effect_resource_service(resources.clone());
+        let ports = session.runtime_context().service_ports();
+        assert!(Rc::ptr_eq(ports.parallel().unwrap(), &parallel));
+        assert!(Rc::ptr_eq(
+            ports.host_effect_resources().unwrap(),
+            &resources
+        ));
+        assert_eq!(
+            ports
+                .parallel()
+                .unwrap()
+                .managed_host_effect_ledger()
+                .unwrap()
+                .snapshot()
+                .capacity_bytes,
+            16
+        );
+        if let Some(previous) = previous_placement {
+            assert!(Rc::ptr_eq(ports.placement().unwrap(), &previous));
+        }
     }
 
     #[test]
