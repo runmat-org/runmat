@@ -101,6 +101,10 @@ fn arrayfun_size_mismatch_errors() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn arrayfun_error_handler_recovers() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 991);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, requested_outputs| {
             assert_eq!(function, 991);
@@ -112,7 +116,7 @@ fn arrayfun_error_handler_recovers() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let handler = Value::Closure(Closure {
         function_name: "arrayfun_error_handler_fixture".into(),
-        binding: Some(runmat_value::BoundFunctionBinding::unavailable(991)),
+        binding: Some(binding),
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
         captures: vec![Value::Num(42.0)],

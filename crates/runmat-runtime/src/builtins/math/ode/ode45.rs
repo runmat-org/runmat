@@ -279,6 +279,11 @@ mod tests {
     #[test]
     fn ode45_automatic_resident_input_gathers_but_explicit_input_is_gated() {
         test_support::with_test_provider(|provider| {
+            let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+            let _entry = runtime.enter();
+            let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 905);
+            let _bound =
+                crate::user_functions::test_support::install_bound_forwarder(binding.clone());
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|_function, _args, _requested_outputs| {
                     Box::pin(
@@ -298,13 +303,7 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("admit provenance view");
             let result = block_on(ode45_builtin(
-                Value::BoundFunctionHandle {
-                    name: "constant_rhs".into(),
-                    function: 905,
-                    authority: runmat_value::BoundFunctionAuthority::unavailable(905),
-                    source_role: runmat_types::FunctionSourceRole::Unknown,
-                    source_file: None,
-                },
+                crate::user_functions::test_support::exact_local_value("constant_rhs", binding),
                 Value::GpuTensor(automatic),
                 Value::Num(1.0),
                 Vec::new(),

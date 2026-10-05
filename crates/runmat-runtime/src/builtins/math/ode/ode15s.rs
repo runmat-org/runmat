@@ -236,6 +236,10 @@ mod tests {
 
     #[test]
     fn ode15s_accepts_semantic_function_handle_rhs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 57);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function, args, _requested_outputs| {
                 assert_eq!(function, 57);
@@ -250,13 +254,7 @@ mod tests {
         )));
 
         let out = block_on(ode15s_builtin(
-            Value::BoundFunctionHandle {
-                name: "ode_stiff_decay".into(),
-                function: 57,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(57),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            crate::user_functions::test_support::exact_local_value("ode_stiff_decay", binding),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
             Vec::new(),

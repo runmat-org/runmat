@@ -3,6 +3,10 @@ use std::sync::Arc;
 
 #[test]
 fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 821);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_, arguments, count| {
             assert_eq!(count, 2);
@@ -24,13 +28,7 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
         for uniform in [true, false] {
             let _outputs = crate::output_count::push_output_count(Some(2));
             let result = call(
-                Value::BoundFunctionHandle {
-                    name: "position".into(),
-                    function: 821,
-                    authority: runmat_value::BoundFunctionAuthority::unavailable(821),
-                    source_role: runmat_types::FunctionSourceRole::Unknown,
-                    source_file: None,
-                },
+                crate::user_functions::test_support::exact_local_value("position", binding.clone()),
                 vec![
                     Value::Cell(
                         CellArray::from_column_major(linear.clone(), shape.clone()).unwrap(),
@@ -68,6 +66,10 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
 
 #[test]
 fn handler_context_refers_to_the_original_column_major_element() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 822);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     for shape in [vec![2, 2], vec![2, 2, 2]] {
         let expected_shape = shape.clone();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -101,13 +103,10 @@ fn handler_context_refers_to_the_original_column_major_element() {
             vec![
                 Value::Cell(CellArray::from_column_major(linear.clone(), shape).unwrap()),
                 Value::String("ErrorHandler".into()),
-                Value::BoundFunctionHandle {
-                    name: "position_handler".into(),
-                    function: 822,
-                    authority: runmat_value::BoundFunctionAuthority::unavailable(822),
-                    source_role: runmat_types::FunctionSourceRole::Unknown,
-                    source_file: None,
-                },
+                crate::user_functions::test_support::exact_local_value(
+                    "position_handler",
+                    binding.clone(),
+                ),
             ],
         )
         .unwrap();
