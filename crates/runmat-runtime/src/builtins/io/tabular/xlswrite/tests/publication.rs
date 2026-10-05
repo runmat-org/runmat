@@ -2,6 +2,7 @@
 
 use super::*;
 use async_trait::async_trait;
+use futures::task::{waker_ref, ArcWake};
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use runmat_filesystem::{
@@ -25,6 +26,15 @@ struct LifecycleEvidence {
     writes: AtomicUsize,
     publish_polls: AtomicUsize,
     retired_stages: AtomicUsize,
+}
+
+#[derive(Default)]
+struct WakeCount(AtomicUsize);
+
+impl ArcWake for WakeCount {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 #[derive(Clone)]
@@ -237,36 +247,44 @@ fn destination_exists(memory: &MemoryFsProvider) -> bool {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn public_call_drop_during_pending_publish_retires_stage_without_replay() {
-    let evidence = Arc::new(LifecycleEvidence::default());
-    with_lifecycle(
-        LifecycleBehavior::Pending(evidence),
-        1,
-        |memory, evidence| {
-            let mut call = Box::pin(xlswrite_call(
-                Value::from("out.xlsx"),
-                Value::Num(7.0),
-                Vec::new(),
-            ));
-            let waker = futures::task::noop_waker();
-            for _ in 0..8 {
-                assert!(matches!(
-                    call.as_mut().poll(&mut Context::from_waker(&waker)),
-                    Poll::Pending
+    for output_count in [1, 2] {
+        let evidence = Arc::new(LifecycleEvidence::default());
+        with_lifecycle(
+            LifecycleBehavior::Pending(evidence),
+            output_count,
+            |memory, evidence| {
+                let cancellation = CancellationSource::new();
+                let runtime = RuntimeContext::with_cancellation(
+                    Rc::new(RuntimeExecutionService::new()),
+                    cancellation.token(),
+                );
+                let mut call = Box::pin(xlswrite_builtin(
+                    Some(runtime),
+                    Value::from("out.xlsx"),
+                    Value::Num(7.0),
+                    Vec::new(),
                 ));
-                if evidence.publish_polls.load(Ordering::SeqCst) == 1 {
-                    break;
+                let waker = futures::task::noop_waker();
+                for _ in 0..8 {
+                    assert!(matches!(
+                        call.as_mut().poll(&mut Context::from_waker(&waker)),
+                        Poll::Pending
+                    ));
+                    if evidence.publish_polls.load(Ordering::SeqCst) == 1 {
+                        break;
+                    }
                 }
-            }
-            assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
-            assert!(evidence.writes.load(Ordering::SeqCst) > 0);
-            assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
-            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 0);
-            drop(call);
-            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 1);
-            assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
-            assert!(!destination_exists(&memory));
-        },
-    );
+                assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
+                assert!(evidence.writes.load(Ordering::SeqCst) > 0);
+                assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
+                assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 0);
+                drop(call);
+                assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 1);
+                assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
+                assert!(!destination_exists(&memory));
+            },
+        );
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -288,7 +306,8 @@ fn public_call_cancel_during_pending_publish_is_indeterminate_not_false() {
                 Value::Num(7.0),
                 Vec::new(),
             ));
-            let waker = futures::task::noop_waker();
+            let wakes = Arc::new(WakeCount::default());
+            let waker = waker_ref(&wakes);
             for _ in 0..8 {
                 assert!(matches!(
                     call.as_mut().poll(&mut Context::from_waker(&waker)),
@@ -299,15 +318,15 @@ fn public_call_cancel_during_pending_publish_is_indeterminate_not_false() {
                 }
             }
             assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
+            let wakes_before_cancel = wakes.0.load(Ordering::SeqCst);
             source.cancel(CancellationReason::User);
-            let result = (0..8)
-                .find_map(
-                    |_| match call.as_mut().poll(&mut Context::from_waker(&waker)) {
-                        Poll::Ready(result) => Some(result),
-                        Poll::Pending => None,
-                    },
-                )
-                .expect("cancellation must wake the pending public call");
+            assert!(
+                wakes.0.load(Ordering::SeqCst) > wakes_before_cancel,
+                "cancellation must wake the pending public call"
+            );
+            let Poll::Ready(result) = call.as_mut().poll(&mut Context::from_waker(&waker)) else {
+                panic!("woken publication call must complete without another external event")
+            };
             let error = result.expect_err("uncertain publication cannot become false status");
             assert_eq!(
                 write_owner::publication_error_disposition(&error),
@@ -320,6 +339,43 @@ fn public_call_cancel_during_pending_publish_is_indeterminate_not_false() {
             assert!(!destination_exists(&memory));
         },
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn dispatcher_binding_preserves_two_output_known_unpublished_status() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let memory = MemoryFsProvider::with_current_dir(fixture_root());
+    block_on(memory.create_dir_all(Path::new(fixture_root()))).expect("fixture directory");
+    let provider = Arc::new(PublicationProvider {
+        memory: memory.clone(),
+        disposition: FsPublicationDisposition::NotPublished,
+        lifecycle: None,
+    });
+    let _restore = runmat_filesystem::replace_provider(provider);
+    runmat_filesystem::set_current_dir(fixture_root()).expect("fixture cwd");
+    let cancellation = CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(RuntimeExecutionService::new()),
+        cancellation.token(),
+    );
+    let outputs = block_on(crate::call_builtin_async_with_outputs_in_context(
+        &runtime,
+        "xlswrite",
+        &[Value::from("out.xlsx"), Value::Num(7.0)],
+        2,
+    ))
+    .expect("public dispatcher must select xlswrite");
+    let values = output_list(outputs);
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0], Value::Bool(false));
+    let Value::Struct(message) = &values[1] else {
+        panic!("message struct")
+    };
+    assert!(
+        matches!(message.fields.get("identifier"), Some(Value::String(id)) if id == "RunMat:xlswrite:Io")
+    );
+    assert!(!destination_exists(&memory));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
