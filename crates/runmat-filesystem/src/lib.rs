@@ -701,6 +701,7 @@ fn current_dir_override() -> Option<PathBuf> {
         .clone()
 }
 
+#[cfg(test)]
 fn replace_current_dir_override(value: Option<PathBuf>) -> Option<PathBuf> {
     let mut guard = provider_state_lock()
         .write()
@@ -818,7 +819,7 @@ pub fn current_dir() -> io::Result<PathBuf> {
 }
 
 pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    futures::executor::block_on(set_current_dir_async(path.as_ref().to_path_buf()))
+    futures::executor::block_on(set_current_dir_async(path.as_ref()))
 }
 
 pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
