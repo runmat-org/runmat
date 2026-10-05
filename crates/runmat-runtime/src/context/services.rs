@@ -308,8 +308,9 @@ pub struct RuntimeManagedWholeWorkSelection {
     pub kind: runmat_execution::WholeWorkDecisionKind,
     pub predicted_total_ns: Option<u64>,
     pub observation_lease: super::ManagedObservationLease,
+    /// Retains the synthetic probe until the selection drops; no reads are required.
     #[cfg(test)]
-    pub(crate) test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    pub(crate) _test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
     #[cfg(test)]
     pub(crate) test_signature: runmat_execution::PlacementSignature,
 }
@@ -357,7 +358,7 @@ pub(crate) fn test_managed_selection(
         kind: runmat_execution::WholeWorkDecisionKind::Unmeasured,
         predicted_total_ns: None,
         observation_lease: pool.acquire(identity, candidate.identity_digest()).unwrap(),
-        test_probe,
+        _test_probe: test_probe,
         test_signature: request.signature.clone(),
     }
 }
