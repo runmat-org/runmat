@@ -38,9 +38,9 @@ references use no RunMat stiffness, mass, damping matrices or eigensolve.
 ## Authored and verification boundaries
 
 The spatial initial displacement is authored as an exact typed per-node initial
-condition using persistent canonical node selectors. This does not establish
-the currently unmaterialized `InitialValue::FieldArtifact` path or generated
-initial-field support.
+condition using persistent canonical node selectors. Separate retained original-field
+witnesses exercise `InitialValue::FieldArtifact` transport and cold admission; those
+checks do not replace this original continuum gate or qualify generated inputs.
 
 Spatial refinement holds 400 time intervals fixed and uses Tet4 cells 2/4/8 or
 straight Tet10 cells 1/2/4. Temporal refinement holds the four-cell Tet10 mesh
@@ -107,3 +107,25 @@ cargo test --locked -p runmat-analysis-fea --lib pipeline::transient::rod_qualif
 General bending/shear, unconstrained Poisson response, curved geometry, generated
 input equivalence, formal study-accuracy acceptance, measured resource envelopes,
 process/remote restart and final release evidence remain separate required gates.
+
+## Exact affine consistent mass
+
+Affine Tet10 elements now integrate consistent mass directly from barycentric
+polynomial moments. For exponents `a_i`, the physical tetrahedron integral is
+`6 V product(a_i!) / (3 + sum(a_i))!`. Quadratic corner and edge shapes yield
+integer coefficients times `rho V / 420`; the negative corner/edge couplings are
+retained. This is consistent mass, with no row-sum lumping or mode fitting.
+
+The existing exact midpoint predicate selects this path. Positive Jacobian and
+material admission run first; curved elements, including a `2^-40` midside
+perturbation, retain the original positive 125-point rule. The affine path evaluates
+one constant determinant and the exact coefficients, eliminating unnecessary
+quadrature accumulation. Existing requested resource ceilings remain conservative;
+this is not a measured performance or RSS claim.
+
+Independent tests cover every quadratic kinetic-energy cross moment across three
+scales and three origins, including `2^40`, all vector axes, symmetry and cross-axis
+zeros. Curved element mass is compared against an independent 512-point integral.
+No original continuum reference, mesh, tolerance or initial displacement changes.
+The original temporal gate was revalidated before this change and still fails its
+velocity refinement ratio; exact mass is not claimed to resolve that scientific gap.
