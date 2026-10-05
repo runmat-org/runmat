@@ -62,6 +62,11 @@ pub struct FunctionBytecode {
     pub source_id: Option<runmat_hir::SourceId>,
     #[serde(default)]
     pub source_role: runmat_types::FunctionSourceRole,
+    /// Compiler ordinal before Core assigns a session-local function ID.
+    pub portable_function: runmat_types::ProgramFunctionId,
+    /// Immutable origin set by the publishing owner before session-ID remap.
+    /// None is a legacy or unpublished function, never portable binding proof.
+    pub binding_origin: Option<runmat_execution::FunctionBindingOrigin>,
     /// Whole-function semantic requirements, including reachable static
     /// callees, captured by MIR analysis before bytecode serialization.
     #[serde(default)]
@@ -114,6 +119,8 @@ impl Default for FunctionBytecode {
             private_owner_scope: String::new(),
             source_id: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            portable_function: runmat_types::ProgramFunctionId(0),
+            binding_origin: None,
             capabilities: Default::default(),
             instructions: Vec::new(),
             instr_spans: Vec::new(),
@@ -1091,6 +1098,8 @@ mod function_registry_tests {
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            portable_function: runmat_types::ProgramFunctionId(0),
+            binding_origin: None,
             capabilities: Default::default(),
             instructions: vec![Instr::Return],
             instr_spans: Vec::new(),
@@ -1114,6 +1123,24 @@ mod function_registry_tests {
             distributed_values: Vec::new(),
             collective_contracts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn session_rebinding_preserves_immutable_function_origin() {
+        let origin = runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("original program"),
+            function: runmat_types::ProgramFunctionId(3),
+        };
+        let mut function = test_function(3, "f", "");
+        function.portable_function = origin.function;
+        function.binding_origin = Some(origin);
+        function.rebind_identity(FunctionId(77), runmat_types::ProgramFunctionId(77));
+        assert_eq!(function.function, FunctionId(77));
+        assert_eq!(
+            function.portable_function,
+            runmat_types::ProgramFunctionId(3)
+        );
+        assert_eq!(function.binding_origin, Some(origin));
     }
 
     #[test]

@@ -838,6 +838,11 @@ fn compile_semantic_functions(
                 private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
                 source_role: hir.function_source_role(function),
+                portable_function: runmat_types::ProgramFunctionId(
+                    u32::try_from(function.id.0)
+                        .map_err(|_| CompileError::new("portable function identity overflow"))?,
+                ),
+                binding_origin: None,
                 capabilities: u32::try_from(function.id.0)
                     .ok()
                     .map(runmat_types::ProgramFunctionId)

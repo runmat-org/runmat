@@ -41,8 +41,8 @@ pub use handle::{
     PoolBackend, PoolHandle, PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
 };
 pub use identity::{
-    CompositeId, DistributedObjectId, ExecutionScopeId, FutureId, GangId, JobId, PoolId, RunId,
-    TaskId,
+    CompositeId, DistributedObjectId, ExecutionScopeId, FunctionBindingOrigin, FutureId, GangId,
+    JobId, PoolId, RunId, TaskId,
 };
 pub use identity::{
     Digest, DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,

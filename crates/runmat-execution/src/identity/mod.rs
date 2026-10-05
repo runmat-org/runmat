@@ -1,8 +1,10 @@
 mod digest;
+mod function;
 mod program;
 mod typed;
 
 pub use digest::Digest;
+pub use function::FunctionBindingOrigin;
 pub use program::{
     DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,
 };

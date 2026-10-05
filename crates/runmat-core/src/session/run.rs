@@ -727,6 +727,26 @@ impl RunMatSession {
             Some(input),
         );
 
+        let mut prepared = self.compile_input(input)?;
+        let source = crate::ExecutableSource::new(
+            format!("interactive:{}", self.abi_workspace_handle.0),
+            self.current_source_name(),
+            input,
+        );
+        let revision = crate::ExecutableRevision::derive(
+            &source,
+            self.runtime_context.program_revision().cloned(),
+            crate::program_environment(self.compat_mode),
+        );
+        prepared
+            .attach_function_origins(&revision.program_revision)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
         let PreparedExecution {
             ast,
             lowering,
@@ -734,20 +754,11 @@ impl RunMatSession {
             analysis,
             bytecode,
             function_registry_after_success,
+            current_function_ids: _,
             next_semantic_function_id_after_success,
-        } = self.compile_input(input)?;
+        } = prepared;
         #[cfg(not(target_arch = "wasm32"))]
         let interactive_unit = {
-            let source = crate::ExecutableSource::new(
-                format!("interactive:{}", self.abi_workspace_handle.0),
-                self.current_source_name(),
-                input,
-            );
-            let revision = crate::ExecutableRevision::derive(
-                &source,
-                self.runtime_context.program_revision().cloned(),
-                crate::program_environment(self.compat_mode),
-            );
             crate::ExecutableUnit::new(
                 source.clone(),
                 revision,

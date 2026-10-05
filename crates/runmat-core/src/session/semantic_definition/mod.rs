@@ -1,5 +1,6 @@
 //! Session definition identity, separate from closure capture instances.
 mod fingerprint;
+mod origin;
 mod remap;
 mod reuse;
 pub(crate) use fingerprint::fingerprint;

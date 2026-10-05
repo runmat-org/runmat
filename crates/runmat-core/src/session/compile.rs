@@ -812,13 +812,22 @@ impl RunMatSession {
         self.active_source_fullpath_name = previous_source_fullpath_name;
         self.pending_companion_source_discovery = previous_pending;
 
-        let prepared = result?;
+        let mut prepared = result?;
         let source_map = self.executable_source_map(&source);
         let revision = crate::ExecutableRevision::derive(
             &source,
             program_revision,
             crate::program_environment(self.compat_mode),
         );
+        prepared
+            .attach_function_origins(&revision.program_revision)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
         crate::ExecutableUnit::new(
             source,
             revision,
@@ -1076,6 +1085,7 @@ impl RunMatSession {
             analysis,
             bytecode,
             function_registry_after_success,
+            current_function_ids: function_id_remap.values().copied().collect(),
             next_semantic_function_id_after_success,
         })
     }

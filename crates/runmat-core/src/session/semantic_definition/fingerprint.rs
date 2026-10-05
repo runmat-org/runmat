@@ -14,6 +14,8 @@ pub(crate) fn fingerprint(
         private_owner_scope,
         source_id,
         source_role,
+        portable_function: _,
+        binding_origin: _,
         capabilities,
         instructions,
         instr_spans,
