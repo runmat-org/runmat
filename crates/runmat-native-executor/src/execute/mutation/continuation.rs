@@ -13,12 +13,14 @@ enum Phase {
 }
 
 mod sequence;
-pub(super) use sequence::{assign_prepared_sequence, assign_sequence, PendingSequenceAssign};
+pub(in crate::execute) use sequence::{
+    assign_prepared_sequence, assign_sequence, PendingSequenceAssign,
+};
 
 /// The invocation-owned cursor for one statement site. Values are arena
 /// references, not copies of a caller's mutable receiver. A completed step is
 /// never evaluated again after a suspended child protocol resumes.
-pub(super) struct PendingAssign {
+pub(in crate::execute) struct PendingAssign {
     request: NativeSiteRequest,
     place: MirPlace,
     root: MirLocalId,
@@ -33,7 +35,7 @@ pub(super) struct PendingAssign {
     allow_init: bool,
 }
 
-pub(super) struct PendingPlacePrepare {
+pub(in crate::execute) struct PendingPlacePrepare {
     request: NativeSiteRequest,
     place: MirPlace,
     root: MirLocalId,
@@ -45,7 +47,7 @@ pub(super) struct PendingPlacePrepare {
 }
 
 impl PendingPlacePrepare {
-    pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
+    pub(in crate::execute) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
         std::iter::once(self.current).chain(self.parents.iter().map(|(value, _)| *value))
     }
 }
@@ -119,7 +121,7 @@ pub(super) fn prepare_place_write(
     ))
 }
 
-pub(super) struct PendingPlainMulti {
+pub(in crate::execute) struct PendingPlainMulti {
     pub(super) request: NativeSiteRequest,
     pub(super) next_target: usize,
 }
@@ -131,7 +133,7 @@ pub(super) fn skip_completed(state: &mut HostState, place: &MirPlace) -> NativeE
     skip_completed_region(state)
 }
 
-pub(super) fn skip_completed_region(state: &mut HostState) -> NativeExecutorResult<()> {
+pub(in crate::execute) fn skip_completed_region(state: &mut HostState) -> NativeExecutorResult<()> {
     let (_, _, completed) = state.enter_contextual_region();
     if completed.is_none() {
         return Err(NativeExecutorError::Host(
@@ -142,7 +144,7 @@ pub(super) fn skip_completed_region(state: &mut HostState) -> NativeExecutorResu
 }
 
 impl PendingAssign {
-    pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
+    pub(in crate::execute) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
         std::iter::once(self.current)
             .chain(std::iter::once(self.rhs))
             .chain(self.parents.iter().map(|(parent, _)| *parent))

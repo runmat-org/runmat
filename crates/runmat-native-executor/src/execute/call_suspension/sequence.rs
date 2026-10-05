@@ -11,13 +11,13 @@ use super::super::state::{EmbeddedOperationIdentity, HostState};
 use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
 
 #[derive(Clone)]
-pub(super) enum SequenceStage {
+pub(in crate::execute) enum SequenceStage {
     Builder(SequenceDestinationBuilder),
     Destination(PreparedSequenceDestination),
 }
 
 impl SequenceStage {
-    pub(super) fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
+    pub(in crate::execute) fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
         match self {
             Self::Builder(builder) => builder.visit_retained_values(visitor),
             Self::Destination(destination) => destination.visit_retained_values(visitor),
@@ -25,7 +25,7 @@ impl SequenceStage {
     }
 }
 
-pub(super) fn take_completed_sequence_stage(
+pub(in crate::execute) fn take_completed_sequence_stage(
     state: &mut HostState,
     embedded: Option<&EmbeddedOperationIdentity>,
 ) -> NativeExecutorResult<Option<SequenceStage>> {
@@ -62,7 +62,7 @@ pub(super) fn take_completed_sequence_stage(
     Ok(Some(stage))
 }
 
-pub(super) fn begin_sequence_stage(
+pub(in crate::execute) fn begin_sequence_stage(
     state: &mut HostState,
     embedded: Option<EmbeddedOperationIdentity>,
     future: Pin<Box<dyn Future<Output = NativeExecutorResult<SequenceStage>> + 'static>>,

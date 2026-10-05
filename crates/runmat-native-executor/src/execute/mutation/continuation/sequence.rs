@@ -13,7 +13,7 @@ enum SequencePhase {
     Writeback(NativeValueRef),
 }
 
-pub(super) struct PendingSequenceAssign {
+pub(in crate::execute) struct PendingSequenceAssign {
     request: NativeSiteRequest,
     target: MirSequenceTarget,
     region: usize,
@@ -23,7 +23,7 @@ pub(super) struct PendingSequenceAssign {
 }
 
 impl PendingSequenceAssign {
-    pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
+    pub(in crate::execute) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
         self.prepared
             .root_references()
             .map(|(_, reference)| reference)
@@ -83,7 +83,7 @@ impl PendingSequenceAssign {
     }
 }
 
-pub(super) fn assign_sequence(
+pub(in crate::execute) fn assign_sequence(
     state: &mut HostState,
     target: &MirSequenceTarget,
 ) -> NativeExecutorResult<()> {
@@ -142,7 +142,7 @@ pub(super) fn assign_sequence(
     }
 }
 
-pub(super) fn assign_prepared_sequence(
+pub(in crate::execute) fn assign_prepared_sequence(
     state: &mut HostState,
     destination: PreparedSequenceDestination,
     root: Value,
