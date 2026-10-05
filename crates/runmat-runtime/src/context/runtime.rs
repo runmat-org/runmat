@@ -429,6 +429,27 @@ impl RuntimeContext {
         ContextFuture::new(self.clone(), future)
     }
 
+    /// Carry this frame's lexical catch exception through every poll, never
+    /// across a yield. `None` explicitly masks an enclosing frame's catch.
+    pub fn scope_active_catch<F: Future>(
+        &self,
+        exception: Option<runmat_value::MException>,
+        future: F,
+    ) -> super::ActiveCatchFuture<F> {
+        super::ActiveCatchFuture::new(self, exception, future)
+    }
+
+    pub fn enter_active_catch(
+        &self,
+        exception: Option<runmat_value::MException>,
+    ) -> super::ActiveCatchGuard {
+        super::ActiveCatchGuard::enter(self.local_identity(), exception)
+    }
+
+    pub fn active_catch_exception(&self) -> Option<runmat_value::MException> {
+        super::catch::active_for(self)
+    }
+
     /// Activate this context for one synchronous executor or foreign-host
     /// extent. Async code should use [`Self::scope`] so the context is removed
     /// across yields.
