@@ -11,7 +11,9 @@ use super::state::HostState;
 
 mod prepared_multi;
 mod continuation;
+pub(super) use continuation::skip_completed_region as skip_prepared_sequence_region;
 pub(super) use continuation::PendingAssign;
+pub(super) use continuation::PendingPlacePrepare;
 pub(super) use continuation::PendingPlainMulti;
 pub(super) use continuation::PendingSequenceAssign;
 pub(super) use prepared_multi::PreparedMultiAssignment;
@@ -247,7 +249,7 @@ pub(super) fn prepare_sequence_assignment(
             ));
         }
     };
-    let (writeback, base) = prepare_place_write(state, base_place)?;
+    let (writeback, base) = continuation::prepare_place_write(state, base_place)?;
     let count = runmat_runtime::object::resolve::member_sequence_cardinality(&base)
         .map_err(NativeExecutorError::from)?;
     let base = state.arena.insert(base);
@@ -259,23 +261,6 @@ pub(super) fn prepare_sequence_assignment(
         },
         count,
     ))
-}
-
-fn prepare_place_write(
-    state: &mut HostState,
-    place: &MirPlace,
-) -> NativeExecutorResult<(PreparedPlaceWrite, Value)> {
-    let mut segments = Vec::new();
-    let root = flatten_place(place, &mut segments)?;
-    let root_reference = state.local_reference(root.0)?;
-    let mut current = state.arena.get(root_reference)?.clone();
-    let mut parents = Vec::with_capacity(segments.len());
-    for segment in &segments {
-        let child = read_segment(state, current.clone(), segment, false)?;
-        parents.push((state.arena.insert(current), segment.clone()));
-        current = child;
-    }
-    Ok((PreparedPlaceWrite { root, parents }, current))
 }
 
 pub(super) fn assign_place_to_root(

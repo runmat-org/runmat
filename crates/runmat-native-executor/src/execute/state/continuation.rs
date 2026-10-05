@@ -63,6 +63,18 @@ impl HostState {
                 });
             }
         }
+        if let Some(preparation) = &self.pending_place_prepare {
+            let values = preparation.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len())
+                    .expect("pending place preparation root cardinality is bounded by native value admission");
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
         let contextual_roots = self.contextual_region_roots().collect::<Vec<_>>();
         for value in contextual_roots {
             let slot = u32::try_from(self.roots.len())
@@ -180,6 +192,7 @@ impl HostState {
             || self.completed_call.is_some()
             || self.pending_place_mutation.is_some()
             || self.pending_assign.is_some()
+            || self.pending_place_prepare.is_some()
             || self.pending_plain_multi.is_some()
             || self.pending_sequence_assign.is_some()
             || self.pending_sequence_rvalue.is_some()

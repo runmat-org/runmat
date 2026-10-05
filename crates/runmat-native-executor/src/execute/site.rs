@@ -309,7 +309,10 @@ fn execute_instruction(
                 ));
             }
             let prepared = match state.pending_sequence_rvalue.take() {
-                Some(prepared) => prepared,
+                Some(prepared) => {
+                    super::mutation::skip_prepared_sequence_region(state)?;
+                    prepared
+                }
                 None => {
                     let (destination, count) =
                         super::mutation::prepare_sequence_assignment(state, target)?;

@@ -5,7 +5,9 @@ use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::{flatten_place, HostState, PlaceSegment, PreparedSequenceAssignment};
+use super::{
+    flatten_place, HostState, PlaceSegment, PreparedPlaceWrite, PreparedSequenceAssignment,
+};
 
 #[derive(Clone, Copy)]
 enum Phase {
@@ -29,6 +31,92 @@ pub(super) struct PendingAssign {
     region: usize,
     delete: bool,
     allow_init: bool,
+}
+
+pub(super) struct PendingPlacePrepare {
+    request: NativeSiteRequest,
+    place: MirPlace,
+    root: MirLocalId,
+    segments: Vec<PlaceSegment>,
+    parents: Vec<(NativeValueRef, PlaceSegment)>,
+    current: NativeValueRef,
+    region: usize,
+    step: usize,
+}
+
+impl PendingPlacePrepare {
+    pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
+        std::iter::once(self.current).chain(self.parents.iter().map(|(value, _)| *value))
+    }
+}
+
+pub(super) fn prepare_place_write(
+    state: &mut HostState,
+    place: &MirPlace,
+) -> NativeExecutorResult<(PreparedPlaceWrite, Value)> {
+    let request = state.current_request.ok_or_else(|| {
+        NativeExecutorError::Host("native place preparation has no active rvalue site".into())
+    })?;
+    let (region, next_step, _) = state.enter_contextual_region();
+    let mut cursor = match state.pending_place_prepare.take() {
+        Some(cursor)
+            if cursor.request == request
+                && cursor.place == *place
+                && cursor.region == region
+                && cursor.step == next_step =>
+        {
+            cursor
+        }
+        Some(_) => {
+            return Err(NativeExecutorError::Host(
+                "pending place preparation does not match the exact resumed site".into(),
+            ));
+        }
+        None => {
+            let mut segments = Vec::new();
+            let root = flatten_place(place, &mut segments)?;
+            let current = state.local_reference(root.0)?;
+            PendingPlacePrepare {
+                request,
+                place: place.clone(),
+                root,
+                segments,
+                parents: Vec::new(),
+                current,
+                region,
+                step: 0,
+            }
+        }
+    };
+    while cursor.step < cursor.segments.len() {
+        let step = cursor.step;
+        state.enter_contextual_step(region, step);
+        let parent = state.arena.get(cursor.current)?.clone();
+        let segment = cursor.segments[step].clone();
+        let result = read_step(state, parent, &segment, false);
+        state.finish_contextual_step(region, step, step + usize::from(result.is_ok()))?;
+        match result {
+            Ok(value) => {
+                cursor.parents.push((cursor.current, segment));
+                cursor.current = state.arena.insert(value);
+                cursor.step += 1;
+            }
+            Err(NativeExecutorError::CallSuspended) => {
+                state.pending_place_prepare = Some(cursor);
+                return Err(NativeExecutorError::CallSuspended);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let current = state.arena.get(cursor.current)?.clone();
+    state.finish_contextual_region(region, vec![cursor.current]);
+    Ok((
+        PreparedPlaceWrite {
+            root: cursor.root,
+            parents: cursor.parents,
+        },
+        current,
+    ))
 }
 
 pub(super) struct PendingPlainMulti {
