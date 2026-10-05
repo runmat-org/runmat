@@ -110,7 +110,7 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
     .ok_or_else(|| crate::runtime_descriptor_error("str2func", &STR2FUNC_ERROR_NAME_INVALID))?;
 
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
-        Ok(Value::BoundFunctionHandle { name, function })
+        Ok(crate::user_functions::bound_function_handle(name, function))
     } else if crate::is_well_formed_qualified_name(&name) {
         Ok(Value::ExternalFunctionHandle(name))
     } else {

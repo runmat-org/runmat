@@ -51,6 +51,7 @@ pub enum Value {
     BoundFunctionHandle {
         name: String,
         function: usize,
+        source_role: runmat_types::FunctionSourceRole,
     },
     Closure(Closure),
     ClassRef(runmat_types::ClassIdentity),

@@ -467,6 +467,7 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
         _ if bound_function.is_some() => Ok(Value::BoundFunctionHandle {
             name: value.qualified_name.clone(),
             function: bound_function.expect("checked above"),
+            source_role: value.source_role,
         }),
         _ => Err(ValueCodecError::unsupported(
             path,

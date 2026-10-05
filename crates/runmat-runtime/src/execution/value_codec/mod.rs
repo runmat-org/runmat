@@ -465,6 +465,16 @@ mod tests {
         };
         callable.form = runmat_execution::value::CallableForm::Handle;
         assert!(decode_inline_value(&tampered_form).is_err());
+        let local_handle = Value::BoundFunctionHandle {
+            name: "local_display".into(),
+            function: 11,
+            source_role: runmat_types::FunctionSourceRole::Local,
+        };
+        assert_eq!(
+            decode_inline_value(&encode_inline_value(&local_handle).unwrap()).unwrap(),
+            local_handle,
+            "bound-handle role must not be re-derived from the destination catalog"
+        );
 
         let mut structure = StructValue::new();
         let service = super::super::RuntimeExecutionService::new();

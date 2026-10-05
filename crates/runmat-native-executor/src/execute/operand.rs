@@ -391,6 +391,7 @@ pub(super) fn evaluate_operand(
                         Value::BoundFunctionHandle {
                             name,
                             function: function.0 as usize,
+                            source_role: target.source_role,
                         }
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(

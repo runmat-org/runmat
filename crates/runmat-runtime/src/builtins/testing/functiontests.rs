@@ -132,6 +132,7 @@ mod tests {
         .map(|(name, function)| Value::BoundFunctionHandle {
             name: name.into(),
             function,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         })
         .collect();
         let input = Value::Cell(CellArray::new(handles, 1, 5).unwrap());

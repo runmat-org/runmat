@@ -202,6 +202,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "ode_decay".into(),
                 function: 55,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),

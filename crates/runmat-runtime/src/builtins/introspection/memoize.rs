@@ -1031,15 +1031,18 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
             Value::BoundFunctionHandle {
                 name: an,
                 function: af,
+                source_role: ar,
             },
             Value::BoundFunctionHandle {
                 name: bn,
                 function: bf,
+                source_role: br,
             },
-        ) => an == bn && af == bf,
+        ) => an == bn && af == bf && ar == br,
         (Value::Closure(a), Value::Closure(b)) => {
             a.function_name == b.function_name
                 && a.bound_function == b.bound_function
+                && a.source_role == b.source_role
                 && values_equal_for_cache(&a.captures, &b.captures)
         }
         (Value::MException(a), Value::MException(b)) => a == b,
@@ -1170,7 +1173,7 @@ fn function_key(function: &Value) -> String {
         Value::FunctionHandle(name) => format!("fh:{name}"),
         Value::ExternalFunctionHandle(name) => format!("external:{name}"),
         Value::MethodFunctionHandle(name) => format!("method:{name}"),
-        Value::BoundFunctionHandle { name, function } => format!("bound:{function}:{name}"),
+        Value::BoundFunctionHandle { name, function, .. } => format!("bound:{function}:{name}"),
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
@@ -1378,6 +1381,7 @@ mod tests {
         block_on(memoize_builtin(Value::BoundFunctionHandle {
             name: "step".into(),
             function: 42,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("memoized function")
     }
@@ -1416,6 +1420,7 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "step".into(),
             function: 42,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
         let enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");

@@ -44,6 +44,7 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
         &[Value::BoundFunctionHandle {
             name: "fixture".into(),
             function: 42,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }],
         1,
     ))

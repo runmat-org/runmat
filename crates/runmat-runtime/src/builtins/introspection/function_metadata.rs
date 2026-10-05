@@ -62,9 +62,13 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
             FunctionHandleKind::Simple,
             String::new(),
         )),
-        Value::BoundFunctionHandle { name, function } => {
-            let (kind, file) =
-                source_metadata(function).unwrap_or((FunctionHandleKind::Unknown, String::new()));
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            source_role,
+        } => {
+            let kind = role_kind(source_role).unwrap_or(FunctionHandleKind::Unknown);
+            let file = source_metadata(function).map_or_else(String::new, |(_, file)| file);
             Ok(metadata_struct(name, kind, file))
         }
         Value::Closure(closure) => {
@@ -221,10 +225,10 @@ mod tests {
             ("metadata_file", 1, "simple"),
             ("child_local", 2, "scopedfunction"),
         ] {
-            let value = dispatch_functions(Value::BoundFunctionHandle {
-                name: name.into(),
+            let value = dispatch_functions(crate::user_functions::bound_function_handle(
+                name.into(),
                 function,
-            })
+            ))
             .expect("metadata");
             assert_eq!(field(&value, "type"), &Value::String(kind.into()));
             assert_eq!(
@@ -258,6 +262,7 @@ mod tests {
         let unknown_bound = dispatch_functions(Value::BoundFunctionHandle {
             name: "display_name".into(),
             function: usize::MAX,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         })
         .expect("unregistered bound handle has unknown source role");
         assert_eq!(

@@ -869,6 +869,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 42,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -886,6 +887,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.decay".into(),
                 function: 43,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -913,6 +915,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 45,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -929,6 +932,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 145,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -947,6 +951,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.decay".into(),
                 function: 46,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -965,6 +970,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.decay".into(),
                 function: 146,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -982,6 +988,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 47,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -999,6 +1006,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 147,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }

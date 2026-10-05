@@ -503,12 +503,17 @@ fn prepare_callable(
                 num_outputs,
             })
         }
-        Value::BoundFunctionHandle { name, function } => {
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            source_role,
+        } => {
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
                 handle: Value::BoundFunctionHandle {
                     name: normalized,
                     function,
+                    source_role,
                 },
                 num_outputs,
             })
@@ -520,6 +525,13 @@ fn prepare_callable(
                         &closure.function_name,
                     ) {
                         closure.bound_function = Some(function);
+                        if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
+                            closure.source_role =
+                                crate::user_functions::source_function_for(function)
+                                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| {
+                                        info.role
+                                    });
+                        }
                     }
                 }
                 Value::Closure(closure)
@@ -535,10 +547,10 @@ fn prepare_callable(
 
 fn handle_for_name(name: &str) -> Option<Value> {
     let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
-    Some(Value::BoundFunctionHandle {
-        name: name.into(),
+    Some(crate::user_functions::bound_function_handle(
+        name.into(),
         function,
-    })
+    ))
 }
 
 fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
@@ -767,6 +779,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".into(),
                 function: 188,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -793,6 +806,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "function_target".into(),
                 function: 612,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Some(3),
         )
@@ -818,6 +832,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".into(),
                 function: 87,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -840,6 +855,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".into(),
                 function: 88,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -860,6 +876,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.callback".into(),
                 function: 86,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
         assert_eq!(callable.num_outputs, Some(2));
@@ -871,6 +888,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "function_target".into(),
                 function: 41,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Some(1),
         )
@@ -880,6 +898,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "function_target".into(),
                 function: 41,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
         assert_eq!(callable.num_outputs, Some(1));

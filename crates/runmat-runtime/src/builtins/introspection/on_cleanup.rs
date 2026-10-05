@@ -482,6 +482,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup");
 
@@ -502,6 +503,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup");
         let Value::HandleObject(handle) = cleanup.clone() else {
@@ -528,6 +530,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup");
 
@@ -563,6 +566,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup");
         let cell = Value::Cell(CellArray::new(vec![cleanup], 1, 1).expect("cell"));
@@ -583,16 +587,19 @@ mod tests {
         let cleanup_a = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanupA".into(),
             function: 7,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup a");
         let cleanup_b = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanupB".into(),
             function: 8,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup b");
         let cleanup_c = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanupC".into(),
             function: 9,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         }))
         .expect("create cleanup c");
 

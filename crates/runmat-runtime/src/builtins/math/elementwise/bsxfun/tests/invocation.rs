@@ -77,6 +77,7 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
         Value::BoundFunctionHandle {
             name: "scaled_add".into(),
             function: 7,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         },
         Value::Tensor(column),
         Value::Tensor(row),
@@ -109,6 +110,7 @@ fn bsxfun_rejects_non_scalar_callback_output() {
         Value::BoundFunctionHandle {
             name: "bad".into(),
             function: 9,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         },
         Value::Num(1.0),
         Value::Num(2.0),

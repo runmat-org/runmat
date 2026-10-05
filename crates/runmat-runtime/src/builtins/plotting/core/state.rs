@@ -699,10 +699,12 @@ pub enum FunctionSurfaceFunctionRef {
     BoundFunctionHandle {
         name: String,
         function: usize,
+        source_role: runmat_types::FunctionSourceRole,
     },
     ClosureSummary {
         function_name: String,
         bound_function: Option<usize>,
+        source_role: runmat_types::FunctionSourceRole,
     },
 }
 

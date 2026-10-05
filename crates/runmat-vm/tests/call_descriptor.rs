@@ -744,6 +744,7 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
         Value::BoundFunctionHandle {
             name: "inc".into(),
             function: 4242,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         },
         vec![Value::Num(2.0)],
         1,

@@ -1028,15 +1028,19 @@ pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionR
         Value::MethodFunctionHandle(name) => {
             FunctionSurfaceFunctionRef::MethodFunctionHandle(name.clone())
         }
-        Value::BoundFunctionHandle { name, function } => {
-            FunctionSurfaceFunctionRef::BoundFunctionHandle {
-                name: name.clone(),
-                function: *function,
-            }
-        }
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            source_role,
+        } => FunctionSurfaceFunctionRef::BoundFunctionHandle {
+            name: name.clone(),
+            function: *function,
+            source_role: *source_role,
+        },
         Value::Closure(closure) => FunctionSurfaceFunctionRef::ClosureSummary {
             function_name: closure.function_name.clone(),
             bound_function: closure.bound_function,
+            source_role: closure.source_role,
         },
         _ => FunctionSurfaceFunctionRef::FunctionHandle("<invalid>".into()),
     }
@@ -1098,6 +1102,7 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "surface".into(),
             function: 1,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
         let domain = Value::Tensor(
             runmat_value::Tensor::new_integer(
@@ -1135,6 +1140,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String(" MeshDensity ".into()),
             Value::Int(IntValue::U8(35)),
@@ -1149,6 +1155,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String("FaceAlpha".into()),
             Value::Int(IntValue::U8(1)),
@@ -1219,6 +1226,7 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "surface".into(),
             function: 1,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -1260,6 +1268,7 @@ mod tests {
             &Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             0.0,
             0.0,
@@ -1337,6 +1346,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
@@ -1402,14 +1412,17 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "x".into(),
                 function: 11,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::BoundFunctionHandle {
                 name: "y".into(),
                 function: 12,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::BoundFunctionHandle {
                 name: "z".into(),
                 function: 13,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
@@ -1450,6 +1463,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
@@ -1477,6 +1491,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String("MeshDensity".into()),
             Value::Num(1.0),

@@ -301,6 +301,7 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "constant_rhs".into(),
                     function: 905,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
                 },
                 Value::GpuTensor(automatic),
                 Value::Num(1.0),

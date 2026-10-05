@@ -1128,6 +1128,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "wide_xdata".into(),
                 function: 901,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             Value::Tensor(xdata),
@@ -1162,6 +1163,7 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "zero_model".into(),
                     function: 904,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
                 },
                 Value::GpuTensor(automatic),
                 Value::Num(0.0),
@@ -1226,6 +1228,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             tensor(vec![0.0, 0.0], vec![2, 1]),
             tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
@@ -1275,6 +1278,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "exp_decay".into(),
                 function: 2,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             tensor(vec![1.0, 0.1], vec![2, 1]),
             tensor(xdata.clone(), vec![1, xdata.len()]),
@@ -1315,6 +1319,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bounded_line".into(),
                 function: 3,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             tensor(vec![0.5], vec![1, 1]),
             tensor(vec![1.0, 2.0, 3.0], vec![1, 3]),
@@ -1354,6 +1359,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line_multi".into(),
                 function: 4,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             tensor(vec![0.0, 0.0], vec![1, 2]),
             tensor(vec![0.0, 1.0, 2.0], vec![1, 3]),
@@ -1415,6 +1421,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line_algorithm".into(),
                 function: 45,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             tensor(vec![1.0, 2.0], vec![1, 2]),
@@ -1457,6 +1464,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "underdetermined".into(),
                 function: 5,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             tensor(vec![0.0, 0.0], vec![2, 1]),
             Value::Num(0.0),
@@ -1485,6 +1493,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bad_shape".into(),
                 function: 6,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             Value::Num(0.0),

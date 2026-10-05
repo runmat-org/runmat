@@ -3756,19 +3756,24 @@ fn function_surface_function_value(function: &super::state::FunctionSurfaceFunct
         super::state::FunctionSurfaceFunctionRef::MethodFunctionHandle(name) => {
             Value::MethodFunctionHandle(name.clone())
         }
-        super::state::FunctionSurfaceFunctionRef::BoundFunctionHandle { name, function } => {
-            Value::BoundFunctionHandle {
-                name: name.clone(),
-                function: *function,
-            }
-        }
+        super::state::FunctionSurfaceFunctionRef::BoundFunctionHandle {
+            name,
+            function,
+            source_role,
+        } => Value::BoundFunctionHandle {
+            name: name.clone(),
+            function: *function,
+            source_role: *source_role,
+        },
         super::state::FunctionSurfaceFunctionRef::ClosureSummary {
             function_name,
             bound_function,
+            source_role,
         } => match bound_function {
             Some(function) => Value::BoundFunctionHandle {
                 name: function_name.clone(),
                 function: *function,
+                source_role: *source_role,
             },
             None => Value::String(function_name.clone()),
         },

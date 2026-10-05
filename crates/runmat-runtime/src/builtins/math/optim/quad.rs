@@ -783,6 +783,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "square".into(),
                 function: 7,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             Value::Num(1.0),
@@ -950,6 +951,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "parameterized".into(),
                 function: 902,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             Value::Num(1.0),
@@ -1036,6 +1038,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "scaled_line".into(),
                 function: 42,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             Value::Num(2.0),
@@ -1085,6 +1088,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "sqrt_fn".into(),
                 function: 9,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Num(0.0),
             Value::Num(1.0),

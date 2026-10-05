@@ -645,7 +645,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
     fn resolve_text_handle(text: &str) -> Option<Value> {
         let name = normalize_handle_name(text)?;
         let function = crate::user_functions::resolve_semantic_function_by_name(&name)?;
-        Some(Value::BoundFunctionHandle { name, function })
+        Some(crate::user_functions::bound_function_handle(name, function))
     }
 
     match callback {
@@ -676,7 +676,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                Value::BoundFunctionHandle { name, function }
+                crate::user_functions::bound_function_handle(name, function)
             } else {
                 Value::FunctionHandle(name)
             }
@@ -686,7 +686,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
                 if let Some(function) =
                     crate::user_functions::resolve_semantic_function_by_name(&name)
                 {
-                    return Value::BoundFunctionHandle { name, function };
+                    return crate::user_functions::bound_function_handle(name, function);
                 }
             }
             Value::ExternalFunctionHandle(name)
@@ -694,7 +694,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::MethodFunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                Value::BoundFunctionHandle { name, function }
+                crate::user_functions::bound_function_handle(name, function)
             } else {
                 Value::MethodFunctionHandle(name)
             }
@@ -705,6 +705,10 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
                     crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
                 {
                     closure.bound_function = Some(function);
+                    if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
+                        closure.source_role = crate::user_functions::source_function_for(function)
+                            .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
+                    }
                 }
             }
             Value::Closure(closure)
@@ -1560,7 +1564,7 @@ async fn feval_builtin_in_runtime(
             )
             .await
         }
-        Value::BoundFunctionHandle { name, function } => {
+        Value::BoundFunctionHandle { name, function, .. } => {
             let request = crate::user_functions::CallableRequest::semantic(
                 function,
                 rest.clone(),
@@ -1834,6 +1838,7 @@ mod tests {
         let handle = Value::BoundFunctionHandle {
             name: "function_target".into(),
             function: 43,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
@@ -1847,6 +1852,7 @@ mod tests {
         let handle = Value::BoundFunctionHandle {
             name: "function_target".into(),
             function: 9043,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
 
         let err = block_on(feval_builtin(handle, vec![Value::Num(3.0)])).expect_err(
@@ -2148,6 +2154,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "resolved_target".into(),
                 function: 145,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -2266,6 +2273,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "resolved_target".into(),
                 function: 445,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -2333,6 +2341,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.resolved_target".into(),
                 function: 446,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             }
         );
     }
@@ -2564,6 +2573,7 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "local_fn".into(),
                     function: 44,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
                 }
             )
             .expect("func2str"),
@@ -3429,7 +3439,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 61
             ));
         });
@@ -3456,7 +3466,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "pkg.event_callback" && *function == 62
             ));
         });
@@ -3483,7 +3493,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 63
             ));
         });
@@ -3510,7 +3520,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 64
             ));
         });
@@ -3540,7 +3550,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 66
             ));
         });
@@ -3599,6 +3609,7 @@ mod tests {
             let callback = Value::BoundFunctionHandle {
                 name: "event_callback".into(),
                 function: 44,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             };
 
             block_on(addlistener_builtin(
@@ -3670,6 +3681,7 @@ mod tests {
         let handle = Value::BoundFunctionHandle {
             name: "function_target".into(),
             function: 46,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(5.0)]))
@@ -3697,6 +3709,7 @@ mod tests {
         let handle = Value::BoundFunctionHandle {
             name: "function_target".into(),
             function: 47,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
         };
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(6.0)]))

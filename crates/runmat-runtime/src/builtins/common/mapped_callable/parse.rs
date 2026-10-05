@@ -15,7 +15,7 @@ impl MappedCallable {
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
             Value::FunctionHandle(name) => Self::parse_text(&name),
             Value::ExternalFunctionHandle(name) => Ok(Self::resolve_name(name)),
-            Value::BoundFunctionHandle { name, function } => Ok(Self::Closure(Closure {
+            Value::BoundFunctionHandle { name, function, .. } => Ok(Self::Closure(Closure {
                 function_name: name,
                 bound_function: Some(function),
                 source_role: user_functions::source_function_for(function)
@@ -65,6 +65,12 @@ impl MappedCallable {
         if closure.bound_function.is_none() {
             closure.bound_function =
                 user_functions::resolve_semantic_function_by_name(&closure.function_name);
+            if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
+                closure.source_role = closure
+                    .bound_function
+                    .and_then(user_functions::source_function_for)
+                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
+            }
         }
         Self::Closure(closure)
     }

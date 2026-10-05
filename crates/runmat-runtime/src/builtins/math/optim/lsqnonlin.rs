@@ -980,6 +980,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "residual".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             vec![tensor(vec![0.0, 0.0], vec![2, 1])],
         ))
@@ -1012,6 +1013,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bounded".into(),
                 function: 2,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             vec![
                 Value::Num(0.0),
@@ -1047,6 +1049,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "empty_options".into(),
                 function: 22,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             vec![Value::Num(0.0), empty.clone(), empty.clone(), empty],
         ))
@@ -1075,6 +1078,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "partial_bounds".into(),
                 function: 23,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             vec![tensor(vec![0.0, 0.0], vec![2, 1]), empty, Value::Num(1.0)],
         ))
@@ -1109,6 +1113,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "multi".into(),
                 function: 3,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             vec![
                 tensor(vec![0.0, 0.0], vec![1, 2]),
@@ -1166,6 +1171,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "problem".into(),
                 function: 4,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
         );
         problem.insert("x0", tensor(vec![0.0, 0.0], vec![2, 1]));

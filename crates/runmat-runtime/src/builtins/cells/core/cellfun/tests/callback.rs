@@ -128,6 +128,7 @@ fn requested_output_count_is_forwarded_and_collected_independently() {
             Value::BoundFunctionHandle {
                 name: "multiple".into(),
                 function: 191,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             vec![cell(vec![Value::Num(1.), Value::Num(2.)], &[1, 2])],
         )

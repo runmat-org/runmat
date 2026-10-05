@@ -194,17 +194,17 @@ fn encode(
             runmat_types::FunctionSourceRole::Method,
             Vec::new(),
         ),
-        Value::BoundFunctionHandle { name, function } => {
-            let role = crate::user_functions::source_function_for(*function)
-                .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
-            callable(
-                &format!("bound:{function}"),
-                name,
-                CallableForm::Handle,
-                role,
-                Vec::new(),
-            )
-        }
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            source_role,
+        } => callable(
+            &format!("bound:{function}"),
+            name,
+            CallableForm::Handle,
+            *source_role,
+            Vec::new(),
+        ),
         Value::Closure(closure) => {
             let captures = closure
                 .captures

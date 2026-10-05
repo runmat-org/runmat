@@ -319,7 +319,7 @@ impl CallableDescriptor {
                 args,
                 requested_outputs,
             ),
-            Value::BoundFunctionHandle { name, function } => Self::feval_semantic(
+            Value::BoundFunctionHandle { name, function, .. } => Self::feval_semantic(
                 function,
                 name,
                 CallableFallbackPolicy::None,

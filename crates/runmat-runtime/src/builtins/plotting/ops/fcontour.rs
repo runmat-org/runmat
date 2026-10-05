@@ -1151,6 +1151,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
@@ -1205,6 +1206,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, -1.0, 1.0], vec![1, 4]).unwrap(),
@@ -1232,6 +1234,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String("MeshDensity".into()),
             Value::Int(IntValue::U8(3)),
@@ -1260,6 +1263,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
@@ -1352,6 +1356,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::Int(IntValue::U8(5)),
         ];

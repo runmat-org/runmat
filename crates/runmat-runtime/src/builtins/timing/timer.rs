@@ -1542,6 +1542,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "tick".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String("ExecutionMode".into()),
             Value::String("fixedSpacing".into()),
@@ -1634,6 +1635,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "tick".into(),
                 function: 1,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
             },
             Value::String("ExecutionMode".into()),
             Value::String("fixedSpacing".into()),

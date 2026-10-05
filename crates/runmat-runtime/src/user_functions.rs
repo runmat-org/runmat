@@ -100,6 +100,18 @@ pub fn source_function_for(function: usize) -> Option<SourceFunctionInfo> {
     })
 }
 
+/// Bind a semantic function while preserving its source role at the value
+/// owner. A missing catalog is explicitly Unknown, never inferred from name.
+pub fn bound_function_handle(name: String, function: usize) -> Value {
+    let source_role = source_function_for(function)
+        .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
+    Value::BoundFunctionHandle {
+        name,
+        function,
+        source_role,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CallableRequest {
     identity: CallableIdentity,
