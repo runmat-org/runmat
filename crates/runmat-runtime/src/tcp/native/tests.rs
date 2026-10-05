@@ -8,6 +8,13 @@ struct LockCheckingWaker {
     unlocked: AtomicBool,
 }
 
+#[derive(Debug)]
+struct ForgedRelease;
+
+impl runmat_value::ForeignResourceRelease for ForgedRelease {
+    fn release(&self, _: &runmat_value::ForeignResourceKey) {}
+}
+
 impl std::task::Wake for LockCheckingWaker {
     fn wake(self: std::sync::Arc<Self>) {
         self.wake_by_ref();
@@ -304,4 +311,145 @@ fn closing_a_server_wakes_pending_accept_without_registry_lock() {
         .is_pending());
     assert!(registry::close(&service.registry, &issuer, &server.authority).expect("close"));
     assert!(probe.unlocked.load(Ordering::SeqCst));
+}
+
+#[test]
+fn authentic_repeated_close_is_zero_and_server_scope_closes_accepted_children() {
+    use crate::context::RuntimeTcpCloseScope;
+
+    let (_driver, service) = service();
+    let issuer = RuntimeTcpIssuer::Process;
+    let server = futures::executor::block_on(service.bind(
+        issuer.clone(),
+        RuntimeTcpBind {
+            address: "127.0.0.1".into(),
+            port: 0,
+            io_timeout: Some(Duration::from_secs(2)),
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("bind");
+    let client = futures::executor::block_on(service.connect(
+        issuer.clone(),
+        RuntimeTcpConnect {
+            host: "127.0.0.1".into(),
+            port: server.local_addr.port(),
+            connect_timeout: Some(Duration::from_secs(2)),
+            io_timeout: Some(Duration::from_secs(2)),
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("connect");
+    let accepted = futures::executor::block_on(service.accept(
+        issuer.clone(),
+        server.authority.clone(),
+        Some(Duration::from_secs(2)),
+    ))
+    .expect("accept");
+    let forged = runmat_value::ForeignRef::detached(
+        accepted.authority.resource_key(),
+        accepted.authority.type_identity.clone(),
+        accepted.authority.ownership,
+        accepted.authority.affinity,
+        accepted.authority.lifetime,
+    );
+    let forged_managed = runmat_value::ForeignRef::managed(
+        accepted.authority.resource_key(),
+        accepted.authority.type_identity.clone(),
+        accepted.authority.ownership,
+        accepted.authority.affinity,
+        accepted.authority.lifetime,
+        std::sync::Arc::new(ForgedRelease),
+    );
+    let mut changed_lifetime = accepted.authority.clone();
+    changed_lifetime.lifetime = runmat_types::ForeignLifetime::Session;
+    let foreign_runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let foreign_issuer = RuntimeTcpIssuer::from_context(Some(&foreign_runtime));
+
+    assert_eq!(
+        futures::executor::block_on(
+            service.close_scope(issuer.clone(), RuntimeTcpCloseScope::Servers)
+        )
+        .expect("close server and child"),
+        2
+    );
+    assert!(
+        !futures::executor::block_on(service.close(issuer.clone(), server.authority.clone()))
+            .expect("authentic server was already closed")
+    );
+    assert!(!futures::executor::block_on(
+        service.close(issuer.clone(), accepted.authority.clone())
+    )
+    .expect("authentic child was already closed"));
+    assert!(matches!(
+        futures::executor::block_on(service.close(issuer.clone(), forged)),
+        Err(error) if error.kind() == TcpTransportErrorKind::InvalidAuthority
+    ));
+    assert!(matches!(
+        futures::executor::block_on(service.close(issuer.clone(), forged_managed)),
+        Err(error) if error.kind() == TcpTransportErrorKind::InvalidAuthority
+    ));
+    assert!(matches!(
+        futures::executor::block_on(service.close(foreign_issuer, accepted.authority.clone())),
+        Err(error) if error.kind() == TcpTransportErrorKind::InvalidAuthority
+    ));
+    assert!(matches!(
+        futures::executor::block_on(service.close(issuer.clone(), changed_lifetime)),
+        Err(error) if error.kind() == TcpTransportErrorKind::InvalidAuthority
+    ));
+    assert!(
+        futures::executor::block_on(service.close(issuer.clone(), client.authority.clone()))
+            .expect("independent client remains open")
+    );
+    assert!(
+        !futures::executor::block_on(service.close(issuer, client.authority))
+            .expect("independent client repeated close")
+    );
+}
+
+#[test]
+fn dropping_last_server_value_closes_its_accepted_child_without_losing_close_identity() {
+    let (_driver, service) = service();
+    let issuer = RuntimeTcpIssuer::Process;
+    let server = futures::executor::block_on(service.bind(
+        issuer.clone(),
+        RuntimeTcpBind {
+            address: "127.0.0.1".into(),
+            port: 0,
+            io_timeout: Some(Duration::from_secs(2)),
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("bind");
+    let client = futures::executor::block_on(service.connect(
+        issuer.clone(),
+        RuntimeTcpConnect {
+            host: "127.0.0.1".into(),
+            port: server.local_addr.port(),
+            connect_timeout: Some(Duration::from_secs(2)),
+            io_timeout: Some(Duration::from_secs(2)),
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("connect");
+    let child = futures::executor::block_on(service.accept(
+        issuer.clone(),
+        server.authority.clone(),
+        Some(Duration::from_secs(2)),
+    ))
+    .expect("accept");
+
+    drop(server);
+    assert_eq!(registry::closed_count(&service.registry), 1);
+    assert!(
+        !futures::executor::block_on(service.close(issuer.clone(), child.authority))
+            .expect("accepted child closed when its server authority expired")
+    );
+    assert_eq!(registry::closed_count(&service.registry), 0);
+    assert!(
+        futures::executor::block_on(service.close(issuer, client.authority))
+            .expect("independent outgoing client remains open")
+    );
 }

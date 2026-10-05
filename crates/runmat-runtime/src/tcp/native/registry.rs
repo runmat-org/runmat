@@ -2,7 +2,7 @@ use crate::context::{RuntimeTcpByteOrder, RuntimeTcpCloseScope, RuntimeTcpIssuer
 use crate::tcp::{TcpTransportError, TcpTransportErrorKind};
 use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 use runmat_value::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -65,10 +65,29 @@ struct Record {
     parent_server: Option<u64>,
 }
 
+/// A weak, issuer-bound proof for an explicitly closed managed value. This
+/// remembers no socket owner and is removed when the last value lease drops.
+struct ClosedRecord {
+    issuer: RuntimeTcpIssuer,
+    lease: WeakForeignRef,
+    name: &'static str,
+}
+
+impl ClosedRecord {
+    fn from_record(record: &Record) -> Self {
+        Self {
+            issuer: record.issuer.clone(),
+            lease: record.lease.clone(),
+            name: record.resource.name(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Registry {
     next: u64,
     records: BTreeMap<u64, Record>,
+    closed: BTreeMap<u64, ClosedRecord>,
 }
 
 struct Release(Weak<Mutex<Registry>>);
@@ -85,11 +104,33 @@ impl ForeignResourceRelease for Release {
             return;
         }
         if let Some(registry) = self.0.upgrade() {
-            let removed = registry
-                .lock()
-                .ok()
-                .and_then(|mut state| state.records.remove(&key.handle));
-            if let Some(record) = removed {
+            let removed = registry.lock().ok().map(|mut state| {
+                state.closed.remove(&key.handle);
+                let mut removed = Vec::new();
+                if let Some(record) = state.records.remove(&key.handle) {
+                    let server = matches!(&record.resource, Resource::Server(_));
+                    removed.push(record);
+                    if server {
+                        let children: Vec<u64> = state
+                            .records
+                            .iter()
+                            .filter_map(|(id, record)| {
+                                (record.parent_server == Some(key.handle)).then_some(*id)
+                            })
+                            .collect();
+                        for child in children {
+                            if let Some(record) = state.records.remove(&child) {
+                                state
+                                    .closed
+                                    .insert(child, ClosedRecord::from_record(&record));
+                                removed.push(record);
+                            }
+                        }
+                    }
+                }
+                removed
+            });
+            for record in removed.into_iter().flatten() {
                 record.resource.close();
             }
         }
@@ -111,18 +152,35 @@ fn unavailable() -> TcpTransportError {
 }
 
 fn admitted(record: &Record, issuer: &RuntimeTcpIssuer, reference: &ForeignRef) -> bool {
-    record.issuer.admits(issuer)
+    admitted_lease(
+        &record.issuer,
+        &record.lease,
+        record.resource.name(),
+        issuer,
+        reference,
+    )
+}
+
+fn admitted_lease(
+    owner: &RuntimeTcpIssuer,
+    lease: &WeakForeignRef,
+    name: &'static str,
+    issuer: &RuntimeTcpIssuer,
+    reference: &ForeignRef,
+) -> bool {
+    owner.admits(issuer)
         && reference.is_managed()
         && reference.host_identity == HOST
         && reference.generation == GENERATION
         && reference.ownership == ForeignOwnership::Shared
         && reference.affinity == ForeignAffinity::OriginProcess
         && reference.type_identity.family == "runmat.tcp"
-        && reference.type_identity.name == record.resource.name()
+        && reference.type_identity.name == name
         && reference.type_identity.version == 1
-        && record.lease.upgrade().is_some_and(|issued| {
+        && lease.upgrade().is_some_and(|issued| {
             issued.shares_managed_lease(reference)
                 && issued.resource_key() == reference.resource_key()
+                && issued.lifetime == reference.lifetime
         })
 }
 
@@ -224,13 +282,30 @@ pub(super) fn close(
 ) -> Result<bool, TcpTransportError> {
     let removed = {
         let mut state = registry.lock().map_err(|_| unavailable())?;
-        let record = state.records.get(&reference.handle).ok_or_else(invalid)?;
+        let Some(record) = state.records.get(&reference.handle) else {
+            return if state.closed.get(&reference.handle).is_some_and(|closed| {
+                admitted_lease(
+                    &closed.issuer,
+                    &closed.lease,
+                    closed.name,
+                    issuer,
+                    reference,
+                )
+            }) {
+                Ok(false)
+            } else {
+                Err(invalid())
+            };
+        };
         if !admitted(record, issuer, reference) {
             return Err(invalid());
         }
         let server = matches!(&record.resource, Resource::Server(_));
         let mut removed = Vec::new();
         if let Some(record) = state.records.remove(&reference.handle) {
+            state
+                .closed
+                .insert(reference.handle, ClosedRecord::from_record(&record));
             removed.push(record);
         }
         if server {
@@ -243,6 +318,9 @@ pub(super) fn close(
                 .collect();
             for child in children {
                 if let Some(record) = state.records.remove(&child) {
+                    state
+                        .closed
+                        .insert(child, ClosedRecord::from_record(&record));
                     removed.push(record);
                 }
             }
@@ -262,7 +340,7 @@ pub(super) fn close_scope(
 ) -> Result<usize, TcpTransportError> {
     let removed = {
         let mut state = registry.lock().map_err(|_| unavailable())?;
-        let selected: Vec<u64> = state
+        let mut selected: BTreeSet<u64> = state
             .records
             .iter()
             .filter_map(|(id, record)| {
@@ -276,9 +354,29 @@ pub(super) fn close_scope(
                 .then_some(*id)
             })
             .collect();
+        if matches!(
+            scope,
+            RuntimeTcpCloseScope::Servers | RuntimeTcpCloseScope::All
+        ) {
+            let children: Vec<u64> = state
+                .records
+                .iter()
+                .filter_map(|(id, record)| {
+                    record
+                        .parent_server
+                        .filter(|parent| selected.contains(parent) && record.issuer.admits(issuer))
+                        .map(|_| *id)
+                })
+                .collect();
+            selected.extend(children);
+        }
         selected
             .into_iter()
-            .filter_map(|id| state.records.remove(&id))
+            .filter_map(|id| {
+                state.records.remove(&id).inspect(|record| {
+                    state.closed.insert(id, ClosedRecord::from_record(record));
+                })
+            })
             .collect::<Vec<_>>()
     };
     let count = removed.len();
@@ -298,4 +396,9 @@ pub(super) fn shutdown_all(registry: &Arc<Mutex<Registry>>) {
             record.resource.close();
         }
     }
+}
+
+#[cfg(test)]
+pub(super) fn closed_count(registry: &Arc<Mutex<Registry>>) -> usize {
+    registry.lock().expect("TCP test registry").closed.len()
 }
