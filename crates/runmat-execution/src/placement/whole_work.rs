@@ -2,6 +2,7 @@
 //! placement graph. An absent cost or resource bound is never zero demand.
 
 use std::collections::BTreeSet;
+use std::io::{self, Write};
 
 use super::{
     CandidateCostEvidence, CandidateExecutionLocation, CandidateOutputPresentation,
@@ -9,7 +10,7 @@ use super::{
     ExecutionCandidateKind, PlacementGraphLimits, PlacementResourceSnapshot, PlacementSignature,
     SelectedExecutionCandidate,
 };
-use crate::Digest;
+use crate::{Digest, DigestStream};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WholeWorkConstraint {
@@ -40,8 +41,9 @@ impl WholeWorkCandidate {
     /// Opaque placement identity derived only from typed route facts. Neither
     /// user layer labels nor unstable allocation IDs are consulted by policy.
     pub fn selected(&self, node: &str) -> SelectedExecutionCandidate {
-        let mut encoded = b"runmat.whole-work.candidate.v2\0".to_vec();
-        encoded.push(match self.kind {
+        let mut encoded = DigestStream::new();
+        encoded.update(b"runmat.whole-work.candidate.v2\0");
+        encoded.update(&[match self.kind {
             ExecutionCandidateKind::SharedRuntime => 0,
             ExecutionCandidateKind::GenericNativeCpu => 1,
             ExecutionCandidateKind::SpecializedNativeCpu => 2,
@@ -51,51 +53,52 @@ impl WholeWorkCandidate {
             ExecutionCandidateKind::ProviderLibrary => 6,
             ExecutionCandidateKind::ProviderGraph => 7,
             ExecutionCandidateKind::ProviderFusion => 8,
-        });
+        }]);
         match self.execution_location {
-            CandidateExecutionLocation::Host => encoded.push(0),
+            CandidateExecutionLocation::Host => encoded.update(&[0]),
             CandidateExecutionLocation::Provider { device_id } => {
-                encoded.push(1);
-                encoded.extend_from_slice(&device_id.to_le_bytes());
+                encoded.update(&[1]);
+                encoded.update(&device_id.to_le_bytes());
             }
         }
-        encoded.push(match self.preparation {
+        encoded.update(&[match self.preparation {
             CandidatePreparationState::Ready => 0,
             CandidatePreparationState::Warm => 1,
             CandidatePreparationState::Cold => 2,
             CandidatePreparationState::Preparing => 3,
             CandidatePreparationState::Unknown => 4,
-        });
+        }]);
         match self.output_residency {
-            CandidateOutputResidency::Host => encoded.push(0),
+            CandidateOutputResidency::Host => encoded.update(&[0]),
             CandidateOutputResidency::Provider { device_id } => {
-                encoded.push(1);
-                encoded.extend_from_slice(&device_id.to_le_bytes());
+                encoded.update(&[1]);
+                encoded.update(&device_id.to_le_bytes());
             }
             CandidateOutputResidency::Mirrored { device_id } => {
-                encoded.push(2);
-                encoded.extend_from_slice(&device_id.to_le_bytes());
+                encoded.update(&[2]);
+                encoded.update(&device_id.to_le_bytes());
             }
-            CandidateOutputResidency::Unknown => encoded.push(3),
+            CandidateOutputResidency::Unknown => encoded.update(&[3]),
             CandidateOutputResidency::ConditionalHostOrProvider {
                 device_id,
                 host_bytes,
             } => {
-                encoded.push(4);
-                encoded.extend_from_slice(&device_id.to_le_bytes());
-                encoded.extend_from_slice(
-                    &serde_json::to_vec(&host_bytes).expect("typed host bound serializes"),
-                );
+                encoded.update(&[4]);
+                encoded.update(&device_id.to_le_bytes());
+                serde_json::to_writer(&mut encoded, &host_bytes)
+                    .expect("typed host bound serializes");
             }
         }
-        let stage = serde_json::to_vec(&self.presentation)
+        let mut stage_length = JsonLength::default();
+        serde_json::to_writer(&mut stage_length, &self.presentation)
             .expect("typed presentation stage must serialize");
-        encoded.extend_from_slice(&(stage.len() as u64).to_le_bytes());
-        encoded.extend_from_slice(&stage);
-        encoded.extend_from_slice(self.route_facts.bytes());
+        encoded.update(&stage_length.0.to_le_bytes());
+        serde_json::to_writer(&mut encoded, &self.presentation)
+            .expect("typed presentation stage must serialize");
+        encoded.update(self.route_facts.bytes());
         SelectedExecutionCandidate {
             node: node.to_owned(),
-            candidate: Digest::sha256(encoded).to_string(),
+            candidate: encoded.finish().to_string(),
             kind: self.kind,
         }
     }
@@ -131,6 +134,23 @@ impl WholeWorkCandidate {
                 return Err("whole-work candidate risk-adjusted cost overflows");
             }
         }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct JsonLength(u64);
+
+impl Write for JsonLength {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0 = self
+            .0
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| io::Error::other("candidate presentation encoding is too long"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
@@ -263,6 +283,44 @@ mod tests {
             cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
             resources: CandidateResourceDemand::default(),
             transactional_results: true,
+        }
+    }
+
+    #[test]
+    fn streamed_candidate_identity_preserves_legacy_bytes() {
+        let host = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
+        let provider = candidate(ExecutionCandidateKind::ProviderGraph, b"device");
+        for route in [host, provider] {
+            let mut legacy = b"runmat.whole-work.candidate.v2\0".to_vec();
+            legacy.push(match route.kind {
+                ExecutionCandidateKind::SharedRuntime => 0,
+                ExecutionCandidateKind::ProviderGraph => 7,
+                _ => unreachable!("fixture kind"),
+            });
+            match route.execution_location {
+                CandidateExecutionLocation::Host => legacy.push(0),
+                CandidateExecutionLocation::Provider { device_id } => {
+                    legacy.push(1);
+                    legacy.extend_from_slice(&device_id.to_le_bytes());
+                }
+            }
+            legacy.push(1); // Warm preparation.
+            match route.output_residency {
+                CandidateOutputResidency::Host => legacy.push(0),
+                CandidateOutputResidency::Provider { device_id } => {
+                    legacy.push(1);
+                    legacy.extend_from_slice(&device_id.to_le_bytes());
+                }
+                _ => unreachable!("fixture residency"),
+            }
+            let presentation = serde_json::to_vec(&route.presentation).unwrap();
+            legacy.extend_from_slice(&(presentation.len() as u64).to_le_bytes());
+            legacy.extend_from_slice(&presentation);
+            legacy.extend_from_slice(route.route_facts.bytes());
+            assert_eq!(
+                route.selected("readmatrix").candidate,
+                Digest::sha256(legacy).to_string()
+            );
         }
     }
 

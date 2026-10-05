@@ -45,7 +45,8 @@ pub use identity::{
     TaskId,
 };
 pub use identity::{
-    Digest, DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,
+    Digest, DigestStream, DomainContribution, LanguageCompatibilityMode, ProgramEnvironment,
+    ProgramRevision,
 };
 pub use placement::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,

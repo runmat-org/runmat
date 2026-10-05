@@ -23,8 +23,9 @@ mod managed_ledger;
 mod output_permit;
 mod final_facts;
 mod exact_bytes;
-mod digest;
-pub(crate) use digest::hash_serializable;
+pub(crate) fn hash_serializable<T: serde::Serialize>(facts: &T) -> Digest {
+    Digest::sha256_serialized(facts)
+}
 pub use exact_bytes::ExactHostEffectBytes;
 pub use final_facts::HostEffectFinalFacts;
 pub use managed_ledger::{

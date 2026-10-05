@@ -2,7 +2,7 @@ mod digest;
 mod program;
 mod typed;
 
-pub use digest::Digest;
+pub use digest::{Digest, DigestStream};
 pub use program::{
     DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,
 };

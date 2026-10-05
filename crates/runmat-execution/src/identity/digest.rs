@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::io::{self, Write};
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -9,9 +10,53 @@ use crate::ContractError;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Digest([u8; 32]);
 
+/// Incremental identity writer for callers whose legacy byte encoding is a
+/// sequence of fixed fields and serialized fields. It retains no byte buffer.
+pub struct DigestStream(Sha256);
+
+impl DigestStream {
+    pub fn new() -> Self {
+        Self(Sha256::new())
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    pub fn finish(self) -> Digest {
+        Digest(self.0.finalize().into())
+    }
+}
+
+impl Default for DigestStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Write for DigestStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 impl Digest {
     pub fn sha256(bytes: impl AsRef<[u8]>) -> Self {
         Self(Sha256::digest(bytes.as_ref()).into())
+    }
+
+    /// Hash the existing JSON identity encoding without retaining a second
+    /// serialized buffer. This does not certify allocations in the caller or
+    /// in a placement service consuming the resulting digest.
+    pub fn sha256_serialized<T: Serialize>(value: &T) -> Self {
+        let mut writer = DigestStream::new();
+        serde_json::to_writer(&mut writer, value).expect("typed digest identity serializes");
+        writer.finish()
     }
 
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
@@ -76,5 +121,17 @@ impl<'de> Deserialize<'de> for Digest {
         String::deserialize(deserializer)?
             .parse()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_json_keeps_existing_digest_schema() {
+        let value = ("host", Digest::sha256(b"source"), 17_u64);
+        let legacy = Digest::sha256(serde_json::to_vec(&value).unwrap());
+        assert_eq!(Digest::sha256_serialized(&value), legacy);
     }
 }

@@ -48,9 +48,7 @@ impl PlacementSignature {
     }
 
     pub fn cache_key(&self) -> Digest {
-        let encoded = serde_json::to_vec(self)
-            .expect("placement signature consists only of infallible serializable fields");
-        Digest::sha256(encoded)
+        Digest::sha256_serialized(self)
     }
 }
 
