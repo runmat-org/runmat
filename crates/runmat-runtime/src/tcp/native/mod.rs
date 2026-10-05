@@ -65,6 +65,13 @@ impl<T> Drop for AbortOnDrop<T> {
 }
 
 impl RuntimeTcpService for NativeTcpService {
+    fn register_session_cleanup(
+        &self,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<(), TcpTransportError> {
+        registry::register_session_cleanup(&self.registry, runtime)
+    }
+
     fn describe_client(
         &self,
         issuer: RuntimeTcpIssuer,

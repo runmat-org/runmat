@@ -27,6 +27,10 @@ impl Drop for PendingDrop {
 }
 
 impl RuntimeTcpService for CountedWriteService {
+    fn register_session_cleanup(&self, _: &RuntimeContext) -> Result<(), TcpTransportError> {
+        Ok(())
+    }
+
     fn describe_client(
         &self,
         _: RuntimeTcpIssuer,

@@ -1,8 +1,11 @@
-use crate::context::{RuntimeTcpByteOrder, RuntimeTcpCloseScope, RuntimeTcpIssuer};
+use crate::context::{
+    RuntimeContext, RuntimeContextLocalId, RuntimeTcpByteOrder, RuntimeTcpCloseScope,
+    RuntimeTcpIssuer,
+};
 use crate::tcp::{TcpTransportError, TcpTransportErrorKind};
 use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 use runmat_value::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -88,6 +91,33 @@ pub(super) struct Registry {
     next: u64,
     records: BTreeMap<u64, Record>,
     closed: BTreeMap<u64, ClosedRecord>,
+    registered_sessions: HashSet<RuntimeContextLocalId>,
+}
+
+pub(super) fn register_session_cleanup(
+    registry: &Arc<Mutex<Registry>>,
+    runtime: &RuntimeContext,
+) -> Result<(), TcpTransportError> {
+    let identity = runtime.local_identity();
+    let issuer = RuntimeTcpIssuer::from_context(Some(runtime));
+    {
+        let mut state = registry.lock().map_err(|_| unavailable())?;
+        if !state.registered_sessions.insert(identity) {
+            return Ok(());
+        }
+    }
+    let weak = Arc::downgrade(registry);
+    runtime.register_session_resource_cleanup(move || {
+        if let Some(registry) = weak.upgrade() {
+            // The context still owns its lease while its cleanup callbacks
+            // run. Resource close/watch notification happens outside locks.
+            let _ = close_scope(&registry, &issuer, RuntimeTcpCloseScope::All);
+            if let Ok(mut state) = registry.lock() {
+                state.registered_sessions.remove(&identity);
+            }
+        }
+    });
+    Ok(())
 }
 
 struct Release(Weak<Mutex<Registry>>);
@@ -401,4 +431,9 @@ pub(super) fn shutdown_all(registry: &Arc<Mutex<Registry>>) {
 #[cfg(test)]
 pub(super) fn closed_count(registry: &Arc<Mutex<Registry>>) -> usize {
     registry.lock().expect("TCP test registry").closed.len()
+}
+
+#[cfg(test)]
+pub(super) fn active_count(registry: &Arc<Mutex<Registry>>) -> usize {
+    registry.lock().expect("TCP test registry").records.len()
 }

@@ -453,3 +453,52 @@ fn dropping_last_server_value_closes_its_accepted_child_without_losing_close_ide
             .expect("independent outgoing client remains open")
     );
 }
+
+#[test]
+fn ending_one_session_releases_its_retained_socket_without_closing_sibling_session() {
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use std::rc::Rc;
+
+    let (_driver, native) = service();
+    let service = Rc::new(native);
+    let runtime_a = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
+    let runtime_b = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
+    service
+        .register_session_cleanup(&runtime_a)
+        .expect("register first exact session");
+    service
+        .register_session_cleanup(&runtime_a)
+        .expect("repeat registration is idempotent");
+    service
+        .register_session_cleanup(&runtime_b)
+        .expect("register independent session");
+    let issuer_a = RuntimeTcpIssuer::from_context(Some(&runtime_a));
+    let issuer_b = RuntimeTcpIssuer::from_context(Some(&runtime_b));
+    let bind = || RuntimeTcpBind {
+        address: "127.0.0.1".into(),
+        port: 0,
+        io_timeout: None,
+        byte_order: RuntimeTcpByteOrder::Little,
+    };
+    let server_a =
+        futures::executor::block_on(service.bind(issuer_a, bind())).expect("first session server");
+    let server_b = futures::executor::block_on(service.bind(issuer_b.clone(), bind()))
+        .expect("sibling session server");
+    assert_eq!(registry::active_count(&service.registry), 2);
+    drop(runtime_a);
+    assert_eq!(registry::active_count(&service.registry), 1);
+    assert!(matches!(
+        futures::executor::block_on(service.close(
+            RuntimeTcpIssuer::from_context(Some(&runtime_b)),
+            server_a.authority
+        )),
+        Err(error) if error.kind() == TcpTransportErrorKind::InvalidAuthority
+    ));
+    assert!(registry::server(&service.registry, &issuer_b, &server_b.authority).is_ok());
+    assert!(
+        futures::executor::block_on(service.close(issuer_b, server_b.authority))
+            .expect("sibling session still owns its server")
+    );
+}

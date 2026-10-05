@@ -63,18 +63,30 @@ pub(super) fn service(
     builtin: &'static str,
 ) -> BuiltinResult<Rc<dyn RuntimeTcpService>> {
     require_native_tcp(builtin)?;
-    runtime
+    let runtime = runtime
         .ok_or_else(|| {
             crate::context::RuntimeCapabilityError::new(
                 crate::context::RuntimeCapability::Tcp,
                 builtin,
             )
         })
-        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?
+        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
+    let service = runtime
         .service_ports()
         .require_tcp(builtin)
         .cloned()
-        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)
+        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
+    service
+        .register_session_cleanup(runtime)
+        .map_err(|source| {
+            crate::build_runtime_error(format!(
+                "{builtin}: TCP session resource registration failed ({source})"
+            ))
+            .with_builtin(builtin)
+            .with_source(source)
+            .build()
+        })?;
+    Ok(service)
 }
 
 pub(super) fn require_native_tcp(builtin: &'static str) -> BuiltinResult<()> {

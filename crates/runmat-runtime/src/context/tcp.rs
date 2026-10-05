@@ -166,6 +166,14 @@ pub enum RuntimeTcpCloseScope {
 /// cancellation checkpoint; only `RuntimeTcpReadResult::publish` consumes the
 /// exclusive receipt.
 pub trait RuntimeTcpService {
+    /// Register exact session teardown with the context-owned cleanup hook.
+    /// A service retaining sockets after the caller drops its values must
+    /// release that session's resources even if the service serves others.
+    fn register_session_cleanup(
+        &self,
+        runtime: &RuntimeContext,
+    ) -> Result<(), crate::tcp::TcpTransportError>;
+
     fn describe_client(
         &self,
         issuer: RuntimeTcpIssuer,
