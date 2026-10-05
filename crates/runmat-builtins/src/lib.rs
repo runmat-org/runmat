@@ -1,6 +1,7 @@
 pub use inventory;
 mod class_declarations;
 pub mod diagnostic_identifier;
+pub mod warning_semantics;
 mod legacy_index;
 pub use class_declarations::{
     standard_class_array_shape, standard_class_declaration, standard_class_is_subclass,

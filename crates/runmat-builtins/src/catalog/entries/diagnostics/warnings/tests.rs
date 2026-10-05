@@ -1,7 +1,7 @@
 use super::*;
 use runmat_types::{
-    CallRequest, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount, ValueFact,
-    ValueKindFact,
+    CallRequest, ExceptionFact, LiteralContext, LiteralValue, NumericClass, NumericDomain,
+    NumericFact, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact, ValueKindFact,
 };
 
 fn request(argument: ValueFact, literal: LiteralValue) -> CallRequest {
@@ -98,4 +98,73 @@ fn warning_inference_keeps_option_dependent_output_facts() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-WARNING-MODE-ARITY"));
+}
+
+#[test]
+fn warning_inference_accepts_exception_and_rejects_invalid_text_and_targets() {
+    let exception = request(
+        ValueFact::scalar(ValueKindFact::Exception(ExceptionFact { identifier: None })),
+        LiteralValue::Unknown,
+    );
+    let inferred = inference::infer(&exception, &WARNING_CATALOG_ENTRY);
+    assert!(inferred.diagnostics.is_empty());
+    assert!(matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(_)
+    ));
+
+    let numeric = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let invalid_message = inference::infer(
+        &request(numeric.clone(), LiteralValue::Unknown),
+        &WARNING_CATALOG_ENTRY,
+    );
+    assert!(invalid_message
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-WARNING-TEXT"));
+
+    let mut invalid_text = ValueFact::scalar(ValueKindFact::String);
+    invalid_text.shape = ShapeFact::from(vec![Some(1), Some(2)]);
+    let invalid_text = inference::infer(
+        &request(invalid_text, LiteralValue::Unknown),
+        &WARNING_CATALOG_ENTRY,
+    );
+    assert!(invalid_text
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-WARNING-TEXT"));
+
+    let invalid_target = CallRequest {
+        arguments: vec![ValueFact::scalar(ValueKindFact::String), numeric],
+        literals: LiteralContext::new(vec![
+            LiteralValue::String("off".into()),
+            LiteralValue::Unknown,
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    assert!(inference::infer(&invalid_target, &WARNING_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-WARNING-TARGET-TEXT"));
+
+    let invalid_special_mode = CallRequest {
+        arguments: vec![
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::String("once".into()),
+            LiteralValue::String(" BACKTRACE ".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    assert!(
+        inference::infer(&invalid_special_mode, &WARNING_CATALOG_ENTRY)
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-WARNING-SPECIAL-MODE")
+    );
 }

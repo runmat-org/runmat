@@ -1,6 +1,7 @@
 use crate::catalog::inference::{
     argument_error, default_double_scalar, finish_fixed, known_invalid_text_scalar, literal_text,
 };
+use crate::warning_semantics::{WarningCommand, WarningTarget};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     CallInference, CallRequest, CellFact, DynamicReason, ResidencyFact, StructFact, ValueFact,
@@ -24,10 +25,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         default_double_scalar()
+    } else if matches!(request.arguments[0].kind, ValueKindFact::Exception(_)) {
+        if request.arguments.len() != 1 {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-WARNING-EXCEPTION-ARITY",
+                "warning exception form accepts exactly one argument",
+                1,
+            ));
+        }
+        default_double_scalar()
     } else if let Some(command) = request.literals.literal_args.first().and_then(literal_text) {
         let target = request.literals.literal_args.get(1).and_then(literal_text);
-        match command.trim().to_ascii_lowercase().as_str() {
-            "on" | "off" | "once" | "error" => {
+        match WarningCommand::parse(&command) {
+            Some(WarningCommand::SetMode(mode)) => {
                 if request.arguments.len() > 2 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-WARNING-MODE-ARITY",
@@ -35,9 +45,27 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         2,
                     ));
                 }
+                if target
+                    .as_deref()
+                    .map(WarningTarget::parse)
+                    .is_some_and(|target| {
+                        matches!(target, WarningTarget::Backtrace | WarningTarget::Verbose)
+                            && !matches!(
+                                mode,
+                                crate::warning_semantics::WarningMode::On
+                                    | crate::warning_semantics::WarningMode::Off
+                            )
+                    })
+                {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-WARNING-SPECIAL-MODE",
+                        "warning backtrace and verbose targets accept only on or off",
+                        1,
+                    ));
+                }
                 state_struct()
             }
-            "reset" => {
+            Some(WarningCommand::Reset) => {
                 if request.arguments.len() != 1 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-WARNING-RESET-ARITY",
@@ -47,7 +75,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 }
                 default_double_scalar()
             }
-            "status" => {
+            Some(WarningCommand::Status) => {
                 if request.arguments.len() != 1 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-WARNING-STATUS-ARITY",
@@ -57,7 +85,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 }
                 state_cell()
             }
-            "default" | "query" => {
+            Some(WarningCommand::Default | WarningCommand::Query) => {
                 if request.arguments.len() > 2 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-WARNING-COMMAND-ARITY",
@@ -65,14 +93,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         2,
                     ));
                 }
-                match target {
-                    Some(target) if target.trim().eq_ignore_ascii_case("all") => state_cell(),
+                match target.as_deref().map(WarningTarget::parse) {
+                    Some(WarningTarget::All) => state_cell(),
                     Some(_) => state_struct(),
                     None if request.arguments.len() == 1 => state_cell(),
                     None => ValueFact::unknown(DynamicReason::RuntimeValue),
                 }
             }
-            "backtrace" => {
+            Some(WarningCommand::Backtrace) => {
                 if request.arguments.len() > 2 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-WARNING-BACKTRACE-ARITY",
@@ -86,26 +114,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     default_double_scalar()
                 }
             }
-            _ => default_double_scalar(),
+            None => default_double_scalar(),
         }
-    } else if matches!(request.arguments[0].kind, ValueKindFact::Exception(_)) {
-        if request.arguments.len() != 1 {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-WARNING-EXCEPTION-ARITY",
-                "warning exception form accepts exactly one argument",
-                1,
-            ));
-        }
-        default_double_scalar()
     } else {
         ValueFact::unknown(DynamicReason::RuntimeValue)
     };
     if let Some(first) = request.arguments.first() {
-        if known_invalid_text_scalar(first)
-            && !matches!(
-                first.kind,
-                ValueKindFact::Struct(_) | ValueKindFact::Cell(_)
-            )
+        if !matches!(
+            first.kind,
+            ValueKindFact::Struct(_) | ValueKindFact::Cell(_) | ValueKindFact::Exception(_)
+        ) && invalid_text_argument(first)
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-WARNING-TEXT",
@@ -114,7 +132,40 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    if request.arguments.len() > 1
+        && request
+            .literals
+            .literal_args
+            .first()
+            .and_then(literal_text)
+            .and_then(|text| WarningCommand::parse(&text))
+            .is_some_and(|command| {
+                matches!(
+                    command,
+                    WarningCommand::SetMode(_)
+                        | WarningCommand::Default
+                        | WarningCommand::Query
+                        | WarningCommand::Backtrace
+                )
+            })
+        && invalid_text_argument(&request.arguments[1])
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-WARNING-TARGET-TEXT",
+            "warning command requires a scalar text target or state",
+            1,
+        ));
+    }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+fn invalid_text_argument(value: &ValueFact) -> bool {
+    match value.kind {
+        ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character => {
+            known_invalid_text_scalar(value)
+        }
+        _ => true,
+    }
 }
 
 fn state_struct() -> ValueFact {

@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 use once_cell::sync::Lazy;
+use runmat_builtins::warning_semantics::{WarningCommand, WarningTarget};
 use runmat_builtins::{
     BuiltinErrorDescriptor, INTEGER_ARRAY_FORMATTING_EXTENSION, WARNING_ERROR_INVALID_INPUT,
 };
@@ -90,7 +91,7 @@ fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         }
         _ => {
             let first_string = value_to_string("warning", first)?;
-            if let Some(command) = parse_command(&first_string) {
+            if let Some(command) = WarningCommand::parse(&first_string) {
                 return handle_command(command, rest);
             }
             Ok(handle_message_call(None, first_string, rest)?)
@@ -148,11 +149,11 @@ fn reissue_exception(mex: &runmat_value::MException) -> crate::BuiltinResult<Val
     emit_warning(&identifier, &mex.message, &[])
 }
 
-fn handle_command(command: Command, rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn handle_command(command: WarningCommand, rest: &[Value]) -> crate::BuiltinResult<Value> {
     match command {
-        Command::SetMode(mode) => set_mode_command(mode, rest),
-        Command::Default => default_command(rest),
-        Command::Reset => {
+        WarningCommand::SetMode(mode) => set_mode_command(mode, rest),
+        WarningCommand::Default => default_command(rest),
+        WarningCommand::Reset => {
             if !rest.is_empty() {
                 return Err(warning_default_error(
                     "warning: 'reset' does not accept additional arguments",
@@ -161,9 +162,9 @@ fn handle_command(command: Command, rest: &[Value]) -> crate::BuiltinResult<Valu
             warnings::with_policy(|policy| policy.reset());
             Ok(Value::Num(0.0))
         }
-        Command::Query => query_command(rest),
-        Command::Status => status_command(rest),
-        Command::Backtrace => backtrace_command(rest),
+        WarningCommand::Query => query_command(rest),
+        WarningCommand::Status => status_command(rest),
+        WarningCommand::Backtrace => backtrace_command(rest),
     }
 }
 
@@ -178,28 +179,27 @@ fn set_mode_command(mode: WarningMode, rest: &[Value]) -> crate::BuiltinResult<V
         ));
     };
 
-    let trimmed = identifier.trim();
-    if trimmed.eq_ignore_ascii_case("all") {
-        let previous = warnings::with_policy(|policy| policy.set_global_mode(mode));
-        return Ok(state_value("all", previous));
+    match WarningTarget::parse(&identifier) {
+        WarningTarget::All => {
+            let previous = warnings::with_policy(|policy| policy.set_global_mode(mode));
+            Ok(state_value("all", previous))
+        }
+        WarningTarget::Last => {
+            let last_warning = warnings::with_policy(|policy| policy.last_warning());
+            let Some(last_warning) = last_warning else {
+                return Err(warning_default_error(
+                    "warning: there is no last warning identifier to target",
+                ));
+            };
+            set_mode_for_identifier(mode, &last_warning.identifier)
+        }
+        WarningTarget::Backtrace => set_mode_for_special_mode(mode, WarningTarget::Backtrace),
+        WarningTarget::Verbose => set_mode_for_special_mode(mode, WarningTarget::Verbose),
+        WarningTarget::Identifier(identifier) => {
+            let normalized = normalize_identifier(identifier);
+            set_mode_for_identifier(mode, &normalized)
+        }
     }
-
-    if trimmed.eq_ignore_ascii_case("last") {
-        let last_warning = warnings::with_policy(|policy| policy.last_warning());
-        let Some(last_warning) = last_warning else {
-            return Err(warning_default_error(
-                "warning: there is no last warning identifier to target",
-            ));
-        };
-        return set_mode_for_identifier(mode, &last_warning.identifier);
-    }
-
-    if trimmed.eq_ignore_ascii_case("backtrace") || trimmed.eq_ignore_ascii_case("verbose") {
-        return set_mode_for_special_mode(mode, trimmed);
-    }
-
-    let normalized = normalize_identifier(trimmed);
-    set_mode_for_identifier(mode, &normalized)
 }
 
 fn set_mode_for_identifier(mode: WarningMode, identifier: &str) -> crate::BuiltinResult<Value> {
@@ -212,27 +212,29 @@ fn reset_identifier_to_default(identifier: &str) -> crate::BuiltinResult<Value> 
     Ok(state_value(identifier, previous))
 }
 
-fn set_mode_for_special_mode(mode: WarningMode, mode_name: &str) -> crate::BuiltinResult<Value> {
-    let mode_lower = mode_name.trim().to_ascii_lowercase();
+fn set_mode_for_special_mode(
+    mode: WarningMode,
+    target: WarningTarget<'_>,
+) -> crate::BuiltinResult<Value> {
+    let mode_name = match target {
+        WarningTarget::Backtrace => "backtrace",
+        WarningTarget::Verbose => "verbose",
+        _ => unreachable!("only special warning targets are passed"),
+    };
     if !matches!(mode, WarningMode::On | WarningMode::Off) {
         return Err(warning_default_error(format!(
-            "warning: only 'on' or 'off' are valid states for '{mode_lower}'"
+            "warning: only 'on' or 'off' are valid states for '{mode_name}'"
         )));
     }
 
     let enabled = matches!(mode, WarningMode::On);
-    let previous_enabled = match mode_lower.as_str() {
-        "backtrace" => warnings::with_policy(|policy| policy.set_backtrace(enabled)),
-        "verbose" => warnings::with_policy(|policy| policy.set_verbose(enabled)),
-        _ => {
-            return Err(warning_default_error(format!(
-                "warning: unknown mode '{}'; expected 'backtrace' or 'verbose'",
-                mode_name
-            )))
-        }
+    let previous_enabled = match target {
+        WarningTarget::Backtrace => warnings::with_policy(|policy| policy.set_backtrace(enabled)),
+        WarningTarget::Verbose => warnings::with_policy(|policy| policy.set_verbose(enabled)),
+        _ => unreachable!("only special warning targets are passed"),
     };
     Ok(state_struct_value(
-        &mode_lower,
+        mode_name,
         if previous_enabled { "on" } else { "off" },
     ))
 }
@@ -245,26 +247,26 @@ fn default_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         }
         1 => {
             let identifier = value_to_string("warning", &rest[0])?;
-            let trimmed = identifier.trim();
-            if trimmed.eq_ignore_ascii_case("all") {
+            let target = WarningTarget::parse(&identifier);
+            if matches!(target, WarningTarget::All) {
                 let snapshot = warnings::with_policy(|policy| policy.reset_defaults());
                 return structs_to_cell(snapshot);
             }
-            if trimmed.eq_ignore_ascii_case("backtrace") {
+            if matches!(target, WarningTarget::Backtrace) {
                 let previous = warnings::with_policy(|policy| policy.set_backtrace(false));
                 return Ok(state_struct_value(
                     "backtrace",
                     if previous { "on" } else { "off" },
                 ));
             }
-            if trimmed.eq_ignore_ascii_case("verbose") {
+            if matches!(target, WarningTarget::Verbose) {
                 let previous = warnings::with_policy(|policy| policy.set_verbose(false));
                 return Ok(state_struct_value(
                     "verbose",
                     if previous { "on" } else { "off" },
                 ));
             }
-            if trimmed.eq_ignore_ascii_case("last") {
+            if matches!(target, WarningTarget::Last) {
                 let last_warning = warnings::with_policy(|policy| policy.last_warning());
                 let Some(last_warning) = last_warning else {
                     return Err(warning_default_error(
@@ -273,7 +275,10 @@ fn default_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
                 };
                 return reset_identifier_to_default(&last_warning.identifier);
             }
-            let normalized = normalize_identifier(trimmed);
+            let WarningTarget::Identifier(identifier) = target else {
+                unreachable!("handled warning target")
+            };
+            let normalized = normalize_identifier(identifier);
             reset_identifier_to_default(&normalized)
         }
         _ => Err(warning_default_error(
@@ -295,48 +300,52 @@ fn query_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         value_to_string("warning", &rest[0])?
     };
 
-    if target.trim().eq_ignore_ascii_case("all") {
-        return structs_to_cell(warnings::with_policy(|policy| policy.snapshot()));
+    match WarningTarget::parse(&target) {
+        WarningTarget::All => {
+            return structs_to_cell(warnings::with_policy(|policy| policy.snapshot()))
+        }
+        WarningTarget::Last => {
+            return Ok(
+                warnings::with_policy(|policy| policy.last_warning()).map_or_else(
+                    || {
+                        let mut st = StructValue::new();
+                        st.fields.insert("identifier".to_string(), Value::from(""));
+                        st.fields.insert("message".to_string(), Value::from(""));
+                        st.fields.insert("state".to_string(), Value::from("none"));
+                        Value::Struct(st)
+                    },
+                    |warning| {
+                        let mut st = StructValue::new();
+                        st.fields
+                            .insert("identifier".to_string(), Value::from(warning.identifier));
+                        st.fields
+                            .insert("message".to_string(), Value::from(warning.message));
+                        st.fields.insert("state".to_string(), Value::from("last"));
+                        Value::Struct(st)
+                    },
+                ),
+            );
+        }
+        WarningTarget::Backtrace => {
+            let enabled = warnings::with_policy(|policy| policy.backtrace_enabled());
+            return Ok(state_struct_value(
+                "backtrace",
+                if enabled { "on" } else { "off" },
+            ));
+        }
+        WarningTarget::Verbose => {
+            let enabled = warnings::with_policy(|policy| policy.verbose_enabled());
+            return Ok(state_struct_value(
+                "verbose",
+                if enabled { "on" } else { "off" },
+            ));
+        }
+        WarningTarget::Identifier(identifier) => {
+            let normalized = normalize_identifier(identifier);
+            let mode = warnings::with_policy(|policy| policy.lookup_mode(&normalized));
+            Ok(state_value(&normalized, mode))
+        }
     }
-    if target.trim().eq_ignore_ascii_case("last") {
-        return Ok(
-            warnings::with_policy(|policy| policy.last_warning()).map_or_else(
-                || {
-                    let mut st = StructValue::new();
-                    st.fields.insert("identifier".to_string(), Value::from(""));
-                    st.fields.insert("message".to_string(), Value::from(""));
-                    st.fields.insert("state".to_string(), Value::from("none"));
-                    Value::Struct(st)
-                },
-                |warning| {
-                    let mut st = StructValue::new();
-                    st.fields
-                        .insert("identifier".to_string(), Value::from(warning.identifier));
-                    st.fields
-                        .insert("message".to_string(), Value::from(warning.message));
-                    st.fields.insert("state".to_string(), Value::from("last"));
-                    Value::Struct(st)
-                },
-            ),
-        );
-    }
-    if target.trim().eq_ignore_ascii_case("backtrace") {
-        let enabled = warnings::with_policy(|policy| policy.backtrace_enabled());
-        return Ok(state_struct_value(
-            "backtrace",
-            if enabled { "on" } else { "off" },
-        ));
-    }
-    if target.trim().eq_ignore_ascii_case("verbose") {
-        let enabled = warnings::with_policy(|policy| policy.verbose_enabled());
-        return Ok(state_struct_value(
-            "verbose",
-            if enabled { "on" } else { "off" },
-        ));
-    }
-    let normalized = normalize_identifier(&target);
-    let mode = warnings::with_policy(|policy| policy.lookup_mode(&normalized));
-    Ok(state_value(&normalized, mode))
 }
 
 fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
@@ -398,17 +407,18 @@ fn backtrace_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         }
         1 => {
             let setting = value_to_string("warning", &rest[0])?;
-            match setting.trim().to_ascii_lowercase().as_str() {
-                "on" => {
+            match WarningMode::parse(&setting) {
+                Some(WarningMode::On) => {
                     warnings::with_policy(|policy| policy.set_backtrace(true));
                 }
-                "off" => {
+                Some(WarningMode::Off) => {
                     warnings::with_policy(|policy| policy.set_backtrace(false));
                 }
-                other => {
+                _ => {
+                    let other = setting.trim().to_ascii_lowercase();
                     return Err(warning_default_error(format!(
                         "warning: backtrace mode must be 'on' or 'off', got '{other}'"
-                    )))
+                    )));
                 }
             }
             Ok(Value::Num(0.0))
@@ -448,9 +458,9 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
     })?;
     let identifier_raw = value_to_string("warning", identifier_value)?;
     let state_raw = value_to_string("warning", state_value)?;
-    let identifier_trimmed = identifier_raw.trim();
-    if identifier_trimmed.eq_ignore_ascii_case("all") {
-        if let Some(mode) = parse_mode_keyword(&state_raw) {
+    let target = WarningTarget::parse(&identifier_raw);
+    if matches!(target, WarningTarget::All) {
+        if let Some(mode) = WarningMode::parse(&state_raw) {
             warnings::with_policy(|policy| policy.set_global_mode(mode));
         } else {
             return Err(warning_default_error(format!(
@@ -458,7 +468,7 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
                 state_raw
             )));
         }
-    } else if identifier_trimmed.eq_ignore_ascii_case("backtrace") {
+    } else if matches!(target, WarningTarget::Backtrace) {
         let state = state_raw.trim().to_ascii_lowercase();
         match state.as_str() {
             "on" => {
@@ -474,7 +484,7 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
                 )))
             }
         }
-    } else if identifier_trimmed.eq_ignore_ascii_case("verbose") {
+    } else if matches!(target, WarningTarget::Verbose) {
         let state = state_raw.trim().to_ascii_lowercase();
         match state.as_str() {
             "on" => {
@@ -490,7 +500,7 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
                 )))
             }
         }
-    } else if identifier_trimmed.eq_ignore_ascii_case("last") {
+    } else if matches!(target, WarningTarget::Last) {
         let last_warning = warnings::with_policy(|policy| policy.last_warning());
         let Some(last_warning) = last_warning else {
             return Err(warning_default_error(
@@ -499,7 +509,7 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
         };
         if state_raw.trim().eq_ignore_ascii_case("default") {
             warnings::with_policy(|policy| policy.clear_identifier(&last_warning.identifier));
-        } else if let Some(mode) = parse_mode_keyword(&state_raw) {
+        } else if let Some(mode) = WarningMode::parse(&state_raw) {
             warnings::with_policy(|policy| {
                 policy.set_identifier_mode(&last_warning.identifier, mode)
             });
@@ -510,10 +520,16 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
             )));
         }
     } else if state_raw.trim().eq_ignore_ascii_case("default") {
-        let normalized = normalize_identifier(identifier_trimmed);
+        let WarningTarget::Identifier(identifier) = target else {
+            unreachable!("handled warning target")
+        };
+        let normalized = normalize_identifier(identifier);
         warnings::with_policy(|policy| policy.clear_identifier(&normalized));
-    } else if let Some(mode) = parse_mode_keyword(&state_raw) {
-        let normalized = normalize_identifier(identifier_trimmed);
+    } else if let Some(mode) = WarningMode::parse(&state_raw) {
+        let WarningTarget::Identifier(identifier) = target else {
+            unreachable!("handled warning target")
+        };
+        let normalized = normalize_identifier(identifier);
         warnings::with_policy(|policy| policy.set_identifier_mode(&normalized, mode));
     } else {
         return Err(warning_default_error(format!(
@@ -522,41 +538,6 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
         )));
     }
     Ok(())
-}
-
-#[derive(Clone, Copy)]
-enum Command {
-    SetMode(WarningMode),
-    Default,
-    Reset,
-    Query,
-    Status,
-    Backtrace,
-}
-
-fn parse_command(text: &str) -> Option<Command> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "on" => Some(Command::SetMode(WarningMode::On)),
-        "off" => Some(Command::SetMode(WarningMode::Off)),
-        "once" => Some(Command::SetMode(WarningMode::Once)),
-        "error" => Some(Command::SetMode(WarningMode::Error)),
-        "default" => Some(Command::Default),
-        "reset" => Some(Command::Reset),
-        "query" => Some(Command::Query),
-        "status" => Some(Command::Status),
-        "backtrace" => Some(Command::Backtrace),
-        _ => None,
-    }
-}
-
-fn parse_mode_keyword(text: &str) -> Option<WarningMode> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "on" => Some(WarningMode::On),
-        "off" => Some(WarningMode::Off),
-        "once" => Some(WarningMode::Once),
-        "error" => Some(WarningMode::Error),
-        _ => None,
-    }
 }
 
 fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {

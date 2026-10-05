@@ -2,25 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use crate::warning_store::RuntimeWarning;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WarningMode {
-    On,
-    Off,
-    Once,
-    Error,
-}
-
-impl WarningMode {
-    pub(crate) fn keyword(self) -> &'static str {
-        match self {
-            Self::On => "on",
-            Self::Off => "off",
-            Self::Once => "once",
-            Self::Error => "error",
-        }
-    }
-}
+use runmat_builtins::warning_semantics::WarningMode;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WarningState {
