@@ -4,7 +4,7 @@ use crate::data_contract::{
 use crate::{
     DirEntry, FileHandle, FsBoundedInput, FsFilePayloadContract, FsFileType,
     FsManagedOpenedInputCost, FsManagedReadContract, FsMetadata, FsProvider, FsResourceContract,
-    FsResourceLease, FsResourceRevision, OpenFlags,
+    FsResourceLease, FsResourceLeaseHandle, FsResourceRevision, OpenFlags,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -12,7 +12,7 @@ use serde_json::Value as JsonValue;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::Arc;
 use url::Url;
 
 #[path = "native/staged.rs"]
@@ -86,21 +86,28 @@ impl FsProvider for NativeFsProvider {
             return Ok(None);
         }
         let metadata = FsMetadata::from(metadata);
-        let lease = self.resource_lease().expect("native direct-file authority");
-        FsBoundedInput::new(Box::new(file), metadata, lease).map(Some)
+        FsBoundedInput::new_with_lease(
+            Box::new(file),
+            metadata,
+            FsResourceLeaseHandle::Static(&NATIVE_DIRECT_LEASE),
+        )
+        .map(Some)
     }
 
     fn managed_read_contract(&self) -> Option<FsManagedReadContract> {
         Some(FsManagedReadContract {
             revision: native_direct_revision(),
-            capture_requested_heap_bytes: native_lease_requested_bytes(),
-            opened_requested_heap_bytes: native_lease_requested_bytes()
-                + std::mem::size_of::<fs::File>() as u64,
+            capture_requested_heap_bytes: 0,
+            opened_requested_heap_bytes: std::mem::size_of::<fs::File>() as u64,
         })
     }
 
     fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
         Some(Arc::new(NativeDirectFileLease))
+    }
+
+    fn resource_lease_handle(&self) -> Option<FsResourceLeaseHandle> {
+        Some(FsResourceLeaseHandle::Static(&NATIVE_DIRECT_LEASE))
     }
 
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
@@ -269,18 +276,7 @@ impl FsProvider for NativeFsProvider {
 }
 
 struct NativeDirectFileLease;
-
-fn native_lease_requested_bytes() -> u64 {
-    // The pinned Rust alloc::sync::ArcInner<T> has this repr(C) layout. This
-    // is the requested managed allocation, not allocator/RSS overhead.
-    let (header, _) = std::alloc::Layout::new::<AtomicUsize>()
-        .extend(std::alloc::Layout::new::<AtomicUsize>())
-        .expect("two atomic reference counts fit a layout");
-    let (layout, _) = header
-        .extend(std::alloc::Layout::new::<NativeDirectFileLease>())
-        .expect("native lease Arc layout fits");
-    layout.pad_to_align().size() as u64
-}
+static NATIVE_DIRECT_LEASE: NativeDirectFileLease = NativeDirectFileLease;
 
 fn native_direct_revision() -> FsResourceRevision {
     FsResourceRevision::for_provider(
@@ -303,12 +299,10 @@ impl FsResourceLease for NativeDirectFileLease {
     }
 
     fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
-        // Box<File> and the fresh resource-lease Arc are the two requested
-        // per-open Rust allocations. Metadata and FsBoundedInput are held by
-        // value. OS descriptor/kernel/stdlib internals remain out of scope.
+        // Only the Box<File> is freshly requested. The immutable lease is
+        // static; OS descriptor/kernel/stdlib internals remain out of scope.
         Some(FsManagedOpenedInputCost {
-            requested_heap_bytes: native_lease_requested_bytes()
-                + std::mem::size_of::<fs::File>() as u64,
+            requested_heap_bytes: std::mem::size_of::<fs::File>() as u64,
         })
     }
 }

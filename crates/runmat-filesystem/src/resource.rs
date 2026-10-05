@@ -107,12 +107,29 @@ pub trait FsResourceLease: Send + Sync + 'static {
     }
 }
 
+/// A provider may expose an immutable static lease without allocating an Arc
+/// for every opened source. Mutable authorities retain their owned Arc.
+#[derive(Clone)]
+pub enum FsResourceLeaseHandle {
+    Static(&'static dyn FsResourceLease),
+    Owned(Arc<dyn FsResourceLease>),
+}
+
+impl FsResourceLeaseHandle {
+    pub fn lease(&self) -> &dyn FsResourceLease {
+        match self {
+            Self::Static(lease) => *lease,
+            Self::Owned(lease) => lease.as_ref(),
+        }
+    }
+}
+
 /// Keeps the precise provider and its resource authority together across
 /// suspension. Callers must perform I/O through `provider`, never the ambient
 /// process-wide provider, and recheck `is_valid` before effect boundaries.
 pub struct CapturedFsResourceLease {
     provider: Arc<dyn FsProvider>,
-    lease: Arc<dyn FsResourceLease>,
+    lease: FsResourceLeaseHandle,
     contract: FsResourceContract,
 }
 
@@ -127,19 +144,19 @@ impl CapturedFsResourceLease {
 
     pub fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
         self.is_valid()
-            .then(|| self.lease.managed_opened_input_cost())
+            .then(|| self.lease.lease().managed_opened_input_cost())
             .flatten()
     }
 
     pub fn is_valid(&self) -> bool {
-        self.lease.is_valid() && self.lease.contract() == self.contract
+        self.lease.lease().is_valid() && self.lease.lease().contract() == self.contract
     }
 }
 
 pub fn capture_resource_lease(provider: Arc<dyn FsProvider>) -> Option<CapturedFsResourceLease> {
-    let lease = provider.resource_lease()?;
-    let contract = lease.contract();
-    if !lease.is_valid() {
+    let lease = provider.resource_lease_handle()?;
+    let contract = lease.lease().contract();
+    if !lease.lease().is_valid() {
         return None;
     }
     Some(CapturedFsResourceLease {
@@ -152,11 +169,11 @@ pub fn capture_resource_lease(provider: Arc<dyn FsProvider>) -> Option<CapturedF
 pub fn capture_resource_lease_for_effect(
     provider: Arc<dyn FsProvider>,
 ) -> std::io::Result<Option<CapturedFsResourceLease>> {
-    let Some(lease) = provider.resource_lease() else {
+    let Some(lease) = provider.resource_lease_handle() else {
         return Ok(None);
     };
-    let contract = lease.contract();
-    if !lease.is_valid() {
+    let contract = lease.lease().contract();
+    if !lease.lease().is_valid() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "filesystem resource authority was revoked",

@@ -47,7 +47,7 @@ pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
     capture_resource_lease, capture_resource_lease_for_effect, CapturedFsResourceLease,
     FsBoundedInput, FsFilePayloadContract, FsManagedOpenedInputCost, FsManagedReadContract,
-    FsResourceContract, FsResourceLease, FsResourceRevision,
+    FsResourceContract, FsResourceLease, FsResourceLeaseHandle, FsResourceRevision,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox::SandboxFsProvider;
@@ -456,6 +456,12 @@ pub trait FsProvider: Send + Sync + 'static {
     /// certify codec, path, result, or whole-invocation allocations.
     fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
         None
+    }
+
+    /// Allocation-free static leases can serve managed reads; existing
+    /// instance-owned authorities use the Arc-valued compatibility method.
+    fn resource_lease_handle(&self) -> Option<FsResourceLeaseHandle> {
+        self.resource_lease().map(FsResourceLeaseHandle::Owned)
     }
 
     /// Whether this installed provider can service ordinary file reads.

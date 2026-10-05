@@ -65,7 +65,7 @@ impl FsStagedOutput for MemoryStagedOutput {
         tree.entries.insert(
             self.destination.clone(),
             MemoryEntry::File {
-                bytes: std::mem::take(&mut self.bytes),
+                bytes: Arc::new(std::mem::take(&mut self.bytes)),
                 readonly: false,
                 identity: Arc::new(AtomicU64::new(0)),
             },

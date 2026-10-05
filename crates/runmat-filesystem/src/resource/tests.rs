@@ -52,7 +52,7 @@ fn native_managed_read_contract_matches_retained_open_authority() {
     let contract = provider
         .managed_read_contract()
         .expect("native direct handle has a typed managed request bound");
-    assert!(contract.capture_requested_heap_bytes > 0);
+    assert_eq!(contract.capture_requested_heap_bytes, 0);
     assert_eq!(
         contract.opened_requested_heap_bytes,
         contract.capture_requested_heap_bytes + std::mem::size_of::<fs::File>() as u64
@@ -147,9 +147,24 @@ fn provider_revisions_are_domain_separated_and_extensible() {
 }
 
 #[test]
-fn memory_provider_does_not_inherit_native_payload_claim() {
+fn memory_provider_has_its_own_immutable_snapshot_contract() {
     let provider: Arc<dyn FsProvider> = Arc::new(MemoryFsProvider::new());
-    assert!(capture_resource_lease(provider).is_none());
+    let contract = provider
+        .managed_read_contract()
+        .expect("memory direct snapshot");
+    assert_eq!(contract.capture_requested_heap_bytes, 0);
+    assert!(contract.opened_requested_heap_bytes > 0);
+    let lease = capture_resource_lease_for_effect(provider)
+        .expect("capture")
+        .expect("memory snapshot lease");
+    assert_eq!(lease.contract().revision, contract.revision);
+    assert_eq!(
+        lease
+            .managed_opened_input_cost()
+            .unwrap()
+            .requested_heap_bytes,
+        contract.opened_requested_heap_bytes
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -165,7 +180,7 @@ fn native_claim_retains_exact_provider_without_claiming_codec_memory() {
         FsResourceContract {
             revision: FsResourceRevision::for_provider(
                 "runmat.filesystem.native",
-                b"direct-file-handles-bounded-open-v2",
+                b"direct-file-handles-bounded-open-managed-v3",
             ),
             opened_input_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
             opened_output_handle: Some(FsFilePayloadContract::CallerOwnedBuffer),
@@ -197,7 +212,7 @@ fn captured_lease_detects_revocation_after_suspension() {
     let captured = CapturedFsResourceLease {
         provider,
         contract: lease.contract(),
-        lease,
+        lease: FsResourceLeaseHandle::Owned(lease),
     };
     assert!(captured.is_valid());
     valid.store(false, Ordering::Release);

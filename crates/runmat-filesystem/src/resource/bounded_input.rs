@@ -1,4 +1,7 @@
-use super::{FsFilePayloadContract, FsResourceContract, FsResourceLease, FsResourceRevision};
+use super::{
+    FsFilePayloadContract, FsResourceContract, FsResourceLease, FsResourceLeaseHandle,
+    FsResourceRevision,
+};
 use crate::{FileHandle, FsMetadata};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -11,7 +14,7 @@ pub struct FsBoundedInput {
     handle: Box<dyn FileHandle>,
     opened_metadata: FsMetadata,
     position: u64,
-    lease: Arc<dyn FsResourceLease>,
+    lease: FsResourceLeaseHandle,
     contract: FsResourceContract,
 }
 
@@ -19,14 +22,22 @@ impl FsBoundedInput {
     /// Providers may opt in only when `handle` reads directly into the caller
     /// buffer and does not retain a payload-sized hidden staging allocation.
     pub fn new(
-        mut handle: Box<dyn FileHandle>,
+        handle: Box<dyn FileHandle>,
         opened_metadata: FsMetadata,
         lease: Arc<dyn FsResourceLease>,
     ) -> io::Result<Self> {
-        let contract = lease.contract();
+        Self::new_with_lease(handle, opened_metadata, FsResourceLeaseHandle::Owned(lease))
+    }
+
+    pub fn new_with_lease(
+        mut handle: Box<dyn FileHandle>,
+        opened_metadata: FsMetadata,
+        lease: FsResourceLeaseHandle,
+    ) -> io::Result<Self> {
+        let contract = lease.lease().contract();
         if !opened_metadata.is_file()
             || contract.opened_input_handle != Some(FsFilePayloadContract::CallerOwnedBuffer)
-            || !lease.is_valid()
+            || !lease.lease().is_valid()
         {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -40,7 +51,7 @@ impl FsBoundedInput {
                 "opened source did not seek to its reported start",
             ));
         }
-        check_lease(lease.as_ref(), contract)?;
+        check_lease(lease.lease(), contract)?;
         Ok(Self {
             handle,
             opened_metadata,
@@ -59,7 +70,7 @@ impl FsBoundedInput {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.lease.is_valid() && self.lease.contract() == self.contract
+        self.lease.lease().is_valid() && self.lease.lease().contract() == self.contract
     }
 
     pub async fn metadata_async(&self) -> io::Result<FsMetadata> {
@@ -68,7 +79,7 @@ impl FsBoundedInput {
     }
 
     fn check_valid(&self) -> io::Result<()> {
-        check_lease(self.lease.as_ref(), self.contract)
+        check_lease(self.lease.lease(), self.contract)
     }
 }
 

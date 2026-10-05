@@ -15,6 +15,7 @@ mod rename;
 mod mapped;
 mod handle_commit;
 mod staged;
+mod bounded;
 
 #[derive(Clone, Debug)]
 pub struct MemoryFsProvider {
@@ -26,7 +27,7 @@ pub struct MemoryFsProvider {
 enum MemoryEntry {
     Directory,
     File {
-        bytes: Vec<u8>,
+        bytes: Arc<Vec<u8>>,
         readonly: bool,
         identity: Arc<AtomicU64>,
     },
@@ -83,7 +84,7 @@ impl MemoryFsProvider {
         let path = normalize_path(path.as_ref())?;
         let guard = self.inner.lock().expect("memory filesystem lock poisoned");
         match guard.entries.get(&path) {
-            Some(MemoryEntry::File { bytes, .. }) => Ok(bytes.clone()),
+            Some(MemoryEntry::File { bytes, .. }) => Ok(bytes.as_ref().clone()),
             _ => Err(not_found(&path)),
         }
     }
@@ -115,7 +116,7 @@ impl MemoryFsProvider {
         guard.entries.insert(
             path,
             MemoryEntry::File {
-                bytes: replacement,
+                bytes: Arc::new(replacement),
                 readonly: false,
                 identity,
             },
@@ -251,6 +252,22 @@ impl FsProvider for MemoryFsProvider {
         crate::FsPathNamespace::VirtualRooted
     }
 
+    async fn open_bounded_input(&self, path: &Path) -> io::Result<Option<crate::FsBoundedInput>> {
+        bounded::open(self, path).map(Some)
+    }
+
+    fn managed_read_contract(&self) -> Option<crate::FsManagedReadContract> {
+        Some(bounded::managed_read_contract())
+    }
+
+    fn resource_lease(&self) -> Option<Arc<dyn crate::FsResourceLease>> {
+        Some(bounded::resource_lease_owned())
+    }
+
+    fn resource_lease_handle(&self) -> Option<crate::FsResourceLeaseHandle> {
+        Some(bounded::resource_lease_handle())
+    }
+
     async fn open_mapped_backing(
         &self,
         path: &Path,
@@ -319,7 +336,7 @@ impl FsProvider for MemoryFsProvider {
         let bytes = if flags.truncate {
             Vec::new()
         } else {
-            existing.map_or_else(Vec::new, |(bytes, _)| bytes)
+            existing.map_or_else(Vec::new, |(bytes, _)| bytes.as_ref().clone())
         };
         let mut cursor = Cursor::new(bytes);
         if flags.append {

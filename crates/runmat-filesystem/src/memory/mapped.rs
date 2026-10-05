@@ -180,8 +180,11 @@ impl FsMappedBacking for MemoryMappedBacking {
                 "memory mapped source was truncated after opening",
             )));
         }
+        // A retained bounded reader may share the old immutable snapshot.
+        // Make the new writable owner before bumping the visible revision.
+        let writable = Arc::make_mut(target);
         bump_identity(identity).map_err(FsMappedWriteFailure::before_effect)?;
-        target[start..end].copy_from_slice(bytes);
+        writable[start..end].copy_from_slice(bytes);
         Ok(FsMappedWriteOutcome {
             accepted_bytes: bytes.len(),
             requested_bytes: bytes.len(),

@@ -53,7 +53,7 @@ pub(super) fn commit(
     tree.entries.insert(
         path,
         MemoryEntry::File {
-            bytes: replacement,
+            bytes: Arc::new(replacement),
             readonly: false,
             identity: expected_identity.clone(),
         },
