@@ -1,6 +1,28 @@
 use super::*;
 
 impl HostState {
+    /// A catch edge abandons the throwing native site, including every
+    /// partially prepared mutation. None of these cursors may be replayed at
+    /// the handler's next site, even when that site has the same MIR shape.
+    pub fn abandon_site_continuations(&mut self) {
+        self.pending_place_mutation = None;
+        self.pending_assign = None;
+        self.pending_place_prepare = None;
+        self.pending_plain_multi = None;
+        self.pending_sequence_assign = None;
+        self.pending_sequence_rvalue = None;
+        self.pending_multi_preparation = None;
+        self.sequence_assignment_register = None;
+        self.prepared_multi_assignment = None;
+        self.pending_call = None;
+        self.completed_call = None;
+        self.pending_await = None;
+        self.captured_sequences.clear();
+        self.contextual_index_extents.clear();
+        self.subscript_end_receivers.clear();
+        self.finish_contextual_site();
+    }
+
     pub fn refresh_roots(&mut self) -> NativeRootSet {
         self.roots.truncate(self.locals.len());
         for (root, value) in self.roots.iter_mut().zip(&self.locals) {

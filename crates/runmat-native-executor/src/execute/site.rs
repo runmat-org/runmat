@@ -702,10 +702,7 @@ pub(super) fn redirect_exception(
     state: &mut HostState,
     exception: runmat_runtime::native::NativeException,
 ) -> NativeExecutorResult<Option<runmat_runtime::native::NativeSiteRequest>> {
-    state.sequence_assignment_register = None;
-    state.prepared_multi_assignment = None;
-    state.captured_sequences.clear();
-    state.finish_contextual_site();
+    state.abandon_site_continuations();
     let Some(handler) = state.take_exception_handler() else {
         return Ok(None);
     };

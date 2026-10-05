@@ -46,7 +46,30 @@ function count = nestedMappedWrite(path)
   holder.map.Data(2) = uint8(9);
   count = mappedCount;
 end
+function result = catchNestedWriteThenMulti(path)
+  map = memmapfile(path, 'Writable', true);
+  holder = struct('map', map, 'out', 0);
+  caught = false;
+  try
+    holder.map.Data(2) = uint8(9);
+  catch err
+    caught = strcmp(err.identifier, 'RunMat:memmapfile:WriteFailed');
+  end
+  assert(caught);
+  [plain, holder.out] = deal(4, 5);
+  result = plain + holder.out;
+end
+function result = mixedMappedRead(path)
+  map = memmapfile(path);
+  holder = struct('map', map, 'out', 0);
+  [plain, holder.out] = deal(3, holder.map.Data(2));
+  assert(isequal(holder.out, uint8(2)));
+  result = plain + double(holder.out);
+end
 "#;
+
+#[path = "native_memmap/continuations.rs"]
+mod continuations;
 
 #[derive(Default)]
 struct Evidence {
