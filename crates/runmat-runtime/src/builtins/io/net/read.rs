@@ -7,8 +7,7 @@ use runmat_builtins::{
     READ_ERROR_TIMEOUT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::NumericStorage;
-use runmat_value::{CharArray, IntegerStorage, Tensor, Value};
+use runmat_value::Value;
 
 use crate::context::{RuntimeTcpByteOrder, RuntimeTcpIssuer, RuntimeTcpReadMode};
 use crate::tcp::TcpTransportErrorKind;
@@ -66,6 +65,7 @@ pub(super) async fn read_builtin(
             )
         })?;
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let options = parse_arguments(rest, known).await?;
     let element_size = options.datatype.element_size();
     let mode = match options.mode {
@@ -79,25 +79,23 @@ pub(super) async fn read_builtin(
             })?)
         }
     };
-    let read_result = super::transport::await_service(
-        runtime.as_ref(),
-        service.read(
+    let read_result = work
+        .await_service(service.read(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             authority,
             mode,
-        ),
-    )
-    .await
-    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
-    .map_err(|err| {
-        let error = match err.kind() {
-            TcpTransportErrorKind::InvalidAuthority => &READ_ERROR_INVALID_CLIENT,
-            TcpTransportErrorKind::Closed => &READ_ERROR_NOT_CONNECTED,
-            TcpTransportErrorKind::Timeout => &READ_ERROR_TIMEOUT,
-            _ => &READ_ERROR_INTERNAL,
-        };
-        super::error::with_source(BUILTIN_NAME, error, format!("read: {err}"), err)
-    })?;
+        ))
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            let error = match err.kind() {
+                TcpTransportErrorKind::InvalidAuthority => &READ_ERROR_INVALID_CLIENT,
+                TcpTransportErrorKind::Closed => &READ_ERROR_NOT_CONNECTED,
+                TcpTransportErrorKind::Timeout => &READ_ERROR_TIMEOUT,
+                _ => &READ_ERROR_INTERNAL,
+            };
+            super::error::with_source(BUILTIN_NAME, error, format!("read: {err}"), err)
+        })?;
 
     if let ReadMode::Count(count) = options.mode {
         if read_result.bytes().is_empty() && count > 0 {
@@ -113,10 +111,9 @@ pub(super) async fn read_builtin(
         RuntimeTcpByteOrder::Little => ByteOrder::Little,
         RuntimeTcpByteOrder::Big => ByteOrder::Big,
     };
-    let value = bytes_to_value(read_result.bytes(), options.datatype, byte_order)?;
-    if let Some(runtime) = &runtime {
-        runtime.cpu_cooperation().completed(0).await?;
-    }
+    let value =
+        bytes_to_value(read_result.bytes(), options.datatype, byte_order, &mut work).await?;
+    work.completed(0).await?;
     read_result.publish();
     Ok(value)
 }
@@ -133,202 +130,9 @@ struct ReadOptions {
     datatype: DataType,
 }
 
-#[derive(Clone, Copy)]
-enum ByteOrder {
-    Little,
-    Big,
-}
-
-fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> BuiltinResult<Value> {
-    match datatype {
-        DataType::Char => Ok(char_row(bytes)),
-        DataType::String => Ok(Value::String(bytes.iter().map(|&b| b as char).collect())),
-        DataType::UInt8
-        | DataType::Int8
-        | DataType::UInt16
-        | DataType::Int16
-        | DataType::UInt32
-        | DataType::Int32
-        | DataType::UInt64
-        | DataType::Int64 => {
-            let storage = integer_storage_from_bytes(bytes, datatype, order)?;
-            let tensor =
-                Tensor::new_integer(storage, vec![1, bytes.len() / datatype.element_size()])
-                    .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
-            Ok(Value::Tensor(tensor))
-        }
-        DataType::Single | DataType::Double => {
-            let storage = floating_storage_from_bytes(bytes, datatype, order)?;
-            let cols = storage.len();
-            let tensor = Tensor::from_numeric_storage(storage, vec![1, cols])
-                .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
-            Ok(Value::Tensor(tensor))
-        }
-    }
-}
-
-fn char_row(bytes: &[u8]) -> Value {
-    let chars: Vec<char> = bytes.iter().map(|&b| b as char).collect();
-    let len = chars.len();
-    let array = CharArray::new(chars, 1, len).unwrap_or_else(|_| CharArray::new_row(""));
-    Value::CharArray(array)
-}
-
-fn floating_storage_from_bytes(
-    bytes: &[u8],
-    datatype: DataType,
-    order: ByteOrder,
-) -> BuiltinResult<NumericStorage> {
-    let size = datatype.element_size();
-    if size == 0 {
-        return Ok(match datatype {
-            DataType::Single => NumericStorage::F32(Vec::new()),
-            DataType::Double => NumericStorage::F64(Vec::new()),
-            _ => unreachable!("floating storage requested for nonfloating datatype"),
-        });
-    }
-    if !bytes.len().is_multiple_of(size) {
-        return Err(read_flow(
-            &READ_ERROR_INTERNAL,
-            "read: received byte count does not align with datatype size",
-        ));
-    }
-    Ok(match datatype {
-        DataType::Single => NumericStorage::F32(
-            bytes
-                .chunks_exact(size)
-                .map(|chunk| f32_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Double => NumericStorage::F64(
-            bytes
-                .chunks_exact(size)
-                .map(|chunk| f64_from(chunk, order))
-                .collect(),
-        ),
-        _ => {
-            return Err(read_flow(
-                &READ_ERROR_INTERNAL,
-                "read: expected a floating-point datatype",
-            ))
-        }
-    })
-}
-
-fn integer_storage_from_bytes(
-    bytes: &[u8],
-    datatype: DataType,
-    order: ByteOrder,
-) -> BuiltinResult<IntegerStorage> {
-    let size = datatype.element_size();
-    if !bytes.len().is_multiple_of(size) {
-        return Err(read_flow(
-            &READ_ERROR_INTERNAL,
-            "read: received byte count does not align with datatype size",
-        ));
-    }
-    Ok(match datatype {
-        DataType::UInt8 => IntegerStorage::U8(bytes.to_vec()),
-        DataType::Int8 => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
-        DataType::UInt16 => IntegerStorage::U16(
-            bytes
-                .chunks_exact(2)
-                .map(|chunk| u16_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Int16 => IntegerStorage::I16(
-            bytes
-                .chunks_exact(2)
-                .map(|chunk| i16_from(chunk, order))
-                .collect(),
-        ),
-        DataType::UInt32 => IntegerStorage::U32(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| u32_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Int32 => IntegerStorage::I32(
-            bytes
-                .chunks_exact(4)
-                .map(|chunk| i32_from(chunk, order))
-                .collect(),
-        ),
-        DataType::UInt64 => IntegerStorage::U64(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| u64_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Int64 => IntegerStorage::I64(
-            bytes
-                .chunks_exact(8)
-                .map(|chunk| i64_from(chunk, order))
-                .collect(),
-        ),
-        DataType::Single | DataType::Double | DataType::Char | DataType::String => {
-            return Err(read_flow(
-                &READ_ERROR_INTERNAL,
-                "read: expected an integer datatype",
-            ));
-        }
-    })
-}
-
-fn u16_from(bytes: &[u8], order: ByteOrder) -> u16 {
-    match order {
-        ByteOrder::Little => u16::from_le_bytes([bytes[0], bytes[1]]),
-        ByteOrder::Big => u16::from_be_bytes([bytes[0], bytes[1]]),
-    }
-}
-
-fn i16_from(bytes: &[u8], order: ByteOrder) -> i16 {
-    u16_from(bytes, order) as i16
-}
-
-fn u32_from(bytes: &[u8], order: ByteOrder) -> u32 {
-    match order {
-        ByteOrder::Little => u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-        ByteOrder::Big => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-    }
-}
-
-fn i32_from(bytes: &[u8], order: ByteOrder) -> i32 {
-    u32_from(bytes, order) as i32
-}
-
-fn u64_from(bytes: &[u8], order: ByteOrder) -> u64 {
-    match order {
-        ByteOrder::Little => u64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-        ByteOrder::Big => u64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-    }
-}
-
-fn i64_from(bytes: &[u8], order: ByteOrder) -> i64 {
-    u64_from(bytes, order) as i64
-}
-
-fn f32_from(bytes: &[u8], order: ByteOrder) -> f32 {
-    match order {
-        ByteOrder::Little => f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-        ByteOrder::Big => f32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
-    }
-}
-
-fn f64_from(bytes: &[u8], order: ByteOrder) -> f64 {
-    match order {
-        ByteOrder::Little => f64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-        ByteOrder::Big => f64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]),
-    }
-}
+#[path = "read/decode.rs"]
+mod decode;
+use decode::{bytes_to_value, ByteOrder};
 
 async fn parse_arguments(rest: Vec<Value>, known: KnownReadControls) -> BuiltinResult<ReadOptions> {
     match rest.len() {

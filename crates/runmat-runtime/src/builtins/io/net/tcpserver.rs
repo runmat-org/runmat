@@ -95,6 +95,7 @@ pub(crate) async fn tcpserver_builtin(
         Some(parse_endpoint_port(&port)?)
     };
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let address = gather_if_needed_async(&address).await.map_err(|err| {
         super::error::with_source(
             BUILTIN_NAME,
@@ -123,36 +124,34 @@ pub(crate) async fn tcpserver_builtin(
 
     let options = parse_name_value_pairs(rest, prepared_options).await?;
 
-    let endpoint = super::transport::await_service(
-        runtime.as_ref(),
-        service.bind(
-            RuntimeTcpIssuer::from_context(runtime.as_ref()),
-            RuntimeTcpBind {
-                address: host.clone(),
-                port,
-                io_timeout: (options.timeout != 0.0)
-                    .then(|| std::time::Duration::from_secs_f64(options.timeout)),
-                byte_order: if options.byte_order == "big-endian" {
-                    RuntimeTcpByteOrder::Big
-                } else {
-                    RuntimeTcpByteOrder::Little
+    let endpoint = work
+        .await_service(
+            service.bind(
+                RuntimeTcpIssuer::from_context(runtime.as_ref()),
+                RuntimeTcpBind {
+                    address: host.clone(),
+                    port,
+                    io_timeout: (options.timeout != 0.0)
+                        .then(|| std::time::Duration::from_secs_f64(options.timeout)),
+                    byte_order: if options.byte_order == "big-endian" {
+                        RuntimeTcpByteOrder::Big
+                    } else {
+                        RuntimeTcpByteOrder::Little
+                    },
                 },
-            },
-        ),
-    )
-    .await
-    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
-    .map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPSERVER_ERROR_BIND_FAILED,
-            format!("tcpserver: unable to bind {host}:{port} ({err})"),
-            err,
+            ),
         )
-    })?;
-    if let Some(runtime) = &runtime {
-        runtime.cpu_cooperation().completed(0).await?;
-    }
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            super::error::with_source(
+                BUILTIN_NAME,
+                &TCPSERVER_ERROR_BIND_FAILED,
+                format!("tcpserver: unable to bind {host}:{port} ({err})"),
+                err,
+            )
+        })?;
+    work.completed(0).await?;
     Ok(build_tcpserver_object(
         endpoint.authority,
         &host,

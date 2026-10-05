@@ -89,6 +89,11 @@ fn run_read(host: &TcpTestHost, client: Value, rest: Vec<Value>) -> BuiltinResul
     futures::executor::block_on(read_builtin(Some(host.runtime.clone()), client, rest))
 }
 
+fn decode(bytes: &[u8], datatype: DataType, order: ByteOrder) -> BuiltinResult<Value> {
+    let mut work = super::super::transport::NetCooperation::new(None, BUILTIN_NAME);
+    futures::executor::block_on(bytes_to_value(bytes, datatype, order, &mut work))
+}
+
 fn integer_bytes(storage: &IntegerStorage, order: ByteOrder) -> Vec<u8> {
     let mut bytes = Vec::new();
     match storage {
@@ -212,8 +217,8 @@ fn bytes_to_value_preserves_all_integer_classes_in_both_byte_orders() {
 
     for order in [ByteOrder::Little, ByteOrder::Big] {
         for (datatype, expected) in &cases {
-            let decoded = bytes_to_value(&integer_bytes(expected, order), *datatype, order)
-                .expect("typed decode");
+            let decoded =
+                decode(&integer_bytes(expected, order), *datatype, order).expect("typed decode");
             let Value::Tensor(tensor) = decoded else {
                 panic!("expected tensor");
             };
@@ -224,8 +229,7 @@ fn bytes_to_value_preserves_all_integer_classes_in_both_byte_orders() {
 
 #[test]
 fn read_default_uint8_and_explicit_single_output_classes_are_truthful() {
-    let default =
-        bytes_to_value(&[1, 2, 255], DataType::UInt8, ByteOrder::Little).expect("default decode");
+    let default = decode(&[1, 2, 255], DataType::UInt8, ByteOrder::Little).expect("default decode");
     let Value::Tensor(default) = default else {
         panic!("expected default tensor");
     };
@@ -238,8 +242,7 @@ fn read_default_uint8_and_explicit_single_output_classes_are_truthful() {
         .into_iter()
         .flat_map(f32::to_le_bytes)
         .collect::<Vec<_>>();
-    let single =
-        bytes_to_value(&bytes, DataType::Single, ByteOrder::Little).expect("single decode");
+    let single = decode(&bytes, DataType::Single, ByteOrder::Little).expect("single decode");
     let Value::Tensor(single) = single else {
         panic!("expected single tensor");
     };

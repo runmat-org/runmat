@@ -120,6 +120,7 @@ pub(super) async fn write_builtin(
         ));
     }
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let data = gather_if_needed_async(&data)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_DATA))?;
@@ -134,20 +135,18 @@ pub(super) async fn write_builtin(
     };
 
     let issuer = RuntimeTcpIssuer::from_context(runtime.as_ref());
-    let status = super::transport::await_service(
-        runtime.as_ref(),
-        service.describe_client(issuer.clone(), authority.clone()),
-    )
-    .await
-    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
-    .map_err(|err| {
-        let descriptor = if err.kind() == TcpTransportErrorKind::InvalidAuthority {
-            &WRITE_ERROR_INVALID_CLIENT
-        } else {
-            &WRITE_ERROR_INTERNAL
-        };
-        super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
-    })?;
+    let status = work
+        .await_service(service.describe_client(issuer.clone(), authority.clone()))
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            let descriptor = if err.kind() == TcpTransportErrorKind::InvalidAuthority {
+                &WRITE_ERROR_INVALID_CLIENT
+            } else {
+                &WRITE_ERROR_INTERNAL
+            };
+            super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
+        })?;
     if !status.connected {
         return Err(write_error(&WRITE_ERROR_NOT_CONNECTED));
     }
@@ -161,31 +160,25 @@ pub(super) async fn write_builtin(
         None => prepare_default_payload(&data, byte_order)?,
     };
     if payload.bytes.is_empty() {
-        if let Some(runtime) = &runtime {
-            runtime.cpu_cooperation().completed(0).await?;
-        }
+        work.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
 
-    if let Some(runtime) = &runtime {
-        runtime.cpu_cooperation().completed(0).await?;
-    }
+    work.completed(0).await?;
     let expected_bytes = payload.bytes.len();
-    let accepted_bytes = super::transport::await_service(
-        runtime.as_ref(),
-        service.write(issuer, authority, payload.bytes),
-    )
-    .await
-    .map_err(map_write_await_failure)?
-    .map_err(|err| {
-        let descriptor = match err.kind() {
-            TcpTransportErrorKind::InvalidAuthority => &WRITE_ERROR_INVALID_CLIENT,
-            TcpTransportErrorKind::Closed => &WRITE_ERROR_CONNECTION_CLOSED,
-            TcpTransportErrorKind::Timeout => &WRITE_ERROR_TIMEOUT,
-            _ => &WRITE_ERROR_INTERNAL,
-        };
-        super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
-    })?;
+    let accepted_bytes = work
+        .await_service(service.write(issuer, authority, payload.bytes))
+        .await
+        .map_err(map_write_await_failure)?
+        .map_err(|err| {
+            let descriptor = match err.kind() {
+                TcpTransportErrorKind::InvalidAuthority => &WRITE_ERROR_INVALID_CLIENT,
+                TcpTransportErrorKind::Closed => &WRITE_ERROR_CONNECTION_CLOSED,
+                TcpTransportErrorKind::Timeout => &WRITE_ERROR_TIMEOUT,
+                _ => &WRITE_ERROR_INTERNAL,
+            };
+            super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
+        })?;
     if accepted_bytes != expected_bytes {
         let progress = if accepted_bytes <= expected_bytes {
             TcpWriteProgress::PrefixSent(accepted_bytes)

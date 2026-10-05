@@ -2,7 +2,7 @@
 
 use crate::{
     context::{RuntimeContext, RuntimeTcpService},
-    execution::ExecutionServiceError,
+    execution::{CpuCooperationBudget, ExecutionServiceError},
     BuiltinResult,
 };
 use std::future::Future;
@@ -29,31 +29,61 @@ impl TcpAwaitFailure {
     }
 }
 
-/// The execution service owns the cancellation wake and CPU turn. A future
-/// cancelled before the initial checkpoint is never polled; dropping an
-/// in-flight future invokes the transport's abort/rollback owner.
-pub(super) async fn await_service<T>(
-    runtime: Option<&RuntimeContext>,
-    future: impl Future<Output = T>,
-) -> Result<T, TcpAwaitFailure> {
-    let Some(runtime) = runtime else {
-        return Ok(future.await);
-    };
-    let mut budget = runtime.cpu_cooperation();
-    budget
-        .checkpoint(0)
-        .await
-        .map_err(|cause| TcpAwaitFailure {
-            cause,
-            launched: false,
-        })?;
-    budget
-        .await_cancellable(future)
-        .await
-        .map_err(|cause| TcpAwaitFailure {
-            cause,
-            launched: true,
-        })
+/// One invocation-owned budget is retained across socket I/O and codec work.
+/// The execution service, not this family, chooses when CPU work yields.
+pub(super) struct NetCooperation {
+    budget: Option<CpuCooperationBudget>,
+    builtin: &'static str,
+}
+
+impl NetCooperation {
+    pub(super) fn new(runtime: Option<&RuntimeContext>, builtin: &'static str) -> Self {
+        Self {
+            budget: runtime.map(RuntimeContext::cpu_cooperation),
+            builtin,
+        }
+    }
+
+    /// A future cancelled before the checkpoint is never polled. Dropping an
+    /// in-flight future invokes the transport's abort/rollback owner.
+    pub(super) async fn await_service<T>(
+        &mut self,
+        future: impl Future<Output = T>,
+    ) -> Result<T, TcpAwaitFailure> {
+        let Some(budget) = self.budget.as_mut() else {
+            return Ok(future.await);
+        };
+        budget
+            .checkpoint(0)
+            .await
+            .map_err(|cause| TcpAwaitFailure {
+                cause,
+                launched: false,
+            })?;
+        budget
+            .await_cancellable(future)
+            .await
+            .map_err(|cause| TcpAwaitFailure {
+                cause,
+                launched: true,
+            })
+    }
+
+    pub(super) async fn completed(&mut self, units: usize) -> BuiltinResult<()> {
+        let Some(budget) = self.budget.as_mut() else {
+            return Ok(());
+        };
+        budget
+            .checkpoint(u64::try_from(units).unwrap_or(u64::MAX))
+            .await
+            .map_err(|cause| {
+                TcpAwaitFailure {
+                    cause,
+                    launched: false,
+                }
+                .into_runtime_error(self.builtin)
+            })
+    }
 }
 
 /// Resolve the installed session authority before an operand download or a

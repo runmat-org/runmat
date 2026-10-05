@@ -63,22 +63,19 @@ pub(super) async fn readline_builtin(
             )
         })?;
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
-    let outcome = super::transport::await_service(
-        runtime.as_ref(),
-        service.read(
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
+    let outcome = work
+        .await_service(service.read(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             authority,
             RuntimeTcpReadMode::Line,
-        ),
-    )
-    .await
-    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?;
+        ))
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?;
     let receipt = match outcome {
         Ok(receipt) => receipt,
         Err(err) if err.kind() == TcpTransportErrorKind::Timeout => {
-            if let Some(runtime) = &runtime {
-                runtime.cpu_cooperation().completed(0).await?;
-            }
+            work.completed(0).await?;
             return Ok(empty_double_matrix());
         }
         Err(err) => {
@@ -101,9 +98,7 @@ pub(super) async fn readline_builtin(
         .unwrap_or(receipt.bytes());
     let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
     let value = value_from_bytes(bytes.to_vec());
-    if let Some(runtime) = &runtime {
-        runtime.cpu_cooperation().completed(0).await?;
-    }
+    work.completed(0).await?;
     receipt.publish();
     Ok(value)
 }

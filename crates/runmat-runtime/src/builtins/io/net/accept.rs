@@ -38,13 +38,13 @@ pub(crate) async fn accept_builtin(
         })?;
     let prepared_options = preflight_accept_options(&rest)?;
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let options = parse_accept_options(rest, prepared_options).await?;
     if let Some(timeout) = options.timeout {
         validate_timeout(timeout)?;
     }
-    let endpoint = super::transport::await_service(
-        runtime.as_ref(),
-        service.accept(
+    let endpoint = work
+        .await_service(service.accept(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             server_authority,
             options.timeout.and_then(|seconds| {
@@ -52,30 +52,27 @@ pub(crate) async fn accept_builtin(
                     .is_finite()
                     .then(|| Duration::from_secs_f64(seconds))
             }),
-        ),
-    )
-    .await
-    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
-    .map_err(|err| {
-        if err.kind() == TcpTransportErrorKind::Timeout {
-            super::error::with_source_message(
-                BUILTIN_NAME,
-                &ACCEPT_ERROR_TIMEOUT,
-                "accept: timed out waiting for a client connection",
-                err,
-            )
-        } else {
-            super::error::with_source(
-                BUILTIN_NAME,
-                &ACCEPT_ERROR_ACCEPT_FAILED,
-                format!("accept: {err}"),
-                err,
-            )
-        }
-    })?;
-    if let Some(runtime) = &runtime {
-        runtime.cpu_cooperation().completed(0).await?;
-    }
+        ))
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            if err.kind() == TcpTransportErrorKind::Timeout {
+                super::error::with_source_message(
+                    BUILTIN_NAME,
+                    &ACCEPT_ERROR_TIMEOUT,
+                    "accept: timed out waiting for a client connection",
+                    err,
+                )
+            } else {
+                super::error::with_source(
+                    BUILTIN_NAME,
+                    &ACCEPT_ERROR_ACCEPT_FAILED,
+                    format!("accept: {err}"),
+                    err,
+                )
+            }
+        })?;
+    work.completed(0).await?;
     Ok(build_tcpclient_value(
         endpoint.authority,
         endpoint.local_addr,

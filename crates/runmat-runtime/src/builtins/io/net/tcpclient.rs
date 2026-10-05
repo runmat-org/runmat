@@ -94,6 +94,7 @@ pub(crate) async fn tcpclient_builtin(
         Some(parse_endpoint_port(&port)?)
     };
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let host = gather_if_needed_async(&host).await.map_err(|err| {
         super::error::with_source(
             BUILTIN_NAME,
@@ -122,39 +123,37 @@ pub(crate) async fn tcpclient_builtin(
 
     let options = parse_name_value_pairs(rest, prepared_options).await?;
 
-    let endpoint = super::transport::await_service(
-        runtime.as_ref(),
-        service.connect(
-            RuntimeTcpIssuer::from_context(runtime.as_ref()),
-            RuntimeTcpConnect {
-                host: host_text.clone(),
-                port: port_num,
-                connect_timeout: options
-                    .connect_timeout
-                    .is_finite()
-                    .then(|| std::time::Duration::from_secs_f64(options.connect_timeout)),
-                io_timeout: timeout_duration(options.timeout),
-                byte_order: if options.byte_order == "big-endian" {
-                    RuntimeTcpByteOrder::Big
-                } else {
-                    RuntimeTcpByteOrder::Little
+    let endpoint = work
+        .await_service(
+            service.connect(
+                RuntimeTcpIssuer::from_context(runtime.as_ref()),
+                RuntimeTcpConnect {
+                    host: host_text.clone(),
+                    port: port_num,
+                    connect_timeout: options
+                        .connect_timeout
+                        .is_finite()
+                        .then(|| std::time::Duration::from_secs_f64(options.connect_timeout)),
+                    io_timeout: timeout_duration(options.timeout),
+                    byte_order: if options.byte_order == "big-endian" {
+                        RuntimeTcpByteOrder::Big
+                    } else {
+                        RuntimeTcpByteOrder::Little
+                    },
                 },
-            },
-        ),
-    )
-    .await
-    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
-    .map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPCLIENT_ERROR_CONNECT_FAILED,
-            format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
-            err,
+            ),
         )
-    })?;
-    if let Some(runtime) = &runtime {
-        runtime.cpu_cooperation().completed(0).await?;
-    }
+        .await
+        .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+        .map_err(|err| {
+            super::error::with_source(
+                BUILTIN_NAME,
+                &TCPCLIENT_ERROR_CONNECT_FAILED,
+                format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
+                err,
+            )
+        })?;
+    work.completed(0).await?;
     Ok(build_tcpclient_object(
         endpoint.authority,
         &host_text,
