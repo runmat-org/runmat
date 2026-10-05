@@ -328,7 +328,7 @@ fn select_host_effect_inner(
     let expected_candidate_kind = candidate.kind;
     let selected = if stage.is_some() {
         let candidates = [candidate];
-        service.select_whole_work_borrowed(WholeWorkPlacementRequestRef {
+        service.select_whole_work_borrowed_managed(WholeWorkPlacementRequestRef {
             signature: &signature,
             constraint: WholeWorkConstraint::AnyLegal,
             candidates: &candidates,

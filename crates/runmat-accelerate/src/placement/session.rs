@@ -29,7 +29,7 @@ enum FeedbackCandidateKey {
 }
 
 fn feedback_candidate_key(candidate: &str) -> FeedbackCandidateKey {
-    if let Ok(identity) = candidate.parse::<Digest>() {
+    if let Some(identity) = Digest::parse_canonical(candidate) {
         return FeedbackCandidateKey::Canonical(identity);
     }
     let mut identity = DigestStream::new();
@@ -184,6 +184,7 @@ pub struct PlacementSession {
     state: RefCell<PlacementSessionState>,
     pending: pending::PendingFeedback,
     observation_permits: observation_permits::ObservationPermits,
+    managed_observations: Option<runmat_runtime::context::ManagedObservationPool>,
     whole_work_probes: Arc<Mutex<BTreeSet<whole_work::ProbeKey>>>,
 }
 
@@ -200,8 +201,23 @@ impl PlacementSession {
             state: RefCell::new(PlacementSessionState::default()),
             pending: pending::PendingFeedback::default(),
             observation_permits: observation_permits::ObservationPermits::default(),
+            managed_observations: None,
             whole_work_probes: Arc::default(),
         }
+    }
+
+    /// Install a finite in-flight observation backing at session setup. The
+    /// existing unbounded/external constructor retains its dynamic registry.
+    pub fn new_with_managed_observations(
+        config: PlacementSessionConfig,
+        ledger: &runmat_runtime::context::host_effect::ManagedHostEffectLedger,
+        slots: usize,
+    ) -> Result<Self, runmat_runtime::context::host_effect::HostEffectAllocationError> {
+        let managed_observations =
+            runmat_runtime::context::ManagedObservationPool::new(ledger, slots)?;
+        let mut session = Self::new(config);
+        session.managed_observations = Some(managed_observations);
+        Ok(session)
     }
 
     pub fn plan(
@@ -396,6 +412,9 @@ impl PlacementSession {
 
     pub fn invalidate(&self, invalidation: PlacementInvalidation) {
         self.observation_permits.invalidate(&invalidation);
+        if let Some(pool) = &self.managed_observations {
+            pool.invalidate(&invalidation);
+        }
         self.pending.invalidate(&invalidation);
         let mut state = self.state.borrow_mut();
         match invalidation {
@@ -513,6 +532,9 @@ impl PlacementSession {
         self.pending.invalidate(&PlacementInvalidation::All);
         self.observation_permits
             .invalidate(&PlacementInvalidation::All);
+        if let Some(pool) = &self.managed_observations {
+            pool.invalidate(&PlacementInvalidation::All);
+        }
         let mut state = self.state.borrow_mut();
         state.tick = restored_tick;
         state.decisions.clear();
@@ -576,6 +598,14 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
     ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
     {
         PlacementSession::select_whole_work_borrowed(self, request).map_err(runtime_error)
+    }
+
+    fn select_whole_work_borrowed_managed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
+    {
+        PlacementSession::select_whole_work_borrowed_managed(self, request).map_err(runtime_error)
     }
 
     fn observed_candidate_duration(

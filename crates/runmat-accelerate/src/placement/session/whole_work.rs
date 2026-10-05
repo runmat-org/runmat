@@ -68,13 +68,14 @@ impl PlacementSession {
         &self,
         request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
-        let draft = self.select_whole_work_untracked(request.as_ref())?;
+        let draft = self.select_whole_work_untracked(request.as_ref(), false)?;
         self.finish_whole_work_selection(
             draft,
             request.signature,
             || request.resources,
             request.deterministic,
             request.require_transactional_results,
+            false,
         )
     }
 
@@ -82,13 +83,35 @@ impl PlacementSession {
         &self,
         request: WholeWorkPlacementRequestRef<'_>,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
-        let draft = self.select_whole_work_untracked(request)?;
+        let draft = self.select_whole_work_untracked(request, false)?;
         self.finish_whole_work_selection(
             draft,
             (*request.signature).clone(),
             || (*request.resources).clone(),
             request.deterministic,
             request.require_transactional_results,
+            false,
+        )
+    }
+
+    pub fn select_whole_work_borrowed_managed(
+        &self,
+        request: WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
+        if self.managed_observations.is_none() {
+            return Err(PlacementPlanError {
+                code: "RunMat:Placement:InsufficientResourceEvidence",
+                message: "managed observation backing is not installed".into(),
+            });
+        }
+        let draft = self.select_whole_work_untracked(request, true)?;
+        self.finish_whole_work_selection(
+            draft,
+            (*request.signature).clone(),
+            || (*request.resources).clone(),
+            request.deterministic,
+            request.require_transactional_results,
+            true,
         )
     }
 
@@ -99,6 +122,7 @@ impl PlacementSession {
         resources: impl FnOnce() -> runmat_execution::PlacementResourceSnapshot,
         deterministic: bool,
         require_transactional_results: bool,
+        managed: bool,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
         let (signature, selected_candidate, kind, predicted_total_ns, probe) = match draft {
             SelectionDraft::Compared { graph } => {
@@ -141,20 +165,49 @@ impl PlacementSession {
             probe,
             observation_permit: None,
         };
-        selected.observation_permit = Some(
-            self.observation_permits
-                .register(&selected.decision.signature)
+        selected.observation_permit = Some(if managed {
+            let identity = selected
+                .decision
+                .signature
+                .permit_identity()
                 .map_err(|source| PlacementPlanError {
                     code: "RunMat:Placement:InvalidRequest",
                     message: source.to_string(),
-                })?,
-        );
+                })?;
+            let pool = self
+                .managed_observations
+                .as_ref()
+                .expect("checked managed owner");
+            let candidate = Digest::parse_canonical(&selected.decision.selected.candidate)
+                .ok_or_else(|| PlacementPlanError {
+                    code: "RunMat:Placement:InvalidDecision",
+                    message: "managed selection did not retain a canonical candidate identity"
+                        .into(),
+                })?;
+            runmat_runtime::context::RuntimeWholeWorkObservationAuthority::Managed(
+                pool.acquire(identity, candidate)
+                    .map_err(|source| PlacementPlanError {
+                        code: "RunMat:Placement:InsufficientResourceEvidence",
+                        message: source.to_string(),
+                    })?,
+            )
+        } else {
+            runmat_runtime::context::RuntimeWholeWorkObservationAuthority::Dynamic(
+                self.observation_permits
+                    .register(&selected.decision.signature)
+                    .map_err(|source| PlacementPlanError {
+                        code: "RunMat:Placement:InvalidRequest",
+                        message: source.to_string(),
+                    })?,
+            )
+        });
         Ok(selected)
     }
 
     fn select_whole_work_untracked(
         &self,
         request: WholeWorkPlacementRequestRef<'_>,
+        managed: bool,
     ) -> Result<SelectionDraft, PlacementPlanError> {
         request.validate().map_err(invalid_request)?;
         let operation =
@@ -281,15 +334,32 @@ impl PlacementSession {
         }
 
         if matches!(request.constraint, WholeWorkConstraint::AnyLegal) {
-            if let Some(index) = exploration_candidate(&admitted, &self.whole_work_probes, request)
-            {
+            if let Some(index) = exploration_candidate(
+                &admitted,
+                &self.whole_work_probes,
+                if managed {
+                    self.managed_observations.as_ref()
+                } else {
+                    None
+                },
+                request,
+            ) {
                 let item = &admitted[index];
                 let key = (
                     request.signature.cache_key(),
                     item.identity,
                     item.candidate.kind,
                 );
-                lock_probes(&self.whole_work_probes).insert(key);
+                let probe = if managed {
+                    None
+                } else {
+                    lock_probes(&self.whole_work_probes).insert(key);
+                    Some(Box::new(ProbeLease {
+                        active: Arc::clone(&self.whole_work_probes),
+                        key,
+                    })
+                        as Box<dyn RuntimeWholeWorkProbeLease>)
+                };
                 return Ok(SelectionDraft::Direct {
                     selected: CompactSelectedExecutionCandidate {
                         node: operation,
@@ -298,10 +368,7 @@ impl PlacementSession {
                     },
                     kind: WholeWorkDecisionKind::Exploratory,
                     predicted_total_ns: None,
-                    probe: Some(Box::new(ProbeLease {
-                        active: Arc::clone(&self.whole_work_probes),
-                        key,
-                    })),
+                    probe,
                 });
             }
         }
@@ -378,6 +445,7 @@ fn unmeasured_host(
 fn exploration_candidate(
     admitted: &[Admitted<'_>],
     active: &Arc<Mutex<BTreeSet<ProbeKey>>>,
+    managed: Option<&runmat_runtime::context::ManagedObservationPool>,
     request: WholeWorkPlacementRequestRef<'_>,
 ) -> Option<usize> {
     let active = lock_probes(active);
@@ -388,6 +456,13 @@ fn exploration_candidate(
                 || !request.require_transactional_results
                 || item.candidate.transactional_results)
             && !active.contains(&(signature, item.identity, item.candidate.kind))
+            && !managed.is_some_and(|pool| {
+                request
+                    .signature
+                    .permit_identity()
+                    .ok()
+                    .is_some_and(|identity| pool.has_active(identity, item.identity))
+            })
     };
     let host = admitted
         .iter()

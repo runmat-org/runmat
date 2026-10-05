@@ -144,6 +144,13 @@ impl RuntimePlacementService for Placement {
             require_transactional_results: request.require_transactional_results,
         })
     }
+    fn select_whole_work_borrowed_managed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, crate::RuntimeError> {
+        // This test service supplies synthetic placement evidence only.
+        self.select_whole_work_borrowed(request)
+    }
     fn observe_whole_work(
         &self,
         observation: WholeWorkObservation,

@@ -278,12 +278,28 @@ pub trait RuntimeWholeWorkObservationPermit: Send + Sync {
     fn is_current(&self) -> bool;
 }
 
+/// The finite managed route retains a value slot/generation lease instead of
+/// allocating one dynamic observation permit per invocation.
+pub enum RuntimeWholeWorkObservationAuthority {
+    Dynamic(std::sync::Arc<dyn RuntimeWholeWorkObservationPermit>),
+    Managed(super::ManagedObservationLease),
+}
+
+impl RuntimeWholeWorkObservationAuthority {
+    pub fn is_current(&self) -> bool {
+        match self {
+            Self::Dynamic(permit) => permit.is_current(),
+            Self::Managed(lease) => lease.is_current(),
+        }
+    }
+}
+
 pub struct RuntimeWholeWorkSelection {
     pub decision: runmat_execution::WholeWorkDecision,
     pub probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
     /// Selection-owned validity; a matching invalidation or profile import
     /// revokes late completion even before a deferred source is registered.
-    pub observation_permit: Option<std::sync::Arc<dyn RuntimeWholeWorkObservationPermit>>,
+    pub observation_permit: Option<RuntimeWholeWorkObservationAuthority>,
 }
 
 impl RuntimeWholeWorkSelection {
@@ -382,6 +398,20 @@ pub trait RuntimePlacementService {
         Err(
             crate::build_runtime_error("borrowed whole-work placement is unavailable")
                 .with_identifier("RunMat:Placement:Unavailable")
+                .build(),
+        )
+    }
+
+    /// Finite host-effect calls require a placement service with a retained,
+    /// capacity-charged in-flight identity owner. An ordinary borrowed policy
+    /// implementation must not masquerade as that managed authority.
+    fn select_whole_work_borrowed_managed(
+        &self,
+        _request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+        Err(
+            crate::build_runtime_error("managed whole-work placement is unavailable")
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
                 .build(),
         )
     }

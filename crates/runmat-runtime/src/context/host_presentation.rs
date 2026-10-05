@@ -170,7 +170,7 @@ struct DeferredPresentationFeedback {
     signature: PlacementSignature,
     selected: SelectedExecutionCandidate,
     _probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
-    observation_permit: Option<std::sync::Arc<dyn super::RuntimeWholeWorkObservationPermit>>,
+    observation_permit: Option<super::RuntimeWholeWorkObservationAuthority>,
     cancellation: CancellationToken,
     terminal_without_feedback: bool,
 }

@@ -10,6 +10,7 @@ mod preferences;
 pub(crate) mod process_invocation;
 mod user_path;
 mod host_document;
+mod managed_observations;
 pub mod host_effect;
 pub(crate) mod host_presentation;
 pub(crate) mod provider_operation;
@@ -30,6 +31,7 @@ pub mod preparation;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
+pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
 #[cfg(target_arch = "wasm32")]
 pub use preferences::BrowserPreferenceService;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,8 +59,8 @@ pub use services::{
     RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
     RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
     RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
-    RuntimeWholeWorkObservationPermit, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
-    RuntimeWorkspaceService,
+    RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
+    RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;
 pub use tcp::{

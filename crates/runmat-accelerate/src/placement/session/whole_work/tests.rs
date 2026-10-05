@@ -30,6 +30,55 @@ fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() 
 }
 
 #[test]
+fn managed_selection_uses_one_precharged_slot_and_fences_late_invalidation() {
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+    use runmat_runtime::context::RuntimeWholeWorkObservationAuthority;
+
+    let ledger = ManagedHostEffectLedger::new(16 * 1024);
+    let session = PlacementSession::new_with_managed_observations(
+        PlacementSessionConfig::default(),
+        &ledger,
+        1,
+    )
+    .expect("managed slot backing");
+    let other = PlacementSession::new_with_managed_observations(
+        PlacementSessionConfig::default(),
+        &ManagedHostEffectLedger::new(16 * 1024),
+        1,
+    )
+    .expect("independent session owner");
+    let route = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
+    let first = session
+        .select_whole_work_borrowed_managed(route.as_ref())
+        .expect("first managed call");
+    assert_eq!(first.decision.kind, WholeWorkDecisionKind::Exploratory);
+    assert!(first.probe.is_none());
+    let RuntimeWholeWorkObservationAuthority::Managed(lease) =
+        first.observation_permit.as_ref().expect("managed lease")
+    else {
+        panic!("finite call must not allocate dynamic observation permit");
+    };
+    assert!(!lease.same_owner(other.managed_observations.as_ref().unwrap()));
+    assert!(first.observation_is_current());
+    let exhausted = session.select_whole_work_borrowed_managed(route.as_ref());
+    assert_eq!(
+        exhausted.err().expect("one slot is exhausted").code,
+        "RunMat:Placement:InsufficientResourceEvidence"
+    );
+    session.invalidate(runmat_execution::PlacementInvalidation::All);
+    assert!(!first.observation_is_current());
+    drop(first);
+    let replacement = session
+        .select_whole_work_borrowed_managed(route.as_ref())
+        .expect("retired slot reusable with next generation");
+    assert!(replacement.observation_is_current());
+    drop(replacement);
+    assert!(ledger.snapshot().live_reserved_bytes > 0);
+    drop(session);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn compact_selection_retains_unicode_operation_and_portable_identity() {
     let route = candidate(ExecutionCandidateKind::SharedRuntime);
     let operation = "foreign.λ";
