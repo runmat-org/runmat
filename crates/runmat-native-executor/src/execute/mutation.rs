@@ -13,6 +13,7 @@ mod prepared_multi;
 mod continuation;
 pub(super) use continuation::PendingAssign;
 pub(super) use continuation::PendingPlainMulti;
+pub(super) use continuation::PendingSequenceAssign;
 pub(super) use prepared_multi::PreparedMultiAssignment;
 
 #[derive(Clone)]
@@ -191,30 +192,7 @@ pub(super) fn execute(
             Ok(true)
         }
         MirStmtKind::SequenceAssign { target, .. } => {
-            let prepared = state.sequence_assignment_register.take().ok_or_else(|| {
-                NativeExecutorError::Host(
-                    "native sequence assignment has no produced value sequence".into(),
-                )
-            })?;
-            let values = prepared
-                .values
-                .into_iter()
-                .map(|reference| state.arena.get(reference).cloned())
-                .collect::<NativeExecutorResult<Vec<_>>>()?;
-            let base = state.arena.get(prepared.destination.base)?.clone();
-            let runtime = state.runtime.clone();
-            let updated = super::sync::complete(
-                &runtime,
-                runmat_runtime::object::resolve::store_member_sequence_traced(
-                    base,
-                    prepared.destination.field,
-                    values,
-                    Some(&state.function.name),
-                ),
-                "comma-separated member assignment",
-            )
-            .finish(state)?;
-            commit_prepared_place_write(state, prepared.destination.writeback, updated)?;
+            continuation::assign_sequence(state, target)?;
             let base = match target {
                 runmat_mir::MirSequenceTarget::Member { base, .. }
                 | runmat_mir::MirSequenceTarget::DynamicMember { base, .. }
@@ -275,19 +253,6 @@ fn prepare_place_write(
         current = child;
     }
     Ok((PreparedPlaceWrite { root, parents }, current))
-}
-
-fn commit_prepared_place_write(
-    state: &mut HostState,
-    prepared: PreparedPlaceWrite,
-    mut updated: Value,
-) -> NativeExecutorResult<()> {
-    for (parent, segment) in prepared.parents.into_iter().rev() {
-        let parent = state.arena.get(parent)?.clone();
-        updated = write_segment(state, parent, &segment, updated, false, true)?;
-    }
-    let reference = state.arena.insert(updated);
-    state.set_local(prepared.root.0, reference)
 }
 
 pub(super) fn assign_place_to_root(
