@@ -229,7 +229,7 @@ fn select_host_effect_inner(
     // still-live precharge; placement must account for the larger amount.
     let placement_scratch = match (stage.as_ref(), evidence.scratch_bytes) {
         (Some(stage), ResourceByteBound::Known(final_bytes)) => {
-            ResourceByteBound::Known(final_bytes.max(stage.reservation.reserved_bytes()))
+            ResourceByteBound::Known(final_bytes.max(stage.reserved_bytes()))
         }
         (_, bound) => bound,
     };
@@ -263,7 +263,6 @@ fn select_host_effect_inner(
     let placement_memory = match stage.as_ref() {
         Some(stage) => {
             let owner = stage
-                .reservation
                 .managed_ledger()
                 .ok_or_else(|| insufficient("staged allocation owner is absent"))?;
             let parallel_owner = runtime
@@ -281,7 +280,7 @@ fn select_host_effect_inner(
             Some(
                 snapshot
                     .free_bytes()
-                    .checked_add(stage.reservation.reserved_bytes())
+                    .checked_add(stage.reserved_bytes())
                     .ok_or_else(|| insufficient("staged resource snapshot overflow"))?,
             )
         }

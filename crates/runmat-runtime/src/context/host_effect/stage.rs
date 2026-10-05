@@ -242,6 +242,14 @@ impl HostEffectStagePermit {
         ))
     }
 
+    pub(super) fn reserved_bytes(&self) -> u64 {
+        self.reservation.reserved_bytes()
+    }
+
+    pub(super) fn managed_ledger(&self) -> Option<super::ManagedHostEffectLedger> {
+        self.reservation.managed_ledger()
+    }
+
     pub fn reserve_live_exact(
         &self,
         kind: HostEffectLiveAllocationKind,
