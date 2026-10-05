@@ -122,6 +122,43 @@ fn retained_exact_claim_follows_last_original_owner_not_later_cow_copy() {
 }
 
 #[test]
+fn owned_reservation_releases_after_retained_exact_output() {
+    #[derive(Debug)]
+    struct OwnedPermit(Arc<AtomicUsize>);
+    impl ExactHostAllocationPermit for OwnedPermit {
+        fn reserve_exact(
+            &self,
+            _: usize,
+        ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError>
+        {
+            panic!("exact route must use the owned claim")
+        }
+
+        fn reserve_exact_claim(
+            &self,
+            bytes: usize,
+        ) -> Result<ExactHostAllocationClaim, ExactHostNumericAllocationError> {
+            self.0.fetch_add(bytes, Ordering::SeqCst);
+            Ok(ExactHostAllocationClaim::Owned(Box::new(Reservation {
+                retained: self.0.clone(),
+                bytes,
+            })))
+        }
+    }
+    let retained = Arc::new(AtomicUsize::new(0));
+    let permit = OwnedPermit(retained.clone());
+    let requested = ExactHostTensor2dAllocation::requested_bytes(NumericDType::U16, 1, 2)
+        .expect("known owner layout");
+    let output = ExactHostTensor2dAllocation::new(NumericDType::U16, 1, 2, &permit)
+        .unwrap()
+        .into_tensor()
+        .unwrap();
+    assert_eq!(retained.load(Ordering::SeqCst), requested);
+    drop(output);
+    assert_eq!(retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
     let shape_bytes = 2 * std::mem::size_of::<usize>();
     let denied = permit(integer_charge(16 + shape_bytes) - 1);

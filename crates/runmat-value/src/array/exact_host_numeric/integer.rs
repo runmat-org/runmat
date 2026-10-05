@@ -4,7 +4,7 @@ use super::*;
 
 pub(super) struct ExactIntegerStorage {
     pub(super) values: IntegerStorage,
-    reservation: Arc<dyn ExactHostAllocationReservation>,
+    reservation: ExactHostAllocationClaim,
     capacity_bytes: usize,
 }
 
@@ -13,7 +13,7 @@ impl ExactIntegerStorage {
         self.capacity_bytes
     }
 
-    pub(super) fn into_parts(self) -> (IntegerStorage, Arc<dyn ExactHostAllocationReservation>) {
+    pub(super) fn into_parts(self) -> (IntegerStorage, ExactHostAllocationClaim) {
         (self.values, self.reservation)
     }
 }
@@ -41,7 +41,7 @@ pub(super) fn allocate_integer(
     dtype: NumericDType,
     len: usize,
     layout: Layout,
-    reservation: Arc<dyn ExactHostAllocationReservation>,
+    reservation: ExactHostAllocationClaim,
 ) -> Result<ExactIntegerStorage, ExactHostNumericAllocationError> {
     macro_rules! allocate {
         ($variant:ident, $type:ty) => {{

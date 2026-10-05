@@ -1,6 +1,5 @@
 use crate::{IntegerStorage, NumericDType, NumericScalar, NumericStorage};
 use std::ffi::c_void;
-use std::sync::Arc;
 
 use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
@@ -11,7 +10,7 @@ struct OwnedIntegerStorage {
     values: IntegerStorage,
     // Only the original exact allocation carries its quota claim. Copy-on-
     // write creates a distinct ordinary value in a subsequent operation.
-    _reservation: Option<Arc<dyn super::ExactHostAllocationReservation>>,
+    _reservation: Option<super::ExactHostAllocationClaim>,
 }
 
 impl Clone for OwnedIntegerStorage {
@@ -131,7 +130,7 @@ impl HostNumericBuffer {
 
     pub(crate) fn from_exact_integer_storage(
         values: IntegerStorage,
-        reservation: Arc<dyn super::ExactHostAllocationReservation>,
+        reservation: super::ExactHostAllocationClaim,
     ) -> Self {
         Self {
             storage: HostBuffer::new_exact(HostNumericStorage::Integer(OwnedIntegerStorage {

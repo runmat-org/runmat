@@ -51,17 +51,34 @@ impl std::error::Error for ExactHostNumericAllocationError {}
 /// invents a machine budget.
 pub trait ExactHostAllocationReservation: fmt::Debug + Send + Sync {}
 
+/// Retains a quota claim through the physical output allocation's lifetime.
+/// Installed exact owners can use a known-layout Box; external permits keep
+/// their existing shared reservation contract.
+#[derive(Debug)]
+pub enum ExactHostAllocationClaim {
+    Shared(Arc<dyn ExactHostAllocationReservation>),
+    Owned(Box<dyn ExactHostAllocationReservation>),
+}
+
 pub trait ExactHostAllocationPermit: fmt::Debug + Send + Sync {
     fn reserve_exact(
         &self,
         bytes: usize,
     ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError>;
+
+    fn reserve_exact_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<ExactHostAllocationClaim, ExactHostNumericAllocationError> {
+        self.reserve_exact(bytes)
+            .map(ExactHostAllocationClaim::Shared)
+    }
 }
 
 #[derive(Debug)]
 struct RustExactRelease {
     layout: Layout,
-    _reservation: Arc<dyn ExactHostAllocationReservation>,
+    _reservation: ExactHostAllocationClaim,
 }
 
 impl HostAllocationRelease for RustExactRelease {
@@ -226,7 +243,7 @@ impl ExactHostNumericAllocation {
     ) -> Result<Self, ExactHostNumericAllocationError> {
         let layout = Self::payload_layout(dtype, len)?;
         let charged = Self::requested_bytes_with_shape(dtype, len, shape_bytes)?;
-        let reservation = permit.reserve_exact(charged)?;
+        let reservation = permit.reserve_exact_claim(charged)?;
         if dtype.integer_class().is_some() {
             return Ok(Self {
                 allocation: ExactAllocation::Integer(allocate_integer(
