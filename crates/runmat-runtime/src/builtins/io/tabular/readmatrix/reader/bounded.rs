@@ -21,6 +21,7 @@ struct RowReader<'a> {
     line: String,
     line_number: usize,
     first_data_line: bool,
+    text_start: usize,
     digest: Sha256,
 }
 
@@ -31,16 +32,21 @@ impl<'a> RowReader<'a> {
             line: String::new(),
             line_number: 0,
             first_data_line: true,
+            text_start: 0,
             digest: Sha256::new(),
         }
     }
 
-    async fn next<'b>(
-        &'b mut self,
+    fn text(&self) -> &str {
+        &self.line[self.text_start..]
+    }
+
+    async fn next(
+        &mut self,
         cooperation: &mut TabularCooperation<'_>,
         path: &TabularFsPath,
         header_lines: usize,
-    ) -> BuiltinResult<Option<(usize, &'b str)>> {
+    ) -> BuiltinResult<Option<usize>> {
         loop {
             self.line.clear();
             let mut pending = [0_u8; 3];
@@ -115,23 +121,22 @@ impl<'a> RowReader<'a> {
             if trailing_cr_work != 0 {
                 checked_row_work(cooperation, path, trailing_cr_work).await?;
             }
-            let text = self.line.as_str();
-            let text = if self.line_number == 1 {
-                strip_utf8_bom(text)
+            let mut text_start = if self.line_number == 1 && self.line.starts_with('\u{FEFF}') {
+                '\u{FEFF}'.len_utf8()
             } else {
-                text
+                0
             };
+            let text = &self.line[text_start..];
             if self.line_number <= header_lines
                 || !scan::has_nonwhitespace(text, cooperation, path).await?
             {
                 continue;
             }
-            let text = if self.first_data_line {
+            if self.first_data_line {
                 self.first_data_line = false;
-                let mut stripped = text;
                 let mut bom_work = 0;
-                while let Some(without_bom) = stripped.strip_prefix('\u{FEFF}') {
-                    stripped = without_bom;
+                while self.line[text_start..].starts_with('\u{FEFF}') {
+                    text_start += '\u{FEFF}'.len_utf8();
                     bom_work += '\u{FEFF}'.len_utf8();
                     if bom_work >= ROW_WORK_CHUNK {
                         checked_row_work(cooperation, path, bom_work).await?;
@@ -141,11 +146,9 @@ impl<'a> RowReader<'a> {
                 if bom_work != 0 {
                     checked_row_work(cooperation, path, bom_work).await?;
                 }
-                stripped
-            } else {
-                text
-            };
-            return Ok(Some((self.line_number, text)));
+            }
+            self.text_start = text_start;
+            return Ok(Some(self.line_number));
         }
     }
 }
@@ -221,13 +224,13 @@ pub(super) async fn scan_utf8(
     let mut reader = RowReader::new(source);
     let mut sample = Vec::new();
     while sample.len() < 32 {
-        let Some((number, text)) = reader
+        let Some(number) = reader
             .next(cooperation, path, options.num_header_lines)
             .await?
         else {
             break;
         };
-        sample.push((number, text.to_owned()));
+        sample.push((number, reader.text().to_owned()));
     }
     let delimiter = match options.delimiter.clone() {
         Some(delimiter) => delimiter,
@@ -268,13 +271,13 @@ pub(super) async fn scan_utf8(
             _ => {}
         }
     }
-    while let Some((number, text)) = reader
+    while let Some(number) = reader
         .next(cooperation, path, options.num_header_lines)
         .await?
     {
         if semantic_error.is_none() {
             match validate_row(
-                text,
+                reader.text(),
                 number,
                 &delimiter,
                 integer_dtype,
@@ -401,10 +404,11 @@ pub(super) async fn fill_utf8(
     let mut reader = RowReader::new(source);
     let mut data_row = 0usize;
     let mut semantic_error = None;
-    while let Some((line_number, text)) = reader
+    while let Some(line_number) = reader
         .next(cooperation, path, options.num_header_lines)
         .await?
     {
+        let text = reader.text();
         let fields = split_fields(text, &geometry.delimiter, cooperation, path).await?;
         if fields.is_empty() {
             continue;
