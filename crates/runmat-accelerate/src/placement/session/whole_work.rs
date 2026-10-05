@@ -149,7 +149,15 @@ impl PlacementSession {
         self.managed_feedback
             .as_ref()
             .expect("checked managed feedback owner")
-            .ensure(request.signature, selected.candidate, selected.kind, seed)
+            .ensure(
+                request.signature,
+                selected.candidate,
+                selected.kind,
+                seed,
+                self.managed_observations
+                    .as_ref()
+                    .expect("checked managed owner"),
+            )
             .map_err(|source| PlacementPlanError {
                 code: "RunMat:Placement:InsufficientResourceEvidence",
                 message: source.to_string(),

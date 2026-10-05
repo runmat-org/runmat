@@ -9,6 +9,7 @@ use runmat_execution::{
 use runmat_runtime::context::host_effect::{
     HostEffectAllocationError, ManagedHostEffectLedger, ManagedHostEffectStageReservation,
 };
+use runmat_runtime::context::ManagedObservationPool;
 use std::cell::RefCell;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -90,6 +91,7 @@ impl ManagedFeedbackPool {
         candidate: Digest,
         kind: ExecutionCandidateKind,
         seed: Option<evidence::FeedbackNumbers>,
+        observations: &ManagedObservationPool,
     ) -> Result<Key, HostEffectAllocationError> {
         if !self.ledger.snapshot().current {
             return Err(HostEffectAllocationError::Revoked);
@@ -110,6 +112,15 @@ impl ManagedFeedbackPool {
             .slots
             .iter()
             .position(|slot| slot.key.is_none())
+            .or_else(|| {
+                state.slots.iter().position(|slot| {
+                    slot.key.is_some_and(|old| {
+                        slot.counters.samples == 0
+                            && slot.counters.failures == 0
+                            && !observations.has_active(old.permit, old.candidate)
+                    })
+                })
+            })
             .ok_or(HostEffectAllocationError::ExceedsCapacity)?;
         let start = index * state.bytes_per_series;
         let end = start + state.bytes_per_series;
@@ -273,12 +284,15 @@ mod tests {
         let kind = ExecutionCandidateKind::SharedRuntime;
         let ledger = ManagedHostEffectLedger::new(16 * 1024);
         let pool = ManagedFeedbackPool::new(&ledger, 1, encoded.len()).unwrap();
+        let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
         let charged = ledger.snapshot().live_reserved_bytes;
         assert_eq!(
             charged,
             (std::mem::size_of::<Series>() + encoded.len()) as u64
         );
-        let key = pool.ensure(&signature, candidate, kind, None).unwrap();
+        let key = pool
+            .ensure(&signature, candidate, kind, None, &observations)
+            .unwrap();
         let state = pool.state.borrow();
         assert_eq!(&state.signatures[..encoded.len()], encoded.as_slice());
         drop(state);
@@ -293,6 +307,7 @@ mod tests {
         pool.invalidate(&PlacementInvalidation::All);
         assert!(pool.profile_snapshot().is_empty());
         drop(pool);
+        drop(observations);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
@@ -301,15 +316,43 @@ mod tests {
         let signature = signature();
         let ledger = ManagedHostEffectLedger::new(16 * 1024);
         let pool = ManagedFeedbackPool::new(&ledger, 1, 1).unwrap();
+        let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
         assert!(matches!(
             pool.ensure(
                 &signature,
                 Digest::sha256(b"route"),
                 ExecutionCandidateKind::SharedRuntime,
-                None
+                None,
+                &observations,
             ),
             Err(HostEffectAllocationError::ExceedsCapacity)
         ));
         assert!(pool.state.borrow().slots[0].key.is_none());
+    }
+
+    #[test]
+    fn abandoned_unobserved_series_reuses_slot_but_active_call_cannot_be_evicted() {
+        let ledger = ManagedHostEffectLedger::new(16 * 1024);
+        let pool = ManagedFeedbackPool::new(&ledger, 1, 1024).unwrap();
+        let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
+        let first = signature();
+        let candidate = Digest::sha256(b"route");
+        let kind = ExecutionCandidateKind::SharedRuntime;
+        let first_identity = first.permit_identity().unwrap();
+        let active = observations.acquire(first_identity, candidate).unwrap();
+        pool.ensure(&first, candidate, kind, None, &observations)
+            .unwrap();
+        let mut second = first.clone();
+        second.operation = "other.readmatrix".into();
+        assert!(matches!(
+            pool.ensure(&second, candidate, kind, None, &observations),
+            Err(HostEffectAllocationError::ExceedsCapacity)
+        ));
+        drop(active);
+        let replacement = pool
+            .ensure(&second, candidate, kind, None, &observations)
+            .expect("abandoned zero-sample series can be replaced");
+        assert_eq!(pool.state.borrow().slots[0].key, Some(replacement));
+        assert_eq!(pool.profile_snapshot().len(), 0);
     }
 }
