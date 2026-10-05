@@ -2,7 +2,9 @@
 
 #[cfg(test)]
 use once_cell::sync::Lazy;
-use runmat_builtins::warning_semantics::{WarningCommand, WarningTarget};
+use runmat_builtins::warning_semantics::{
+    WarningCommand, WarningDisplayMode, WarningStateSetting, WarningTarget,
+};
 use runmat_builtins::{
     BuiltinErrorDescriptor, INTEGER_ARRAY_FORMATTING_EXTENSION, WARNING_ERROR_INVALID_INPUT,
 };
@@ -193,8 +195,8 @@ fn set_mode_command(mode: WarningMode, rest: &[Value]) -> crate::BuiltinResult<V
             };
             set_mode_for_identifier(mode, &last_warning.identifier)
         }
-        WarningTarget::Backtrace => set_mode_for_special_mode(mode, WarningTarget::Backtrace),
-        WarningTarget::Verbose => set_mode_for_special_mode(mode, WarningTarget::Verbose),
+        WarningTarget::Backtrace => set_mode_for_special_mode(mode, WarningDisplayMode::Backtrace),
+        WarningTarget::Verbose => set_mode_for_special_mode(mode, WarningDisplayMode::Verbose),
         WarningTarget::Identifier(identifier) => {
             let normalized = normalize_identifier(identifier);
             set_mode_for_identifier(mode, &normalized)
@@ -214,13 +216,9 @@ fn reset_identifier_to_default(identifier: &str) -> crate::BuiltinResult<Value> 
 
 fn set_mode_for_special_mode(
     mode: WarningMode,
-    target: WarningTarget<'_>,
+    target: WarningDisplayMode,
 ) -> crate::BuiltinResult<Value> {
-    let mode_name = match target {
-        WarningTarget::Backtrace => "backtrace",
-        WarningTarget::Verbose => "verbose",
-        _ => unreachable!("only special warning targets are passed"),
-    };
+    let mode_name = target.keyword();
     if !matches!(mode, WarningMode::On | WarningMode::Off) {
         return Err(warning_default_error(format!(
             "warning: only 'on' or 'off' are valid states for '{mode_name}'"
@@ -229,9 +227,10 @@ fn set_mode_for_special_mode(
 
     let enabled = matches!(mode, WarningMode::On);
     let previous_enabled = match target {
-        WarningTarget::Backtrace => warnings::with_policy(|policy| policy.set_backtrace(enabled)),
-        WarningTarget::Verbose => warnings::with_policy(|policy| policy.set_verbose(enabled)),
-        _ => unreachable!("only special warning targets are passed"),
+        WarningDisplayMode::Backtrace => {
+            warnings::with_policy(|policy| policy.set_backtrace(enabled))
+        }
+        WarningDisplayMode::Verbose => warnings::with_policy(|policy| policy.set_verbose(enabled)),
     };
     Ok(state_struct_value(
         mode_name,
@@ -459,91 +458,89 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
     let identifier_raw = value_to_string("warning", identifier_value)?;
     let state_raw = value_to_string("warning", state_value)?;
     let target = WarningTarget::parse(&identifier_raw);
-    if matches!(target, WarningTarget::All) {
-        if let Some(mode) = WarningMode::parse(&state_raw) {
-            warnings::with_policy(|policy| policy.set_global_mode(mode));
-        } else {
-            return Err(warning_default_error(format!(
-                "warning: unknown state '{}'",
-                state_raw
-            )));
-        }
-    } else if matches!(target, WarningTarget::Backtrace) {
-        let state = state_raw.trim().to_ascii_lowercase();
-        match WarningMode::parse(&state) {
-            Some(WarningMode::On) => {
-                warnings::with_policy(|policy| policy.set_backtrace(true));
-            }
-            Some(WarningMode::Off) => {
-                warnings::with_policy(|policy| policy.set_backtrace(false));
-            }
-            _ if state == "default" => {
-                warnings::with_policy(|policy| policy.set_backtrace(false));
+    let setting = WarningStateSetting::parse(&state_raw);
+    match target {
+        WarningTarget::All => match setting {
+            Some(WarningStateSetting::Mode(mode)) => {
+                warnings::with_policy(|policy| policy.set_global_mode(mode));
             }
             _ => {
                 return Err(warning_default_error(format!(
-                    "warning: unknown backtrace state '{}'",
-                    state
+                    "warning: unknown state '{state_raw}'"
                 )))
             }
+        },
+        WarningTarget::Backtrace => {
+            let enabled =
+                restored_special_mode_enabled(setting, WarningDisplayMode::Backtrace, &state_raw)?;
+            warnings::with_policy(|policy| policy.set_backtrace(enabled));
         }
-    } else if matches!(target, WarningTarget::Verbose) {
-        let state = state_raw.trim().to_ascii_lowercase();
-        match WarningMode::parse(&state) {
-            Some(WarningMode::On) => {
-                warnings::with_policy(|policy| policy.set_verbose(true));
-            }
-            Some(WarningMode::Off) => {
-                warnings::with_policy(|policy| policy.set_verbose(false));
-            }
-            _ if state == "default" => {
-                warnings::with_policy(|policy| policy.set_verbose(false));
-            }
-            _ => {
-                return Err(warning_default_error(format!(
-                    "warning: unknown verbose state '{}'",
-                    state
-                )))
+        WarningTarget::Verbose => {
+            let enabled =
+                restored_special_mode_enabled(setting, WarningDisplayMode::Verbose, &state_raw)?;
+            warnings::with_policy(|policy| policy.set_verbose(enabled));
+        }
+        WarningTarget::Last => {
+            let last_warning = warnings::with_policy(|policy| policy.last_warning());
+            let Some(last_warning) = last_warning else {
+                return Err(warning_default_error(
+                    "warning: there is no last warning identifier to apply state",
+                ));
+            };
+            match setting {
+                Some(WarningStateSetting::Default) => {
+                    warnings::with_policy(|policy| {
+                        policy.clear_identifier(&last_warning.identifier)
+                    });
+                }
+                Some(WarningStateSetting::Mode(mode)) => {
+                    warnings::with_policy(|policy| {
+                        policy.set_identifier_mode(&last_warning.identifier, mode)
+                    });
+                }
+                None => {
+                    return Err(warning_default_error(format!(
+                        "warning: unknown state '{state_raw}'"
+                    )))
+                }
             }
         }
-    } else if matches!(target, WarningTarget::Last) {
-        let last_warning = warnings::with_policy(|policy| policy.last_warning());
-        let Some(last_warning) = last_warning else {
-            return Err(warning_default_error(
-                "warning: there is no last warning identifier to apply state",
-            ));
-        };
-        if state_raw.trim().eq_ignore_ascii_case("default") {
-            warnings::with_policy(|policy| policy.clear_identifier(&last_warning.identifier));
-        } else if let Some(mode) = WarningMode::parse(&state_raw) {
-            warnings::with_policy(|policy| {
-                policy.set_identifier_mode(&last_warning.identifier, mode)
-            });
-        } else {
-            return Err(warning_default_error(format!(
-                "warning: unknown state '{}'",
-                state_raw
-            )));
+        WarningTarget::Identifier(identifier) => {
+            let normalized = normalize_identifier(identifier);
+            match setting {
+                Some(WarningStateSetting::Default) => {
+                    warnings::with_policy(|policy| policy.clear_identifier(&normalized));
+                }
+                Some(WarningStateSetting::Mode(mode)) => {
+                    warnings::with_policy(|policy| policy.set_identifier_mode(&normalized, mode));
+                }
+                None => {
+                    return Err(warning_default_error(format!(
+                        "warning: unknown state '{state_raw}'"
+                    )))
+                }
+            }
         }
-    } else if state_raw.trim().eq_ignore_ascii_case("default") {
-        let WarningTarget::Identifier(identifier) = target else {
-            unreachable!("handled warning target")
-        };
-        let normalized = normalize_identifier(identifier);
-        warnings::with_policy(|policy| policy.clear_identifier(&normalized));
-    } else if let Some(mode) = WarningMode::parse(&state_raw) {
-        let WarningTarget::Identifier(identifier) = target else {
-            unreachable!("handled warning target")
-        };
-        let normalized = normalize_identifier(identifier);
-        warnings::with_policy(|policy| policy.set_identifier_mode(&normalized, mode));
-    } else {
-        return Err(warning_default_error(format!(
-            "warning: unknown state '{}'",
-            state_raw
-        )));
     }
     Ok(())
+}
+
+fn restored_special_mode_enabled(
+    setting: Option<WarningStateSetting>,
+    mode: WarningDisplayMode,
+    original: &str,
+) -> crate::BuiltinResult<bool> {
+    match setting {
+        Some(WarningStateSetting::Mode(WarningMode::On)) => Ok(true),
+        Some(WarningStateSetting::Mode(WarningMode::Off) | WarningStateSetting::Default) => {
+            Ok(false)
+        }
+        _ => Err(warning_default_error(format!(
+            "warning: unknown {} state '{}'",
+            mode.keyword(),
+            original.trim().to_ascii_lowercase()
+        ))),
+    }
 }
 
 fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
@@ -946,10 +943,10 @@ pub(crate) mod tests {
         let mut backtrace = StructValue::new();
         backtrace
             .fields
-            .insert("identifier".to_string(), Value::from("backtrace"));
+            .insert("identifier".to_string(), Value::from(" BaCkTrAcE "));
         backtrace
             .fields
-            .insert("state".to_string(), Value::from("on"));
+            .insert("state".to_string(), Value::from(" ON "));
         warning_builtin(vec![Value::Struct(backtrace)]).expect("apply backtrace");
         assert!(warnings::with_policy(|policy| policy.backtrace_enabled()));
 
@@ -959,9 +956,21 @@ pub(crate) mod tests {
             .insert("identifier".to_string(), Value::from("verbose"));
         verbose
             .fields
-            .insert("state".to_string(), Value::from("default"));
+            .insert("state".to_string(), Value::from(" DeFaUlT "));
         warning_builtin(vec![Value::Struct(verbose)]).expect("apply verbose");
         assert!(!warnings::with_policy(|policy| policy.verbose_enabled()));
+
+        let mut invalid = StructValue::new();
+        invalid
+            .fields
+            .insert("identifier".to_string(), Value::from(" BACKTRACE "));
+        invalid
+            .fields
+            .insert("state".to_string(), Value::from(" OnCe "));
+        let err = unwrap_error(
+            warning_builtin(vec![Value::Struct(invalid)]).expect_err("invalid special state"),
+        );
+        assert_eq!(err.message(), "warning: unknown backtrace state 'once'");
     }
 
     #[test]

@@ -10,12 +10,17 @@ pub enum WarningMode {
 
 impl WarningMode {
     pub fn parse(text: &str) -> Option<Self> {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "on" => Some(Self::On),
-            "off" => Some(Self::Off),
-            "once" => Some(Self::Once),
-            "error" => Some(Self::Error),
-            _ => None,
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("on") {
+            Some(Self::On)
+        } else if text.eq_ignore_ascii_case("off") {
+            Some(Self::Off)
+        } else if text.eq_ignore_ascii_case("once") {
+            Some(Self::Once)
+        } else if text.eq_ignore_ascii_case("error") {
+            Some(Self::Error)
+        } else {
+            None
         }
     }
 
@@ -44,13 +49,52 @@ impl WarningCommand {
         if let Some(mode) = WarningMode::parse(text) {
             return Some(Self::SetMode(mode));
         }
-        match text.trim().to_ascii_lowercase().as_str() {
-            "default" => Some(Self::Default),
-            "reset" => Some(Self::Reset),
-            "query" => Some(Self::Query),
-            "status" => Some(Self::Status),
-            "backtrace" => Some(Self::Backtrace),
-            _ => None,
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("default") {
+            Some(Self::Default)
+        } else if text.eq_ignore_ascii_case("reset") {
+            Some(Self::Reset)
+        } else if text.eq_ignore_ascii_case("query") {
+            Some(Self::Query)
+        } else if text.eq_ignore_ascii_case("status") {
+            Some(Self::Status)
+        } else if text.eq_ignore_ascii_case("backtrace") {
+            Some(Self::Backtrace)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WarningDisplayMode {
+    Backtrace,
+    Verbose,
+}
+
+impl WarningDisplayMode {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Backtrace => "backtrace",
+            Self::Verbose => "verbose",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WarningStateSetting {
+    Mode(WarningMode),
+    Default,
+}
+
+impl WarningStateSetting {
+    pub fn parse(text: &str) -> Option<Self> {
+        if let Some(mode) = WarningMode::parse(text) {
+            Some(Self::Mode(mode))
+        } else if text.trim().eq_ignore_ascii_case("default") {
+            Some(Self::Default)
+        } else {
+            None
         }
     }
 }
@@ -97,6 +141,15 @@ mod tests {
         );
         assert_eq!(WarningMode::parse(" oNcE "), Some(WarningMode::Once));
         assert_eq!(WarningMode::parse("default"), None);
+        assert_eq!(
+            WarningStateSetting::parse(" DeFaUlT "),
+            Some(WarningStateSetting::Default)
+        );
+        assert_eq!(
+            WarningStateSetting::parse(" oFf "),
+            Some(WarningStateSetting::Mode(WarningMode::Off))
+        );
+        assert_eq!(WarningStateSetting::parse("reset"), None);
         assert_eq!(WarningCommand::parse("some warning"), None);
         assert_eq!(WarningTarget::parse(" ALL "), WarningTarget::All);
         assert_eq!(WarningTarget::parse(" LaSt "), WarningTarget::Last);
