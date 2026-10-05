@@ -5,6 +5,7 @@
 //! before invoking it and charge its live line, field, and output allocations.
 
 use super::*;
+use crate::context::host_effect::ExactHostEffectBytes;
 use runmat_filesystem::FsBoundedInput;
 use sha2::{Digest as _, Sha256};
 use std::io::{BufRead, BufReader};
@@ -21,18 +22,77 @@ pub(super) struct BoundedScanGeometry {
 
 struct RowReader<'a> {
     source: BufReader<&'a mut FsBoundedInput>,
-    line: String,
+    line: LineBuffer,
     line_number: usize,
     first_data_line: bool,
     text_start: usize,
     digest: Sha256,
 }
 
+enum LineBuffer {
+    Ordinary(String),
+    Staged(ExactHostEffectBytes),
+}
+
+impl LineBuffer {
+    fn clear(&mut self) {
+        match self {
+            Self::Ordinary(line) => line.clear(),
+            Self::Staged(line) => line.clear(),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Ordinary(line) => line,
+            Self::Staged(line) => {
+                std::str::from_utf8(line.as_bytes()).expect("validated UTF-8 line chunks")
+            }
+        }
+    }
+
+    fn append_validated(&mut self, text: &str) -> BuiltinResult<()> {
+        match self {
+            Self::Ordinary(line) => {
+                line.try_reserve(text.len()).map_err(|source| {
+                    readmatrix_error_with_source(
+                        &READMATRIX_ERROR_TENSOR_BUILD,
+                        "readmatrix: unable to reserve decoded input line",
+                        source,
+                    )
+                })?;
+                line.push_str(text);
+            }
+            Self::Staged(line) => line.append(text.as_bytes()).map_err(|source| {
+                readmatrix_error_with_source(
+                    &READMATRIX_ERROR_TENSOR_BUILD,
+                    "readmatrix: decoded input line exceeded its admitted workspace",
+                    source,
+                )
+            })?,
+        }
+        Ok(())
+    }
+
+    fn pop_ascii(&mut self) {
+        match self {
+            Self::Ordinary(line) => {
+                line.pop();
+            }
+            Self::Staged(line) => {
+                line.truncate(line.len() - 1)
+                    .expect("ASCII line suffix has one byte");
+            }
+        }
+    }
+}
+
 impl<'a> RowReader<'a> {
-    fn new(source: &'a mut FsBoundedInput) -> Self {
+    fn new(source: &'a mut FsBoundedInput, staged_line: Option<ExactHostEffectBytes>) -> Self {
         Self {
             source: BufReader::with_capacity(4096, source),
-            line: String::new(),
+            line: staged_line
+                .map_or_else(|| LineBuffer::Ordinary(String::new()), LineBuffer::Staged),
             line_number: 0,
             first_data_line: true,
             text_start: 0,
@@ -41,7 +101,7 @@ impl<'a> RowReader<'a> {
     }
 
     fn text(&self) -> &str {
-        &self.line[self.text_start..]
+        &self.line.as_str()[self.text_start..]
     }
 
     async fn next(
@@ -109,12 +169,12 @@ impl<'a> RowReader<'a> {
                     "readmatrix: input line number exceeds platform limits",
                 )
             })?;
-            if self.line.ends_with('\n') {
-                self.line.pop();
+            if self.line.as_str().ends_with('\n') {
+                self.line.pop_ascii();
             }
             let mut trailing_cr_work = 0;
-            while self.line.ends_with('\r') {
-                self.line.pop();
+            while self.line.as_str().ends_with('\r') {
+                self.line.pop_ascii();
                 trailing_cr_work += 1;
                 if trailing_cr_work >= ROW_WORK_CHUNK {
                     checked_row_work(cooperation, path, trailing_cr_work).await?;
@@ -124,12 +184,13 @@ impl<'a> RowReader<'a> {
             if trailing_cr_work != 0 {
                 checked_row_work(cooperation, path, trailing_cr_work).await?;
             }
-            let mut text_start = if self.line_number == 1 && self.line.starts_with('\u{FEFF}') {
-                '\u{FEFF}'.len_utf8()
-            } else {
-                0
-            };
-            let text = &self.line[text_start..];
+            let mut text_start =
+                if self.line_number == 1 && self.line.as_str().starts_with('\u{FEFF}') {
+                    '\u{FEFF}'.len_utf8()
+                } else {
+                    0
+                };
+            let text = &self.line.as_str()[text_start..];
             if self.line_number <= header_lines
                 || !scan::has_nonwhitespace(text, cooperation, path).await?
             {
@@ -138,7 +199,7 @@ impl<'a> RowReader<'a> {
             if self.first_data_line {
                 self.first_data_line = false;
                 let mut bom_work = 0;
-                while self.line[text_start..].starts_with('\u{FEFF}') {
+                while self.line.as_str()[text_start..].starts_with('\u{FEFF}') {
                     text_start += '\u{FEFF}'.len_utf8();
                     bom_work += '\u{FEFF}'.len_utf8();
                     if bom_work >= ROW_WORK_CHUNK {
@@ -157,7 +218,7 @@ impl<'a> RowReader<'a> {
 }
 
 fn append_utf8_chunk(
-    line: &mut String,
+    line: &mut LineBuffer,
     pending: &mut [u8; 3],
     pending_len: &mut usize,
     chunk: &[u8],
@@ -190,14 +251,7 @@ fn append_utf8_chunk(
             ));
         }
     };
-    line.try_reserve(text.len()).map_err(|source| {
-        readmatrix_error_with_source(
-            &READMATRIX_ERROR_TENSOR_BUILD,
-            "readmatrix: unable to reserve decoded input line",
-            source,
-        )
-    })?;
-    line.push_str(text);
+    line.append_validated(text)?;
     if tail.len() > pending.len() {
         return Err(readmatrix_error_with(
             &READMATRIX_ERROR_IO_READ,
@@ -223,8 +277,9 @@ pub(super) async fn scan_utf8(
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,
     options: &ReadMatrixOptions,
+    staged_line: Option<ExactHostEffectBytes>,
 ) -> BuiltinResult<BoundedScanGeometry> {
-    let mut reader = RowReader::new(source);
+    let mut reader = RowReader::new(source, staged_line);
     let mut sample = Vec::new();
     while sample.len() < 32 {
         let Some(number) = reader

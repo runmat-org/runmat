@@ -40,6 +40,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,
     options: &ReadMatrixOptions,
+    staged_line: Option<ExactHostEffectBytes>,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
     let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
@@ -62,7 +63,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     let mut floating = integer_dtype
         .is_none()
         .then(|| vec![options.empty_value_f64(); count]);
-    let mut reader = RowReader::new(source);
+    let mut reader = RowReader::new(source, staged_line);
     let mut data_row = 0usize;
     let mut semantic_error = None;
     while let Some(line_number) = reader
