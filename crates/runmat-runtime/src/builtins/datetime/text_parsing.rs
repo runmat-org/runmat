@@ -1,5 +1,27 @@
 use super::capabilities::{DEFAULT_DATETIME_FORMAT, DEFAULT_DATE_FORMAT};
 use super::*;
+use runmat_value::CellArray;
+
+pub(super) fn validate_cell_text_input(value: &Value) -> BuiltinResult<()> {
+    let Value::Cell(cells) = value else {
+        return Ok(());
+    };
+    validate_cell_text_elements(cells)
+}
+
+fn validate_cell_text_elements(cells: &CellArray) -> BuiltinResult<()> {
+    for (index, element) in cells.data.iter().enumerate() {
+        if !matches!(element, Value::CharArray(_))
+            || crate::builtins::common::validation::value_text_scalar_string(element).is_none()
+        {
+            return Err(datetime_argument_error(format!(
+                "datetime: cell element {} must be a character vector",
+                index + 1
+            )));
+        }
+    }
+    Ok(())
+}
 
 pub(super) fn format_serial(serial: f64, format: &str) -> BuiltinResult<String> {
     if serial.is_nan() {
@@ -148,8 +170,31 @@ pub(super) fn parse_text_input(
                 input_format,
             )
         }
+        Value::Cell(cells) => {
+            validate_cell_text_elements(&cells)?;
+            let mut serials = Vec::with_capacity(cells.data.len());
+            let mut has_time = false;
+            for element in &cells.data {
+                let text = crate::builtins::common::validation::value_text_scalar_string(element)
+                    .expect("validated character vector cell");
+                let parsed = relative_datetime(text.trim())
+                    .map(|value| (value, text.trim().eq_ignore_ascii_case("now")))
+                    .or_else(|| parse_datetime_text_with_input_format(&text, input_format));
+                let (naive, parsed_has_time) = parsed.ok_or_else(|| {
+                    datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
+                })?;
+                serials.push(datenum_from_naive(naive));
+                has_time |= parsed_has_time;
+            }
+            let shape = tensor::default_shape_for(&cells.shape, cells.data.len());
+            Ok((
+                serials,
+                shape,
+                if has_time { DEFAULT_DATETIME_FORMAT } else { DEFAULT_DATE_FORMAT }.to_string(),
+            ))
+        }
         _ => Err(datetime_error(
-            "datetime: text input must be a string scalar, string array, or character array",
+            "datetime: text input must be a string scalar, string array, character array, or cell array of character vectors",
         )),
     }
 }

@@ -3735,7 +3735,7 @@ mod tests {
         let source = format!(
             "\
 T = readtable('{}');\n\
-T.Date = datetime(T.Date, 'InputFormat', 'yyyy-MM-dd');\n\
+importedDate = T.Date;\n\
 T.Week = dateshift(T.Date, 'start', 'week');\n\
 weekly = groupsummary(T, 'Week', 'mean', {{'Orders', 'Revenue'}});\n\
 weekly.Properties.VariableNames(end-1:end) = {{'AvgOrders', 'AvgRevenue'}};\n\
@@ -3755,12 +3755,74 @@ out = weekly.AvgRevenue;\n",
             .iter()
             .find(|export| export.name == "out")
             .expect("out export");
+        let imported_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "importedDate")
+            .expect("imported date export");
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(
+            matches!(&vars[imported_export.slot.0], Value::Object(object)
+            if object.is_class(runmat_types::standard::DATETIME))
+        );
         let Value::Tensor(tensor) = &vars[out_export.slot.0] else {
             panic!(
                 "expected numeric AvgRevenue tensor, got {:?}",
                 vars[out_export.slot.0]
+            );
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.materialize_f64(), vec![200.0, 90.0]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compile_interprets_text_import_datetime_weekly_groupsummary_workflow() {
+        let path = unique_csv_temp_path("readtable_weekly_text");
+        std::fs::write(
+            &path,
+            "Date,Orders,Revenue\n2024-03-11,10,100\n2024-03-12,20,300\n2024-03-18,6,90\n",
+        )
+        .expect("write csv");
+        let source = format!(
+            "\
+T = readtable('{}','DatetimeType','text','TextType','string');\n\
+importedDate = T.Date;\n\
+T.Date = datetime(T.Date, 'InputFormat', 'yyyy-MM-dd');\n\
+T.Week = dateshift(T.Date, 'start', 'week');\n\
+weekly = groupsummary(T, 'Week', 'mean', {{'Orders', 'Revenue'}});\n\
+weekly.Properties.VariableNames(end-1:end) = {{'AvgOrders', 'AvgRevenue'}};\n\
+weekly = sortrows(weekly, 'Week');\n\
+out = weekly.AvgRevenue;\n",
+            path.to_string_lossy()
+        );
+        let ast = runmat_parser::parse(&source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let exports = &layout.entrypoints[&entrypoint].exports;
+        let output = exports
+            .iter()
+            .find(|export| export.name == "out")
+            .expect("out export");
+        let imported = exports
+            .iter()
+            .find(|export| export.name == "importedDate")
+            .expect("date export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(matches!(&vars[imported.slot.0], Value::StringArray(array)
+        if array.shape == [3, 1]
+            && array.data.iter().map(String::as_str).eq([
+                "2024-03-11", "2024-03-12", "2024-03-18"
+            ])));
+        let Value::Tensor(tensor) = &vars[output.slot.0] else {
+            panic!(
+                "expected numeric AvgRevenue tensor, got {:?}",
+                vars[output.slot.0]
             );
         };
         assert_eq!(tensor.shape, vec![2, 1]);

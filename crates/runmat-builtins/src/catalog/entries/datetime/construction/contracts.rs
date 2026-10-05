@@ -12,7 +12,8 @@ const TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Date/time string, string array, or character array.",
+    description:
+        "Date/time string, string array, character array, or cell array of character vectors.",
 }];
 const DATE_VECTORS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "dateVectors",

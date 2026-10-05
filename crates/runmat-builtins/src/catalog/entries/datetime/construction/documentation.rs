@@ -6,6 +6,12 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
         "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/constructor_builtin.rs",
     ),
 };
+const TEXT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "RunMat datetime text decoding",
+    target: BuiltinDocumentationLinkTarget::Source(
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/text_parsing.rs",
+    ),
+};
 const TESTS: &[BuiltinEvidenceReference] = &[
     BuiltinEvidenceReference {
         kind: BuiltinEvidenceKind::UnitTest,
@@ -33,7 +39,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "`datetime(Y,M,D)` and `datetime(Y,M,D,H,MI,S)` accept scalar or equally sized arrays of real numeric components. Scalars expand to the non-scalar component shape. A seventh millisecond component is supported; when it is supplied, the second component must be integral. The constructor accepts double, single, and all eight fixed-width integer classes. Date-vector matrices have three or six columns and return one datetime per row.",
                 "Calendar components carry into adjacent units. NaN components produce NaT, and infinite components retain an infinite serial marker in the current host representation. Integer values are checked in exact storage before conversion to RunMat's floating serial-date representation.",
-                "String scalars, string arrays, and character arrays accept common ISO-like date/time text, `dd-MMM-yyyy`, and the relative words `now`, `today`, `tomorrow`, and `yesterday`. Character-array rows yield a datetime column. Relative words read the local clock.",
+                "String scalars, string arrays, character arrays, and cell arrays of character vectors accept common ISO-like date/time text, `dd-MMM-yyyy`, and the relative words `now`, `today`, `tomorrow`, and `yesterday`. Character-array rows yield a datetime column; cell arrays retain their shape. Relative words read the local clock.",
             ],
         },
         BuiltinDocumentationSection {
@@ -74,6 +80,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(year(t),[2024;2024])); assert(isequal(day(t),[9;10])); assert(isequal(hour(t),[13;8]));" },
+        },
+        BuiltinExample {
+            id: "cellstr-input-format", title: "Parse a cell array of character vectors",
+            program: "dates = {'2024-04-09';'2024-04-10'}; t = datetime(dates,'InputFormat','yyyy-MM-dd'); disp(t);",
+            display_output: Some("09-Apr-2024\n10-Apr-2024"), compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(year(t),[2024;2024])); assert(isequal(day(t),[9;10]));" },
         },
         BuiltinExample {
             id: "extract-components", title: "Extract calendar and clock components",
@@ -148,10 +162,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "calendarDuration", target: BuiltinDocumentationLinkTarget::Builtin("calendarDuration") },
         BuiltinDocumentationLink { label: "duration", target: BuiltinDocumentationLinkTarget::Builtin("duration") },
         SOURCE,
+        TEXT_SOURCE,
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE], verification: TESTS,
+        implementation: &[SOURCE, TEXT_SOURCE], verification: TESTS,
         notes: &["Locale, timezone, pivot-year, non-datenum epochs, and general nanosecond fidelity remain unsupported. A shared injectable clock and timezone service is not implemented; clock-dependent forms remain nondeterministic. Native/browser example execution and provider-owner behavior still need integrated qualification."],
     },
     introduced: None,

@@ -15,6 +15,10 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
     let (positional_end, options) = parse_trailing_options(&args)?;
     let positional_inputs = &args[..positional_end];
 
+    if let [input] = positional_inputs {
+        validate_cell_text_input(input)?;
+    }
+
     // Reject malformed call structure and host-only options before a resident
     // operand can trigger provider lookup or an upload/gather failure.
     if let Some(convert_from) = options.convert_from.as_deref() {
@@ -37,7 +41,7 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
         && (options.convert_from.is_some()
             || !matches!(
                 positional_inputs,
-                [Value::String(_) | Value::StringArray(_) | Value::CharArray(_)]
+                [Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_)]
             ))
     {
         return Err(datetime_argument_error(
@@ -93,7 +97,7 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
                     .unwrap_or_else(|| datetime_format_from_value(&positional[0]));
                 datetime_object_from_serial_tensor(serials, format)
             }
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
+            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
                 let (serials, shape, inferred_format) =
                     parse_text_input(positional[0].clone(), options.input_format.as_deref())?;
                 datetime_object_from_serials(

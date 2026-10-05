@@ -468,6 +468,61 @@ fn datetime_invalid_options_precede_resident_provider_access() {
 }
 
 #[test]
+fn datetime_parses_cell_array_of_character_vectors_with_its_shape() {
+    let dates = ["2024-04-09", "2024-04-10", "2024-04-11", "2024-04-12"]
+        .into_iter()
+        .map(|text| Value::CharArray(CharArray::new_row(text)))
+        .collect();
+    let input = Value::Cell(runmat_value::CellArray::new(dates, 2, 2).expect("cellstr"));
+    let result = futures::executor::block_on(datetime_builtin(vec![
+        input,
+        Value::from("InputFormat"),
+        Value::from("yyyy-MM-dd"),
+    ]))
+    .expect("cellstr datetime");
+    let object = as_datetime(result);
+    assert_eq!(serial_tensor_for_object(&object).unwrap().shape, vec![2, 2]);
+    let serials = serial_tensor_for_object(&object).unwrap().materialize_f64();
+    assert_eq!(serials[0], serial_for_date(2024, 4, 9));
+    assert_eq!(serials[3], serial_for_date(2024, 4, 12));
+}
+
+#[test]
+fn datetime_rejects_noncharacter_and_paged_cell_elements_before_resident_access() {
+    let allocation = unregistered_resident(vec![1, 1]);
+    let paged = CharArray::new_with_shape(vec!['x'; 20], vec![1, 10, 2]).expect("paged char");
+    for invalid in [
+        Value::Num(1.0),
+        Value::Cell(runmat_value::CellArray::new(Vec::new(), 0, 0).unwrap()),
+        Value::CharArray(paged),
+        Value::GpuTensor(allocation.handle.clone()),
+    ] {
+        let input = Value::Cell(
+            runmat_value::CellArray::new(
+                vec![Value::CharArray(CharArray::new_row("2024-04-09")), invalid],
+                2,
+                1,
+            )
+            .unwrap(),
+        );
+        let error = futures::executor::block_on(datetime_builtin(vec![
+            input,
+            Value::from("InputFormat"),
+            Value::from("yyyy-MM-dd"),
+        ]))
+        .expect_err("cell elements must be character vectors");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::DATETIME_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(error.message().contains("cell element 2"));
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
 fn datetime_constructor_value_errors_use_catalog_invalid_input_identifier() {
     let error = futures::executor::block_on(datetime_builtin(vec![
         Value::Num(2024.5),

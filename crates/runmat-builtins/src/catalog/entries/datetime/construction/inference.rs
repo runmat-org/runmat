@@ -43,6 +43,7 @@ fn single_input_shape(input: &ValueFact) -> ShapeFact {
             input.shape.clone()
         }
         ValueKindFact::String => input.shape.clone(),
+        ValueKindFact::Cell(_) => input.shape.clone(),
         ValueKindFact::Character => input
             .shape
             .known_dims()
@@ -68,6 +69,29 @@ fn single_input_shape(input: &ValueFact) -> ShapeFact {
         }
         _ => ShapeFact::Unknown,
     }
+}
+
+fn possible_character_vector(value: &ValueFact) -> bool {
+    if !matches!(
+        value.kind,
+        ValueKindFact::Unknown | ValueKindFact::Character
+    ) {
+        return false;
+    }
+    value.shape.known_dims().is_none_or(|dims| {
+        dims.first().copied().flatten().is_none_or(|rows| rows == 1)
+            && dims
+                .iter()
+                .skip(2)
+                .all(|dim| dim.is_none_or(|size| size == 1))
+    })
+}
+
+fn possible_cellstr(value: &ValueFact) -> bool {
+    let ValueKindFact::Cell(cell) = &value.kind else {
+        return false;
+    };
+    possible_character_vector(&cell.element) && cell.elements.iter().all(possible_character_vector)
 }
 
 fn component_shape(arguments: &[ValueFact]) -> (ShapeFact, bool) {
@@ -204,7 +228,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             || positional.len() != 1
             || !matches!(
                 &positional[0].kind,
-                ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
+                ValueKindFact::Unknown
+                    | ValueKindFact::String
+                    | ValueKindFact::Character
+                    | ValueKindFact::Cell(_)
             ))
     {
         diagnostics.push(argument_error(
@@ -250,6 +277,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     | ValueKindFact::String
                     | ValueKindFact::Character
                     | ValueKindFact::Logical => {}
+                    ValueKindFact::Cell(_) if possible_cellstr(input) => {}
                     ValueKindFact::Numeric(numeric)
                         if numeric.domain == runmat_types::NumericDomain::Real => {}
                     ValueKindFact::Object(object)

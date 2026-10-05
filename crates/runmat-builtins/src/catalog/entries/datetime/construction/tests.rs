@@ -1,7 +1,7 @@
 use super::*;
 use crate::*;
 use runmat_types::{
-    CallRequest, DimensionFact, EffectKind, LiteralContext, LiteralValue, NumericClass,
+    CallRequest, CellFact, DimensionFact, EffectKind, LiteralContext, LiteralValue, NumericClass,
     NumericDomain, NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact,
     ValueFact, ValueKindFact,
 };
@@ -60,7 +60,7 @@ fn datetime_is_one_canonical_identity_with_clock_and_host_contract() {
         BuiltinResidencyPolicy::GatherToHost
     );
     assert_eq!(DATETIME_DESCRIPTOR.signatures.len(), 10);
-    assert_eq!(DATETIME_CATALOG_ENTRY.documentation.examples.len(), 9);
+    assert_eq!(DATETIME_CATALOG_ENTRY.documentation.examples.len(), 10);
     assert!(DATETIME_CATALOG_ENTRY
         .documentation
         .examples
@@ -127,6 +127,53 @@ fn datetime_infers_date_vectors_text_and_component_shapes() {
         components.outputs[0].residency,
         runmat_types::ResidencyFact::Host
     );
+}
+
+#[test]
+fn datetime_infers_cellstr_shape_and_rejects_known_nontext_elements() {
+    let cell = |element: ValueFact| {
+        ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(element),
+                elements: Vec::new(),
+                elements_complete: false,
+            }),
+            shape(2, 1),
+            runmat_types::StorageFact::Dense,
+        )
+    };
+    let character = ValueFact::proven(
+        ValueKindFact::Character,
+        shape(1, 10),
+        runmat_types::StorageFact::Dense,
+    );
+    let accepted = inference::infer(
+        &request(
+            vec![
+                cell(character),
+                text(ShapeFact::Scalar),
+                text(ShapeFact::Scalar),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("InputFormat".into()),
+                LiteralValue::String("yyyy-MM-dd".into()),
+            ],
+            1,
+        ),
+        &DATETIME_CATALOG_ENTRY,
+    );
+    assert_eq!(accepted.outputs[0].shape, shape(2, 1));
+    assert!(accepted.diagnostics.is_empty());
+
+    let rejected = inference::infer(
+        &request(vec![cell(number(ShapeFact::Scalar))], vec![], 1),
+        &DATETIME_CATALOG_ENTRY,
+    );
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DATETIME-INPUT"));
 }
 
 #[test]
