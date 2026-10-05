@@ -29,8 +29,10 @@ impl XlsWorkbook {
     ) -> BuiltinResult<()> {
         validate_write_bounds(&table, request.range)?;
         let sheet_index = self.resolve_sheet_index(&request.sheet);
-        self.sheets[sheet_index]
-            .table
+        // A suspended or failed overlay drops its private candidate. The retained
+        // workbook still owns a valid empty sheet, never stale geometry with no cells.
+        let previous = std::mem::replace(&mut self.sheets[sheet_index].table, XlsTable::empty());
+        self.sheets[sheet_index].table = previous
             .overlay(request.range, table, cooperation, selected)
             .await?;
         Ok(())
@@ -449,3 +451,7 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"PK\x05\x06")
         || bytes.starts_with(b"PK\x07\x08")
 }
+
+#[cfg(test)]
+#[path = "workbook/tests.rs"]
+mod tests;

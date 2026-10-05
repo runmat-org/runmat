@@ -17,7 +17,7 @@ fn resize_and_overlay_transfer_owned_text_without_cloning_payloads() {
     let old_ptr = old.as_ptr();
     let new = "n".repeat(8192);
     let new_ptr = new.as_ptr();
-    let mut target = XlsTable {
+    let target = XlsTable {
         rows: 1,
         cols: 1,
         cells: vec![CellValue::Text(old)],
@@ -28,7 +28,7 @@ fn resize_and_overlay_transfer_owned_text_without_cloning_payloads() {
         cells: vec![CellValue::Text(new)],
     };
     let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
-    futures::executor::block_on(target.overlay(
+    let target = futures::executor::block_on(target.overlay(
         RangeStart { row: 1, col: 1 },
         incoming,
         &mut cooperation,

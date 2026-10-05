@@ -4,12 +4,12 @@ use super::*;
 
 impl XlsTable {
     pub(in crate::builtins::io::tabular::xlswrite) async fn overlay(
-        &mut self,
+        self,
         start: RangeStart,
         incoming: XlsTable,
         cooperation: &mut TabularCooperation<'_>,
         selected: &TabularFsPath,
-    ) -> BuiltinResult<()> {
+    ) -> BuiltinResult<Self> {
         let required_rows = start.row.checked_add(incoming.rows).ok_or_else(|| {
             xlswrite_error_with(&XLSWRITE_ERROR_RANGE, "xlswrite: range row overflow")
         })?;
@@ -17,21 +17,23 @@ impl XlsTable {
             xlswrite_error_with(&XLSWRITE_ERROR_RANGE, "xlswrite: range column overflow")
         })?;
         checked_cell_count(required_rows, required_cols, "worksheet")?;
-        if required_rows > self.rows || required_cols > self.cols {
+        let mut result = if required_rows > self.rows || required_cols > self.cols {
             self.resize(
                 required_rows.max(self.rows),
                 required_cols.max(self.cols),
                 cooperation,
                 selected,
             )
-            .await?;
-        }
+            .await?
+        } else {
+            self
+        };
         let mut work = 0;
         for (index, value) in incoming.cells.into_iter().enumerate() {
             let row = index / incoming.cols;
             let col = index % incoming.cols;
-            let dest = (start.row + row) * self.cols + start.col + col;
-            self.cells[dest] = value;
+            let dest = (start.row + row) * result.cols + start.col + col;
+            result.cells[dest] = value;
             work += 1;
             if work == 1024 {
                 checkpoint_table(cooperation, selected, work).await?;
@@ -39,16 +41,16 @@ impl XlsTable {
             }
         }
         checkpoint_table(cooperation, selected, work).await?;
-        Ok(())
+        Ok(result)
     }
 
     async fn resize(
-        &mut self,
+        self,
         rows: usize,
         cols: usize,
         cooperation: &mut TabularCooperation<'_>,
         selected: &TabularFsPath,
-    ) -> BuiltinResult<()> {
+    ) -> BuiltinResult<Self> {
         checked_cell_count(rows, cols, "worksheet")?;
         let count = rows * cols;
         let mut resized = Vec::new();
@@ -65,7 +67,7 @@ impl XlsTable {
             checkpoint_table(cooperation, selected, chunk).await?;
         }
         let previous_cols = self.cols;
-        let previous_cells = std::mem::take(&mut self.cells);
+        let previous_cells = self.cells;
         let mut work = 0;
         for (index, value) in previous_cells.into_iter().enumerate() {
             let row = index / previous_cols;
@@ -78,10 +80,11 @@ impl XlsTable {
             }
         }
         checkpoint_table(cooperation, selected, work).await?;
-        self.rows = rows;
-        self.cols = cols;
-        self.cells = resized;
-        Ok(())
+        Ok(Self {
+            rows,
+            cols,
+            cells: resized,
+        })
     }
 }
 
