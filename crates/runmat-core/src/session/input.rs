@@ -129,12 +129,13 @@ mod tests {
                 let (guard, events) = session.install_execution_input();
                 assert_eq!(request_line_async("line: ", false).await.unwrap(), "value");
                 wait_for_key_async("key: ").await.unwrap();
-                let events = events.lock().unwrap();
-                assert_eq!(events.len(), 2);
-                assert_eq!(events[0].value.as_deref(), Some("value"));
-                assert!(!events[0].echo);
-                assert!(events[1].value.is_none());
-                drop(events);
+                {
+                    let events = events.lock().unwrap();
+                    assert_eq!(events.len(), 2);
+                    assert_eq!(events[0].value.as_deref(), Some("value"));
+                    assert!(!events[0].echo);
+                    assert!(events[1].value.is_none());
+                }
                 drop(guard);
                 assert_eq!(
                     request_line_async("restored: ", false).await.unwrap(),
