@@ -207,15 +207,13 @@ mod tests {
         let provider = MemoryFsProvider::with_current_dir("/reports");
         assert_eq!(
             File::open_on(&provider, Path::new("data.txt"))
-                .err()
-                .expect("relative captured path is invalid")
+                .expect_err("relative captured path is invalid")
                 .kind(),
             ErrorKind::InvalidInput
         );
         assert_eq!(
             futures::executor::block_on(File::open_async_on(&provider, Path::new("data.txt")))
-                .err()
-                .expect("relative captured path is invalid")
+                .expect_err("relative captured path is invalid")
                 .kind(),
             ErrorKind::InvalidInput
         );
