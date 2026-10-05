@@ -2,8 +2,8 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{
-    AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
-    PublicationDurability,
+    AtomicCreateResult, AtomicReplaceOutcome, DirEntry, FileHandle, FsFileType, FsMetadata,
+    FsProvider, OpenFlags, PublicationDurability,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -13,6 +13,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use url::Url;
 use uuid::Uuid;
+
+mod atomic_replace;
 
 #[derive(Default)]
 pub struct NativeFsProvider;
@@ -42,6 +44,10 @@ impl FsProvider for NativeFsProvider {
         opts.create_new(flags.create_new);
         let file = opts.open(path)?;
         Ok(Box::new(file))
+    }
+
+    async fn atomic_replace(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicReplaceOutcome> {
+        atomic_replace::publish(path, bytes)
     }
 
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {

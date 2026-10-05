@@ -9,6 +9,7 @@ use runmat_execution_runner::task::AttemptRecord;
 use runmat_execution_runner::{AttemptRequest, AttemptSuccess, DriverSnapshot};
 
 use super::TransferResult;
+use crate::NativeCheckpointEvidence;
 
 const MAX_BUFFERED_PROGRESS: usize = 256;
 
@@ -17,8 +18,13 @@ pub(super) struct CompletedTask {
     pub attempts: Vec<AttemptRecord>,
 }
 
+struct PersistedCompletion {
+    original: CompletedTask,
+    checkpoint: NativeCheckpointEvidence,
+}
+
 pub(crate) struct TaskCompletion {
-    value: Mutex<Option<CompletedTask>>,
+    value: Mutex<Option<PersistedCompletion>>,
     progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
     pub(super) cancelled: AtomicBool,
 }
@@ -37,7 +43,10 @@ impl TaskCompletion {
             .lock()
             .expect("task completion poisoned")
             .as_ref()
-            .map(|value| value.result.clone())
+            .map(|value| match value.checkpoint.delivery_error() {
+                Some(error) => Err(error),
+                None => value.original.result.clone(),
+            })
     }
 
     pub(crate) fn try_attempt_history(&self) -> Option<Vec<AttemptRecord>> {
@@ -45,7 +54,24 @@ impl TaskCompletion {
             .lock()
             .expect("task completion poisoned")
             .as_ref()
-            .map(|value| value.attempts.clone())
+            .map(|value| value.original.attempts.clone())
+    }
+
+    /// Scheduler result for inspection, before the separate durable-delivery gate.
+    pub(crate) fn try_scheduler_result(&self) -> Option<TransferResult> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .map(|value| value.original.result.clone())
+    }
+
+    pub(crate) fn try_checkpoint_evidence(&self) -> Option<NativeCheckpointEvidence> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .map(|value| value.checkpoint.clone())
     }
 
     pub(crate) fn cancel(&self) {
@@ -68,10 +94,13 @@ impl TaskCompletion {
             .collect()
     }
 
-    pub(super) fn complete(&self, value: CompletedTask) {
+    pub(super) fn complete(&self, value: CompletedTask, checkpoint: NativeCheckpointEvidence) {
         let mut result = self.value.lock().expect("task completion poisoned");
         if result.is_none() {
-            *result = Some(value);
+            *result = Some(PersistedCompletion {
+                original: value,
+                checkpoint,
+            });
         }
     }
 }

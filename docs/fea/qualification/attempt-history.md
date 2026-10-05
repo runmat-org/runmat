@@ -54,6 +54,32 @@ preserved instead of ignored. Cancellation remains active while waiting after a
 terminal response. Positive native process identities are checked before signalling;
 zero and out-of-range values never select a substituted process group.
 
+## Native checkpoint persistence and delivery
+
+The shared filesystem provider owns atomic replacement: a uniquely staged complete
+payload is flushed before rename, and directory-flush failure after rename returns
+visible-but-durability-indeterminate evidence with the original diagnostic. It is
+never reported as an unpublished write. Unsupported providers fail explicitly;
+ordering and fencing remain the storage consumer's responsibility.
+
+Native snapshot capture and publication hold the existing driver state mutex. This
+prevents an older snapshot from overwriting a newer terminal state. Snapshot content
+is validated before replacement; the native consumer also flushes namespace ancestry.
+Submission rollback occurs only after a write known not to have published. Cancellation
+records persistence evidence before dispatching its existing shared cancellation actions.
+
+Terminal result delivery follows snapshot persistence. `try_result` requires durable
+checkpoint evidence; unavailable or indeterminate persistence returns a delivery error.
+`try_scheduler_result` and original attempt history remain inspection evidence for the
+original execution verdict, and do not authorize result publication. Task and session
+checkpoint getters expose typed durability diagnostics. A storage error never rewrites
+a successful physical execution as a failed execution or fabricates a retry.
+
+Verification targets atomic-reader, original-snapshot, typed uncertainty and actual
+native storage-fault cases; the evidence ledger records exact verdicts. These checks do not prove every crash/restart,
+remote-provider, filesystem/hardware or resource envelope. Session retention remains
+owned by the existing session-store lifetime.
+
 ## Qualification boundary
 
 This foundation preserves original history and prevents incomplete resource claims.

@@ -102,14 +102,20 @@ fn completion_publishes_result_and_history_once() {
     let completion = TaskCompletion::new();
     assert!(completion.try_value().is_none());
     assert!(completion.try_attempt_history().is_none());
-    completion.complete(CompletedTask {
-        result: Err("original".into()),
-        attempts: Vec::new(),
-    });
-    completion.complete(CompletedTask {
-        result: Err("late".into()),
-        attempts: Vec::new(),
-    });
+    completion.complete(
+        CompletedTask {
+            result: Err("original".into()),
+            attempts: Vec::new(),
+        },
+        NativeCheckpointEvidence::Durable,
+    );
+    completion.complete(
+        CompletedTask {
+            result: Err("late".into()),
+            attempts: Vec::new(),
+        },
+        NativeCheckpointEvidence::Durable,
+    );
     assert_eq!(completion.try_value(), Some(Err("original".into())));
     assert_eq!(completion.try_attempt_history(), Some(Vec::new()));
 }
@@ -177,4 +183,41 @@ fn committed_original_result_wins_over_a_different_raw_response() {
     .unwrap()
     .result
     .is_err());
+}
+
+#[test]
+fn uncertain_checkpoint_blocks_delivery_without_rewriting_original_execution() {
+    for checkpoint in [
+        NativeCheckpointEvidence::NotPublished {
+            diagnostic: "injected write failure".into(),
+        },
+        NativeCheckpointEvidence::DurabilityIndeterminate {
+            diagnostic: "injected directory flush failure".into(),
+        },
+    ] {
+        let (mut driver, request) = assigned();
+        let success = AttemptSuccess::new(&request, Vec::new(), Vec::new(), 1, 0, 0).unwrap();
+        driver
+            .handle(DriverCommand::BackendReport(BackendReport::for_request(
+                &request,
+                AttemptReport::Succeeded {
+                    result: success.clone(),
+                },
+            )))
+            .unwrap();
+        let snapshot = driver.snapshot();
+        let original = from_snapshot(&snapshot, &request, Ok(success.clone())).unwrap();
+        let history = original.attempts.clone();
+        let completion = TaskCompletion::new();
+        completion.complete(original, checkpoint.clone());
+        assert_eq!(
+            completion.try_value(),
+            Some(Err(checkpoint.delivery_error().unwrap()))
+        );
+        assert_eq!(completion.try_scheduler_result(), Some(Ok(success)));
+        assert_eq!(completion.try_checkpoint_evidence(), Some(checkpoint));
+        assert_eq!(completion.try_attempt_history(), Some(history));
+        assert_eq!(snapshot.tasks[&request.task_id].state, TaskState::Succeeded);
+        snapshot.validate().unwrap();
+    }
 }

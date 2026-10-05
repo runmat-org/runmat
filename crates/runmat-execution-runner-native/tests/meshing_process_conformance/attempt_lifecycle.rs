@@ -4,6 +4,7 @@ use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_execution_runner::{AttemptDisposition, AttemptExecutionTermination};
 use runmat_execution_runner_native::WorkerProcessMessage;
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
+use std::path::PathBuf;
 
 pub(super) async fn fault_child(mode: &str) {
     let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint().unwrap();
@@ -33,6 +34,13 @@ pub(super) async fn fault_child(mode: &str) {
             Err(error) => panic!("fault injection marker: {error}"),
         }
     }
+    if mode == "--checkpoint-failure-child" {
+        // Test-only storage fault in this fresh session. Execution still succeeds.
+        let objects = PathBuf::from(std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV).unwrap());
+        let checkpoints = objects.parent().unwrap().join("checkpoints");
+        std::fs::remove_dir_all(&checkpoints).unwrap();
+        std::fs::write(checkpoints, b"injected checkpoint namespace failure").unwrap();
+    }
     let bytes = if mode == "--raw-terminal-child" {
         serde_json::to_vec(&response).unwrap()
     } else {
@@ -49,6 +57,7 @@ async fn fault_parent() {
         "--exit-after-success-child",
         "--raw-terminal-child",
         "--retry-observed-child",
+        "--checkpoint-failure-child",
     ] {
         let directory = tempfile::tempdir().unwrap();
         let (host, request) = fixture();
@@ -111,6 +120,26 @@ async fn fault_parent() {
                 }
             );
         }
+        if mode == "--checkpoint-failure-child" {
+            assert!(matches!(
+                task.try_checkpoint_evidence(),
+                Some(runmat_execution_runner_native::NativeCheckpointEvidence::NotPublished { .. })
+            ));
+            assert!(task.try_scheduler_result().unwrap().is_ok());
+            assert_eq!(
+                history[0].terminal.as_ref().unwrap().disposition,
+                AttemptDisposition::Succeeded
+            );
+            assert!(result
+                .as_ref()
+                .unwrap_err()
+                .contains("checkpoint was not published"));
+        } else {
+            assert_eq!(
+                task.try_checkpoint_evidence(),
+                Some(runmat_execution_runner_native::NativeCheckpointEvidence::Durable)
+            );
+        }
         if mode == "--retry-observed-child" {
             assert!(history[0].terminal.as_ref().unwrap().resources.is_none());
             assert_eq!(
@@ -143,6 +172,7 @@ async fn fault_parent() {
         let cold: Vec<runmat_execution_runner::task::AttemptRecord> =
             serde_json::from_slice(&serde_json::to_vec(&history).unwrap()).unwrap();
         assert_eq!(cold, history);
+        eprintln!("native lifecycle fault {mode}: original history/exit/checkpoint evidence PASS");
     }
 }
 

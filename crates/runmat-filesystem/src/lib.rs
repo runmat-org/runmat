@@ -12,14 +12,16 @@ use std::time::SystemTime;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
-#[cfg(not(target_arch = "wasm32"))]
-mod workspace_native;
+mod publication;
+pub use publication::{AtomicCreateResult, AtomicReplaceOutcome, PublicationDurability};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sandbox;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
+#[cfg(not(target_arch = "wasm32"))]
+mod workspace_native;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use memory::MemoryFsProvider;
@@ -33,10 +35,10 @@ pub use sandbox::{CapturedIo, SandboxFsProvider};
 pub use wasm::PlaceholderFsProvider;
 
 pub mod data_contract;
+pub mod execution;
 pub mod pinned;
 pub mod workspace;
 pub mod workspace_access;
-pub mod execution;
 
 use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
@@ -265,32 +267,6 @@ pub struct ReadManyEntry {
     error: Option<String>,
 }
 
-/// The durability established by a successful atomic publication.
-///
-/// Every successful publication is immediately visible as one complete byte sequence. Providers
-/// report `Durable` only when they also guarantee that the published directory entry and content
-/// survive a host crash. Remote and in-memory providers generally establish atomic visibility but
-/// leave durable retention to their backing service.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PublicationDurability {
-    AtomicVisibility,
-    Durable,
-}
-
-/// Result of publishing one complete byte sequence at a previously absent path.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(
-    tag = "kind",
-    content = "result",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-pub enum AtomicCreateResult {
-    Published { durability: PublicationDurability },
-    Existing(Vec<u8>),
-}
-
 impl ReadManyEntry {
     pub fn new(path: PathBuf, bytes: Option<Vec<u8>>) -> Self {
         Self {
@@ -410,21 +386,38 @@ impl DirEntry {
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
     /// Coherent access through this provider's existing publication/recovery authority.
-    fn workspace_access(&self, _root: &Path, _writable: bool, _maximum_resident_bytes: u64) -> io::Result<Box<dyn workspace_access::WorkspaceAccess>> {
-        Err(io::Error::new(ErrorKind::Unsupported, "provider coherent workspace access is unsupported"))
+    fn workspace_access(
+        &self,
+        _root: &Path,
+        _writable: bool,
+        _maximum_resident_bytes: u64,
+    ) -> io::Result<Box<dyn workspace_access::WorkspaceAccess>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "provider coherent workspace access is unsupported",
+        ))
     }
     /// Capture one coherent project inventory, including immutable file versions.
     async fn capture_workspace(
         &self,
         _request: workspace::WorkspaceCaptureRequest,
     ) -> io::Result<workspace::WorkspaceSnapshot> {
-        Err(io::Error::new(ErrorKind::Unsupported, "coherent workspace capture is unsupported"))
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "coherent workspace capture is unsupported",
+        ))
     }
 
     /// Recover the result of an exact publication request without replaying edits.
     /// This supports lost acknowledgements and rename/delete retries after restart.
-    async fn lookup_workspace_publication(&self, _request: &workspace::WorkspacePublicationRequest) -> io::Result<Option<workspace::WorkspacePublicationOutcome>> {
-        Err(io::Error::new(ErrorKind::Unsupported, "workspace publication receipts are unsupported"))
+    async fn lookup_workspace_publication(
+        &self,
+        _request: &workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<workspace::WorkspacePublicationOutcome>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "workspace publication receipts are unsupported",
+        ))
     }
 
     /// Publish against exactly the captured revision. Successful retries return
@@ -433,7 +426,10 @@ pub trait FsProvider: Send + Sync + 'static {
         &self,
         _request: workspace::WorkspacePublicationRequest,
     ) -> io::Result<workspace::WorkspacePublicationOutcome> {
-        Err(io::Error::new(ErrorKind::Unsupported, "conditional workspace publication is unsupported"))
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "conditional workspace publication is unsupported",
+        ))
     }
     /// Arbitrate execution ownership inside this provider's existing project
     /// scope. The authority supplies time and stores the transition atomically.
@@ -443,7 +439,10 @@ pub trait FsProvider: Send + Sync + 'static {
         _work: &execution::ExecutionWorkId,
         _command: execution::ExecutionLeaseCommand,
     ) -> io::Result<execution::ExecutionLeaseOutcome> {
-        Err(io::Error::new(ErrorKind::Unsupported, "provider execution authority is unsupported"))
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "provider execution authority is unsupported",
+        ))
     }
     /// Validate ownership at the publication commit boundary under the same
     /// provider lock as the files and receipt. A separate lease check is unsafe.
@@ -452,7 +451,10 @@ pub trait FsProvider: Send + Sync + 'static {
         _request: workspace::WorkspacePublicationRequest,
         _lease: &execution::ExecutionLease,
     ) -> io::Result<execution::FencedWorkspacePublicationOutcome> {
-        Err(io::Error::new(ErrorKind::Unsupported, "fenced workspace publication is unsupported"))
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "fenced workspace publication is unsupported",
+        ))
     }
     fn current_dir_override(&self) -> Option<PathBuf> {
         None
@@ -524,6 +526,22 @@ pub trait FsProvider: Send + Sync + 'static {
         Err(io::Error::new(
             ErrorKind::Unsupported,
             "atomic create-if-absent is unsupported by this provider",
+        ))
+    }
+
+    /// Atomically replaces a path with one complete payload. Concurrent callers
+    /// are linearized at publication; ordering/fencing belongs to the caller.
+    /// Err guarantees this invocation did not publish its replacement. After
+    /// publication, uncertain crash durability is returned explicitly with its
+    /// original diagnostic. Unsupported providers must not emulate this by write.
+    async fn atomic_replace(
+        &self,
+        _path: &Path,
+        _bytes: &[u8],
+    ) -> io::Result<AtomicReplaceOutcome> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "atomic replacement is unsupported by this provider",
         ))
     }
 

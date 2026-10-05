@@ -32,6 +32,7 @@ pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
 mod clock;
 mod completion;
+mod persistence;
 pub(crate) use completion::TaskCompletion;
 
 pub(crate) struct LocalDriver {
@@ -44,6 +45,7 @@ pub(crate) struct LocalDriver {
     artifacts: ArtifactStore,
     objects: FilesystemObjectStore,
     checkpoints: CheckpointStore,
+    checkpoint_evidence: Mutex<crate::NativeCheckpointEvidence>,
     completions: Mutex<HashMap<TaskId, Arc<TaskCompletion>>>,
 }
 
@@ -121,6 +123,9 @@ impl LocalDriver {
             artifacts,
             objects,
             checkpoints,
+            checkpoint_evidence: Mutex::new(crate::NativeCheckpointEvidence::NotPublished {
+                diagnostic: "initial snapshot has not been published".into(),
+            }),
             completions: Mutex::new(HashMap::new()),
         });
         local.checkpoint()?;
@@ -264,7 +269,7 @@ impl LocalDriver {
         for (task_id, completion, _) in &registrations {
             completions.insert(*task_id, Arc::clone(completion));
         }
-        let (actions, inherited_terminals) = {
+        let (actions, inherited_terminals, checkpoint) = {
             let mut driver = self.driver.lock().expect("local driver poisoned");
             let prior = driver.snapshot();
             let submissions = registrations
@@ -280,14 +285,19 @@ impl LocalDriver {
                     return Err(error.into());
                 }
             };
-            if let Err(error) = self.checkpoints.write(&driver.snapshot()) {
-                driver.restore_snapshot(prior)?;
-                for (task_id, _, _) in &registrations {
-                    completions.remove(task_id);
-                }
-                return Err(error);
-            }
             let snapshot = driver.snapshot();
+            let checkpoint = match self.persist_snapshot(&snapshot) {
+                Ok(checkpoint) => checkpoint,
+                Err(error) => {
+                    // Err means the shared atomic operation did not publish.
+                    // Visible-but-uncertain publication is not rolled back.
+                    driver.restore_snapshot(prior)?;
+                    for (task_id, _, _) in &registrations {
+                        completions.remove(task_id);
+                    }
+                    return Err(error);
+                }
+            };
             let terminal = registrations
                 .iter()
                 .filter_map(|(task_id, completion, _)| {
@@ -300,16 +310,19 @@ impl LocalDriver {
                     })
                 })
                 .collect::<Vec<_>>();
-            (actions, terminal)
+            (actions, terminal, checkpoint)
         };
         drop(completions);
         for (completion, state) in inherited_terminals {
-            completion.complete(completion::CompletedTask {
-                result: Err(format!(
-                    "local task inherited terminal dependency state {state:?}"
-                )),
-                attempts: Vec::new(),
-            });
+            completion.complete(
+                completion::CompletedTask {
+                    result: Err(format!(
+                        "local task inherited terminal dependency state {state:?}"
+                    )),
+                    attempts: Vec::new(),
+                },
+                checkpoint.clone(),
+            );
         }
         Self::dispatch(Arc::clone(self), actions);
         Ok(registrations
@@ -322,16 +335,17 @@ impl LocalDriver {
         let actions = {
             let mut driver = self.driver.lock().expect("local driver poisoned");
             let now_millis = self.clock.now_millis().max(driver.now_millis());
-            driver
+            let actions = driver
                 .handle(DriverCommand::CancelScope {
                     scope_id: self.scope_id,
                     reason,
                     now_millis,
                 })
-                .expect("native cancellation uses a monotonic driver clock")
+                .expect("native cancellation uses a monotonic driver clock");
+            self.persist_observed_snapshot(&driver.snapshot());
+            actions
         };
         Self::dispatch(Arc::clone(self), actions);
-        let _ = self.checkpoint();
     }
 
     fn dispatch(this: Arc<Self>, actions: Vec<DriverAction>) {
@@ -349,7 +363,7 @@ impl LocalDriver {
                     }
                 }
                 DriverAction::Checkpoint => {
-                    let _ = this.checkpoint();
+                    this.checkpoint_observed();
                 }
                 DriverAction::ResizePool { .. } | DriverAction::GarbageCollectResults { .. } => {}
             }
@@ -363,7 +377,7 @@ impl LocalDriver {
             .lock()
             .expect("local driver poisoned")
             .handle(DriverCommand::BackendReport(started))
-            .unwrap_or_default();
+            .expect("native start report binds an assigned attempt");
         Self::dispatch(Arc::clone(&this), actions);
         std::thread::spawn(move || {
             let completion = this
@@ -387,32 +401,20 @@ impl LocalDriver {
             };
             let mut report = BackendReport::for_request(&request, report);
             report.execution = Some(Box::new(observed.execution));
-            let actions = this
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .handle(DriverCommand::BackendReport(report))
-                .expect("native provider report binds its original attempt observation");
-            let snapshot = this
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .snapshot();
+            let (actions, snapshot, checkpoint) = {
+                let mut driver = this.driver.lock().expect("local driver poisoned");
+                let actions = driver
+                    .handle(DriverCommand::BackendReport(report))
+                    .expect("native provider report binds its original attempt observation");
+                let snapshot = driver.snapshot();
+                let checkpoint = this.persist_observed_snapshot(&snapshot);
+                (actions, snapshot, checkpoint)
+            };
             if let Some(terminal) = completion::from_snapshot(&snapshot, &request, result) {
-                completion.complete(terminal);
+                // Original execution remains intact even if durable delivery fails.
+                completion.complete(terminal, checkpoint);
             }
-            let _ = this.checkpoint();
             Self::dispatch(Arc::clone(&this), actions);
         });
-    }
-
-    fn checkpoint(&self) -> NativeExecutionResult<()> {
-        self.checkpoints.write(
-            &self
-                .driver
-                .lock()
-                .expect("local driver poisoned")
-                .snapshot(),
-        )
     }
 }

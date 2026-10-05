@@ -236,7 +236,10 @@ fn main() {
     if let Some(mode) = arguments.get(1).and_then(|mode| mode.to_str()) {
         if matches!(
             mode,
-            "--exit-after-success-child" | "--raw-terminal-child" | "--retry-observed-child"
+            "--exit-after-success-child"
+                | "--raw-terminal-child"
+                | "--retry-observed-child"
+                | "--checkpoint-failure-child"
         ) {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()

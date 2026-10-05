@@ -170,6 +170,11 @@ impl NativeProgramSession {
             .collect())
     }
 
+    /// Latest observed local snapshot publication, separate from task execution.
+    pub fn checkpoint_evidence(&self) -> crate::NativeCheckpointEvidence {
+        self.driver.checkpoint_evidence()
+    }
+
     pub fn cancel(&self, reason: CancellationReason) {
         self.driver.cancel_all(reason);
     }
@@ -202,6 +207,16 @@ impl NativeProgramTask {
     /// Missing worker accounting remains explicit on unsuccessful attempts.
     pub fn try_attempt_history(&self) -> Option<Vec<runmat_execution_runner::task::AttemptRecord>> {
         self.completion.try_attempt_history()
+    }
+
+    /// Original scheduler verdict for inspection. This does not authorize result
+    /// publication: `try_result` also requires durable checkpoint delivery.
+    pub fn try_scheduler_result(&self) -> Option<Result<AttemptSuccess, String>> {
+        self.completion.try_scheduler_result()
+    }
+
+    pub fn try_checkpoint_evidence(&self) -> Option<crate::NativeCheckpointEvidence> {
+        self.completion.try_checkpoint_evidence()
     }
 
     pub fn drain_progress(&self) -> Vec<ProgramProgress> {
