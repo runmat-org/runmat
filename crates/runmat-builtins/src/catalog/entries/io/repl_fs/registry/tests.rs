@@ -7,7 +7,7 @@ fn registry_preserves_reviewed_family_order_and_entry_identity() {
         super::super::directory_listing::ENTRIES,
         super::super::environment::ENTRIES,
         super::super::exist::ENTRIES,
-        &[&super::super::fileattrib::FILEATTRIB_CATALOG_ENTRY],
+        super::super::fileattrib::ENTRIES,
         super::super::file_transfer::ENTRIES,
         super::super::genpath::ENTRIES,
         super::super::installation_path::ENTRIES,
@@ -20,8 +20,8 @@ fn registry_preserves_reviewed_family_order_and_entry_identity() {
         super::super::pcode::ENTRIES,
         super::super::preferences::ENTRIES,
         super::super::pwd::ENTRIES,
-        &[&super::super::rehash::REHASH_CATALOG_ENTRY],
-        &[&super::super::restoredefaultpath::RESTOREDEFAULTPATH_CATALOG_ENTRY],
+        super::super::rehash::ENTRIES,
+        super::super::restoredefaultpath::ENTRIES,
         super::super::rmpath::ENTRIES,
         super::super::run::ENTRIES,
         super::super::savepath::ENTRIES,
@@ -31,7 +31,7 @@ fn registry_preserves_reviewed_family_order_and_entry_identity() {
         super::super::uigetdir::ENTRIES,
         super::super::uigetfile::ENTRIES,
         super::super::uiputfile::ENTRIES,
-        &[&super::super::userpath::USERPATH_CATALOG_ENTRY],
+        super::super::userpath::ENTRIES,
         super::super::filesystem::ENTRIES,
     ];
     let expected: Vec<_> = reviewed_groups.into_iter().flatten().copied().collect();
