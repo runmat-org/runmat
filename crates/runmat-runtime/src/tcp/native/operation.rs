@@ -88,6 +88,7 @@ pub(super) async fn connect(
         authority,
         local_addr,
         peer_addr,
+        io_timeout: request.io_timeout,
         byte_order: request.byte_order,
     })
 }
@@ -156,6 +157,7 @@ pub(super) async fn accept(
         authority: client,
         local_addr,
         peer_addr,
+        io_timeout: timeout,
         byte_order,
     })
 }

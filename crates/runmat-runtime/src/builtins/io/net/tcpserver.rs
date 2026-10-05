@@ -1,7 +1,8 @@
 //! MATLAB-compatible `tcpserver` builtin for RunMat.
 
 use super::control::{canonicalize_byte_order, default_user_data, parse_port, string_scalar};
-use super::server_state::{insert_server, DEFAULT_TIMEOUT_SECONDS, HANDLE_ID_FIELD};
+use super::server_state::DEFAULT_TIMEOUT_SECONDS;
+use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpIssuer};
 use runmat_builtins::{
     BuiltinErrorDescriptor, NetConstructorOption, TCPSERVER_ERROR_BIND_FAILED,
     TCPSERVER_ERROR_INTERNAL, TCPSERVER_ERROR_INVALID_ADDRESS, TCPSERVER_ERROR_INVALID_NAME_VALUE,
@@ -13,12 +14,12 @@ use runmat_builtins::{
     TCPSERVER_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, StructValue, Tensor, Value};
+use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Tensor, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
 
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 
 const BUILTIN_NAME: &str = "tcpserver";
 
@@ -57,9 +58,11 @@ fn tcpserver_internal_source(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "tcpserver",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::tcpserver"
 )]
 pub(crate) async fn tcpserver_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     address: Value,
     port: Value,
     rest: Vec<Value>,
@@ -91,7 +94,7 @@ pub(crate) async fn tcpserver_builtin(
     } else {
         Some(parse_endpoint_port(&port)?)
     };
-    super::transport::require_native_tcp(BUILTIN_NAME)?;
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
     let address = gather_if_needed_async(&address).await.map_err(|err| {
         super::error::with_source(
             BUILTIN_NAME,
@@ -120,32 +123,39 @@ pub(crate) async fn tcpserver_builtin(
 
     let options = parse_name_value_pairs(rest, prepared_options).await?;
 
-    let listener = TcpListener::bind((host.as_str(), port)).map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPSERVER_ERROR_BIND_FAILED,
-            format!("tcpserver: unable to bind {host}:{port} ({err})"),
-            err,
+    let endpoint = service
+        .bind(
+            RuntimeTcpIssuer::from_context(runtime.as_ref()),
+            RuntimeTcpBind {
+                address: host.clone(),
+                port,
+                io_timeout: (options.timeout != 0.0)
+                    .then(|| std::time::Duration::from_secs_f64(options.timeout)),
+                byte_order: if options.byte_order == "big-endian" {
+                    RuntimeTcpByteOrder::Big
+                } else {
+                    RuntimeTcpByteOrder::Little
+                },
+            },
         )
-    })?;
-    let local_addr = listener.local_addr().map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPSERVER_ERROR_INTERNAL,
-            format!("tcpserver: {err}"),
-            err,
-        )
-    })?;
-
-    let id = insert_server(
-        listener,
-        host.clone(),
-        local_addr,
-        options.timeout,
-        options.name.clone(),
-        options.byte_order.clone(),
-    );
-    Ok(build_tcpserver_struct(id, &host, local_addr, &options))
+        .await
+        .map_err(|err| {
+            super::error::with_source(
+                BUILTIN_NAME,
+                &TCPSERVER_ERROR_BIND_FAILED,
+                format!("tcpserver: unable to bind {host}:{port} ({err})"),
+                err,
+            )
+        })?;
+    if let Some(runtime) = &runtime {
+        runtime.cpu_cooperation().completed(0).await?;
+    }
+    Ok(build_tcpserver_object(
+        endpoint.authority,
+        &host,
+        endpoint.local_addr,
+        &options,
+    ))
 }
 
 fn parse_address(address: &Value) -> BuiltinResult<String> {
@@ -416,8 +426,8 @@ async fn parse_name_value_pairs(
     Ok(options)
 }
 
-fn build_tcpserver_struct(
-    id: u64,
+fn build_tcpserver_object(
+    authority: ForeignRef,
     requested_address: &str,
     local_addr: SocketAddr,
     options: &ParsedOptions,
@@ -483,13 +493,13 @@ fn build_tcpserver_struct(
     st.fields
         .insert("KeepAlive".to_string(), Value::Bool(false));
     st.fields
-        .insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::U64(id)));
-    st.fields
         .insert("Timeout".to_string(), Value::Num(options.timeout));
     st.fields
         .insert("UserData".to_string(), options.user_data.clone());
 
-    Value::Struct(st)
+    let mut object = ObjectInstance::new(runmat_builtins::TCPSERVER_CLASS);
+    object.properties = st.fields;
+    Value::Object(object.with_tcp_authority(authority))
 }
 
 #[derive(Debug, Error)]
@@ -527,30 +537,44 @@ fn parse_timeout(value: &Value) -> Result<f64, TimeoutParseError> {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
-    use super::super::server_state::remove_server_for_test;
     use super::*;
     use crate::builtins::io::net::test_support::CountingDownloadProvider;
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::tcp::NativeTcpService;
     use runmat_builtins::TCPSERVER_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::error::Error;
     use std::net::{TcpListener, TcpStream};
+    use std::rc::Rc;
     use std::time::Duration;
 
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
-            Value::Struct(struct_value) => struct_value
-                .fields
+            Value::Object(object) => object
+                .properties
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
-            _ => panic!("expected struct result"),
+            _ => panic!("expected TCP server object"),
         }
     }
 
-    fn server_id(value: &Value) -> u64 {
-        match struct_field(value, HANDLE_ID_FIELD) {
-            Value::Int(IntValue::U64(id)) => *id,
-            Value::Int(iv) => iv.to_i64() as u64,
-            other => panic!("unexpected id representation {other:?}"),
+    struct TestServer {
+        value: Value,
+        _service: Rc<NativeTcpService>,
+        _driver: tokio::runtime::Runtime,
+    }
+
+    impl std::fmt::Debug for TestServer {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("TestTcpServer")
+        }
+    }
+
+    impl std::ops::Deref for TestServer {
+        type Target = Value;
+
+        fn deref(&self) -> &Self::Target {
+            &self.value
         }
     }
 
@@ -558,8 +582,22 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
-    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tcpserver_builtin(address, port, rest))
+    fn run_tcpserver(address: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<TestServer> {
+        let driver = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("isolated TCP server driver");
+        let service = Rc::new(NativeTcpService::new(driver.handle().clone()));
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
+        let value = driver.block_on(tcpserver_builtin(Some(runtime), address, port, rest))?;
+        Ok(TestServer {
+            value,
+            _service: service,
+            _driver: driver,
+        })
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -645,7 +683,6 @@ pub(crate) mod tests {
 
         let result = run_tcpserver(Value::from("127.0.0.1"), Value::Num(0.0), Vec::new())
             .expect("tcpserver");
-        let id = server_id(&result);
         let address = match struct_field(&result, "ServerAddress") {
             Value::String(s) => s.clone(),
             other => panic!("expected ServerAddress string, got {other:?}"),
@@ -656,7 +693,7 @@ pub(crate) mod tests {
         };
 
         TcpStream::connect((address.as_str(), port)).expect("connect to loopback server");
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -678,8 +715,7 @@ pub(crate) mod tests {
         };
         assert!((timeout - 5.0).abs() < f64::EPSILON);
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -701,8 +737,7 @@ pub(crate) mod tests {
         };
         assert_eq!(name, "CustomListener");
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -724,8 +759,7 @@ pub(crate) mod tests {
         };
         assert_eq!(order, "big-endian");
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -761,8 +795,7 @@ pub(crate) mod tests {
         };
         assert!(port > 0);
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -869,8 +902,7 @@ pub(crate) mod tests {
         let stored = struct_field(&result, "UserData");
         assert_eq!(stored, &user_struct);
 
-        let id = server_id(&result);
-        remove_server_for_test(id);
+        drop(result);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -885,7 +917,6 @@ pub(crate) mod tests {
             vec![Value::from("Timeout"), Value::Num(1.5)],
         )
         .expect("tcpserver");
-        let id = server_id(&result);
         let port = match struct_field(&result, "ServerPort") {
             Value::Num(value) => *value as u16,
             other => panic!("expected double ServerPort, got {other:?}"),
@@ -896,6 +927,6 @@ pub(crate) mod tests {
             .set_read_timeout(Some(Duration::from_millis(10)))
             .expect("set timeout");
 
-        remove_server_for_test(id);
+        drop(result);
     }
 }

@@ -12,19 +12,16 @@ use runmat_builtins::{
     TCPCLIENT_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, StructValue, Value};
+use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Value};
 
-use super::client_state::{insert_client, CLIENT_HANDLE_FIELD};
 use super::control::{
-    canonicalize_byte_order, configure_stream, default_user_data, parse_port, parse_timeout_value,
-    string_scalar,
+    canonicalize_byte_order, default_user_data, parse_port, parse_timeout_value, string_scalar,
 };
-use super::server_state::{DEFAULT_TIMEOUT_SECONDS, HANDLE_ID_FIELD};
+use super::server_state::DEFAULT_TIMEOUT_SECONDS;
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpIssuer};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use std::io::{self, ErrorKind};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::net::SocketAddr;
 
 const BUILTIN_NAME: &str = "tcpclient";
 
@@ -65,9 +62,11 @@ fn tcpclient_internal_source(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "tcpclient",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::tcpclient"
 )]
 pub(crate) async fn tcpclient_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     host: Value,
     port: Value,
     rest: Vec<Value>,
@@ -94,7 +93,7 @@ pub(crate) async fn tcpclient_builtin(
     } else {
         Some(parse_endpoint_port(&port)?)
     };
-    super::transport::require_native_tcp(BUILTIN_NAME)?;
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
     let host = gather_if_needed_async(&host).await.map_err(|err| {
         super::error::with_source(
             BUILTIN_NAME,
@@ -123,8 +122,26 @@ pub(crate) async fn tcpclient_builtin(
 
     let options = parse_name_value_pairs(rest, prepared_options).await?;
 
-    let (stream, resolved_addr) =
-        connect_with_timeout(&host_text, port_num, options.connect_timeout).map_err(|err| {
+    let endpoint = service
+        .connect(
+            RuntimeTcpIssuer::from_context(runtime.as_ref()),
+            RuntimeTcpConnect {
+                host: host_text.clone(),
+                port: port_num,
+                connect_timeout: options
+                    .connect_timeout
+                    .is_finite()
+                    .then(|| std::time::Duration::from_secs_f64(options.connect_timeout)),
+                io_timeout: timeout_duration(options.timeout),
+                byte_order: if options.byte_order == "big-endian" {
+                    RuntimeTcpByteOrder::Big
+                } else {
+                    RuntimeTcpByteOrder::Little
+                },
+            },
+        )
+        .await
+        .map_err(|err| {
             super::error::with_source(
                 BUILTIN_NAME,
                 &TCPCLIENT_ERROR_CONNECT_FAILED,
@@ -132,44 +149,20 @@ pub(crate) async fn tcpclient_builtin(
                 err,
             )
         })?;
-
-    if let Err(err) = configure_stream(&stream, options.timeout) {
-        return Err(super::error::with_source(
-            BUILTIN_NAME,
-            &TCPCLIENT_ERROR_INTERNAL,
-            format!("tcpclient: failed to configure stream timeouts ({err})"),
-            err,
-        ));
+    if let Some(runtime) = &runtime {
+        runtime.cpu_cooperation().completed(0).await?;
     }
-
-    let peer_addr = stream.peer_addr().map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPCLIENT_ERROR_INTERNAL,
-            format!("tcpclient: failed to query peer address for {resolved_addr} ({err})"),
-            err,
-        )
-    })?;
-    let local_addr = stream.local_addr().map_err(|err| {
-        super::error::with_source(
-            BUILTIN_NAME,
-            &TCPCLIENT_ERROR_INTERNAL,
-            format!("tcpclient: {err}"),
-            err,
-        )
-    })?;
-
-    let client_id = insert_client(
-        stream,
-        0,
-        peer_addr,
-        options.timeout,
-        options.byte_order.clone(),
-    );
-
-    Ok(build_tcpclient_struct(
-        client_id, &host_text, peer_addr, local_addr, &options,
+    Ok(build_tcpclient_object(
+        endpoint.authority,
+        &host_text,
+        endpoint.peer_addr,
+        endpoint.local_addr,
+        &options,
     ))
+}
+
+fn timeout_duration(seconds: f64) -> Option<std::time::Duration> {
+    (seconds.is_finite() && seconds != 0.0).then(|| std::time::Duration::from_secs_f64(seconds))
 }
 
 fn parse_host(host: &Value) -> BuiltinResult<String> {
@@ -553,36 +546,8 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
     Ok(raw as i32)
 }
 
-fn connect_with_timeout(
-    host: &str,
-    port: u16,
-    timeout: f64,
-) -> io::Result<(TcpStream, SocketAddr)> {
-    let mut last_err: Option<io::Error> = None;
-    for addr in (host, port).to_socket_addrs()? {
-        let attempt = if timeout.is_infinite() {
-            TcpStream::connect(addr)
-        } else {
-            let duration = Duration::from_secs_f64(timeout);
-            TcpStream::connect_timeout(&addr, duration)
-        };
-        match attempt {
-            Ok(stream) => return Ok((stream, addr)),
-            Err(err) => last_err = Some(err),
-        }
-    }
-
-    match last_err {
-        Some(err) => Err(err),
-        None => Err(io::Error::new(
-            ErrorKind::NotFound,
-            "tcpclient: no addresses resolved",
-        )),
-    }
-}
-
-fn build_tcpclient_struct(
-    client_id: u64,
+fn build_tcpclient_object(
+    authority: ForeignRef,
     requested_host: &str,
     peer_addr: SocketAddr,
     local_addr: SocketAddr,
@@ -657,43 +622,33 @@ fn build_tcpclient_struct(
     );
     st.fields
         .insert("UserData".to_string(), options.user_data.clone());
-    st.fields.insert(
-        CLIENT_HANDLE_FIELD.to_string(),
-        Value::Int(IntValue::U64(client_id)),
-    );
-    st.fields
-        .insert(HANDLE_ID_FIELD.to_string(), Value::Int(IntValue::I32(0)));
-
-    Value::Struct(st)
+    let mut object = ObjectInstance::new(runmat_builtins::TCPCLIENT_CLASS);
+    object.properties = st.fields;
+    Value::Object(object.with_tcp_authority(authority))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
-    use super::super::client_state::remove_client_for_test;
     use super::*;
     use crate::builtins::io::net::test_support::CountingDownloadProvider;
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::tcp::NativeTcpService;
     use runmat_builtins::TCPCLIENT_DESCRIPTOR;
     use runmat_value::{IntegerStorage, Tensor, Value};
     use std::error::Error;
+    use std::io;
     use std::net::TcpListener;
+    use std::rc::Rc;
     use std::thread;
     use std::time::Duration;
 
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
-            Value::Struct(st) => st
-                .fields
+            Value::Object(object) => object
+                .properties
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
-            _ => panic!("expected struct"),
-        }
-    }
-
-    fn client_id(value: &Value) -> u64 {
-        match struct_field(value, CLIENT_HANDLE_FIELD) {
-            Value::Int(IntValue::U64(id)) => *id,
-            Value::Int(iv) => iv.to_i64() as u64,
-            other => panic!("expected client id, got {other:?}"),
+            _ => panic!("expected TCP object"),
         }
     }
 
@@ -702,7 +657,16 @@ pub(crate) mod tests {
     }
 
     fn run_tcpclient(host: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tcpclient_builtin(host, port, rest))
+        let driver = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("isolated TCP host driver");
+        let service = Rc::new(NativeTcpService::new(driver.handle().clone()));
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service));
+        driver.block_on(tcpclient_builtin(Some(runtime), host, port, rest))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -806,8 +770,7 @@ pub(crate) mod tests {
             other => panic!("expected Address string, got {other:?}"),
         }
 
-        let cid = client_id(&client);
-        remove_client_for_test(cid);
+        assert!(matches!(&client, Value::Object(object) if object.tcp_authority().is_some()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -864,8 +827,7 @@ pub(crate) mod tests {
             other => panic!("expected UserData numeric, got {other:?}"),
         }
 
-        let cid = client_id(&client);
-        remove_client_for_test(cid);
+        assert!(matches!(&client, Value::Object(object) if object.tcp_authority().is_some()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

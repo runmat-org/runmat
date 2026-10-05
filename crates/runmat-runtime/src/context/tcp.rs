@@ -74,6 +74,7 @@ pub struct RuntimeTcpClient {
     pub authority: ForeignRef,
     pub local_addr: SocketAddr,
     pub peer_addr: SocketAddr,
+    pub io_timeout: Option<Duration>,
     pub byte_order: RuntimeTcpByteOrder,
 }
 
