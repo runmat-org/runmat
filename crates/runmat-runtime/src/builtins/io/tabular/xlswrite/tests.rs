@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[path = "tests/publication.rs"]
 mod publication;
+#[path = "tests/admission.rs"]
+mod admission;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 

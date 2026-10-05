@@ -124,6 +124,7 @@ async fn write_spreadsheet(
 ) -> BuiltinResult<usize> {
     let mut cooperation = TabularCooperation::new(runtime, BUILTIN_NAME);
     let path = resolve_path(&filename)?;
+    XlsWriteRequest::preflight_host_arguments(&rest)?;
     let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
         xlswrite_error_with_source(
             &XLSWRITE_ERROR_IO,

@@ -16,6 +16,42 @@ impl Default for XlsWriteRequest {
 }
 
 impl XlsWriteRequest {
+    pub(super) fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
+        if args.len() > 3 {
+            return Err(xlswrite_error_with(
+                &XLSWRITE_ERROR_INVALID_ARGUMENT,
+                "xlswrite: expected filename, data, optional sheet, optional range, and optional '-basic'",
+            ));
+        }
+        let host = |value: &Value| !matches!(value, Value::GpuTensor(_));
+        match args {
+            [single] if host(single) => {
+                parse_single_selector(single, &mut Self::default())?;
+            }
+            [sheet, range] => {
+                if host(sheet) {
+                    parse_sheet_selector(sheet)?;
+                }
+                if host(range) {
+                    parse_range_start(range)?;
+                }
+            }
+            [sheet, range, mode] => {
+                if host(sheet) {
+                    parse_sheet_selector(sheet)?;
+                }
+                if host(range) {
+                    parse_range_start(range)?;
+                }
+                if host(mode) {
+                    parse_basic_mode(mode)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
         let mut request = Self::default();
         match args {

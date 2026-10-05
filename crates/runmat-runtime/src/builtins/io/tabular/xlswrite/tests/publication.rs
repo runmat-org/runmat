@@ -7,7 +7,7 @@ use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, FsPublicationDisposition, FsPublicationFailure,
-    FsStagedOutput, MemoryFsProvider, OpenFlags,
+    FsResourceLease, FsStagedOutput, MemoryFsProvider, OpenFlags,
 };
 use std::future::Future;
 use std::io;
@@ -21,8 +21,9 @@ use crate::context::RuntimeContext;
 use crate::execution::RuntimeExecutionService;
 
 #[derive(Default)]
-struct LifecycleEvidence {
-    begins: AtomicUsize,
+pub(super) struct LifecycleEvidence {
+    pub(super) begins: AtomicUsize,
+    pub(super) resource_probes: AtomicUsize,
     writes: AtomicUsize,
     publish_polls: AtomicUsize,
     retired_stages: AtomicUsize,
@@ -38,7 +39,7 @@ impl ArcWake for WakeCount {
 }
 
 #[derive(Clone)]
-enum LifecycleBehavior {
+pub(super) enum LifecycleBehavior {
     Pending(Arc<LifecycleEvidence>),
     ReadyCancel(CancellationSource, Arc<LifecycleEvidence>),
 }
@@ -124,6 +125,16 @@ impl FsStagedOutput for PublicationStage {
 
 #[async_trait(?Send)]
 impl FsProvider for PublicationProvider {
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        if let Some(lifecycle) = &self.lifecycle {
+            lifecycle
+                .evidence()
+                .resource_probes
+                .fetch_add(1, Ordering::SeqCst);
+        }
+        None
+    }
+
     fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
         self.memory.path_namespace()
     }
@@ -218,7 +229,7 @@ fn public_call(
     (result, memory)
 }
 
-fn with_lifecycle(
+pub(super) fn with_lifecycle(
     lifecycle: LifecycleBehavior,
     output_count: usize,
     test: impl FnOnce(MemoryFsProvider, Arc<LifecycleEvidence>),
