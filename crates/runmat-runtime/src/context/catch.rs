@@ -6,6 +6,8 @@ use runmat_value::MException;
 use std::cell::RefCell;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::marker::PhantomPinned;
+use std::mem::ManuallyDrop;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
@@ -130,6 +132,57 @@ impl<F> Drop for ActiveCatchFuture<F> {
 
 impl<F> Unpin for ActiveCatchFuture<F> {}
 
+/// Allocation-free poll and drop scope for a child future already owned by an
+/// execution frame. Unlike a poll-only adapter, cancellation drops the child
+/// while its lexical catch is active.
+pub struct UnboxedActiveCatchFuture<F> {
+    owner: RuntimeContextLocalId,
+    exception: Option<Rc<MException>>,
+    future: ManuallyDrop<F>,
+    _pin: PhantomPinned,
+    _local_affinity: PhantomData<Rc<()>>,
+}
+
+impl<F> UnboxedActiveCatchFuture<F> {
+    pub(super) fn new(
+        runtime: &RuntimeContext,
+        exception: Option<Rc<MException>>,
+        future: F,
+    ) -> Self {
+        Self {
+            owner: runtime.local_identity(),
+            exception,
+            future: ManuallyDrop::new(future),
+            _pin: PhantomPinned,
+            _local_affinity: PhantomData,
+        }
+    }
+}
+
+impl<F: Future> Future for UnboxedActiveCatchFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // SAFETY: `_pin` makes the wrapper !Unpin. Once pinned, `future` stays
+        // at this address until Drop; ManuallyDrop prevents an unscopeable
+        // automatic field drop. We only project a pinned mutable reference.
+        let this = unsafe { self.get_unchecked_mut() };
+        let _guard = ActiveCatchGuard::enter(this.owner, this.exception.clone());
+        // SAFETY: see the stable-address invariant above. `future` is never
+        // moved after this projection, including in the wrapper's Drop.
+        unsafe { Pin::new_unchecked(&mut *this.future) }.poll(cx)
+    }
+}
+
+impl<F> Drop for UnboxedActiveCatchFuture<F> {
+    fn drop(&mut self) {
+        let _guard = ActiveCatchGuard::enter(self.owner, self.exception.clone());
+        // SAFETY: this is the sole drop of `future`; ManuallyDrop suppresses
+        // its automatic field drop after this lexical catch guard exits.
+        unsafe { ManuallyDrop::drop(&mut self.future) };
+    }
+}
+
 pub(super) fn active_for(runtime: &RuntimeContext) -> Option<MException> {
     active_shared_for(runtime).as_deref().cloned()
 }
@@ -156,6 +209,7 @@ mod tests {
         runtime: RuntimeContext,
         polls: Rc<Cell<usize>>,
         drops: Rc<Cell<usize>>,
+        _pin: PhantomPinned,
     }
 
     impl Future for CheckPending {
@@ -194,6 +248,7 @@ mod tests {
                 runtime: first.clone(),
                 polls: polls.clone(),
                 drops: drops.clone(),
+                _pin: PhantomPinned,
             },
         ));
         let waker = futures::task::noop_waker();
@@ -231,5 +286,65 @@ mod tests {
         );
         drop(inner);
         assert!(runtime.active_catch_exception().is_none());
+    }
+
+    #[test]
+    fn unboxed_scope_keeps_the_inner_catch_active_through_pending_drop() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let outer = runtime
+            .enter_active_catch(Some(MException::new("RunMat:outer".into(), "outer".into())));
+        let polls = Rc::new(Cell::new(0));
+        let drops = Rc::new(Cell::new(0));
+        let inner = Rc::new(MException::new("RunMat:first".into(), "first".into()));
+        let mut pending = Box::pin(runtime.scope_active_catch_unboxed_shared(
+            Some(inner),
+            CheckPending {
+                runtime: runtime.clone(),
+                polls: polls.clone(),
+                drops: drops.clone(),
+                _pin: PhantomPinned,
+            },
+        ));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(pending.as_mut().poll(&mut context).is_pending());
+        assert_eq!(
+            runtime.active_catch_exception().unwrap().identifier,
+            "RunMat:outer"
+        );
+        drop(pending);
+        assert_eq!(polls.get(), 1);
+        assert_eq!(drops.get(), 1);
+        assert_eq!(
+            runtime.active_catch_exception().unwrap().identifier,
+            "RunMat:outer"
+        );
+        drop(outer);
+        assert!(runtime.active_catch_exception().is_none());
+    }
+
+    #[test]
+    fn unboxed_unpolled_drop_is_scoped_and_other_sessions_remain_isolated() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let other = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let drops = Rc::new(Cell::new(0));
+        let pending = runtime.scope_active_catch_unboxed_shared(
+            Some(Rc::new(MException::new(
+                "RunMat:first".into(),
+                "first".into(),
+            ))),
+            CheckPending {
+                runtime: runtime.clone(),
+                polls: Rc::new(Cell::new(0)),
+                drops: drops.clone(),
+                _pin: PhantomPinned,
+            },
+        );
+        assert!(runtime.active_catch_exception().is_none());
+        assert!(other.active_catch_exception().is_none());
+        drop(pending);
+        assert_eq!(drops.get(), 1);
+        assert!(runtime.active_catch_exception().is_none());
+        assert!(other.active_catch_exception().is_none());
     }
 }

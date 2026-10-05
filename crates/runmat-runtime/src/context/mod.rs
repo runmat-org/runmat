@@ -32,7 +32,7 @@ pub mod legacy;
 pub mod preparation;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
-pub use catch::{ActiveCatchFuture, ActiveCatchGuard};
+pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
 #[cfg(target_arch = "wasm32")]

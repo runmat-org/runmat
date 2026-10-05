@@ -447,6 +447,16 @@ impl RuntimeContext {
         super::ActiveCatchFuture::new_shared(self, exception, future)
     }
 
+    /// Scope a pinned execution child without allocating another future box.
+    /// The child is also dropped under the catch authority on abandonment.
+    pub fn scope_active_catch_unboxed_shared<F: Future>(
+        &self,
+        exception: Option<Rc<runmat_value::MException>>,
+        future: F,
+    ) -> super::UnboxedActiveCatchFuture<F> {
+        super::UnboxedActiveCatchFuture::new(self, exception, future)
+    }
+
     pub fn enter_active_catch(
         &self,
         exception: Option<runmat_value::MException>,

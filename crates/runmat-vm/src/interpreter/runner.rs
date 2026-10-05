@@ -945,12 +945,9 @@ async fn run_interpreter_inner(
                 },
             );
             let dispatch_result = if let Some(exception) = active_catch {
-                let mut dispatch_future = std::pin::pin!(dispatch_future);
-                std::future::poll_fn(|cx| {
-                    let _guard = catch_runtime.enter_active_catch_shared(Some(exception.clone()));
-                    std::future::Future::poll(dispatch_future.as_mut(), cx)
-                })
-                .await
+                catch_runtime
+                    .scope_active_catch_unboxed_shared(Some(exception), dispatch_future)
+                    .await
             } else {
                 dispatch_future.await
             };
