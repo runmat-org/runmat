@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
         BuiltinDocumentationSection { heading: "Execution and source ownership", paragraphs: &[
             "The selected filesystem provider, working directory and advertised resource lease are captured before resident controls suspend. The same provider opens the file; parsing stays on the host and forms a fusion boundary. Like may explicitly restore the result to the prototype's exact provider.",
-            "The reader checks cancellation and filesystem liveness during bounded acquisition. Complete-call finite memory certification for decoded text, token rows and output remains a shared resource-admission requirement.",
+            "The reader limits input files to 512 MiB and checks cancellation and filesystem liveness while scanning and converting rows. Decoded text and the resulting matrix can require more memory than the file size.",
         ] },
     ],
     examples: &[
@@ -87,10 +87,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[
             BuiltinDocumentationLink { label: "readmatrix implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/readmatrix.rs") },
+            BuiltinDocumentationLink { label: "Borrowed row scanner", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/readmatrix/reader/scan.rs") },
+            BuiltinDocumentationLink { label: "Numeric token conversion", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/readmatrix/reader/numeric.rs") },
             BuiltinDocumentationLink { label: "Captured tabular filesystem authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/path.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "readmatrix option, class, range and file reading tests", location: "builtins::io::tabular::readmatrix::tests" }],
-        notes: &[],
+        notes: &["Chunked acquisition and row cooperation do not certify a finite whole-call memory peak for text decoding, token rows, range selection and output allocation; integrated resource admission remains required."],
     },
     introduced: Some("R2019a"),
     status: Some(BuiltinDocumentationStatus::Stable),
