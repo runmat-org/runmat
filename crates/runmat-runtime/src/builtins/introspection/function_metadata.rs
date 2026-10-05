@@ -44,13 +44,11 @@ fn role_kind(role: runmat_types::FunctionSourceRole) -> Option<FunctionHandleKin
     })
 }
 
-fn source_metadata(function: usize) -> Option<(FunctionHandleKind, String)> {
+fn source_file(function: usize) -> Option<String> {
     let info = crate::user_functions::source_function_for(function)?;
-    let kind = role_kind(info.role)?;
-    let file = crate::source_context::source_info(info.source_id)
+    crate::source_context::source_info(info.source_id)
         .and_then(|source| source.fullpath_name)
-        .map_or_else(String::new, |path| path.to_string());
-    Some((kind, file))
+        .map(|path| path.to_string())
 }
 
 pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
@@ -68,15 +66,15 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
             source_role,
         } => {
             let kind = role_kind(source_role).unwrap_or(FunctionHandleKind::Unknown);
-            let file = source_metadata(function).map_or_else(String::new, |(_, file)| file);
+            let file = source_file(function).unwrap_or_default();
             Ok(metadata_struct(name, kind, file))
         }
         Value::Closure(closure) => {
-            let source = closure.bound_function.and_then(source_metadata);
-            let kind = role_kind(closure.source_role)
-                .or_else(|| source.as_ref().map(|(kind, _)| *kind))
-                .unwrap_or(FunctionHandleKind::Unknown);
-            let file = source.map_or_else(String::new, |(_, file)| file);
+            let kind = role_kind(closure.source_role).unwrap_or(FunctionHandleKind::Unknown);
+            let file = closure
+                .bound_function
+                .and_then(source_file)
+                .unwrap_or_default();
             Ok(metadata_struct(closure.function_name, kind, file))
         }
         _ => Err(crate::runtime_descriptor_error(
@@ -182,7 +180,7 @@ mod tests {
         let value = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "@anon0".into(),
             bound_function: Some(1),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_role: runmat_types::FunctionSourceRole::Anonymous,
             captures: Vec::new(),
         }))
         .expect("functions succeeds");
@@ -219,6 +217,12 @@ mod tests {
                     function: 2,
                     role: runmat_types::FunctionSourceRole::Local,
                 },
+                crate::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: "legacy_role_missing".into(),
+                    function: 3,
+                    role: runmat_types::FunctionSourceRole::Unknown,
+                },
             ]),
         ));
         for (name, function, kind) in [
@@ -231,6 +235,22 @@ mod tests {
             ))
             .expect("metadata");
             assert_eq!(field(&value, "type"), &Value::String(kind.into()));
+            assert_eq!(
+                field(&value, "file"),
+                &Value::String("/tmp/metadata_file.m".into())
+            );
+        }
+        for (stored_role, expected_type) in [
+            (runmat_types::FunctionSourceRole::Local, "scopedfunction"),
+            (runmat_types::FunctionSourceRole::Unknown, "unknown"),
+        ] {
+            let value = dispatch_functions(Value::BoundFunctionHandle {
+                name: "legacy_role_missing".into(),
+                function: 3,
+                source_role: stored_role,
+            })
+            .expect("file provenance independent of role");
+            assert_eq!(field(&value, "type"), &Value::String(expected_type.into()));
             assert_eq!(
                 field(&value, "file"),
                 &Value::String("/tmp/metadata_file.m".into())
