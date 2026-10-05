@@ -6,6 +6,9 @@ use runmat_filesystem::{self as vfs, MemoryFsProvider};
 use runmat_value::{IntValue, IntegerStorage, Tensor};
 use std::sync::Arc;
 
+#[path = "tests/repeat_effects.rs"]
+mod repeat_effects;
+
 fn property(name: &str) -> Value {
     ObjectSubscriptPath::single(ObjectSubscript::member(name))
         .to_standard_substruct_value()
