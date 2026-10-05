@@ -132,9 +132,14 @@ impl<F> Drop for ActiveCatchFuture<F> {
 
 impl<F> Unpin for ActiveCatchFuture<F> {}
 
-/// Allocation-free poll and drop scope for a child future already owned by an
-/// execution frame. Unlike a poll-only adapter, cancellation drops the child
-/// while its lexical catch is active.
+/// Poll and drop scope that does not allocate a box for the child future
+/// already owned by an execution frame. The thread-local catch stack can
+/// still grow with nesting. Cancellation drops the child under its catch.
+///
+/// ```compile_fail
+/// fn require_send<T: Send>() {}
+/// require_send::<runmat_runtime::context::UnboxedActiveCatchFuture<std::future::Ready<()>>>();
+/// ```
 pub struct UnboxedActiveCatchFuture<F> {
     owner: RuntimeContextLocalId,
     exception: Option<Rc<MException>>,
@@ -276,6 +281,31 @@ mod tests {
         }
     }
 
+    struct PanicOnDrop {
+        runtime: RuntimeContext,
+        drops: Rc<Cell<usize>>,
+        _pin: PhantomPinned,
+    }
+
+    impl Future for PanicOnDrop {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Ready(())
+        }
+    }
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            assert_eq!(
+                self.runtime.active_catch_exception().unwrap().identifier,
+                "RunMat:first"
+            );
+            self.drops.set(self.drops.get() + 1);
+            panic!("child destructor panic");
+        }
+    }
+
     #[test]
     fn interleaved_poll_and_drop_never_leak_catch_authority() {
         let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
@@ -407,6 +437,33 @@ mod tests {
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         assert!(ready.as_mut().poll(&mut context).is_ready());
+        assert_eq!(drops.get(), 1);
+        assert!(runtime.active_catch_exception().is_none());
+        drop(ready);
+        assert_eq!(drops.get(), 1);
+    }
+
+    #[test]
+    fn unboxed_child_destructor_unwinds_scope_without_a_second_drop() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let drops = Rc::new(Cell::new(0));
+        let mut ready = Box::pin(runtime.scope_active_catch_unboxed_shared(
+            Some(Rc::new(MException::new(
+                "RunMat:first".into(),
+                "first".into(),
+            ))),
+            PanicOnDrop {
+                runtime: runtime.clone(),
+                drops: drops.clone(),
+                _pin: PhantomPinned,
+            },
+        ));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ready.as_mut().poll(&mut context)
+        }));
+        assert!(result.is_err());
         assert_eq!(drops.get(), 1);
         assert!(runtime.active_catch_exception().is_none());
         drop(ready);
