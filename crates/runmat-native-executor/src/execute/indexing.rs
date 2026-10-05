@@ -6,7 +6,7 @@ use runmat_runtime::indexing::selectors::{
 };
 use runmat_runtime::indexing::write_slice;
 use runmat_runtime::object::dispatch::{
-    invoke_resolved_object_index_path_method, resolve_object_index_protocol,
+    invoke_resolved_object_index_path_method_in_context, resolve_object_index_protocol,
 };
 use runmat_runtime::object::indexing::{
     ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
@@ -15,10 +15,18 @@ use runmat_runtime::RuntimeError;
 use runmat_types::{IndexKind, IndexResultContext};
 use runmat_value::{LogicalArray, SymbolicArray, Value};
 
+use crate::memory::ScopedValueRoots;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::operand::materialize_operand;
 use super::state::HostState;
+
+fn object_protocol_roots(base: &Value, selectors: &MaterializedSelectors) -> Vec<Value> {
+    let mut roots = Vec::with_capacity(selectors.numeric.len() + 1);
+    roots.push(base.clone());
+    roots.extend(selectors.numeric.iter().cloned());
+    roots
+}
 
 fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<ObjectIndexSelector> {
     if selectors.end_mask != 0 {
@@ -53,8 +61,31 @@ pub(super) fn read(
     indexing: &MirIndexing,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
+    let embedded = state.enter_embedded_call();
+    let result = read_inner(state, base, indexing, requested_outputs, embedded.as_ref());
+    if let Ok(outputs) = &result {
+        state.cache_embedded_call(embedded.as_ref(), outputs);
+    }
+    let finished = state.finish_embedded_call(embedded.as_ref());
+    match (result, finished) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outputs), Ok(())) => Ok(outputs),
+    }
+}
+
+fn read_inner(
+    state: &mut HostState,
+    base: &MirOperand,
+    indexing: &MirIndexing,
+    requested_outputs: usize,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Vec<Value>> {
+    if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
+        return Ok(outputs);
+    }
     let base = materialize_operand(state, base)?;
-    read_value(state, base, indexing, requested_outputs)
+    read_value_inner(state, base, indexing, requested_outputs, embedded)
 }
 
 pub(super) fn read_value(
@@ -63,9 +94,48 @@ pub(super) fn read_value(
     indexing: &MirIndexing,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
+    let embedded = state.enter_embedded_call();
+    let result = read_value_inner_with_completion(
+        state,
+        base,
+        indexing,
+        requested_outputs,
+        embedded.as_ref(),
+    );
+    if let Ok(outputs) = &result {
+        state.cache_embedded_call(embedded.as_ref(), outputs);
+    }
+    let finished = state.finish_embedded_call(embedded.as_ref());
+    match (result, finished) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outputs), Ok(())) => Ok(outputs),
+    }
+}
+
+fn read_value_inner_with_completion(
+    state: &mut HostState,
+    base: Value,
+    indexing: &MirIndexing,
+    requested_outputs: usize,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Vec<Value>> {
+    if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
+        return Ok(outputs);
+    }
+    read_value_inner(state, base, indexing, requested_outputs, embedded)
+}
+
+fn read_value_inner(
+    state: &mut HostState,
+    base: Value,
+    indexing: &MirIndexing,
+    requested_outputs: usize,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Vec<Value>> {
     let selectors = materialize_selectors(state, &base, indexing)?;
     match indexing.kind {
-        IndexKind::Paren => read_paren(state, base, selectors, requested_outputs),
+        IndexKind::Paren => read_paren(state, base, selectors, requested_outputs, embedded),
         IndexKind::Brace => read_brace(base, selectors, indexing, requested_outputs),
     }
 }
@@ -77,6 +147,36 @@ pub(super) fn assign(
     rhs: Value,
     delete: bool,
 ) -> NativeExecutorResult<Value> {
+    let embedded = state.enter_embedded_call();
+    let result =
+        assign_inner_with_completion(state, base, indexing, rhs, delete, embedded.as_ref());
+    if let Ok(value) = &result {
+        state.cache_embedded_call(embedded.as_ref(), std::slice::from_ref(value));
+    }
+    let finished = state.finish_embedded_call(embedded.as_ref());
+    match (result, finished) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
+fn assign_inner_with_completion(
+    state: &mut HostState,
+    base: Value,
+    indexing: &MirIndexing,
+    rhs: Value,
+    delete: bool,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Value> {
+    if let Some(mut values) = super::call_suspension::take_completed(state, embedded)? {
+        if values.len() != 1 {
+            return Err(NativeExecutorError::Host(
+                "completed object assignment did not produce one receiver".into(),
+            ));
+        }
+        return Ok(values.remove(0));
+    }
     let selectors = materialize_selectors(state, &base, indexing)?;
     if indexing.kind == IndexKind::Brace {
         return assign_brace(base, selectors, rhs, delete);
@@ -90,18 +190,31 @@ pub(super) fn assign(
             let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
                 &selectors,
             )?));
-            return super::sync::complete(
-                &state.runtime,
-                runmat_runtime::object::protocol::invoke_resolved_object_assignment(
-                    &method,
-                    base,
-                    path,
-                    runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?
-                        .into_values(),
-                ),
-                "object indexed assignment",
-            )
-            .finish(state);
+            let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs.clone())?
+                .into_values();
+            let mut roots = object_protocol_roots(&base, &selectors);
+            roots.push(rhs);
+            let roots = ScopedValueRoots::register(roots, "native_pending_object_index_write")?;
+            let runtime = state.runtime.clone();
+            let mut outputs = super::call_suspension::begin(
+                state,
+                embedded.cloned(),
+                Box::pin(async move {
+                    let _roots = roots;
+                    let value = runtime
+                        .scope(runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
+                            &runtime, &method, base, path, values,
+                        ))
+                        .await?;
+                    Ok(vec![value])
+                }),
+            )?;
+            if outputs.len() != 1 {
+                return Err(NativeExecutorError::Host(
+                    "object assignment did not produce one receiver".into(),
+                ));
+            }
+            return Ok(outputs.remove(0));
         }
         if let Some(indices) = object_scalar_indices(state, &selectors)? {
             return runmat_runtime::indexing::object::assign_scalar_indices(
@@ -421,6 +534,7 @@ fn read_paren(
     base: Value,
     selectors: MaterializedSelectors,
     requested_outputs: usize,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
 ) -> NativeExecutorResult<Vec<Value>> {
     if is_function_value(&base) {
         if selectors.colon_mask != 0 || selectors.end_mask != 0 {
@@ -455,18 +569,28 @@ fn read_paren(
             let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
                 &selectors,
             )?));
-            let value = super::sync::complete(
-                &state.runtime,
-                invoke_resolved_object_index_path_method(
-                    &resolution,
-                    base,
-                    path,
-                    requested_outputs,
-                ),
-                "object indexed read",
-            )
-            .finish(state)?;
-            return normalize_sequence_outputs(value, requested_outputs);
+            let roots = ScopedValueRoots::register(
+                object_protocol_roots(&base, &selectors),
+                "native_pending_object_index_read",
+            )?;
+            let runtime = state.runtime.clone();
+            return super::call_suspension::begin(
+                state,
+                embedded.cloned(),
+                Box::pin(async move {
+                    let _roots = roots;
+                    let sequence = runtime
+                        .scope(invoke_resolved_object_index_path_method_in_context(
+                            &runtime,
+                            &resolution,
+                            base,
+                            path,
+                            requested_outputs,
+                        ))
+                        .await?;
+                    normalize_sequence_outputs(sequence, requested_outputs)
+                }),
+            );
         }
     }
     let plan = super::sync::complete(
