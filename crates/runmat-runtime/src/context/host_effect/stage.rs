@@ -487,13 +487,11 @@ pub fn try_admit_host_effect_stage(
     let _available = resources
         .memory_available_bytes
         .ok_or_else(|| insufficient("staged scan requires an installed finite memory budget"))?;
-    let managed = parallel
-        .managed_host_effect_ledger()
-        .ok_or_else(|| insufficient("staged scan has no managed allocation owner"))?;
-    let before = managed.snapshot();
-    if !before.current || before.epoch != resources.epoch {
-        return Err(stale_resource());
-    }
+    // A complete direct-admission service may decline staging. Capture any
+    // managed owner before asking for a stage, but require it only if a stage
+    // is actually offered.
+    let managed = parallel.managed_host_effect_ledger();
+    let before = managed.as_ref().map(ManagedHostEffectLedger::snapshot);
     let resource_service = runtime
         .service_ports()
         .host_effect_resources()
@@ -501,6 +499,12 @@ pub fn try_admit_host_effect_stage(
     let Some(admission) = resource_service.stage_admission(&request, runtime) else {
         return Ok(None);
     };
+    let managed =
+        managed.ok_or_else(|| insufficient("staged scan has no managed allocation owner"))?;
+    let before = before.expect("managed owner has a captured snapshot");
+    if !before.current || before.epoch != resources.epoch {
+        return Err(stale_resource());
+    }
     let ResourceByteBound::Known(scratch_bytes) = admission.evidence.scratch_bytes else {
         return Err(insufficient("staged scan peak is unavailable"));
     };

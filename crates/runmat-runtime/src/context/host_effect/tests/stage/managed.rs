@@ -72,6 +72,55 @@ fn managed_runtime(
 }
 
 #[test]
+fn direct_only_finite_service_may_decline_stage_without_a_managed_owner() {
+    let placement = Rc::new(Placement::default());
+    let runtime = runtime_context(
+        placement.clone(),
+        Some(bounds(
+            ResourceByteBound::Known(4),
+            ResourceByteBound::Known(8),
+        )),
+        Some(12),
+    );
+    assert!(
+        try_admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+            .expect("direct-only service may decline staging")
+            .is_none()
+    );
+    let receipt = select_host_effect(Some(&runtime), request(HostEffectOutput::ReturnedValue))
+        .expect("direct service's complete evidence is still selected")
+        .expect("one complete direct route");
+    assert_eq!(placement.selections.get(), 1);
+    receipt.finish(WholeWorkObservationOutcome::Success);
+}
+
+#[test]
+fn offered_stage_without_parallel_managed_owner_fails_before_selection() {
+    let stage_ledger = ManagedHostEffectLedger::new(12);
+    let placement = Rc::new(Placement::default());
+    placement.revision_available.set(true);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(placement.clone())
+                .with_parallel(Rc::new(Parallel(Some(12))))
+                .with_host_effect_resources(Rc::new(ManagedResources {
+                    ledger: stage_ledger.clone(),
+                    revision: Digest::sha256(b"managed-stage-v1"),
+                })),
+        );
+    let error = try_admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .err()
+        .expect("offered stage requires the same installed managed owner");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(placement.selections.get(), 0);
+    assert_eq!(stage_ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn foreign_stage_ledger_rejects_before_selection_and_releases_its_charge() {
     let parallel_ledger = ManagedHostEffectLedger::new(12);
     let stage_ledger = ManagedHostEffectLedger::new(12);
