@@ -68,36 +68,52 @@ fn evaluate_inner(
                 return Err(runmat_runtime::runtime_error::semantic_error(
                     "NativeUnaryArity",
                     "unary arithmetic requires one operand",
-                ));
+                )
+                .into());
             };
-            return runmat_runtime::unary_arithmetic::evaluate_in_context(
+            let value = runmat_runtime::unary_arithmetic::evaluate_in_context(
                 Some(&runtime),
                 operation,
                 argument.clone(),
             )
-            .await;
+            .await?;
+            return Ok(vec![value]);
         }
         if arguments.len() == 2
             && !matches!(arguments[0], Value::Object(_) | Value::HandleObject(_))
             && matches!(arguments[1], Value::Object(_) | Value::HandleObject(_))
         {
-            return runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered_in_context(
+            let value = runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered_in_context(
                 &runtime,
                 arguments[0].clone(),
                 arguments[1].clone(),
                 name.display_name(),
             )
-            .await;
+            .await?;
+            return Ok(vec![value]);
         }
-        runmat_runtime::call_builtin_async_in_context(&runtime, name.display_name(), &arguments)
-            .await
+        let result = runmat_runtime::call_builtin_async_with_outputs_in_context(
+            &runtime,
+            name.display_name(),
+            &arguments,
+            1,
+        )
+        .await?;
+        let outputs =
+            runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?.into_values();
+        let [value] = <[Value; 1]>::try_from(outputs).map_err(|_| {
+            crate::NativeExecutorError::Host(
+                "operator evaluation requires exactly one output".into(),
+            )
+        })?;
+        Ok(vec![value])
     };
     let scoped_runtime = state.runtime.clone();
     let values = super::call_suspension::begin_with_roots(
         state,
         embedded.cloned(),
         retained_roots,
-        Box::pin(async move { Ok(vec![scoped_runtime.scope(future).await?]) }),
+        Box::pin(async move { scoped_runtime.scope(future).await }),
     )?;
     let [value] = <[Value; 1]>::try_from(values).map_err(|_| {
         crate::NativeExecutorError::Host("native operator did not produce exactly one value".into())
