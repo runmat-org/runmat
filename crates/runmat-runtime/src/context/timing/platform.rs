@@ -22,6 +22,10 @@ impl RuntimeTimingService for PlatformTimingService {
             .unwrap_or(Duration::ZERO)
     }
 
+    fn wall_time_since_epoch(&self) -> Duration {
+        runmat_time::duration_since_epoch()
+    }
+
     fn process_cpu_seconds(&self) -> Option<f64> {
         process_cpu_seconds()
     }

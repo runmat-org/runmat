@@ -685,6 +685,9 @@ pub(crate) mod tests {
             fn monotonic_elapsed(&self) -> Duration {
                 Duration::ZERO
             }
+            fn wall_time_since_epoch(&self) -> Duration {
+                Duration::ZERO
+            }
             fn process_cpu_seconds(&self) -> Option<f64> {
                 Some(0.0)
             }

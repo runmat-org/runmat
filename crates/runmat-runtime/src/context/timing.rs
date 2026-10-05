@@ -28,6 +28,10 @@ pub trait RuntimeTimingService {
     /// Monotonic elapsed time in this service's clock domain.
     fn monotonic_elapsed(&self) -> Duration;
 
+    /// Wall-clock time since the Unix epoch for externally visible event stamps.
+    /// Scheduling must use `monotonic_elapsed`, never this adjustable clock.
+    fn wall_time_since_epoch(&self) -> Duration;
+
     /// Process CPU seconds; browser hosts must report unavailable, not wall time.
     fn process_cpu_seconds(&self) -> Option<f64>;
 
@@ -112,6 +116,10 @@ mod tests {
             self.0.get()
         }
 
+        fn wall_time_since_epoch(&self) -> Duration {
+            Duration::from_secs(1_700_000_000) + self.0.get()
+        }
+
         fn process_cpu_seconds(&self) -> Option<f64> {
             Some(17.0)
         }
@@ -131,6 +139,10 @@ mod tests {
         let first_clone = first.clone();
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
             .with_service_ports(services);
+        assert_eq!(
+            first.service_ports().timing().wall_time_since_epoch(),
+            Duration::from_secs(1_700_000_003)
+        );
         let token = first
             .state()
             .timing
