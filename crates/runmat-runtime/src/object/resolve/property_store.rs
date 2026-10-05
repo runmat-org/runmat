@@ -71,6 +71,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
 }
 
 pub(super) async fn store_value(
+    context: Option<&crate::context::RuntimeContext>,
     mut obj: ObjectInstance,
     field: String,
     rhs: Value,
@@ -79,9 +80,23 @@ pub(super) async fn store_value(
 ) -> Result<Value, RuntimeError> {
     match admit(&obj, &field, caller)? {
         Store::Dependent => {
-            call_object_property_setter_with_outputs(Value::Object(obj), &field, rhs, 1)
-                .await
-                .and_then(require_single_sequence)
+            let outputs = match context {
+                Some(context) => {
+                    crate::object::dispatch::call_object_property_setter_with_outputs_in_context(
+                        context,
+                        Value::Object(obj),
+                        &field,
+                        rhs,
+                        1,
+                    )
+                    .await
+                }
+                None => {
+                    call_object_property_setter_with_outputs(Value::Object(obj), &field, rhs, 1)
+                        .await
+                }
+            }?;
+            require_single_sequence(outputs)
         }
         Store::Stored => {
             if let Some(old) = obj.properties.get(&field) {
@@ -117,6 +132,7 @@ fn target_object<'a>(
 }
 
 pub(super) async fn store_handle(
+    context: Option<&crate::context::RuntimeContext>,
     handle: HandleRef,
     field: String,
     rhs: Value,
@@ -175,13 +191,27 @@ pub(super) async fn store_handle(
             // Handle setters have no replacement output. Reentrant changes are
             // already published by their own stores and must never be replaced
             // with a pre-call snapshot (which would also be NaN-unsafe).
-            call_object_property_setter_with_outputs(
-                Value::HandleObject(handle.clone()),
-                &field,
-                rhs,
-                0,
-            )
-            .await?;
+            match context {
+                Some(context) => {
+                    crate::object::dispatch::call_object_property_setter_with_outputs_in_context(
+                        context,
+                        Value::HandleObject(handle.clone()),
+                        &field,
+                        rhs,
+                        0,
+                    )
+                    .await?;
+                }
+                None => {
+                    call_object_property_setter_with_outputs(
+                        Value::HandleObject(handle.clone()),
+                        &field,
+                        rhs,
+                        0,
+                    )
+                    .await?;
+                }
+            }
             runmat_gc::gc_with_value(&handle.target, |target| {
                 target_object(&handle, target).map(|_| ())
             })

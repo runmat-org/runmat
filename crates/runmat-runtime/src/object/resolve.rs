@@ -160,14 +160,29 @@ async fn load_scalar_member_with_context(
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
                     crate::object::indexing::ObjectSubscript::member(field),
                 );
-                return crate::object::protocol::invoke_resolved_object_protocol(
-                    &crate::object::protocol::ProtocolResolution::Method(method),
-                    base,
-                    path,
-                    1,
-                )
-                .await
-                .and_then(require_single_sequence);
+                let resolution = crate::object::protocol::ProtocolResolution::Method(method);
+                let outputs = match context {
+                    Some(context) => {
+                        crate::object::protocol::invoke_resolved_object_protocol_in_context(
+                            context,
+                            &resolution,
+                            base,
+                            path,
+                            1,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::object::protocol::invoke_resolved_object_protocol(
+                            &resolution,
+                            base,
+                            path,
+                            1,
+                        )
+                        .await
+                    }
+                }?;
+                return require_single_sequence(outputs);
             }
             if let Some((p, owner)) = crate::class_registry::lookup_property(
                 &obj.class_name,
@@ -196,13 +211,26 @@ async fn load_scalar_member_with_context(
                     )
                     .is_some()
                     {
-                        return call_object_property_getter_with_outputs(
-                            Value::Object(obj.clone()),
-                            &field,
-                            1,
-                        )
-                        .await
-                        .and_then(require_single_sequence);
+                        let outputs = match context {
+                            Some(context) => {
+                                crate::object::dispatch::call_object_property_getter_with_outputs_in_context(
+                                    context,
+                                    Value::Object(obj.clone()),
+                                    &field,
+                                    1,
+                                )
+                                .await
+                            }
+                            None => {
+                                call_object_property_getter_with_outputs(
+                                    Value::Object(obj.clone()),
+                                    &field,
+                                    1,
+                                )
+                                .await
+                            }
+                        }?;
+                        return require_single_sequence(outputs);
                     }
                 }
             }
@@ -256,14 +284,29 @@ async fn load_scalar_member_with_context(
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
                     crate::object::indexing::ObjectSubscript::member(field),
                 );
-                return crate::object::protocol::invoke_resolved_object_protocol(
-                    &crate::object::protocol::ProtocolResolution::Method(method),
-                    base,
-                    path,
-                    1,
-                )
-                .await
-                .and_then(require_single_sequence);
+                let resolution = crate::object::protocol::ProtocolResolution::Method(method);
+                let outputs = match context {
+                    Some(context) => {
+                        crate::object::protocol::invoke_resolved_object_protocol_in_context(
+                            context,
+                            &resolution,
+                            base,
+                            path,
+                            1,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::object::protocol::invoke_resolved_object_protocol(
+                            &resolution,
+                            base,
+                            path,
+                            1,
+                        )
+                        .await
+                    }
+                }?;
+                return require_single_sequence(outputs);
             }
             crate::builtins::structs::core::getfield::get_member_value(
                 Value::HandleObject(handle),
@@ -481,7 +524,7 @@ where
                     }
                 };
             }
-            property_store::store_value(obj, field, rhs, caller_function_name, &mut on_write).await
+            property_store::store_value(context, obj, field, rhs, caller_function_name, &mut on_write).await
         }
         Value::ClassRef(cls) => {
             if let Some((p, owner)) = crate::class_registry::lookup_property(
@@ -542,7 +585,7 @@ where
                     }
                 };
             }
-            property_store::store_handle(handle, field, rhs, caller_function_name).await
+            property_store::store_handle(context, handle, field, rhs, caller_function_name).await
         }
         Value::Listener(_) => Err(crate::build_runtime_error(
             "setfield: listeners do not support direct field assignment",

@@ -376,6 +376,24 @@ pub async fn call_object_property_getter_with_outputs(
     .await
 }
 
+pub async fn call_object_property_getter_with_outputs_in_context(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    field: &str,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_method_or_member_index_with_outputs_in_context(
+        runtime,
+        base,
+        CallableIdentity::Method(MethodId(crate::object_property_getter_name(field))),
+        vec![],
+        requested_outputs,
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
+}
+
 pub async fn call_object_property_setter_with_outputs(
     base: Value,
     field: &str,
@@ -387,6 +405,25 @@ pub async fn call_object_property_setter_with_outputs(
         crate::object_property_setter_name(field),
         vec![value],
         requested_outputs,
+    )
+    .await
+}
+
+pub async fn call_object_property_setter_with_outputs_in_context(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    field: &str,
+    value: Value,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_method_or_member_index_with_outputs_in_context(
+        runtime,
+        base,
+        CallableIdentity::Method(MethodId(crate::object_property_setter_name(field))),
+        vec![value],
+        requested_outputs,
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
     )
     .await
 }
