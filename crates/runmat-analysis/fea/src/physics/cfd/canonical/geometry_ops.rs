@@ -88,9 +88,6 @@ pub(super) fn gradient(
                     (FaceBoundary::Velocity { value, .. }, Some(k)) => {
                         (sub(f.centroid_m, cell.centroid_m), value[k] - values[c])
                     }
-                    (FaceBoundary::PressureOutlet { pressure, .. }, None) => {
-                        (sub(f.centroid_m, cell.centroid_m), pressure - values[c])
-                    }
                     _ => (scale(f.owner_area_vector_m2, 1.0 / f.area_m2), 0.0),
                 }
             };
@@ -177,13 +174,12 @@ pub(super) fn face_pressure_offset(
     let f = &p.topology.faces[i];
     Ok(if let Some(n) = f.neighbor {
         let (_, _, w) = face_geometry(p, f)?;
-        let pp = pressure[f.owner] - p.pressure_reference_pa[f.owner]
+        let pp = pressure[f.owner]
             + dot(
                 g[f.owner],
                 sub(f.centroid_m, p.topology.cells[f.owner].centroid_m),
             );
-        let pn = pressure[n] - p.pressure_reference_pa[n]
-            + dot(g[n], sub(f.centroid_m, p.topology.cells[n].centroid_m));
+        let pn = pressure[n] + dot(g[n], sub(f.centroid_m, p.topology.cells[n].centroid_m));
         w * pp + (1.0 - w) * pn
     } else {
         match p.boundaries[i] {
@@ -191,7 +187,7 @@ pub(super) fn face_pressure_offset(
                 pressure - p.pressure_reference_pa[f.owner]
             }
             _ => {
-                pressure[f.owner] - p.pressure_reference_pa[f.owner]
+                pressure[f.owner]
                     + dot(
                         g[f.owner],
                         sub(f.centroid_m, p.topology.cells[f.owner].centroid_m),

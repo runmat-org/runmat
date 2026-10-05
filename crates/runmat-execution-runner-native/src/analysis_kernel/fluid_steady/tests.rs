@@ -16,10 +16,23 @@ use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::fixtures;
 
 mod chain;
+mod pressure_state;
 
 fn task(
     nonzero: bool,
     chunk: usize,
+) -> (
+    FluidSteadyWorkload,
+    SolverMeshArtifact,
+    PreparedFluidSteadyTask,
+) {
+    task_with_pressure(nonzero, chunk, 0.0)
+}
+
+fn task_with_pressure(
+    nonzero: bool,
+    chunk: usize,
+    reference_pa: f64,
 ) -> (
     FluidSteadyWorkload,
     SolverMeshArtifact,
@@ -88,7 +101,7 @@ fn task(
         boundary_id: "outlet".into(),
         target: RegionTarget::boundary("slab_right"),
         operator: BoundaryOperator::FluidOutletPressure {
-            value: PrescribedValue::Constant(Pressure::new(0.0)),
+            value: PrescribedValue::Constant(Pressure::new(reference_pa)),
         },
     });
     for constraint in &mut model.constraints {

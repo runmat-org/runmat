@@ -92,6 +92,7 @@ pub(super) fn derive(
     Ok(stencils)
 }
 
+/// Reconstruct the gradient of original component-relative pressure.
 pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[f64]) -> Result<Vec<V>, Error> {
     let mut result = Vec::with_capacity(values.len());
     for (c, stencil) in p.pressure_stencils.iter().enumerate() {
@@ -103,7 +104,7 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[f64]) -> Result<
                     let FaceBoundary::PressureOutlet { pressure, .. } = p.boundaries[i] else {
                         return Err(Error::Invalid("pressure outlet stencil authority"));
                     };
-                    pressure
+                    pressure - p.pressure_reference_pa[c]
                 }
             };
             gradient = add(gradient, scale(*weight, value - values[c]));

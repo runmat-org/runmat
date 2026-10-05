@@ -6,7 +6,7 @@ use super::{
 pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResult, Error> {
     let n = p.topology.cells.len();
     let mut u = vec![[0.0; 3]; n];
-    let mut physical_pressure = p.pressure_reference_pa.clone();
+    let mut pressure_fluctuation = vec![0.0; n];
     let mut q = pressure::h_flux(p, &u, &vec![[0.0; 3]; n])?;
     let mut linear_iterations = 0;
     let mut last = [f64::INFINITY; 5];
@@ -15,7 +15,7 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
         let m = momentum::assemble(
             p,
             &u,
-            &physical_pressure,
+            &pressure_fluctuation,
             &q,
             momentum::MomentumMode::SolverTrial,
         )?;
@@ -32,8 +32,8 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
         let rau = (0..n)
             .map(|c| p.topology.cells[c].volume_m3 / m.diagonal[c])
             .collect::<Vec<_>>();
-        let gp = gradient(p, &physical_pressure, None)?;
-        let old_force = pressure_force(p, &physical_pressure, &gp)?;
+        let gp = gradient(p, &pressure_fluctuation, None)?;
+        let old_force = pressure_force(p, &pressure_fluctuation, &gp)?;
         let pressure_term = (0..n)
             .map(|c| scale(old_force[c], rau[c] / p.topology.cells[c].volume_m3))
             .collect::<Vec<_>>();
@@ -42,21 +42,21 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
             .collect::<Vec<_>>();
         let qh = pressure::h_flux(p, &predicted, &pressure_term)?;
         let rf = pressure::coefficients(p, &rau)?;
-        let (new_pressure, new_q, count) = pressure::solve(p, &qh, &rf, &physical_pressure)?;
+        let (new_pressure, new_q, count) = pressure::solve(p, &qh, &rf, &pressure_fluctuation)?;
         linear_iterations += count;
         let mut pressure_defect = Vec::new();
         if p.policy.fixed_point_acceleration.is_some() {
             pressure_defect.reserve(n);
         }
         for c in 0..n {
-            let delta = p.policy.pressure_relaxation * (new_pressure[c] - physical_pressure[c]);
-            physical_pressure[c] += delta;
+            let delta = p.policy.pressure_relaxation * (new_pressure[c] - pressure_fluctuation[c]);
+            pressure_fluctuation[c] += delta;
             if p.policy.fixed_point_acceleration.is_some() {
                 pressure_defect.push(delta);
             }
         }
-        let gp = gradient(p, &physical_pressure, None)?;
-        let force = pressure_force(p, &physical_pressure, &gp)?;
+        let gp = gradient(p, &pressure_fluctuation, None)?;
+        let force = pressure_force(p, &pressure_fluctuation, &gp)?;
         u = (0..n)
             .map(|c| {
                 sub(
@@ -80,12 +80,12 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
             acceleration_history = None;
             continue;
         }
-        let residual = recovery::evaluate(p, &u, &physical_pressure, &q)?;
+        let residual = recovery::evaluate(p, &u, &pressure_fluctuation, &q)?;
         let residual = super::acceleration::consider(
             p,
             super::acceleration::Fields {
                 velocity: &mut u,
-                pressure: &mut physical_pressure,
+                pressure: &mut pressure_fluctuation,
                 flux: &mut q,
             },
             pressure_defect,
@@ -104,11 +104,24 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
                 .fold(0.0, f64::max),
         ];
         if residual.accepted(p.policy.physical_relative_tolerance) {
+            let pressure_pa = pressure_fluctuation
+                .iter()
+                .zip(&p.pressure_reference_pa)
+                .map(|(value, reference)| {
+                    let absolute = value + reference;
+                    if absolute.is_finite() {
+                        Ok(absolute)
+                    } else {
+                        Err(Error::Invalid("nonfinite absolute pressure projection"))
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             return Ok(CanonicalFluidResult {
                 numerical_input_identity: p.numerical_input_identity,
                 authored_authority_identity: p.authored_authority_identity,
                 velocity_m_per_s: u,
-                pressure_pa: physical_pressure,
+                pressure_pa,
+                pressure_fluctuation_pa: pressure_fluctuation,
                 face_volume_flux_m3_per_s: q,
                 outer_iterations: iteration,
                 linear_iterations,

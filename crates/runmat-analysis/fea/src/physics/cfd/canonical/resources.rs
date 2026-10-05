@@ -250,7 +250,9 @@ impl CanonicalFluidReservation {
         )?;
         // Current component/reference, original action, defect and correction
         // coexist with the existing shared Krylov peak in a correction solve.
-        let mut bytes = add(baseline_bytes, mul(n, 4 * 8)?)?;
+        // Original governing fluctuation coexists with its absolute-Pa output projection.
+        // Charge the extra retained vector with the same doubled payload allowance.
+        let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 16)?, 48)?)?;
         if p.fixed_point_acceleration.is_some() {
             // Two images/residuals, U/p/q proposal and shared coefficient workspace;
             // one additional complete physical residual/face-force evaluation.

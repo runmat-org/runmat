@@ -459,6 +459,7 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
     for path in [
         vec!["original", "velocity_m_per_s", "0", "0"],
         vec!["original", "pressure_pa", "0"],
+        vec!["original", "pressure_fluctuation_pa", "0"],
         vec!["original", "face_volume_flux_m3_per_s", "0"],
         vec![
             "original",
@@ -490,6 +491,26 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
             Digest::sha256(&bytes),
             &workload,
             &mesh
+        )
+        .is_err());
+    }
+    for legacy_schema in [false, true] {
+        let mut wire = serde_json::to_value(&result).unwrap();
+        if legacy_schema {
+            wire["data"]["schema_version"] = serde_json::json!(1);
+        } else {
+            wire["data"]["original"]
+                .as_object_mut()
+                .unwrap()
+                .remove("pressure_fluctuation_pa");
+        }
+        let bytes =
+            encode_contract(RESULT_PREFIX, "steady-fluid-retained-result", &wire, LIMITS).unwrap();
+        assert!(FluidSteadySolverResult::from_canonical_bytes_for(
+            &bytes,
+            Digest::sha256(&bytes),
+            &workload,
+            &mesh,
         )
         .is_err());
     }

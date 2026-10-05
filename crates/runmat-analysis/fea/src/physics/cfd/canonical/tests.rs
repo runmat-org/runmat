@@ -4,6 +4,7 @@ mod acceleration;
 mod authority;
 mod fixture;
 mod linear_correction;
+mod pressure_reference;
 mod reference;
 
 use super::*;
@@ -116,7 +117,10 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
         .topology
         .cells
         .iter()
-        .map(|c| reference::pressure(f.reference, c.centroid_m, false))
+        .enumerate()
+        .map(|(i, c)| {
+            reference::pressure(f.reference, c.centroid_m, false) - p.pressure_reference_pa[i]
+        })
         .collect::<Vec<_>>();
     let gradients = geometry_ops::gradient(&p, &samples, None).unwrap();
     for g in gradients {

@@ -98,6 +98,7 @@ fn artifact_profile(
         || counts.len() != 3
         || original.velocity_m_per_s.len() != counts[0]
         || original.pressure_pa.len() != counts[1]
+        || original.pressure_fluctuation_pa.len() != counts[1]
         || original.face_volume_flux_m3_per_s.len() != counts[2]
     {
         return Err(invalid("fluid native profile original cardinality"));
@@ -260,6 +261,7 @@ mod tests {
             numerical_input_identity: Digest::from_bytes([1; 32]),
             authored_authority_identity: Digest::from_bytes([2; 32]),
             velocity_m_per_s: vec![[1.0, -2.0, 3.0]; 2],
+            pressure_fluctuation_pa: vec![4.0; 2],
             pressure_pa: vec![4.0; 2],
             face_volume_flux_m3_per_s: vec![5.0; 7],
             outer_iterations: 1,

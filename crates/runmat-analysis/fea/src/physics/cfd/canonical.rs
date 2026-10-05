@@ -82,7 +82,11 @@ pub struct CanonicalFluidResult {
     pub authored_authority_identity: Digest,
     /// Metres per second, in source-bound canonical cell order.
     pub velocity_m_per_s: Vec<[f64; 3]>,
+    /// Original governing pressure relative to the source-bound component outlet.
+    /// This is retained independently of the rounded absolute-pressure projection.
+    pub pressure_fluctuation_pa: Vec<f64>,
     /// Physical pressure in pascals, NOT kinematic pressure.
+    /// Exact f64 projection reference + original fluctuation; never restart authority.
     pub pressure_pa: Vec<f64>,
     /// Volume flux m^3/s, outward from the canonical face owner.
     pub face_volume_flux_m3_per_s: Vec<f64>,
@@ -297,7 +301,7 @@ impl<'a> CanonicalFluidProblem<'a> {
 
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(
-        b"runmat-canonical-fluid/v1\0",
+        b"runmat-canonical-fluid/v2\0",
         domain,
         value,
         runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32),

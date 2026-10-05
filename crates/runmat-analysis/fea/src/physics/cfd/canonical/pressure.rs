@@ -1,4 +1,5 @@
 //! Compact pressure Laplacian with geometric nonorthogonal correction.
+//! All numerical pressure arrays are original component-relative Pa, never absolute Pa.
 use super::{
     boundary::FaceBoundary, geometry_ops::*, linear, CanonicalFluidError as Error,
     CanonicalFluidProblem,
@@ -79,7 +80,8 @@ pub(super) fn corrected_flux(
                 match p.boundaries[i] {
                     FaceBoundary::Velocity { .. } => return Ok(qh[i]),
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
-                        alpha * (pb - pressure[f.owner]) + dot(gp[f.owner], tangent)
+                        alpha * ((pb - p.pressure_reference_pa[f.owner]) - pressure[f.owner])
+                            + dot(gp[f.owner], tangent)
                     }
                     _ => return Err(Error::Invalid("missing face law")),
                 }
@@ -130,17 +132,8 @@ pub(super) fn solve(
             }
         }
         let a = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
-        let current = pressure
-            .iter()
-            .zip(&p.pressure_reference_pa)
-            .map(|(v, r)| v - r)
-            .collect::<Vec<_>>();
-        let (next, count) = linear::solve(p, &a, &b, &current)?;
-        pressure = next
-            .into_iter()
-            .zip(&p.pressure_reference_pa)
-            .map(|(v, r)| v + r)
-            .collect();
+        let (next, count) = linear::solve(p, &a, &b, &pressure)?;
+        pressure = next;
         linear_iterations += count;
     }
     let q = corrected_flux(p, qh, rf, &pressure)?;

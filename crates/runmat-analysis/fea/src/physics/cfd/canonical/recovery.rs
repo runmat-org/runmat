@@ -54,10 +54,25 @@ pub(super) fn recover(
     {
         return Err(Error::Invalid("retained iteration authority"));
     }
+    if original.pressure_pa.len() != p.topology.cells.len()
+        || original.pressure_fluctuation_pa.len() != p.topology.cells.len()
+        || original
+            .pressure_pa
+            .iter()
+            .zip(&original.pressure_fluctuation_pa)
+            .zip(&p.pressure_reference_pa)
+            .any(|((absolute, fluctuation), reference)| {
+                !absolute.is_finite()
+                    || !fluctuation.is_finite()
+                    || absolute.to_bits() != (reference + fluctuation).to_bits()
+            })
+    {
+        return Err(Error::Invalid("retained original pressure projection"));
+    }
     let r = evaluate(
         p,
         &original.velocity_m_per_s,
-        &original.pressure_pa,
+        &original.pressure_fluctuation_pa,
         &original.face_volume_flux_m3_per_s,
     )?;
     if !r.accepted(p.policy.physical_relative_tolerance) {
@@ -72,22 +87,28 @@ pub(super) fn recover(
 pub(super) fn evaluate(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
-    pressure_pa: &[f64],
+    pressure_fluctuation_pa: &[f64],
     q: &[f64],
 ) -> Result<CanonicalFluidResidual, Error> {
     let n = p.topology.cells.len();
     if u.len() != n
-        || pressure_pa.len() != n
+        || pressure_fluctuation_pa.len() != n
         || q.len() != p.topology.faces.len()
         || u.iter()
             .flatten()
-            .chain(pressure_pa)
+            .chain(pressure_fluctuation_pa)
             .chain(q)
             .any(|v| !v.is_finite())
     {
         return Err(Error::Invalid("retained field shape/value"));
     }
-    let m = momentum::assemble(p, u, pressure_pa, q, momentum::MomentumMode::Original)?;
+    let m = momentum::assemble(
+        p,
+        u,
+        pressure_fluctuation_pa,
+        q,
+        momentum::MomentumMode::Original,
+    )?;
     let mut rm = vec![[0.0; 3]; n];
     let mut momentum_norm = 0.0f64;
     let mut momentum_scale = 0.0f64;
@@ -103,14 +124,14 @@ pub(super) fn evaluate(
     let rau = (0..n)
         .map(|c| p.topology.cells[c].volume_m3 * p.policy.momentum_relaxation / m.diagonal[c])
         .collect::<Vec<_>>();
-    let gp = gradient(p, pressure_pa, None)?;
-    let pf = pressure_force(p, pressure_pa, &gp)?;
+    let gp = gradient(p, pressure_fluctuation_pa, None)?;
+    let pf = pressure_force(p, pressure_fluctuation_pa, &gp)?;
     let pressure_term = (0..n)
         .map(|c| scale(pf[c], rau[c] / p.topology.cells[c].volume_m3))
         .collect::<Vec<_>>();
     let qh = pressure::h_flux(p, u, &pressure_term)?;
     let rf = pressure::coefficients(p, &rau)?;
-    let constitutive = pressure::corrected_flux(p, &qh, &rf, pressure_pa)?;
+    let constitutive = pressure::corrected_flux(p, &qh, &rf, pressure_fluctuation_pa)?;
     let mut continuity = vec![0.0; n];
     let mut flux_scale = vec![0.0; n];
     let mut global_flux = 0.0;
@@ -142,7 +163,7 @@ pub(super) fn evaluate(
     let continuity_relative = local.iter().copied().fold(0.0, f64::max);
     let momentum_relative = relative(momentum_norm, momentum_scale);
     let flux_constitutive_relative = relative(discrepancy, discrepancy_scale);
-    let face_forces = super::flux_evidence::evaluate(p, u, pressure_pa, q)?;
+    let face_forces = super::flux_evidence::evaluate(p, u, pressure_fluctuation_pa, q)?;
     let mut independent_cells = vec![[0.0; 3]; n];
     let mut local_scales = vec![0.0; n];
     let mut global_momentum = [0.0; 3];

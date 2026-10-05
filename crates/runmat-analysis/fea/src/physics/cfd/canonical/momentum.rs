@@ -22,15 +22,15 @@ pub(super) enum MomentumMode {
 pub(super) fn assemble(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
-    pressure: &[f64],
+    pressure_fluctuation: &[f64],
     q: &[f64],
     mode: MomentumMode,
 ) -> Result<Momentum, Error> {
     let n = u.len();
     let mut a = linear::assembler(p, "incompressible-newtonian-momentum")?;
     let gu = velocity_gradients(p, u)?;
-    let gp = gradient(p, pressure, None)?;
-    let pf = pressure_force(p, pressure, &gp)?;
+    let gp = gradient(p, pressure_fluctuation, None)?;
+    let pf = pressure_force(p, pressure_fluctuation, &gp)?;
     let mut rhs = (0..n)
         .map(|c| {
             sub(

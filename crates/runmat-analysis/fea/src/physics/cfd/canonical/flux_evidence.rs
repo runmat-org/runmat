@@ -20,11 +20,11 @@ pub struct CanonicalFluidFaceForces {
 pub(super) fn evaluate(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
-    pressure: &[f64],
+    pressure_fluctuation: &[f64],
     q: &[f64],
 ) -> Result<CanonicalFluidFaceForces, Error> {
     let gu = velocity_gradients(p, u)?;
-    let gp = gradient(p, pressure, None)?;
+    let gp = gradient(p, pressure_fluctuation, None)?;
     let mut advective = Vec::with_capacity(q.len());
     let mut viscous = Vec::with_capacity(q.len());
     let mut pressure_force = Vec::with_capacity(q.len());
@@ -40,7 +40,7 @@ pub(super) fn evaluate(
                 _ => return Err(Error::Invalid("missing traction boundary")),
             }
         };
-        let pf = face_pressure_offset(p, i, pressure, &gp)?;
+        let pf = face_pressure_offset(p, i, pressure_fluctuation, &gp)?;
         advective.push(scale(
             face_upwind_velocity(p, i, u, q[i], &gu)?,
             p.density * q[i],

@@ -145,3 +145,34 @@ publication atomicity and the blocking release lane remain open. The older runti
 fluid and operation-contract selections failed their FSI success expectations on
 the retired directional fallback; no green coupled release lane is claimed.
 No Stage9 or production gate is promoted by this bounded cutover.
+
+## Original pressure-state authority (2026-10-05)
+
+The retained authored lifecycle uses zero-pressure outlets; its historical
+unaccelerated failure is not caused by atmospheric-reference cancellation.
+A separate scaled duct freezes accepted U/q, then adds101325Pa to its original
+pressure and outlet. With rho, mu and force all scaled by1e-5, the independent
+Fourier velocity/Re are unchanged. Absolute-pressure round trips lose7.0154e-12Pa
+and worsen worst-cell closure7.3232e-8→8.4818e-7 under unchanged fixture1e-7.
+
+The new implementation evolves and retains original governing pressure fluctuation
+relative to each source-bound connected-component outlet. Absolute physical pressure
+remains its finite f64 projection for field output, never restart/recovery authority.
+The sparse equation, gradient, face action, relaxation, acceleration and original
+recovery consume fluctuation directly. No pressure field is reconstructed or re-solved.
+Cold recovery checks exact projection, full inventory, original input identity,
+physical acceptance and retained residual. Result schema2/numerical identityv2 reject
+old or missing governing state; model72 charges the additional retained vector and
+shared structural codec profiling describes its actual numerical shape.
+
+Fresh0/101325Pa solves pass with byte-identical U/q/fluctuation and iteration counts.
+Cold state preserves it, and missing state, substituted absolute projection, foreign
+source and reconstructed rounded fluctuation reject. Final focused tests2/2PASS3.50s
+exercise both ordinary and safeguarded accelerated iteration. Canonical22/22PASS67.00s,
+portable result/profile/field/rejection15/15PASS.13s, shared resources170/170PASS10.71s
+and native5/5PASS3.23s cover worker output/receipt, cold original state, field recovery,
+observations and publication. Strict FEA/native lib/tests lint passes. Main architecture
+passes; isolated candidate retains two existing runtime rendering-size debts.
+These are scoped implementation checks, not production or measured-resource
+qualification. Mandatory spatial accuracy, transient/coupled/claimed execution
+and release gates remain open.
