@@ -206,6 +206,11 @@ pub(super) fn lower_function(
         region_boundaries.sort_by_key(|boundary| (boundary.point, boundary.region, boundary.kind));
         blocks.push(NativeBlock {
             id: checked_block(block.id, function)?,
+            catch_scopes: body
+                .catch_scopes
+                .get(&block.id)
+                .cloned()
+                .unwrap_or_default(),
             parameters,
             side_effect_epoch: *epoch_parameters.get(&block.id).expect("preallocated epoch"),
             region_boundaries,

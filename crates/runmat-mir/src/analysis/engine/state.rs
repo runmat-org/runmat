@@ -233,6 +233,7 @@ mod tests {
 
     fn empty_body() -> MirBody {
         MirBody {
+            catch_scopes: Default::default(),
             function: FunctionId(0),
             abi: FunctionAbi {
                 fixed_inputs: Vec::new(),

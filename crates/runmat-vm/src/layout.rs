@@ -470,6 +470,7 @@ mod tests {
             bodies: BTreeMap::from([(
                 function,
                 MirBody {
+                    catch_scopes: Default::default(),
                     function,
                     abi: assembly.functions[0].abi.clone(),
                     locals: vec![MirLocal {
@@ -568,6 +569,7 @@ mod tests {
             bodies: BTreeMap::from([(
                 function,
                 MirBody {
+                    catch_scopes: Default::default(),
                     function,
                     abi: assembly.functions[0].abi.clone(),
                     locals: vec![

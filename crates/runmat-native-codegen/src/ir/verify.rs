@@ -198,10 +198,44 @@ fn verify_function(
     }
 
     let mut all_values = BTreeSet::new();
+    let catch_scope_ids: BTreeSet<_> = function
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                &block.terminator.kind,
+                NativeTerminatorKind::TryCatch { .. }
+            )
+        })
+        .map(|block| runmat_mir::CatchScopeId(block.id.0 as usize))
+        .collect();
     let mut all_instructions = BTreeSet::new();
     let mut all_safepoints = BTreeSet::new();
     let mut actual_sites = BTreeSet::new();
     for block in &function.blocks {
+        if block
+            .catch_scopes
+            .iter()
+            .any(|scope| !catch_scope_ids.contains(scope))
+            || block.catch_scopes.windows(2).any(|pair| pair[0] == pair[1])
+        {
+            return Err(error(
+                "native.ir.catch_scope",
+                "block catch membership names a missing or repeated lexical scope",
+            ));
+        }
+        if let NativeTerminatorKind::TryCatch { catch_edge, .. } = &block.terminator.kind {
+            let expected = runmat_mir::CatchScopeId(block.id.0 as usize);
+            if !function.blocks.iter().any(|candidate| {
+                candidate.id == catch_edge.target
+                    && candidate.catch_scopes.last() == Some(&expected)
+            }) {
+                return Err(error(
+                    "native.ir.catch_scope",
+                    "catch target does not carry its MIR lexical catch scope",
+                ));
+            }
+        }
         if block.instructions.iter().any(|instruction| {
             instruction.site.point.block != block.id.0
                 || instruction.site.point.function != function.id

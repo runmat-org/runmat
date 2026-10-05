@@ -1,4 +1,5 @@
 use super::envelope::{decode_canonical_body, decode_envelope, encode_payload};
+use super::error::invalid;
 use super::{InterpreterPayloadError, InterpreterPayloadForm, InterpreterRevisionField};
 use crate::bytecode::{
     Bytecode, FunctionRegistry, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
@@ -10,6 +11,9 @@ const PROGRAM_V2_PREAMBLE: &[u8] = b"runmat-interpreter-program-v2\n";
 pub fn encode_interpreter_script_v2(
     bytecode: &Bytecode,
 ) -> Result<Vec<u8>, InterpreterPayloadError> {
+    bytecode
+        .validate_catch_scope_metadata()
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     encode_payload(
         InterpreterPayloadForm::ScriptV2,
         SCRIPT_V2_PREAMBLE,
@@ -29,12 +33,21 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
             BYTECODE_SCHEMA_VERSION,
         )],
     )?;
-    decode_canonical_body(body, InterpreterPayloadForm::ScriptV2)
+    let bytecode: Bytecode = decode_canonical_body(body, InterpreterPayloadForm::ScriptV2)?;
+    bytecode
+        .validate_catch_scope_metadata()
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    Ok(bytecode)
 }
 
 pub fn encode_interpreter_program_v2(
     registry: &FunctionRegistry,
 ) -> Result<Vec<u8>, InterpreterPayloadError> {
+    for function in registry.functions.values() {
+        function
+            .validate_catch_scope_metadata()
+            .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+    }
     encode_payload(
         InterpreterPayloadForm::ProgramV2,
         PROGRAM_V2_PREAMBLE,
@@ -66,5 +79,12 @@ pub fn decode_interpreter_program_v2(
             ),
         ],
     )?;
-    decode_canonical_body(body, InterpreterPayloadForm::ProgramV2)
+    let registry: FunctionRegistry =
+        decode_canonical_body(body, InterpreterPayloadForm::ProgramV2)?;
+    for function in registry.functions.values() {
+        function
+            .validate_catch_scope_metadata()
+            .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+    }
+    Ok(registry)
 }

@@ -50,12 +50,13 @@ pub(in crate::execute) fn begin_prepared_receiver(
         >,
     >,
 ) -> NativeExecutorResult<runmat_runtime::object::protocol::PreparedSubscriptReceiver> {
-    let mut future: CompletionFuture = Box::pin(async move {
+    let future: CompletionFuture = Box::pin(async move {
         future
             .await
             .map(Box::new)
             .map(CallCompletion::PreparedReceiver)
     });
+    let mut future = super::scope_completion(state, future);
     if let Some(result) = future.as_mut().now_or_never() {
         drop(future);
         let CallCompletion::PreparedReceiver(prepared) =

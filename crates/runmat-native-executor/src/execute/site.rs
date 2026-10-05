@@ -710,15 +710,16 @@ pub(super) fn redirect_exception(
         handle: exception.handle,
         generation: exception.generation,
     };
-    if !matches!(
-        state.arena.get(reference)?,
-        runmat_value::Value::MException(_)
-    ) {
-        return Err(NativeExecutorError::Host(
-            "native exception exit does not reference an MException".into(),
-        ));
-    }
+    let exception = match state.arena.get(reference)? {
+        runmat_value::Value::MException(exception) => exception.clone(),
+        _ => {
+            return Err(NativeExecutorError::Host(
+                "native exception exit does not reference an MException".into(),
+            ))
+        }
+    };
     let target = handler.catch_edge.target;
+    state.bind_catch_exception(target, exception)?;
     let _ = take_edge(state, &handler.catch_edge, 1, None, Some(reference))?;
     state.resume_request_for_block(target).map(Some)
 }

@@ -1,10 +1,11 @@
 use crate::{
-    BasicBlock, BasicBlockId, MirConstant, MirOperand, MirPlace, MirTerminator, MirTerminatorKind,
+    BasicBlock, BasicBlockId, CatchScopeId, MirConstant, MirOperand, MirPlace, MirTerminator,
+    MirTerminatorKind,
 };
 use runmat_hir::{
     ExprId, HirBlock, HirError, HirExpr, HirExprKind, HirStmt, HirStmtKind, Span, StmtId,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::{
     conditional_await::conditional_await_guard,
@@ -23,6 +24,13 @@ pub(crate) struct ControlFlowBuilder {
     blocks: Vec<BasicBlock>,
     active_conditional_awaits: HashSet<ExprId>,
     repeating_while_headers: HashMap<StmtId, BasicBlockId>,
+    active_catches: Vec<CatchScopeId>,
+    catch_scopes: BTreeMap<BasicBlockId, Vec<CatchScopeId>>,
+}
+
+pub(crate) struct LoweredControlFlow {
+    pub blocks: Vec<BasicBlock>,
+    pub catch_scopes: BTreeMap<BasicBlockId, Vec<CatchScopeId>>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,7 +58,7 @@ impl ControlFlowBuilder {
         ctx: &MirLoweringContext,
         body: &HirBlock,
         return_terminator: MirTerminator,
-    ) -> Result<Vec<BasicBlock>, HirError> {
+    ) -> Result<LoweredControlFlow, HirError> {
         let base_env = BlockLoweringEnv {
             ctx,
             body,
@@ -62,7 +70,10 @@ impl ControlFlowBuilder {
         let entry = self.lower_block_from(entry, 0, return_terminator.clone(), base_env)?;
         self.blocks.push(entry);
         self.blocks.sort_by_key(|block| block.id.0);
-        Ok(self.blocks)
+        Ok(LoweredControlFlow {
+            blocks: self.blocks,
+            catch_scopes: self.catch_scopes,
+        })
     }
 
     fn lower_block_from(
@@ -72,6 +83,7 @@ impl ControlFlowBuilder {
         final_terminator: MirTerminator,
         env: BlockLoweringEnv<'_>,
     ) -> Result<BasicBlock, HirError> {
+        self.catch_scopes.insert(id, self.active_catches.clone());
         let BlockLoweringEnv {
             ctx,
             body,
@@ -774,6 +786,7 @@ impl ControlFlowBuilder {
                         await_replacements,
                     },
                 )?;
+                self.active_catches.push(CatchScopeId(id.0));
                 let catch_block = self.lower_block_from(
                     catch_id,
                     0,
@@ -785,7 +798,9 @@ impl ControlFlowBuilder {
                         loop_targets,
                         await_replacements,
                     },
-                )?;
+                );
+                self.active_catches.pop();
+                let catch_block = catch_block?;
                 self.blocks.push(try_block);
                 self.blocks.push(catch_block);
                 return Ok(BasicBlock {

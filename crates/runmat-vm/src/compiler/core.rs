@@ -49,6 +49,7 @@ impl ResolvedCallOutputCount {
 
 pub struct Compiler {
     pub instructions: Vec<Instr>,
+    pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
     pub instr_spans: Vec<runmat_hir::Span>,
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     pub var_count: usize,
@@ -60,6 +61,7 @@ pub struct Compiler {
     aggregate_proof: Option<aggregate_construction::ProofIndex>,
     pub class_registrations: Vec<ClassRegistration>,
     current_span: Option<runmat_hir::Span>,
+    current_catch_scope: Option<runmat_mir::CatchScopeId>,
     pending_place_mutation: Option<MirPlaceMutation>,
     prepared_index_component: Option<usize>,
     contextual_index_component: Option<usize>,
@@ -510,6 +512,7 @@ impl Compiler {
 
         Ok(Self {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             var_count,
@@ -521,6 +524,7 @@ impl Compiler {
             aggregate_proof: None,
             class_registrations: hir_class_registrations(hir),
             current_span: None,
+            current_catch_scope: None,
             pending_place_mutation: None,
             prepared_index_component: None,
             contextual_index_component: None,
@@ -556,6 +560,7 @@ impl Compiler {
 
         Ok(Self {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             var_count,
@@ -567,6 +572,7 @@ impl Compiler {
             aggregate_proof: None,
             class_registrations: hir_class_registrations(hir),
             current_span: None,
+            current_catch_scope: None,
             pending_place_mutation: None,
             prepared_index_component: None,
             contextual_index_component: None,
@@ -628,6 +634,10 @@ impl Compiler {
 
         for (block_index, block) in blocks.iter().enumerate() {
             self.pending_place_mutation = None;
+            self.current_catch_scope = body
+                .catch_scopes
+                .get(&block.id)
+                .and_then(|scopes| scopes.last().copied());
             block_starts.insert(block.id, self.instructions.len());
             for scope in exception_scopes.leaving_at(block.id) {
                 self.emit(Instr::LeaveTry(*scope));
@@ -4484,6 +4494,7 @@ impl Compiler {
         }
         let pc = self.instructions.len();
         self.instructions.push(instr);
+        self.catch_scopes.push(self.current_catch_scope);
         let span = self.current_span.unwrap_or_default();
         self.instr_spans.push(span);
         self.call_arg_spans.push(None);
@@ -4623,6 +4634,7 @@ mod tests {
             .collect();
         Compiler {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             var_count: local_count,
@@ -4635,6 +4647,7 @@ mod tests {
             }),
             function: Some(function),
             body: Some(MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: empty_function_abi(),
                 locals,
@@ -4650,6 +4663,7 @@ mod tests {
             aggregate_proof: None,
             class_registrations: Vec::new(),
             current_span: None,
+            current_catch_scope: None,
             pending_place_mutation: None,
             prepared_index_component: None,
             contextual_index_component: None,

@@ -136,6 +136,7 @@ fn compile_with_bound_analysis(
         active_function: entrypoint_target,
         active_class_method_owner: None,
         instructions: c.instructions,
+        catch_scopes: c.catch_scopes,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,
         coverage_sites: Vec::new(),
@@ -849,6 +850,7 @@ fn compile_semantic_functions(
                         ))
                     })?,
                 instructions: compiler.instructions,
+                catch_scopes: compiler.catch_scopes,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,
                 coverage_sites: Vec::new(),

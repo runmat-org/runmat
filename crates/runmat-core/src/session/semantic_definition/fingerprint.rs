@@ -15,6 +15,7 @@ pub(crate) fn fingerprint(
         source_id,
         capabilities,
         instructions,
+        catch_scopes,
         instr_spans,
         call_arg_spans,
         coverage_sites,
@@ -54,6 +55,7 @@ pub(crate) fn fingerprint(
     append!(source_id);
     append!(capabilities);
     append!(instructions);
+    append!(catch_scopes);
     append!(instr_spans);
     append!(call_arg_spans);
     append!(coverage_sites);

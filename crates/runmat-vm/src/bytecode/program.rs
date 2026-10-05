@@ -65,6 +65,8 @@ pub struct FunctionBytecode {
     #[serde(default)]
     pub capabilities: runmat_types::CapabilitySet,
     pub instructions: Vec<Instr>,
+    /// Innermost lexical catch at each instruction, derived from MIR.
+    pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
     #[serde(default)]
     pub instr_spans: Vec<runmat_hir::Span>,
     #[serde(default)]
@@ -113,6 +115,7 @@ impl Default for FunctionBytecode {
             source_id: None,
             capabilities: Default::default(),
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             coverage_sites: Vec::new(),
@@ -138,11 +141,16 @@ impl Default for FunctionBytecode {
 }
 
 impl FunctionBytecode {
+    pub(crate) fn validate_catch_scope_metadata(&self) -> Result<(), String> {
+        validate_catch_scope_metadata(&self.instructions, &self.catch_scopes)
+    }
+
     /// Materializes the function-local executable view consumed by the VM.
     /// All compiler-owned metadata travels with the instruction stream here so
     /// function dispatch cannot accidentally discard executable contracts.
     pub(crate) fn execution_bytecode(&self, registry: &FunctionRegistry) -> Bytecode {
         let mut bytecode = Bytecode::with_instructions(self.instructions.clone(), self.var_count);
+        bytecode.catch_scopes = self.catch_scopes.clone();
         bytecode.instr_spans = self.instr_spans.clone();
         bytecode.call_arg_spans = self.call_arg_spans.clone();
         bytecode.coverage_sites = self.coverage_sites.clone();
@@ -739,6 +747,8 @@ impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
+    /// Innermost lexical catch at each instruction, derived from MIR.
+    pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
     #[serde(skip)]
     pub active_function: Option<FunctionId>,
     #[serde(skip)]
@@ -890,9 +900,14 @@ impl RuntimeAccelGraphSource {
 }
 
 impl Bytecode {
+    pub(crate) fn validate_catch_scope_metadata(&self) -> Result<(), String> {
+        validate_catch_scope_metadata(&self.instructions, &self.catch_scopes)
+    }
+
     pub fn empty() -> Self {
         Self {
             instructions: Vec::new(),
+            catch_scopes: Vec::new(),
             active_function: None,
             active_class_method_owner: None,
             instr_spans: Vec::new(),
@@ -925,8 +940,10 @@ impl Bytecode {
         let instr_spans = vec![runmat_hir::Span::default(); instructions.len()];
         let call_arg_spans = vec![None; instructions.len()];
         let coverage_sites = vec![Vec::new(); instructions.len()];
+        let catch_scopes = vec![None; instructions.len()];
         Self {
             instructions,
+            catch_scopes,
             instr_spans,
             call_arg_spans,
             coverage_sites,
@@ -1069,6 +1086,33 @@ impl Bytecode {
     }
 }
 
+fn validate_catch_scope_metadata(
+    instructions: &[Instr],
+    catch_scopes: &[Option<runmat_mir::CatchScopeId>],
+) -> Result<(), String> {
+    let has_handler = instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::EnterTry { .. }));
+    if catch_scopes.len() != instructions.len() && (has_handler || !catch_scopes.is_empty()) {
+        return Err("bytecode lexical catch metadata length does not match instructions".into());
+    }
+    let mut targets = std::collections::HashSet::new();
+    for instruction in instructions {
+        if let Instr::EnterTry {
+            scope, catch_pc, ..
+        } = instruction
+        {
+            if !targets.insert(*catch_pc) {
+                return Err("bytecode catch entry PC is ambiguous".into());
+            }
+            if catch_scopes.get(*catch_pc) != Some(&Some(runmat_mir::CatchScopeId(*scope))) {
+                return Err("bytecode catch entry has no matching lexical scope".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod function_registry_tests {
     use super::{Bytecode, FunctionBytecode, FunctionRegistry};
@@ -1080,6 +1124,26 @@ mod function_registry_tests {
     };
     use std::collections::{HashMap, HashSet};
 
+    #[test]
+    fn catch_scope_metadata_rejects_missing_or_mismatched_artifact_facts() {
+        let mut bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::EnterTry {
+                    scope: 7,
+                    catch_pc: 1,
+                    catch_var: None,
+                },
+                Instr::Return,
+            ],
+            0,
+        );
+        assert!(bytecode.validate_catch_scope_metadata().is_err());
+        bytecode.catch_scopes[1] = Some(runmat_mir::CatchScopeId(7));
+        assert!(bytecode.validate_catch_scope_metadata().is_ok());
+        bytecode.catch_scopes.pop();
+        assert!(bytecode.validate_catch_scope_metadata().is_err());
+    }
+
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
         FunctionBytecode {
             function: FunctionId(id),
@@ -1089,6 +1153,7 @@ mod function_registry_tests {
             source_id: None,
             capabilities: Default::default(),
             instructions: vec![Instr::Return],
+            catch_scopes: vec![None],
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             coverage_sites: Vec::new(),

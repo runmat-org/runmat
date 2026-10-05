@@ -556,8 +556,16 @@ async fn run_interpreter(
     state: Box<InterpreterState>,
     initial_vars: &mut Vec<Value>,
 ) -> VmResult<InterpreterOutcome> {
+    state
+        .bytecode
+        .validate_catch_scope_metadata()
+        .map_err(RuntimeError::new)?;
+    let catch_runtime = state.context.runtime.clone();
+    let inherited_catch = catch_runtime.active_catch_exception_shared();
     let state = *state;
-    Box::pin(run_interpreter_inner(state, initial_vars)).await
+    catch_runtime
+        .scope_active_catch_shared(inherited_catch, run_interpreter_inner(state, initial_vars))
+        .await
 }
 
 async fn run_interpreter_inner(
@@ -604,6 +612,21 @@ async fn run_interpreter_inner(
             call_counts.clone(),
         );
     let function_registry = Arc::new(bytecode.function_registry());
+    let catch_runtime = context.runtime.clone();
+    let mut catch_exceptions: HashMap<
+        runmat_mir::CatchScopeId,
+        std::rc::Rc<runmat_value::MException>,
+    > = HashMap::new();
+    let catch_entries: HashMap<usize, runmat_mir::CatchScopeId> = bytecode
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instr::EnterTry {
+                scope, catch_pc, ..
+            } => Some((*catch_pc, runmat_mir::CatchScopeId(*scope))),
+            _ => None,
+        })
+        .collect();
     let nested_runtime = context.runtime.clone();
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let registry_for_function_invoker = Arc::clone(&function_registry);
@@ -707,6 +730,11 @@ async fn run_interpreter_inner(
     // roots and frame state outside it until suspended work has been dropped.
     let execution_result = super::dispatch_cancellation::until_cancelled(&cancellation, async {
         while pc < bytecode.instructions.len() {
+            if let (Some(scope), Some(exception)) =
+                (catch_entries.get(&pc), last_exception.as_ref())
+            {
+                catch_exceptions.insert(*scope, std::rc::Rc::new(exception.clone()));
+            }
             if completion_boundary.is_some_and(|boundary| boundary.pc() == pc) {
                 break;
             }
@@ -877,7 +905,13 @@ async fn run_interpreter_inner(
                 };
             #[cfg(feature = "native-accel")]
             let executed_pc = pc;
-            let dispatch_result = interp_dispatch::dispatch_instruction(
+            let active_catch = bytecode
+                .catch_scopes
+                .get(pc)
+                .copied()
+                .flatten()
+                .and_then(|scope| catch_exceptions.get(&scope).cloned());
+            let dispatch_future = interp_dispatch::dispatch_instruction(
                 interp_dispatch::DispatchMeta {
                     instr: &bytecode.instructions[pc],
                     bytecode: &bytecode,
@@ -909,8 +943,17 @@ async fn run_interpreter_inner(
                     store_local_after_store: &mut store_local_after_store,
                     store_local_after_fallback_store: &mut store_local_after_fallback_store,
                 },
-            )
-            .await;
+            );
+            let dispatch_result = if let Some(exception) = active_catch {
+                let mut dispatch_future = std::pin::pin!(dispatch_future);
+                std::future::poll_fn(|cx| {
+                    let _guard = catch_runtime.enter_active_catch_shared(Some(exception.clone()));
+                    std::future::Future::poll(dispatch_future.as_mut(), cx)
+                })
+                .await
+            } else {
+                dispatch_future.await
+            };
             let dispatch_result = match dispatch_result {
                 Ok(result) => result,
                 Err(err) => {

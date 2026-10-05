@@ -275,6 +275,10 @@ impl ActiveInvocation {
         // SAFETY: every ABI record borrows invocation-owned storage that stays
         // live and stable until this synchronous machine-code entry returns.
         let _runtime_guard = self.state.runtime.enter();
+        let _catch_guard = self
+            .state
+            .runtime
+            .enter_active_catch_shared(self.state.active_catch_exception());
         let status = unsafe { (self.entrypoint)(&mut call, &mut exit) };
         // A generated entry has returned: any still-open region was incomplete,
         // including ABI failures, suspension, cancellation and exceptional exits.

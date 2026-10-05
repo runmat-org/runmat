@@ -123,6 +123,7 @@ fn omitted_input_state() -> HostState {
         expected_sites: vec![],
         blocks: vec![NativeBlock {
             id: NativeBlockId(0),
+            catch_scopes: vec![],
             parameters: vec![],
             side_effect_epoch: NativeValueId(0),
             region_boundaries: vec![],

@@ -120,6 +120,8 @@ pub struct NativeRegionBoundary {
 #[serde(deny_unknown_fields)]
 pub struct NativeBlock {
     pub id: NativeBlockId,
+    /// Lexical catch membership from MIR, outermost first.
+    pub catch_scopes: Vec<runmat_mir::CatchScopeId>,
     pub parameters: Vec<NativeBlockParameter>,
     pub side_effect_epoch: NativeValueId,
     pub region_boundaries: Vec<NativeRegionBoundary>,

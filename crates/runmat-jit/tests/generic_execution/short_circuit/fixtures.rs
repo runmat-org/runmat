@@ -111,6 +111,7 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),

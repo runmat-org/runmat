@@ -1,6 +1,42 @@
 use super::*;
 
 impl HostState {
+    /// Resolve catch authority from the shared MIR-authored NativeBlock scope.
+    pub fn active_catch_exception(&self) -> Option<std::rc::Rc<runmat_value::MException>> {
+        self.current_block
+            .and_then(|current| {
+                self.function
+                    .blocks
+                    .iter()
+                    .find(|block| block.id == current)
+            })
+            .and_then(|block| block.catch_scopes.last())
+            .and_then(|scope| self.catch_exceptions.get(scope).cloned())
+            .or_else(|| self.inherited_catch.clone())
+    }
+
+    pub fn bind_catch_exception(
+        &mut self,
+        block: NativeBlockId,
+        exception: runmat_value::MException,
+    ) -> NativeExecutorResult<()> {
+        let scope = self
+            .function
+            .blocks
+            .iter()
+            .find(|candidate| candidate.id == block)
+            .and_then(|block| block.catch_scopes.last())
+            .copied()
+            .ok_or_else(|| {
+                NativeExecutorError::Host(
+                    "native catch edge has no MIR-authored lexical catch scope".into(),
+                )
+            })?;
+        self.catch_exceptions
+            .insert(scope, std::rc::Rc::new(exception));
+        Ok(())
+    }
+
     pub fn has_for_loop(&self, header: NativeBlockId) -> bool {
         self.active_for_loops.contains_key(&header)
     }

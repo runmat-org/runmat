@@ -114,6 +114,7 @@ fn function(statements: Vec<MirStmt>) -> MirAssembly {
     let span = Span { start: 0, end: 8 };
     let function = FunctionId(0);
     let body = MirBody {
+        catch_scopes: Default::default(),
         function,
         abi: FunctionAbi {
             fixed_inputs: Vec::new(),
@@ -272,6 +273,15 @@ fn native_sequence_register_requires_one_adjacent_matching_pair() {
         mismatched.verify().unwrap_err().code,
         "native.ir.sequence_register"
     );
+}
+
+#[test]
+fn native_ir_rejects_forged_lexical_catch_membership() {
+    let mut assembly = lower(&function(vec![assignment(1)]));
+    assembly.functions[0].blocks[0]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(99));
+    assert_eq!(assembly.verify().unwrap_err().code, "native.ir.catch_scope");
 }
 
 fn lower(mir: &MirAssembly) -> runmat_native_codegen::NativeAssembly {

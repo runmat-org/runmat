@@ -1,4 +1,4 @@
-use crate::{BasicBlock, MirLocalId};
+use crate::{BasicBlock, BasicBlockId, CatchScopeId, MirLocalId};
 use runmat_hir::{BindingId, FunctionAbi, FunctionId, Span};
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +11,9 @@ pub struct MirBody {
     pub abi: FunctionAbi,
     pub locals: Vec<MirLocal>,
     pub blocks: Vec<BasicBlock>,
+    /// Lexical catch membership authored while lowering HIR catch bodies.
+    /// The outer-to-inner scope order is authoritative for every backend.
+    pub catch_scopes: std::collections::BTreeMap<BasicBlockId, Vec<CatchScopeId>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

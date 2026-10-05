@@ -68,6 +68,7 @@ fn entry_block() -> NativeBlock {
     };
     NativeBlock {
         id: NativeBlockId(0),
+        catch_scopes: vec![],
         parameters: vec![],
         side_effect_epoch: NativeValueId(0),
         region_boundaries: vec![],

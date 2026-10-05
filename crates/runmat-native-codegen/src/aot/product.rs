@@ -3,7 +3,7 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 5;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 6;
 pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 3;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;

@@ -45,6 +45,7 @@ pub(super) struct HostState {
     pub function: NativeFunction,
     pub functions: Arc<Vec<NativeFunction>>,
     pub runtime: RuntimeContext,
+    inherited_catch: Option<std::rc::Rc<runmat_value::MException>>,
     pub locals: Vec<NativeValueRef>,
     pub values: BTreeMap<NativeValueId, NativeValueRef>,
     pub roots: Vec<NativeRoot>,
@@ -88,6 +89,7 @@ pub(super) struct HostState {
     osr_point: Option<runmat_types::ProgramPointId>,
     osr_entry: Option<runmat_types::ProgramPointId>,
     active_exception_handlers: Vec<ActiveExceptionHandler>,
+    catch_exceptions: BTreeMap<runmat_mir::CatchScopeId, std::rc::Rc<runmat_value::MException>>,
     next_await_continuation: u64,
     deoptimization: DeoptimizationPolicy,
     retired_guards: BTreeSet<runmat_types::RegionGuardId>,
@@ -128,6 +130,7 @@ impl HostState {
             optimized_regions,
             workspace,
         } = input;
+        let inherited_catch = runtime.active_catch_exception_shared();
         let construction_values = arguments
             .iter()
             .cloned()
@@ -264,6 +267,7 @@ impl HostState {
             function,
             functions,
             runtime,
+            inherited_catch,
             arena,
             locals,
             values: BTreeMap::new(),
@@ -302,6 +306,7 @@ impl HostState {
             global_seen_revision: BTreeMap::new(),
             persistent_bindings: BTreeMap::new(),
             active_exception_handlers: Vec::new(),
+            catch_exceptions: BTreeMap::new(),
             next_await_continuation: 1,
             deoptimization,
             retired_guards: BTreeSet::new(),

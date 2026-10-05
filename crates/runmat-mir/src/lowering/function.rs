@@ -123,7 +123,7 @@ fn lower_function_with_context(
         kind: MirTerminatorKind::Return(returns),
         span: function.span,
     };
-    let blocks =
+    let lowered =
         ControlFlowBuilder::new().lower_function_body(&ctx, &function.body, return_terminator)?;
     let temp_locals = ctx.take_temp_locals();
     locals.extend(temp_locals);
@@ -132,6 +132,7 @@ fn lower_function_with_context(
         function: function.id,
         abi: function.abi.clone(),
         locals,
-        blocks,
+        blocks: lowered.blocks,
+        catch_scopes: lowered.catch_scopes,
     })
 }

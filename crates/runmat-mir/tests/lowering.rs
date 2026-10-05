@@ -3901,6 +3901,64 @@ fn try_catch_flows_to_following_statements() {
 }
 
 #[test]
+fn catch_membership_is_lexical_and_ends_before_merge() {
+    let mir =
+        lower_mir("function y = guarded(x); try; y = x; catch err; y = 0; end; y = y + 1; end");
+    let body = mir.bodies.values().next().unwrap();
+    let entry = &body.blocks[0];
+    let MirTerminatorKind::TryCatch {
+        try_block,
+        catch_block,
+        ..
+    } = entry.terminator.kind
+    else {
+        panic!("expected try/catch");
+    };
+    let scope = runmat_mir::CatchScopeId(entry.id.0);
+    assert!(body.catch_scopes[&try_block].is_empty());
+    assert_eq!(body.catch_scopes[&catch_block], vec![scope]);
+    for block in &body.blocks {
+        if block.id != catch_block {
+            assert!(!body.catch_scopes[&block.id].contains(&scope));
+        }
+    }
+}
+
+#[test]
+fn nested_catch_and_loop_exit_restore_lexical_outer_scope() {
+    let mir = lower_mir("function y = guarded(x); try; y = x; catch outer; while x; try; y = x; catch inner; break; end; end; y = 2; end; y = 3; end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut outer_scope = None;
+    let mut inner_scope = None;
+    for block in &body.blocks {
+        if let MirTerminatorKind::TryCatch { catch_block, .. } = block.terminator.kind {
+            let scope = runmat_mir::CatchScopeId(block.id.0);
+            if body.catch_scopes[&block.id].is_empty() {
+                outer_scope = Some(scope);
+                assert_eq!(body.catch_scopes[&catch_block], vec![scope]);
+            } else {
+                inner_scope = Some(scope);
+                assert_eq!(
+                    body.catch_scopes[&catch_block],
+                    vec![outer_scope.unwrap(), scope]
+                );
+            }
+        }
+    }
+    let outer = outer_scope.expect("outer catch");
+    let inner = inner_scope.expect("inner catch");
+    assert!(body
+        .catch_scopes
+        .values()
+        .any(|scopes| scopes == &vec![outer]));
+    assert!(body.catch_scopes.values().any(|scopes| scopes.is_empty()));
+    assert!(body
+        .catch_scopes
+        .values()
+        .any(|scopes| scopes == &vec![outer, inner]));
+}
+
+#[test]
 fn break_in_loop_lowers_to_exit_edge() {
     let mir = lower_mir("function y = first(c); while c; break; end; y = 1; end");
     let body = mir.bodies.values().next().unwrap();

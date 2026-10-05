@@ -67,12 +67,13 @@ pub(in crate::execute) fn begin_sequence_stage(
     embedded: Option<EmbeddedOperationIdentity>,
     future: Pin<Box<dyn Future<Output = NativeExecutorResult<SequenceStage>> + 'static>>,
 ) -> NativeExecutorResult<SequenceStage> {
-    let mut future: CompletionFuture = Box::pin(async move {
+    let future: CompletionFuture = Box::pin(async move {
         future
             .await
             .map(Box::new)
             .map(CallCompletion::SequenceStage)
     });
+    let mut future = super::scope_completion(state, future);
     if let Some(result) = future.as_mut().now_or_never() {
         drop(future);
         let CallCompletion::SequenceStage(stage) =

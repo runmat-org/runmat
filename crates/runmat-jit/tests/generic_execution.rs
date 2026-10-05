@@ -1954,6 +1954,7 @@ fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -2087,6 +2088,7 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -2479,6 +2481,7 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -2569,6 +2572,7 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -3340,6 +3344,7 @@ fn lower_body_with_inputs(
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: fixed_inputs.clone(),
@@ -3438,6 +3443,7 @@ fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembl
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: vec![BindingId(0)],
@@ -3537,6 +3543,7 @@ fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembl
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: vec![BindingId(0)],
@@ -3636,6 +3643,7 @@ fn workspace_binding_fixture(
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -3710,6 +3718,7 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -4253,6 +4262,7 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
@@ -4455,6 +4465,7 @@ fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
         bodies: [(
             function,
             MirBody {
+                catch_scopes: Default::default(),
                 function,
                 abi: FunctionAbi {
                     fixed_inputs: Vec::new(),
