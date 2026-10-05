@@ -373,7 +373,7 @@ pub(crate) fn test_managed_selection(
                     .build()
             })?,
         _test_probe: test_probe,
-        test_signature: Box::new(request.signature.clone()),
+        test_signature: Box::new(request.signature.to_owned()),
     })
 }
 
@@ -446,6 +446,17 @@ pub trait RuntimePlacementService {
         _program: Option<runmat_execution::ProgramRevision>,
         _host_service: runmat_execution::Digest,
     ) -> Option<runmat_execution::PlacementRevision> {
+        None
+    }
+
+    /// Exact borrowed managed revision. The portable owned hook above is not
+    /// an implicit fallback: cloning its program facts would escape the
+    /// staged invocation's allocation authority.
+    fn whole_work_host_service_revision_ref<'a>(
+        &self,
+        _program: Option<&'a runmat_execution::ProgramRevision>,
+        _host_service: runmat_execution::Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
         None
     }
 

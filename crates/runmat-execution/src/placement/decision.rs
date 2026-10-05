@@ -194,10 +194,42 @@ mod borrowed_signature_tests {
         );
         assert_eq!(borrowed.cache_key(), owned.cache_key());
         assert_eq!(
+            borrowed.cache_key(),
+            Digest::sha256_serialized(&owned).unwrap()
+        );
+        assert_eq!(
             borrowed.permit_identity().unwrap(),
             owned.permit_identity().unwrap()
         );
         assert_eq!(borrowed.to_owned(), owned);
+
+        let without_program = PlacementSignature {
+            region: None,
+            operation: "host.effect".into(),
+            runtime_facts: Digest::sha256(b"effect"),
+            revision: PlacementRevision {
+                program: None,
+                catalog: Digest::sha256(b"catalog"),
+                compiler: Digest::sha256(b"compiler"),
+                authority: PlacementExecutionAuthorityRevision::Provider(Digest::sha256(
+                    b"provider",
+                )),
+                policy: Digest::sha256(b"policy"),
+            },
+        };
+        let borrowed = PlacementSignatureRef::from(&without_program);
+        assert_eq!(
+            serde_json::to_vec(&borrowed).unwrap(),
+            serde_json::to_vec(&without_program).unwrap()
+        );
+        assert_eq!(
+            borrowed.cache_key(),
+            Digest::sha256_serialized(&without_program).unwrap()
+        );
+        assert_eq!(
+            borrowed.permit_identity().unwrap(),
+            without_program.permit_identity().unwrap()
+        );
     }
 }
 

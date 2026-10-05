@@ -73,6 +73,25 @@ impl Drop for Probe {
     }
 }
 impl RuntimePlacementService for Placement {
+    fn whole_work_host_service_revision_ref<'a>(
+        &self,
+        program: Option<&'a runmat_execution::ProgramRevision>,
+        host_service: Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
+        self.revision_available.get().then(|| {
+            let digest = Digest::sha256(b"host-effect-test-placement");
+            runmat_execution::PlacementRevisionRef {
+                program,
+                catalog: digest,
+                compiler: digest,
+                authority: runmat_execution::PlacementExecutionAuthorityRevision::HostService(
+                    host_service,
+                ),
+                policy: digest,
+            }
+        })
+    }
+
     fn whole_work_host_service_revision(
         &self,
         program: Option<runmat_execution::ProgramRevision>,

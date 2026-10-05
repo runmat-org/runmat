@@ -8,9 +8,9 @@ use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, ExecutionCandidateKind, PlacementExecutionAuthorityRevision,
-    PlacementResourceSnapshot, PlacementSignature, ResourceByteBound, WholeWorkCandidate,
-    WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
-    WholeWorkPlacementRequestRef,
+    PlacementResourceSnapshot, PlacementSignature, PlacementSignatureRef, ResourceByteBound,
+    WholeWorkCandidate, WholeWorkConstraint, WholeWorkObservationOutcome,
+    WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
 };
 use runmat_time::{duration_ns_saturating, Instant};
 use std::sync::{
@@ -181,10 +181,24 @@ fn select_host_effect_inner(
             ));
         }
     }
-    let Some(revision) = service.whole_work_host_service_revision(
-        runtime.program_revision().cloned(),
-        evidence.authority_revision,
-    ) else {
+    let managed_revision = if stage.is_some() {
+        service.whole_work_host_service_revision_ref(
+            runtime.program_revision(),
+            evidence.authority_revision,
+        )
+    } else {
+        None
+    };
+    let mut portable_revision = if stage.is_none() {
+        service.whole_work_host_service_revision(
+            runtime.program_revision().cloned(),
+            evidence.authority_revision,
+        )
+    } else {
+        None
+    };
+    let Some(revision) = managed_revision.or_else(|| portable_revision.as_ref().map(Into::into))
+    else {
         return if finite {
             Err(insufficient(
                 "host effect placement revision is unavailable",
@@ -203,7 +217,7 @@ fn select_host_effect_inner(
         );
     }
     if let Some(stage) = stage.as_ref() {
-        stage.validate_revision(&revision)?;
+        stage.validate_revision(revision)?;
     }
     let output = request.workload.output();
     let retained_bytes = match output {
@@ -237,11 +251,23 @@ fn select_host_effect_inner(
             .expect("typed host effect facts serialize"),
         ),
     };
-    let signature = PlacementSignature {
+    let portable_signature = portable_revision.take().map(|revision| PlacementSignature {
         region: None,
         operation: request.operation.into(),
         runtime_facts,
         revision,
+    });
+    let signature = PlacementSignatureRef {
+        region: None,
+        operation: request.operation,
+        runtime_facts,
+        revision: managed_revision
+            .or_else(|| {
+                portable_signature
+                    .as_ref()
+                    .map(|signature| (&signature.revision).into())
+            })
+            .expect("placement revision was checked"),
     };
     // A staged scratch reservation remains charged while the returned value
     // is allocated. The final measured scratch bound may be lower than that
@@ -331,7 +357,7 @@ fn select_host_effect_inner(
         let candidates = [candidate];
         SelectedHostEffect::Managed(service.select_whole_work_borrowed_managed(
             WholeWorkPlacementRequestRef {
-                signature: (&signature).into(),
+                signature,
                 constraint: WholeWorkConstraint::AnyLegal,
                 candidates: &candidates,
                 resources: &resources,
@@ -342,21 +368,26 @@ fn select_host_effect_inner(
             },
         )?)
     } else {
-        SelectedHostEffect::Portable(service.select_whole_work(WholeWorkPlacementRequest {
-            signature: signature.clone(),
-            constraint: WholeWorkConstraint::AnyLegal,
-            candidates: vec![candidate],
-            resources,
-            deterministic: true,
-            require_transactional_results: false,
-        })?)
+        SelectedHostEffect::Portable(
+            service.select_whole_work(WholeWorkPlacementRequest {
+                signature: portable_signature
+                    .as_ref()
+                    .expect("portable revision")
+                    .clone(),
+                constraint: WholeWorkConstraint::AnyLegal,
+                candidates: vec![candidate],
+                resources,
+                deterministic: true,
+                require_transactional_results: false,
+            })?,
+        )
     };
     if !admission.liveness_lease.is_current() {
         return Err(stale_resource());
     }
     let valid_selection = match &selected {
         SelectedHostEffect::Portable(selected) => {
-            selected.decision.signature == signature
+            selected.decision.signature == *portable_signature.as_ref().expect("portable signature")
                 && selected.decision.selected.node == request.operation
                 && selected.decision.selected.kind == expected_candidate_kind
                 && Digest::parse_canonical(&selected.decision.selected.candidate)

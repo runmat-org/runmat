@@ -3,7 +3,8 @@
 //! inputs remain distinct and typed.
 
 use runmat_execution::{
-    Digest, PlacementExecutionAuthorityRevision, PlacementRevision, ProgramRevision,
+    Digest, DigestStream, PlacementExecutionAuthorityRevision, PlacementRevision,
+    PlacementRevisionRef, ProgramRevision,
 };
 
 use super::{ExplorationMode, PlacementPolicy, PlacementSessionConfig};
@@ -51,21 +52,36 @@ pub(super) fn whole_work(
 }
 
 fn whole_work_policy(config: PlacementSessionConfig) -> Digest {
-    let mut bytes = b"runmat-whole-work-policy.v1\0".to_vec();
+    let mut bytes = DigestStream::new();
+    bytes.update(b"runmat-whole-work-policy.v1\0");
     let graph = PlacementPolicy::default();
-    bytes.extend_from_slice(&graph.absolute_margin_ns.to_le_bytes());
-    bytes.extend_from_slice(&graph.relative_margin_basis_points.to_le_bytes());
-    bytes.extend_from_slice(&config.leave_absolute_margin_ns.to_le_bytes());
-    bytes.extend_from_slice(&config.leave_relative_margin_basis_points.to_le_bytes());
-    bytes.extend_from_slice(&config.exploration_max_overhead_basis_points.to_le_bytes());
+    bytes.update(&graph.absolute_margin_ns.to_le_bytes());
+    bytes.update(&graph.relative_margin_basis_points.to_le_bytes());
+    bytes.update(&config.leave_absolute_margin_ns.to_le_bytes());
+    bytes.update(&config.leave_relative_margin_basis_points.to_le_bytes());
+    bytes.update(&config.exploration_max_overhead_basis_points.to_le_bytes());
     match config.exploration {
-        ExplorationMode::Disabled => bytes.push(0),
+        ExplorationMode::Disabled => bytes.update(&[0]),
         ExplorationMode::TransactionalEvery { interval } => {
-            bytes.push(1);
-            bytes.extend_from_slice(&interval.to_le_bytes());
+            bytes.update(&[1]);
+            bytes.update(&interval.to_le_bytes());
         }
     }
-    Digest::sha256(bytes)
+    bytes.finish()
+}
+
+pub(super) fn whole_work_host_service_ref<'a>(
+    program: Option<&'a ProgramRevision>,
+    host_service: Digest,
+    config: PlacementSessionConfig,
+) -> PlacementRevisionRef<'a> {
+    PlacementRevisionRef {
+        program,
+        catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
+        compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
+        authority: PlacementExecutionAuthorityRevision::HostService(host_service),
+        policy: whole_work_policy(config),
+    }
 }
 
 pub(super) fn whole_work_host_service(
@@ -83,6 +99,30 @@ pub(super) fn whole_work_host_service(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_host_revision_and_streamed_policy_preserve_owned_wire_identity() {
+        let host = Digest::sha256(b"host-service");
+        let mut config = PlacementSessionConfig::default();
+        config.leave_absolute_margin_ns += 3;
+        config.exploration = ExplorationMode::TransactionalEvery { interval: 7 };
+        let owned = whole_work_host_service(None, host, config);
+        let borrowed = whole_work_host_service_ref(None, host, config);
+        assert_eq!(
+            serde_json::to_vec(&borrowed).unwrap(),
+            serde_json::to_vec(&owned).unwrap()
+        );
+        let mut legacy = b"runmat-whole-work-policy.v1\0".to_vec();
+        let graph = PlacementPolicy::default();
+        legacy.extend_from_slice(&graph.absolute_margin_ns.to_le_bytes());
+        legacy.extend_from_slice(&graph.relative_margin_basis_points.to_le_bytes());
+        legacy.extend_from_slice(&config.leave_absolute_margin_ns.to_le_bytes());
+        legacy.extend_from_slice(&config.leave_relative_margin_basis_points.to_le_bytes());
+        legacy.extend_from_slice(&config.exploration_max_overhead_basis_points.to_le_bytes());
+        legacy.push(1);
+        legacy.extend_from_slice(&7_u32.to_le_bytes());
+        assert_eq!(borrowed.policy, Digest::sha256(legacy));
+    }
 
     #[test]
     fn common_revision_owner_distinguishes_policy_and_provider() {

@@ -630,6 +630,18 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         ))
     }
 
+    fn whole_work_host_service_revision_ref<'a>(
+        &self,
+        program: Option<&'a runmat_execution::ProgramRevision>,
+        host_service: Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
+        Some(super::revision::whole_work_host_service_ref(
+            program,
+            host_service,
+            self.config,
+        ))
+    }
+
     fn select_whole_work(
         &self,
         request: runmat_execution::WholeWorkPlacementRequest,

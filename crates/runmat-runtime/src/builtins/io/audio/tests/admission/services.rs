@@ -116,6 +116,21 @@ impl Drop for Probe {
     }
 }
 impl RuntimePlacementService for Placement {
+    fn whole_work_host_service_revision_ref<'a>(
+        &self,
+        program: Option<&'a runmat_execution::ProgramRevision>,
+        service: Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
+        let digest = Digest::sha256(b"audio-admission-test-placement");
+        Some(runmat_execution::PlacementRevisionRef {
+            program,
+            catalog: digest,
+            compiler: digest,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::HostService(service),
+            policy: digest,
+        })
+    }
+
     fn whole_work_host_service_revision(
         &self,
         program: Option<runmat_execution::ProgramRevision>,

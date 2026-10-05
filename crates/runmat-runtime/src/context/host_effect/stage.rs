@@ -3,7 +3,7 @@
 //! after the retained source has supplied exact result geometry.
 
 use super::*;
-use runmat_execution::{PlacementRevision, ResourceByteBound};
+use runmat_execution::{PlacementRevisionRef, ResourceByteBound};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Weak;
 
@@ -273,7 +273,7 @@ pub struct HostEffectStagePermit {
     identity: Digest,
     filesystem: Arc<dyn runmat_filesystem::FsProvider>,
     authority_revision: Digest,
-    revision: PlacementRevision,
+    revision: Digest,
     reservation: Arc<dyn HostEffectStageReservation>,
     slot_generation: Option<u64>,
     active_epoch: Arc<AtomicBool>,
@@ -592,9 +592,12 @@ impl HostEffectStagePermit {
         Ok(())
     }
 
-    pub(super) fn validate_revision(&self, revision: &PlacementRevision) -> BuiltinResult<()> {
+    pub(super) fn validate_revision(
+        &self,
+        revision: PlacementRevisionRef<'_>,
+    ) -> BuiltinResult<()> {
         self.checkpoint()?;
-        if &self.revision != revision {
+        if self.revision != hash_serializable(&revision) {
             return Err(invalid_stage(
                 "placement revision changed after source scan",
             ));
@@ -696,8 +699,8 @@ pub fn try_admit_host_effect_stage(
         .placement()
         .ok_or_else(|| insufficient("placement service is absent"))?;
     let revision = placement
-        .whole_work_host_service_revision(
-            runtime.program_revision().cloned(),
+        .whole_work_host_service_revision_ref(
+            runtime.program_revision(),
             admission.evidence.authority_revision,
         )
         .ok_or_else(|| insufficient("staged scan placement revision is unavailable"))?;
@@ -728,7 +731,7 @@ pub fn try_admit_host_effect_stage(
         identity: request_identity(&request),
         filesystem: request.filesystem.clone(),
         authority_revision: admission.evidence.authority_revision,
-        revision,
+        revision: hash_serializable(&revision),
         reservation: admission.reservation,
         slot_generation,
         active_epoch,
