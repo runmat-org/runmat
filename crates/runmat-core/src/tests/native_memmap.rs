@@ -29,6 +29,15 @@ function count = mappedRead(path)
   assert(isequal(value, uint8(2)));
   count = mappedCount;
 end
+function count = nestedMappedRead(path)
+  global mappedCount
+  mappedCount = mappedCount + 1;
+  map = memmapfile(path);
+  holder = struct('map', map);
+  value = holder.map.Data(2);
+  assert(isequal(value, uint8(2)));
+  count = mappedCount;
+end
 function count = nestedMappedWrite(path)
   global mappedCount
   mappedCount = mappedCount + 1;
@@ -282,6 +291,59 @@ fn core_dropped_pending_mapped_read_retires_owner_and_fresh_call_reads_exact_byt
         drop(fresh);
         drop(session);
         assert_eq!(evidence.retired_backings.load(Ordering::SeqCst), 2);
+    });
+}
+
+#[test]
+fn native_nested_mapped_read_resumes_once_without_replaying_prefix() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let memory = MemoryFsProvider::with_current_dir("/mapped-core");
+    memory
+        .write_project_path("/mapped-core/data.bin", &[1, 2, 3, 4])
+        .unwrap();
+    let (release, receiver) = oneshot::channel();
+    let evidence = Arc::new(Evidence::default());
+    let provider = Arc::new(GatedProvider {
+        memory,
+        gate: Arc::new(Mutex::new(Some(receiver))),
+        write_gate: Arc::new(Mutex::new(None)),
+        fail_write: false,
+        evidence: evidence.clone(),
+    });
+    let _owner = replace_provider(provider);
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new("mapped-core-nested-read@1", "nestedMappedRead.m", SOURCE),
+            None,
+        ))
+        .unwrap();
+        let control = InvocationControl::default().force_generic_native();
+        block_on(session.invoke_executable(&unit, invocation("resetMappedCount", 0), &control))
+            .unwrap();
+        let mut pending =
+            Box::pin(session.invoke_executable(&unit, invocation("nestedMappedRead", 1), &control));
+        for _ in 0..8 {
+            let mut task = Context::from_waker(noop_waker_ref());
+            if let Poll::Ready(outcome) = pending.as_mut().poll(&mut task) {
+                panic!("nested read completed before backing suspension: {outcome:?}");
+            }
+            if evidence.reads.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+        }
+        assert_eq!(evidence.opens.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.completed_reads.load(Ordering::SeqCst), 0);
+        release.send(()).unwrap();
+        let completed = block_on(pending).expect("resumed nested read");
+        assert_eq!(completed.as_slice(), &[Value::Num(1.0)]);
+        assert_eq!(evidence.opens.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.completed_reads.load(Ordering::SeqCst), 1);
+        drop(completed);
+        drop(session);
+        assert_eq!(evidence.retired_backings.load(Ordering::SeqCst), 1);
     });
 }
 
