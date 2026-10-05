@@ -212,6 +212,56 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
     assert!(error
         .message()
         .contains("changed between validation and output"));
+
+    std::fs::write(&file, b"1,2\n3,4\n").expect("reset payload");
+    let mut opened = block_on(selected.open_bounded_input())
+        .expect("direct read")
+        .expect("bounded source");
+    let geometry = block_on(bounded::scan_utf8(
+        &mut opened,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect("new first pass");
+    std::fs::write(&file, b"x,2\n3,4\n").expect("same-length malformed mutation");
+    let error = block_on(bounded::fill_utf8(
+        &mut opened,
+        &geometry,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect_err("changed-source error precedes replay token error");
+    assert!(error
+        .message()
+        .contains("changed between validation and output"));
+
+    std::fs::write(&file, b"1,2\n3,4\n").expect("reset payload");
+    let mut opened = block_on(selected.open_bounded_input())
+        .expect("direct read")
+        .expect("bounded source");
+    let mut empty_options = options.clone();
+    empty_options.range = Some(super::super::range::parse_range(&Value::from("Z9")).unwrap());
+    let geometry = block_on(bounded::scan_utf8(
+        &mut opened,
+        &mut cooperation,
+        &selected,
+        &empty_options,
+    ))
+    .expect("out-of-range first pass");
+    std::fs::write(&file, b"9,8\n7,6\n").expect("same-length mutation outside range");
+    let error = block_on(bounded::fill_utf8(
+        &mut opened,
+        &geometry,
+        &mut cooperation,
+        &selected,
+        &empty_options,
+    ))
+    .expect_err("empty range still checks retained source before publication");
+    assert!(error
+        .message()
+        .contains("changed between validation and output"));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

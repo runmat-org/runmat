@@ -378,9 +378,6 @@ pub(super) async fn fill_utf8(
     options: &ReadMatrixOptions,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
-    if rows == 0 || cols == 0 {
-        return empty_tensor();
-    }
     let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
     source.seek(SeekFrom::Start(0)).map_err(|source| {
         readmatrix_error_with_source(
@@ -403,6 +400,7 @@ pub(super) async fn fill_utf8(
         .then(|| vec![options.empty_value_f64(); count]);
     let mut reader = RowReader::new(source);
     let mut data_row = 0usize;
+    let mut semantic_error = None;
     while let Some((line_number, text)) = reader
         .next(cooperation, path, options.num_header_lines)
         .await?
@@ -414,7 +412,7 @@ pub(super) async fn fill_utf8(
         if fields.len() > geometry.columns || data_row >= geometry.rows {
             return Err(changed_source());
         }
-        if data_row >= first_row && data_row - first_row < rows {
+        if semantic_error.is_none() && data_row >= first_row && data_row - first_row < rows {
             let output_row = data_row - first_row;
             for output_col in 0..cols {
                 let token = fields
@@ -423,13 +421,19 @@ pub(super) async fn fill_utf8(
                     .unwrap_or("");
                 let index = output_col * rows + output_row;
                 if let (Some(dtype), Some(storage)) = (integer_dtype, integer.as_mut()) {
-                    let value = parse_integer_numeric_token(
+                    let value = match parse_integer_numeric_token(
                         token,
                         options,
                         dtype,
                         line_number,
                         first_col + output_col + 1,
-                    )?;
+                    ) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            semantic_error = Some(error);
+                            break;
+                        }
+                    };
                     storage.set_value(index, value).map_err(|source| {
                         readmatrix_error_with(
                             &READMATRIX_ERROR_TENSOR_BUILD,
@@ -437,12 +441,18 @@ pub(super) async fn fill_utf8(
                         )
                     })?;
                 } else if let Some(storage) = floating.as_mut() {
-                    storage[index] = parse_numeric_token(
+                    match parse_numeric_token(
                         token,
                         options,
                         line_number,
                         first_col + output_col + 1,
-                    )?;
+                    ) {
+                        Ok(value) => storage[index] = value,
+                        Err(error) => {
+                            semantic_error = Some(error);
+                            break;
+                        }
+                    }
                 }
                 if (output_col + 1) % ROW_WORK_CHUNK == 0 {
                     checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
@@ -460,6 +470,12 @@ pub(super) async fn fill_utf8(
     let replay_digest: [u8; 32] = reader.digest.finalize().into();
     if replay_digest != geometry.source_digest {
         return Err(changed_source());
+    }
+    if let Some(error) = semantic_error {
+        return Err(error);
+    }
+    if rows == 0 || cols == 0 {
+        return empty_tensor();
     }
     if let Some(storage) = integer {
         Tensor::from_numeric_storage(storage, vec![rows, cols]).map_err(|source| {
