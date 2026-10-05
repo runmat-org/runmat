@@ -15,7 +15,7 @@ mod user;
 #[path = "dispatch/workspace.rs"]
 mod workspace;
 
-pub(super) struct CallDispatchContext<'a> {
+pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub instr: &'a Instr,
     pub stack: &'a mut Vec<Value>,
     pub vars: &'a mut Vec<Value>,
@@ -32,7 +32,7 @@ pub(super) struct CallDispatchContext<'a> {
     pub current_function_name: &'a str,
 }
 
-pub(super) async fn dispatch_call(
+pub(in crate::interpreter::dispatch) async fn dispatch_call(
     ctx: CallDispatchContext<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match ctx.instr {
