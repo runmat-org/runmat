@@ -78,7 +78,7 @@ fn leased_old_body_survives_name_republication_without_becoming_name_visible() {
         .unwrap()
         .definition_owner
         .clone();
-    let lease = runmat_value::FunctionDefinitionOwner::issue(&old_owner);
+    let lease = runmat_value::FunctionDefinitionOwner::issue(&old_owner, 1);
     registry.insert_replacing_name(function(4, "first", 7));
     assert_eq!(registry.resolve_name("first"), Some(FunctionId(4)));
     assert!(registry.get(FunctionId(1)).is_none());
@@ -91,6 +91,7 @@ fn leased_old_body_survives_name_republication_without_becoming_name_visible() {
     );
     let wrong = runmat_value::FunctionDefinitionOwner::issue(
         &registry.get(FunctionId(4)).unwrap().definition_owner,
+        4,
     );
     assert!(registry.get_owned(FunctionId(1), &wrong).is_none());
     drop(lease);
@@ -103,7 +104,64 @@ fn reused_numeric_id_never_executes_retired_body() {
     let mut registry = registry();
     let lease = runmat_value::FunctionDefinitionOwner::issue(
         &registry.get(FunctionId(1)).unwrap().definition_owner,
+        1,
     );
     registry.insert_replacing_name(function(1, "first", 7));
     assert!(registry.get_owned(FunctionId(1), &lease).is_none());
+}
+
+#[test]
+fn unchanged_origin_refresh_keeps_existing_definition_lease() {
+    let mut registry = registry();
+    let origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("unchanged program"),
+        function: runmat_types::ProgramFunctionId(1),
+    };
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .binding_origin = Some(origin);
+    let lease = runmat_value::FunctionDefinitionOwner::issue(
+        &registry.get(FunctionId(1)).unwrap().definition_owner,
+        1,
+    );
+    let mut republished = function(1, "first", 5);
+    republished.binding_origin = Some(origin);
+    registry.insert_replacing_name(republished);
+    assert!(registry.get_owned(FunctionId(1), &lease).is_some());
+}
+
+#[test]
+fn old_caller_view_retains_old_helper_without_name_fallback() {
+    let mut registry = registry();
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)];
+    let owners = registry
+        .definition_dependency_owners(FunctionId(1))
+        .unwrap();
+    let session = std::sync::Arc::new(());
+    let authority = runmat_value::BoundFunctionAuthority::local(
+        std::sync::Arc::downgrade(&session),
+        runmat_value::FunctionDefinitionOwner::issue(&owners[0].1, owners[0].0 .0),
+        owners[1..]
+            .iter()
+            .map(|(id, owner)| runmat_value::FunctionDefinitionOwner::issue(owner, id.0))
+            .collect(),
+        runmat_value::LocalExport::Ephemeral,
+    );
+    registry.remove_source(SourceId(5));
+    registry.insert_replacing_name(function(4, "first", 7));
+    registry.insert_replacing_name(function(5, "second", 7));
+    let old = registry
+        .owned_view(FunctionId(1), &authority)
+        .expect("old owned definition and helper");
+    assert!(old.get(FunctionId(1)).is_some());
+    assert!(old.get(FunctionId(2)).is_some());
+    assert_eq!(old.resolve_name("first"), Some(FunctionId(4)));
+    assert_eq!(old.resolve_name("second"), Some(FunctionId(5)));
+    assert!(registry.get(FunctionId(1)).is_none());
 }

@@ -21,6 +21,9 @@ use super::{
     region::BytecodeRegion,
 };
 
+#[path = "program/definition_dependencies.rs"]
+mod definition_dependencies;
+
 #[derive(Debug, Clone)]
 pub struct CallFrame {
     pub function_name: String,
@@ -288,6 +291,9 @@ impl FunctionRegistry {
         function: FunctionId,
         lease: &runmat_value::FunctionDefinitionLease,
     ) -> Option<&FunctionBytecode> {
+        if lease.function() != function.0 {
+            return None;
+        }
         if let Some(current) = self.functions.get(&function) {
             // Reusing a number for another definition invalidates old bound
             // calls; nested static calls in that old body would otherwise be
@@ -298,6 +304,47 @@ impl FunctionRegistry {
             .get(&function)?
             .iter()
             .find(|body| lease.matches(&body.definition_owner))
+    }
+
+    /// Build the executable view for an authorized local callable. Retired
+    /// dependencies become executable by their original IDs in this view but
+    /// remain absent from name and source lookup.
+    pub fn owned_view(
+        &self,
+        function: FunctionId,
+        authority: &runmat_value::BoundFunctionAuthority,
+    ) -> Option<Self> {
+        let runmat_value::BoundFunctionAuthority::Local {
+            definition,
+            dependencies,
+            ..
+        } = authority
+        else {
+            return None;
+        };
+        let mut view = self.clone();
+        for lease in std::iter::once(definition).chain(dependencies.iter()) {
+            let id = FunctionId(lease.function());
+            let body = self.get_owned(id, lease)?;
+            view.functions.insert(id, body.clone());
+        }
+        self.get_owned(function, definition)?;
+        view.execution_stacks.take();
+        Some(view)
+    }
+
+    /// Retain the complete statically bound call/closure graph behind a
+    /// function handle. An unresolved static edge makes issuance unavailable.
+    pub fn definition_dependency_owners(
+        &self,
+        function: FunctionId,
+    ) -> Option<
+        Vec<(
+            FunctionId,
+            std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
+        )>,
+    > {
+        definition_dependencies::owners(self, function)
     }
 
     fn prune_retired(&mut self) {
@@ -323,7 +370,7 @@ impl FunctionRegistry {
         self.names.get(&scoped_name).copied()
     }
 
-    pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
+    pub fn insert_replacing_name(&mut self, mut function: FunctionBytecode) {
         self.execution_stacks.take();
         self.prune_retired();
         if let Some(previous) = self.resolve_name(&function.display_name) {
@@ -332,6 +379,14 @@ impl FunctionRegistry {
             }
         }
         let function_id = function.function;
+        if let Some(previous) = self.functions.get(&function_id) {
+            if previous.binding_origin.is_some()
+                && previous.binding_origin == function.binding_origin
+            {
+                // Identical immutable publication keeps value leases valid.
+                function.definition_owner = std::sync::Arc::clone(&previous.definition_owner);
+            }
+        }
         // Refreshing an existing identity does not retire its live aliases,
         // but its previous source membership must still be detached.
         if let Some(old) = self.detach_definition(function_id) {

@@ -10,10 +10,11 @@ pub struct FunctionDefinitionOwner {
 }
 
 impl FunctionDefinitionOwner {
-    pub fn issue(owner: &Arc<Self>) -> FunctionDefinitionLease {
+    pub fn issue(owner: &Arc<Self>, function: usize) -> FunctionDefinitionLease {
         owner.handles.fetch_add(1, Ordering::Relaxed);
         FunctionDefinitionLease {
             owner: Arc::clone(owner),
+            function,
         }
     }
 
@@ -25,17 +26,22 @@ impl FunctionDefinitionOwner {
 #[derive(Debug)]
 pub struct FunctionDefinitionLease {
     owner: Arc<FunctionDefinitionOwner>,
+    function: usize,
 }
 
 impl FunctionDefinitionLease {
     pub fn matches(&self, owner: &Arc<FunctionDefinitionOwner>) -> bool {
         Arc::ptr_eq(&self.owner, owner)
     }
+
+    pub fn function(&self) -> usize {
+        self.function
+    }
 }
 
 impl Clone for FunctionDefinitionLease {
     fn clone(&self) -> Self {
-        FunctionDefinitionOwner::issue(&self.owner)
+        FunctionDefinitionOwner::issue(&self.owner, self.function)
     }
 }
 
@@ -47,7 +53,7 @@ impl Drop for FunctionDefinitionLease {
 
 impl PartialEq for FunctionDefinitionLease {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.owner, &other.owner)
+        self.function == other.function && Arc::ptr_eq(&self.owner, &other.owner)
     }
 }
 
@@ -61,6 +67,7 @@ pub enum BoundFunctionAuthority {
     Local {
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
+        dependencies: Vec<FunctionDefinitionLease>,
         export: LocalExport,
     },
     Portable {
@@ -89,11 +96,12 @@ impl BoundFunctionBinding {
         function: usize,
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
+        dependencies: Vec<FunctionDefinitionLease>,
         export: LocalExport,
     ) -> Self {
         Self {
             function,
-            authority: BoundFunctionAuthority::local(issuer, definition, export),
+            authority: BoundFunctionAuthority::local(issuer, definition, dependencies, export),
         }
     }
 
@@ -109,11 +117,13 @@ impl BoundFunctionAuthority {
     pub fn local(
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
+        dependencies: Vec<FunctionDefinitionLease>,
         export: LocalExport,
     ) -> Self {
         Self::Local {
             issuer,
             definition,
+            dependencies,
             export,
         }
     }
@@ -164,16 +174,19 @@ impl PartialEq for BoundFunctionAuthority {
                 Self::Local {
                     issuer: left,
                     definition: left_definition,
+                    dependencies: left_dependencies,
                     export: left_export,
                 },
                 Self::Local {
                     issuer: right,
                     definition: right_definition,
+                    dependencies: right_dependencies,
                     export: right_export,
                 },
             ) => {
                 Weak::ptr_eq(left, right)
                     && left_definition == right_definition
+                    && left_dependencies == right_dependencies
                     && left_export == right_export
             }
             (Self::Portable { origin: left }, Self::Portable { origin: right }) => left == right,
@@ -193,7 +206,8 @@ mod tests {
         let definition = Arc::new(FunctionDefinitionOwner::default());
         let local = BoundFunctionAuthority::local(
             Arc::downgrade(&owner),
-            FunctionDefinitionOwner::issue(&definition),
+            FunctionDefinitionOwner::issue(&definition, 1),
+            Vec::new(),
             LocalExport::Ephemeral,
         );
         let other = Arc::new(());
