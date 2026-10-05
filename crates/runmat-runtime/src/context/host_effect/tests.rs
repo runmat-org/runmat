@@ -588,13 +588,15 @@ fn non_utf8_source_and_destination_reach_service_losslessly_and_have_distinct_id
                 .with_parallel(Rc::new(Parallel(Some(2)))),
         );
     let identity = |source: &Path, destination: &Path| {
-        select_host_effect(Some(&runtime), raw_request(source, destination))
+        let receipt = select_host_effect(Some(&runtime), raw_request(source, destination))
             .expect("exact raw paths are admitted")
-            .expect("whole-work selection")
-            .selected
-            .decision
-            .signature
-            .runtime_facts
+            .expect("whole-work selection");
+        match receipt.selected {
+            SelectedHostEffect::Portable(ref selected) => selected.decision.signature.runtime_facts,
+            SelectedHostEffect::Managed(_) => {
+                panic!("direct admission must use portable selection")
+            }
+        }
     };
     let first = identity(&source_a, &destination_a);
     let changed_source = identity(&source_b, &destination_a);
