@@ -279,7 +279,7 @@ mod tests {
     use super::*;
     use crate::{
         CandidateCostUnavailable, EstimateConfidence, EstimateSource, ExecutionCostComponents,
-        ExecutionCostEstimate, PlacementRevision, ProgramRevision,
+        ExecutionCostEstimate, PlacementRevision, ProgramRevision, ResourceByteBound,
     };
 
     fn signature() -> PlacementSignature {
