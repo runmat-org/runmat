@@ -74,13 +74,7 @@ pub async fn dispatch_object(
         | crate::bytecode::Instr::FinishDottedInvokeReceiver { .. }
         | crate::bytecode::Instr::ReadSubscriptPath { .. }
         | crate::bytecode::Instr::CaptureSubscriptPath { .. } => {
-            Box::pin(subscript::dispatch(
-                instr,
-                stack,
-                sequence_register,
-                context,
-            ))
-            .await
+            subscript::dispatch(instr, stack, sequence_register, context).await
         }
         crate::bytecode::Instr::LoadMember(_)
         | crate::bytecode::Instr::LoadMemberOrInit(_)
@@ -91,7 +85,7 @@ pub async fn dispatch_object(
         | crate::bytecode::Instr::MemberSequenceCardinality
         | crate::bytecode::Instr::LoadMemberSequenceUsingOutputSlot { .. }
         | crate::bytecode::Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. } => {
-            Box::pin(read::dispatch(instr, stack, sequence_register, context)).await
+            read::dispatch(instr, stack, sequence_register, context).await
         }
         crate::bytecode::Instr::CaptureCallOutputSequence
         | crate::bytecode::Instr::CaptureScalarSequence
@@ -99,7 +93,7 @@ pub async fn dispatch_object(
         | crate::bytecode::Instr::CaptureMemberDynamicSequence { .. }
         | crate::bytecode::Instr::CaptureCellContentsSequence { .. }
         | crate::bytecode::Instr::CaptureReturnedOutputsSequence { .. } => {
-            Box::pin(capture::dispatch(instr, stack, sequence_register, context)).await
+            capture::dispatch(instr, stack, sequence_register, context).await
         }
         crate::bytecode::Instr::StoreMember(_)
         | crate::bytecode::Instr::StoreMemberOrInit(_)
@@ -107,7 +101,7 @@ pub async fn dispatch_object(
         | crate::bytecode::Instr::StoreMemberDynamicOrInit
         | crate::bytecode::Instr::StoreMemberSequence(_)
         | crate::bytecode::Instr::StoreMemberDynamicSequence => {
-            Box::pin(write::dispatch(instr, stack, sequence_register, context)).await
+            write::dispatch(instr, stack, sequence_register, context).await
         }
         _ => Ok(false),
     }

@@ -896,7 +896,7 @@ pub async fn dispatch_indexing(
         | crate::bytecode::Instr::IndexCellList { .. }
         | crate::bytecode::Instr::StoreIndexCell { .. }
         | crate::bytecode::Instr::StoreIndexCellDelete { .. } => {
-            Box::pin(scalar_read_and_cell::dispatch(
+            scalar_read_and_cell::dispatch(
                 instr,
                 stack,
                 vars,
@@ -904,11 +904,11 @@ pub async fn dispatch_indexing(
                 pc,
                 runtime,
                 sequence_register,
-            ))
+            )
             .await
         }
         crate::bytecode::Instr::StoreIndex(_) | crate::bytecode::Instr::StoreIndexDelete(_) => {
-            Box::pin(scalar_store::dispatch(
+            scalar_store::dispatch(
                 instr,
                 stack,
                 vars,
@@ -916,11 +916,11 @@ pub async fn dispatch_indexing(
                 pc,
                 runtime,
                 sequence_register,
-            ))
+            )
             .await
         }
         crate::bytecode::Instr::IndexSlice(..) => {
-            Box::pin(slice_read::dispatch(
+            slice_read::dispatch(
                 instr,
                 stack,
                 vars,
@@ -928,11 +928,11 @@ pub async fn dispatch_indexing(
                 pc,
                 runtime,
                 sequence_register,
-            ))
+            )
             .await
         }
         crate::bytecode::Instr::StoreSlice(..) | crate::bytecode::Instr::StoreSliceDelete(..) => {
-            Box::pin(slice_store::dispatch(
+            slice_store::dispatch(
                 instr,
                 stack,
                 vars,
@@ -940,7 +940,7 @@ pub async fn dispatch_indexing(
                 pc,
                 runtime,
                 sequence_register,
-            ))
+            )
             .await
         }
         _ => Ok(false),
