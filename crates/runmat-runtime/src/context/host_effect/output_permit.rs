@@ -13,16 +13,19 @@ use runmat_value::{
 pub(super) struct ReceiptOutputPermit {
     authority: Weak<dyn ExactHostAllocationPermit>,
     active_epoch: Arc<AtomicBool>,
+    cancellation: runmat_execution::cancellation::CancellationToken,
 }
 
 impl ReceiptOutputPermit {
     pub(super) fn new(
         authority: Weak<dyn ExactHostAllocationPermit>,
         active_epoch: Arc<AtomicBool>,
+        cancellation: runmat_execution::cancellation::CancellationToken,
     ) -> Self {
         Self {
             authority,
             active_epoch,
+            cancellation,
         }
     }
 }
@@ -40,7 +43,7 @@ impl ExactHostAllocationPermit for ReceiptOutputPermit {
         &self,
         bytes: usize,
     ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
-        if !self.active_epoch.load(Ordering::Acquire) {
+        if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
             return Err(ExactHostNumericAllocationError::ExceedsPermit);
         }
         let authority = self
@@ -48,7 +51,7 @@ impl ExactHostAllocationPermit for ReceiptOutputPermit {
             .upgrade()
             .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
         let claim = authority.reserve_exact(bytes)?;
-        if !self.active_epoch.load(Ordering::Acquire) {
+        if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
             return Err(ExactHostNumericAllocationError::ExceedsPermit);
         }
         Ok(claim)
@@ -81,7 +84,11 @@ mod tests {
     fn direct_authority_view_cannot_allocate_after_terminal_epoch() {
         let authority: Arc<dyn ExactHostAllocationPermit> = Arc::new(DirectPermit);
         let epoch = Arc::new(AtomicBool::new(true));
-        let view = ReceiptOutputPermit::new(Arc::downgrade(&authority), epoch.clone());
+        let view = ReceiptOutputPermit::new(
+            Arc::downgrade(&authority),
+            epoch.clone(),
+            runmat_execution::cancellation::CancellationSource::new().token(),
+        );
         let retained = view.reserve_exact(4).expect("live direct claim");
         epoch.store(false, Ordering::Release);
         assert!(matches!(

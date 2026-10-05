@@ -163,6 +163,74 @@ fn abandoned_receipt_invalidates_retained_permit_and_stage_view() {
 }
 
 #[test]
+fn observation_callback_cannot_admit_new_temporary_or_output_work() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("precharged stage");
+    let view = stage.reservation();
+    let receipt = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .expect("selected call");
+    let output_permit = receipt.output_allocation_permit().expect("output permit");
+    let retained = output_permit.reserve_exact(4).expect("retained result");
+    let observed = Rc::new(Cell::new(false));
+    let observed_callback = observed.clone();
+    *placement.on_observe.borrow_mut() = Some(Box::new(move || {
+        observed_callback.set(true);
+        assert!(!view.is_current());
+        assert!(matches!(
+            view.reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 1),
+            Err(HostEffectAllocationError::InvalidInvocation)
+        ));
+        assert!(matches!(
+            output_permit.reserve_exact(1),
+            Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+        ));
+    }));
+    receipt.finish(WholeWorkObservationOutcome::Success);
+    assert!(observed.get());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
+fn captured_cancellation_blocks_cloned_allocation_views_before_receipt_drop() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let cancellation = CancellationSource::new();
+    let runtime = runtime.with_cancellation_token(cancellation.token());
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("precharged stage");
+    let view = stage.reservation();
+    let receipt = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .expect("selected call");
+    let output_permit = receipt.output_allocation_permit().expect("output permit");
+    cancellation.cancel(CancellationReason::User);
+    assert!(matches!(
+        view.reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 1),
+        Err(HostEffectAllocationError::Cancelled)
+    ));
+    assert!(matches!(
+        output_permit.reserve_exact(1),
+        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    drop(receipt);
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn simultaneous_receipts_compete_for_retained_output_capacity() {
     let ledger = ManagedHostEffectLedger::new(20);
     let (runtime, placement) = managed_runtime(&ledger, 20);

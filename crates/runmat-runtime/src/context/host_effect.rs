@@ -346,6 +346,7 @@ impl HostEffectReceipt {
             Arc::new(output_permit::ReceiptOutputPermit::new(
                 Arc::downgrade(permit),
                 self.active_epoch.clone(),
+                self.runtime.cancellation(),
             )) as Arc<dyn runmat_value::ExactHostAllocationPermit>
         })
     }
@@ -383,6 +384,12 @@ impl HostEffectReceipt {
             WholeWorkObservationOutcome::Cancelled | WholeWorkObservationOutcome::Abandoned
         ) {
             return;
+        }
+        // Observation is an external callback. The measured invocation is
+        // already terminal, so no retained permit can admit work inside it.
+        self.active_epoch.store(false, Ordering::Release);
+        if let Some(stage) = self._stage.as_ref() {
+            stage.terminate_allocations();
         }
         if let Some(service) = self.runtime.service_ports().placement() {
             let _ = service.observe_selected_whole_work(

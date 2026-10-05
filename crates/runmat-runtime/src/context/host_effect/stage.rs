@@ -86,6 +86,7 @@ pub trait HostEffectStageReservation: Send + Sync {
 struct StagedOutputPermit {
     reservation: Weak<dyn HostEffectStageReservation>,
     active_epoch: Arc<AtomicBool>,
+    cancellation: runmat_execution::cancellation::CancellationToken,
     max_output_bytes: u64,
     live_output_bytes: Arc<AtomicU64>,
 }
@@ -122,7 +123,7 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
         Arc<dyn runmat_value::ExactHostAllocationReservation>,
         runmat_value::ExactHostNumericAllocationError,
     > {
-        if !self.active_epoch.load(Ordering::Acquire) {
+        if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
         }
         let reservation = self
@@ -148,7 +149,10 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
                 return Err(error);
             }
         };
-        if !self.active_epoch.load(Ordering::Acquire) || !reservation.is_current() {
+        if !self.active_epoch.load(Ordering::Acquire)
+            || self.cancellation.is_cancelled()
+            || !reservation.is_current()
+        {
             self.live_output_bytes
                 .fetch_sub(requested, Ordering::SeqCst);
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
@@ -189,6 +193,7 @@ impl HostEffectStagePermit {
         Arc::new(StageReservationView::new(
             Arc::downgrade(&self.reservation),
             self.active_epoch.clone(),
+            self.cancellation.clone(),
         ))
     }
 
@@ -232,9 +237,14 @@ impl HostEffectStagePermit {
         Arc::new(StagedOutputPermit {
             reservation: Arc::downgrade(&self.reservation),
             active_epoch: self.active_epoch.clone(),
+            cancellation: self.cancellation.clone(),
             max_output_bytes,
             live_output_bytes: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    pub(super) fn terminate_allocations(&self) {
+        self.active_epoch.store(false, Ordering::Release);
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {

@@ -61,6 +61,7 @@ struct Placement {
     observations: RefCell<Vec<WholeWorkObservation>>,
     probes: Arc<AtomicUsize>,
     revision_available: Cell<bool>,
+    on_observe: RefCell<Option<Box<dyn Fn()>>>,
 }
 struct Probe(Arc<AtomicUsize>);
 impl RuntimeWholeWorkProbeLease for Probe {}
@@ -128,6 +129,9 @@ impl RuntimePlacementService for Placement {
         &self,
         observation: WholeWorkObservation,
     ) -> Result<(), crate::RuntimeError> {
+        if let Some(callback) = self.on_observe.borrow().as_ref() {
+            callback();
+        }
         self.observations.borrow_mut().push(observation);
         Ok(())
     }
