@@ -6,6 +6,77 @@ struct ManagedResources {
     revision: Digest,
 }
 
+struct PooledResources {
+    pool: ManagedHostEffectStagePool,
+    revision: Digest,
+}
+
+impl RuntimeHostEffectResourceService for PooledResources {
+    fn admission(
+        &self,
+        _: &HostEffectRequest<'_>,
+        _: &RuntimeContext,
+    ) -> Option<HostEffectResourceAdmission> {
+        None
+    }
+
+    fn stage_admission(
+        &self,
+        request: &HostEffectRequest<'_>,
+        _: &RuntimeContext,
+    ) -> Option<HostEffectStageAdmission> {
+        if request.operation != "unzip" || !Arc::ptr_eq(request.filesystem, fixture_fs()) {
+            return None;
+        }
+        Some(HostEffectStageAdmission {
+            evidence: HostEffectStageEvidence {
+                authority_revision: self.revision,
+                scratch_bytes: ResourceByteBound::Known(8),
+            },
+            reservation: self.pool.acquire(8).ok()?.into_reservation(),
+        })
+    }
+}
+
+fn pooled_runtime(ledger: &ManagedHostEffectLedger) -> RuntimeContext {
+    let placement = Rc::new(Placement::default());
+    placement.revision_available.set(true);
+    *placement.managed_ledger.borrow_mut() = Some(ledger.clone());
+    RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(placement)
+                .with_host_effect_resources(Rc::new(PooledResources {
+                    pool: ManagedHostEffectStagePool::new(ledger, 1).unwrap(),
+                    revision: Digest::sha256(b"pooled-stage-v1"),
+                }))
+                .with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+}
+
+#[test]
+fn pooled_stage_admission_releases_only_its_session_slot() {
+    let ledger = ManagedHostEffectLedger::new(16);
+    let first = pooled_runtime(&ledger);
+    let second = pooled_runtime(&ledger);
+    let first_stage = admit_host_effect_stage(&first, request(HostEffectOutput::ReturnedValue))
+        .expect("first session admission");
+    let second_stage = admit_host_effect_stage(&second, request(HostEffectOutput::ReturnedValue))
+        .expect("second session admission");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 16);
+    drop(first_stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 8);
+    second_stage
+        .checkpoint()
+        .expect("second owner remains current");
+    let reused = admit_host_effect_stage(&first, request(HostEffectOutput::ReturnedValue))
+        .expect("first owner reuses its retired slot");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 16);
+    drop(reused);
+    drop(second_stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
 impl RuntimeHostEffectResourceService for ManagedResources {
     fn admission(
         &self,

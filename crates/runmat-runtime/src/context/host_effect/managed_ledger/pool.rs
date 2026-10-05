@@ -35,6 +35,7 @@ impl Drop for ManagedHostEffectStageSlot {
 
 struct PooledStageSlot {
     reservation: ManagedHostEffectStageReservation,
+    mutation: Mutex<()>,
     active: AtomicBool,
     generation: AtomicU64,
     retired: AtomicBool,
@@ -54,6 +55,7 @@ impl ManagedHostEffectStagePool {
             slots.push(Arc::new(PooledStageSlot {
                 reservation: Arc::try_unwrap(reservation)
                     .unwrap_or_else(|_| unreachable!("new zero-byte reservation has one owner")),
+                mutation: Mutex::new(()),
                 active: AtomicBool::new(false),
                 generation: AtomicU64::new(0),
                 retired: AtomicBool::new(false),
@@ -71,6 +73,7 @@ impl ManagedHostEffectStagePool {
     ) -> Result<ManagedHostEffectStageSlot, HostEffectAllocationError> {
         let _admission = self.admission.lock().expect("managed stage pool lock");
         for slot in &self.slots {
+            let _mutation = slot.mutation.lock().expect("managed stage slot lock");
             if slot.active.load(Ordering::Acquire)
                 || slot.retired.load(Ordering::Acquire)
                 || Arc::strong_count(slot) != 1
@@ -109,6 +112,7 @@ impl HostEffectStageReservation for PooledStageSlot {
     }
 
     fn promote_scan_envelope(&self, bytes: u64) -> Result<(), HostEffectAllocationError> {
+        let _mutation = self.mutation.lock().expect("managed stage slot lock");
         if !self.active.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
@@ -120,6 +124,7 @@ impl HostEffectStageReservation for PooledStageSlot {
         kind: HostEffectLiveAllocationKind,
         bytes: usize,
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
+        let _mutation = self.mutation.lock().expect("managed stage slot lock");
         if !self.active.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
@@ -130,6 +135,7 @@ impl HostEffectStageReservation for PooledStageSlot {
         &self,
         bytes: u64,
     ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
+        let _mutation = self.mutation.lock().expect("managed stage slot lock");
         if !self.active.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
@@ -145,6 +151,7 @@ impl HostEffectStageReservation for PooledStageSlot {
     }
 
     fn retire_invocation(&self) {
+        let _mutation = self.mutation.lock().expect("managed stage slot lock");
         if self.active.swap(false, Ordering::AcqRel) {
             self.reservation.retire_pooled_invocation();
         }
@@ -154,6 +161,7 @@ impl HostEffectStageReservation for PooledStageSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Barrier;
 
     #[test]
     fn slot_retires_once_and_reuse_requires_all_old_references_to_drop() {
@@ -259,5 +267,36 @@ mod tests {
         second.reservation().retire_invocation();
         drop(second);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[test]
+    fn concurrent_promotion_and_retirement_cannot_reserve_an_inactive_slot() {
+        let ledger = ManagedHostEffectLedger::new(16);
+        let pool = ManagedHostEffectStagePool::new(&ledger, 1).unwrap();
+        for _ in 0..64 {
+            let slot = pool.acquire(8).unwrap();
+            let promote = slot.reservation().clone();
+            let retire = slot.reservation().clone();
+            let start = Arc::new(Barrier::new(3));
+            let promotion_start = start.clone();
+            let promotion = std::thread::spawn(move || {
+                promotion_start.wait();
+                promote.promote_scan_envelope(12)
+            });
+            let retirement_start = start.clone();
+            let retirement = std::thread::spawn(move || {
+                retirement_start.wait();
+                retire.retire_invocation();
+            });
+            start.wait();
+            let _ = promotion.join().unwrap();
+            retirement.join().unwrap();
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+            assert!(matches!(
+                slot.reservation().promote_scan_envelope(12),
+                Err(HostEffectAllocationError::InvalidInvocation)
+            ));
+            drop(slot);
+        }
     }
 }
