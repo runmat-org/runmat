@@ -38,12 +38,7 @@ pub struct PlacementSignature {
 
 impl PlacementSignature {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.operation.is_empty()
-            || self.operation.len() > 128
-            || self.operation.chars().any(char::is_control)
-        {
-            return Err("placement operation must be 1..=128 bytes without control characters");
-        }
+        PlacementOperationId::new(&self.operation)?;
         if self
             .revision
             .program
@@ -77,6 +72,34 @@ impl PlacementSignature {
     }
 }
 
+/// The validated operation spelling retained by a local placement decision.
+/// The portable signature still owns its String at the wire/profile boundary.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PlacementOperationId {
+    bytes: [u8; 128],
+    length: u8,
+}
+
+impl PlacementOperationId {
+    pub fn new(operation: &str) -> Result<Self, &'static str> {
+        if operation.is_empty() || operation.len() > 128 || operation.chars().any(char::is_control)
+        {
+            return Err("placement operation must be 1..=128 bytes without control characters");
+        }
+        let mut bytes = [0; 128];
+        bytes[..operation.len()].copy_from_slice(operation.as_bytes());
+        Ok(Self {
+            bytes,
+            length: operation.len() as u8,
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.length)])
+            .expect("validated operation retains UTF-8 bytes")
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlacementPermitIdentity {
     pub signature: Digest,
@@ -91,6 +114,26 @@ pub struct SelectedExecutionCandidate {
     pub node: String,
     pub candidate: String,
     pub kind: ExecutionCandidateKind,
+}
+
+/// Allocation-free local identity for a candidate selected by the same
+/// whole-work policy. Presentation Strings are built only at a portable
+/// decision/feedback boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompactSelectedExecutionCandidate {
+    pub node: PlacementOperationId,
+    pub candidate: Digest,
+    pub kind: ExecutionCandidateKind,
+}
+
+impl CompactSelectedExecutionCandidate {
+    pub fn portable(self) -> SelectedExecutionCandidate {
+        SelectedExecutionCandidate {
+            node: self.node.as_str().to_owned(),
+            candidate: self.candidate.to_string(),
+            kind: self.kind,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

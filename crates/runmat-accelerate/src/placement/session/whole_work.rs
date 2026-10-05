@@ -7,11 +7,12 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::{
-    CandidateCostEvidence, CandidateCostUnavailable, CandidateObservationEvidence, Digest,
-    ExecutionCandidateDescriptor, ExecutionCandidateKind, PlacementGraph, PlacementGraphCandidate,
-    PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest, ResourceByteBound,
-    SelectedExecutionCandidate, WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision,
-    WholeWorkDecisionKind, WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
+    CandidateCostEvidence, CandidateCostUnavailable, CandidateObservationEvidence,
+    CompactSelectedExecutionCandidate, Digest, ExecutionCandidateDescriptor,
+    ExecutionCandidateKind, PlacementGraph, PlacementGraphCandidate, PlacementGraphLimits,
+    PlacementGraphNode, PlacementOperationId, PlacementPlanRequest, ResourceByteBound,
+    WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind,
+    WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
 };
 use runmat_runtime::context::{RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection};
 
@@ -52,7 +53,7 @@ struct Admitted<'a> {
 
 enum SelectionDraft {
     Direct {
-        selected: SelectedExecutionCandidate,
+        selected: CompactSelectedExecutionCandidate,
         kind: WholeWorkDecisionKind,
         predicted_total_ns: Option<u64>,
         probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
@@ -122,7 +123,13 @@ impl PlacementSession {
                 kind,
                 predicted_total_ns,
                 probe,
-            } => (signature, selected, kind, predicted_total_ns, probe),
+            } => (
+                signature,
+                selected.portable(),
+                kind,
+                predicted_total_ns,
+                probe,
+            ),
         };
         let mut selected = RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
@@ -150,6 +157,8 @@ impl PlacementSession {
         request: WholeWorkPlacementRequestRef<'_>,
     ) -> Result<SelectionDraft, PlacementPlanError> {
         request.validate().map_err(invalid_request)?;
+        let operation =
+            PlacementOperationId::new(&request.signature.operation).map_err(invalid_request)?;
         if request.resources.cancellation_requested {
             return Err(PlacementPlanError {
                 code: "RunMat:Placement:Cancelled",
@@ -250,7 +259,11 @@ impl PlacementSession {
                 .or_else(|| admitted.first())
                 .expect("nonempty admitted whole-work candidates");
             return Ok(SelectionDraft::Direct {
-                selected: item.candidate.selected(&request.signature.operation),
+                selected: CompactSelectedExecutionCandidate {
+                    node: operation,
+                    candidate: item.identity,
+                    kind: item.candidate.kind,
+                },
                 kind: if matches!(
                     request.constraint,
                     WholeWorkConstraint::ProviderRequired { .. }
@@ -278,7 +291,11 @@ impl PlacementSession {
                 );
                 lock_probes(&self.whole_work_probes).insert(key);
                 return Ok(SelectionDraft::Direct {
-                    selected: item.candidate.selected(&request.signature.operation),
+                    selected: CompactSelectedExecutionCandidate {
+                        node: operation,
+                        candidate: item.identity,
+                        kind: item.candidate.kind,
+                    },
                     kind: WholeWorkDecisionKind::Exploratory,
                     predicted_total_ns: None,
                     probe: Some(Box::new(ProbeLease {
@@ -297,7 +314,7 @@ impl PlacementSession {
             })
             .collect();
         if estimated.is_empty() {
-            return unmeasured_host(&admitted, &request.signature.operation);
+            return unmeasured_host(&admitted, operation);
         }
         // A measured host route is required before the ordinary numeric graph
         // can compare it with provider candidates. Unmeasured host routes are
@@ -306,7 +323,7 @@ impl PlacementSession {
             .iter()
             .any(|(item, _)| !item.candidate.kind.is_provider())
         {
-            return unmeasured_host(&admitted, &request.signature.operation);
+            return unmeasured_host(&admitted, operation);
         }
         let node = PlacementGraphNode {
             identity: request.signature.operation.clone(),
@@ -340,14 +357,18 @@ impl PlacementSession {
 
 fn unmeasured_host(
     admitted: &[Admitted<'_>],
-    operation: &str,
+    operation: PlacementOperationId,
 ) -> Result<SelectionDraft, PlacementPlanError> {
     let item = admitted
         .iter()
         .find(|item| !item.candidate.kind.is_provider())
         .ok_or_else(no_legal_candidate)?;
     Ok(SelectionDraft::Direct {
-        selected: item.candidate.selected(operation),
+        selected: CompactSelectedExecutionCandidate {
+            node: operation,
+            candidate: item.identity,
+            kind: item.candidate.kind,
+        },
         kind: WholeWorkDecisionKind::Unmeasured,
         predicted_total_ns: None,
         probe: None,

@@ -30,6 +30,22 @@ fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() 
 }
 
 #[test]
+fn compact_selection_retains_unicode_operation_and_portable_identity() {
+    let route = candidate(ExecutionCandidateKind::SharedRuntime);
+    let operation = "foreign.λ";
+    let compact = CompactSelectedExecutionCandidate {
+        node: PlacementOperationId::new(operation).expect("valid operation"),
+        candidate: route.identity_digest(),
+        kind: route.kind,
+    };
+    assert_eq!(compact.node.as_str(), operation);
+    assert_eq!(compact.portable(), route.selected(operation));
+    assert!(PlacementOperationId::new("").is_err());
+    assert!(PlacementOperationId::new("\n").is_err());
+    assert!(PlacementOperationId::new(&"x".repeat(129)).is_err());
+}
+
+#[test]
 fn owned_and_borrowed_compared_routes_use_the_same_graph_policy() {
     let estimate = |execution_ns| {
         CandidateCostEvidence::Estimated(runmat_execution::ExecutionCostEstimate {
