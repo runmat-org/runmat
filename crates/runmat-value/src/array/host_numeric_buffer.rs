@@ -142,10 +142,10 @@ impl HostNumericBuffer {
             | NumericDType::U16
             | NumericDType::U32
             | NumericDType::U64 => {
-                return Err((
+                Err((
                     allocation,
                     "external adopted integer storage is unavailable; exact integer allocations use the owned typed constructor".into(),
-                ));
+                ))
             }
         }
     }
