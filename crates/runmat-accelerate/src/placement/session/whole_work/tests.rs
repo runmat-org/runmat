@@ -204,15 +204,19 @@ fn managed_selection_seeds_from_explicit_profile_import_without_duplicate_export
 
     let route = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
     let source = PlacementSession::default();
-    source
-        .observe(runmat_execution::PlacementFeedback {
-            signature: route.signature.clone(),
-            candidate: route.candidates[0].identity_digest().to_string(),
-            kind: route.candidates[0].kind,
-            total_elapsed_ns: 23,
-            succeeded: true,
-        })
-        .expect("portable source profile");
+    // The shared confidence policy needs two completed observations before
+    // an imported duration can replace exploratory execution.
+    for total_elapsed_ns in [23, 25] {
+        source
+            .observe(runmat_execution::PlacementFeedback {
+                signature: route.signature.clone(),
+                candidate: route.candidates[0].identity_digest().to_string(),
+                kind: route.candidates[0].kind,
+                total_elapsed_ns,
+                succeeded: true,
+            })
+            .expect("portable source profile");
+    }
     let imported = source.profile_snapshot();
     let managed = PlacementSession::new_with_managed_observations(
         PlacementSessionConfig::default(),
@@ -229,6 +233,7 @@ fn managed_selection_seeds_from_explicit_profile_import_without_duplicate_export
         .select_whole_work_borrowed_managed(route.as_ref())
         .expect("matching finite selection");
     assert_eq!(selected.kind, WholeWorkDecisionKind::Uncompared);
+    assert_eq!(selected.predicted_total_ns, Some(24));
     RuntimePlacementService::observe_managed_whole_work(
         &managed,
         &selected,
@@ -238,7 +243,8 @@ fn managed_selection_seeds_from_explicit_profile_import_without_duplicate_export
     .expect("managed completion");
     let exported = managed.profile_snapshot();
     assert_eq!(exported.feedback.len(), 1);
-    assert_eq!(exported.feedback[0].samples, 2);
+    assert_eq!(exported.feedback[0].samples, 3);
+    assert_eq!(exported.feedback[0].total_elapsed_ns, 77);
 }
 
 #[test]
