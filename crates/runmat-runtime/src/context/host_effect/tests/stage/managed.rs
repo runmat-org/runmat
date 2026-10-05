@@ -1,4 +1,5 @@
 use super::*;
+use std::error::Error;
 
 struct ManagedResources {
     ledger: ManagedHostEffectLedger,
@@ -314,7 +315,12 @@ fn selected_headroom_capacity_failure_preserves_typed_resource_cause() {
     .err()
     .expect("selected output headroom cannot race with other reservations");
     assert_eq!(error.identifier(), Some("RunMat:Placement:ResourceLimit"));
-    assert!(error.source().is_some());
+    assert!(matches!(
+        error
+            .source()
+            .and_then(|source| source.downcast_ref::<HostEffectAllocationError>()),
+        Some(HostEffectAllocationError::ExceedsCapacity)
+    ));
     assert!(placement.observations.borrow().is_empty());
     assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
     drop(competing.borrow_mut().take());
@@ -341,7 +347,12 @@ fn revoked_selected_headroom_reports_stale_authority_with_cause() {
         error.identifier(),
         Some("RunMat:Placement:StaleResourceAuthority")
     );
-    assert!(error.source().is_some());
+    assert!(matches!(
+        error
+            .source()
+            .and_then(|source| source.downcast_ref::<HostEffectAllocationError>()),
+        Some(HostEffectAllocationError::Revoked)
+    ));
     assert!(placement.observations.borrow().is_empty());
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
