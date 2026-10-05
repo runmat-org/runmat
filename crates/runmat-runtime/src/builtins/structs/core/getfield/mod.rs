@@ -34,13 +34,18 @@ async fn getfield_builtin(
     base: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    crate::output_count::validate_fixed_outputs(
-        &runmat_builtins::GETFIELD_DESCRIPTOR,
-        &runmat_builtins::GETFIELD_ERROR_TOO_MANY_OUTPUTS,
-        "getfield",
-    )?;
-
-    execution::getfield(runtime.as_ref(), base, rest, true).await
+    let work = async {
+        crate::output_count::validate_fixed_outputs(
+            &runmat_builtins::GETFIELD_DESCRIPTOR,
+            &runmat_builtins::GETFIELD_ERROR_TOO_MANY_OUTPUTS,
+            "getfield",
+        )?;
+        execution::getfield_in_scope(runtime.as_ref(), base, rest, true).await
+    };
+    match runtime.as_ref() {
+        Some(runtime) => runtime.scope(work).await,
+        None => work.await,
+    }
 }
 
 pub(crate) async fn getfield_internal_with_context(

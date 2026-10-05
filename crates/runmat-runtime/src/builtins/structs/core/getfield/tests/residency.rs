@@ -55,12 +55,28 @@ fn getfield_strict_indexed_resident_field_rejects_before_provider_access() {
     );
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 #[test]
-#[cfg(feature = "wgpu")]
 fn getfield_gpu_tensor_indexing() {
+    futures::executor::block_on(getfield_gpu_tensor_indexing_case());
+}
+
+#[cfg(all(feature = "wgpu", target_arch = "wasm32"))]
+#[wasm_bindgen_test::wasm_bindgen_test]
+async fn getfield_gpu_tensor_indexing() {
+    getfield_gpu_tensor_indexing_case().await;
+}
+
+#[cfg(feature = "wgpu")]
+async fn getfield_gpu_tensor_indexing_case() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _ = wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default());
+    #[cfg(not(target_arch = "wasm32"))]
+    wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
+        .unwrap_or_else(|error| panic!("native WGPU provider initialization failed: {error:#}"));
+    #[cfg(target_arch = "wasm32")]
+    wgpu_backend::register_wgpu_provider_async(wgpu_backend::WgpuProviderOptions::default())
+        .await
+        .unwrap_or_else(|error| panic!("browser WGPU provider initialization failed: {error:#}"));
     let provider = runmat_accelerate_api::provider().expect("wgpu provider");
 
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();

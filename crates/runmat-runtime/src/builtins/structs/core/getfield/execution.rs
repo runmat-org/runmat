@@ -22,7 +22,7 @@ pub(super) async fn getfield(
     }
 }
 
-async fn getfield_in_scope(
+pub(super) async fn getfield_in_scope(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     rest: Vec<Value>,
