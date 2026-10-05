@@ -619,7 +619,10 @@ async fn try_execute_resolved_callable(
 pub async fn execute_callable_descriptor(
     descriptor: CallableDescriptor,
 ) -> Result<ValueSequence, RuntimeError> {
-    execute_callable_descriptor_with_runtime(None, descriptor).await
+    // A dynamic call can suspend or reenter the interpreter. Keep its execution
+    // frame at the call boundary, rather than in every enclosing indexing or
+    // member-access future (including those that never invoke a callable).
+    Box::pin(execute_callable_descriptor_with_runtime(None, descriptor)).await
 }
 
 pub async fn execute_callable_descriptor_in_context(
@@ -627,10 +630,10 @@ pub async fn execute_callable_descriptor_in_context(
     descriptor: CallableDescriptor,
 ) -> Result<ValueSequence, RuntimeError> {
     runtime
-        .scope(execute_callable_descriptor_with_runtime(
+        .scope(Box::pin(execute_callable_descriptor_with_runtime(
             Some(runtime),
             descriptor,
-        ))
+        )))
         .await
 }
 
@@ -687,7 +690,10 @@ mod tests;
 pub async fn try_execute_callable_descriptor(
     descriptor: CallableDescriptor,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
-    try_execute_callable_descriptor_with_runtime(None, descriptor).await
+    Box::pin(try_execute_callable_descriptor_with_runtime(
+        None, descriptor,
+    ))
+    .await
 }
 
 pub async fn try_execute_callable_descriptor_in_context(
@@ -695,10 +701,10 @@ pub async fn try_execute_callable_descriptor_in_context(
     descriptor: CallableDescriptor,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
     runtime
-        .scope(try_execute_callable_descriptor_with_runtime(
+        .scope(Box::pin(try_execute_callable_descriptor_with_runtime(
             Some(runtime),
             descriptor,
-        ))
+        )))
         .await
 }
 
