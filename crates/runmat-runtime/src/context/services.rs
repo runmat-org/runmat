@@ -312,7 +312,7 @@ pub struct RuntimeManagedWholeWorkSelection {
     #[cfg(test)]
     pub(crate) _test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
     #[cfg(test)]
-    pub(crate) test_signature: runmat_execution::PlacementSignature,
+    pub(crate) test_signature: Box<runmat_execution::PlacementSignature>,
 }
 
 impl RuntimeManagedWholeWorkSelection {
@@ -327,7 +327,7 @@ impl RuntimeManagedWholeWorkSelection {
         outcome: runmat_execution::WholeWorkObservationOutcome,
     ) -> runmat_execution::WholeWorkObservation {
         runmat_execution::WholeWorkObservation {
-            signature: self.test_signature.clone(),
+            signature: (*self.test_signature).clone(),
             selected: self.selected.portable(),
             elapsed_ns,
             outcome,
@@ -359,7 +359,7 @@ pub(crate) fn test_managed_selection(
         predicted_total_ns: None,
         observation_lease: pool.acquire(identity, candidate.identity_digest()).unwrap(),
         _test_probe: test_probe,
-        test_signature: request.signature.clone(),
+        test_signature: Box::new(request.signature.clone()),
     }
 }
 
