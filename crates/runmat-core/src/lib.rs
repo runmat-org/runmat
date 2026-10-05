@@ -54,7 +54,9 @@ pub fn execute_text_request_for_testing(
         abi::HostExecutionPolicy::default(),
         session.workspace_handle(),
     );
-    let response = futures::executor::block_on(session.execute_request(request));
+    // Keep the potentially large native call future off the test thread's
+    // stack while exercising the same public request path.
+    let response = futures::executor::block_on(Box::pin(session.execute_request(request)));
     let outcome = response.result?;
     let workspace = session.workspace_snapshot();
     let warnings = outcome
