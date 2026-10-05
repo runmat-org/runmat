@@ -242,8 +242,16 @@ pub struct FunctionArgumentValidation {
     pub default_value: Option<FunctionArgDefaultValue>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Cheap immutable execution snapshots; authoring mutations copy on write.
+/// The serialized representation remains the prior registry record, not an
+/// Arc or a process-local owner token.
+#[derive(Debug, Clone, Default)]
 pub struct FunctionRegistry {
+    data: std::sync::Arc<FunctionRegistryData>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FunctionRegistryData {
     pub functions: HashMap<FunctionId, FunctionBytecode>,
     #[serde(default)]
     pub names: HashMap<String, FunctionId>,
@@ -255,6 +263,36 @@ pub struct FunctionRegistry {
     retired: HashMap<FunctionId, Vec<FunctionBytecode>>,
     #[serde(skip)]
     execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
+}
+
+impl std::ops::Deref for FunctionRegistry {
+    type Target = FunctionRegistryData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for FunctionRegistry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let data = std::sync::Arc::make_mut(&mut self.data);
+        data.execution_stacks.take();
+        data
+    }
+}
+
+impl Serialize for FunctionRegistry {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.data.as_ref().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FunctionRegistry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        FunctionRegistryData::deserialize(deserializer).map(|data| Self {
+            data: std::sync::Arc::new(data),
+        })
+    }
 }
 
 impl FunctionRegistry {
@@ -272,11 +310,13 @@ impl FunctionRegistry {
             }
         }
         Self {
-            functions,
-            names,
-            source_functions,
-            retired: HashMap::new(),
-            execution_stacks: OnceLock::new(),
+            data: std::sync::Arc::new(FunctionRegistryData {
+                functions,
+                names,
+                source_functions,
+                retired: HashMap::new(),
+                execution_stacks: OnceLock::new(),
+            }),
         }
     }
 

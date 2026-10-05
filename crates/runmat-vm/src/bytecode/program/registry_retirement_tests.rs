@@ -20,6 +20,20 @@ fn registry() -> FunctionRegistry {
 }
 
 #[test]
+fn execution_snapshot_clone_is_shared_until_publication_mutates() {
+    let original = registry();
+    let mut publication = original.clone();
+    assert!(std::sync::Arc::ptr_eq(&original.data, &publication.data));
+    publication.insert_replacing_name(function(4, "new", 8));
+    assert!(!std::sync::Arc::ptr_eq(&original.data, &publication.data));
+    assert_eq!(original.resolve_name("new"), None);
+    assert_eq!(publication.resolve_name("new"), Some(FunctionId(4)));
+    let serialized = serde_json::to_value(&publication).expect("registry record");
+    assert!(serialized.get("functions").is_some());
+    assert!(serialized.get("data").is_none());
+}
+
+#[test]
 fn source_retirement_removes_all_target_aliases_and_preserves_rebound_names() {
     let mut registry = registry();
     registry.names.insert("first_alias".into(), FunctionId(1));
