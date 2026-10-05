@@ -18,15 +18,24 @@ impl ExactHostEffectBytes {
         capacity: usize,
         claim: Arc<dyn HostEffectLiveAllocationReservation>,
     ) -> Result<Self, HostEffectAllocationError> {
+        Self::new_with(capacity, claim, |layout| {
+            // SAFETY: the checked layout and matching release remain owned by
+            // the returned buffer if allocation succeeds.
+            unsafe { alloc(layout) }
+        })
+    }
+
+    fn new_with(
+        capacity: usize,
+        claim: Arc<dyn HostEffectLiveAllocationReservation>,
+        allocate: impl FnOnce(Layout) -> *mut u8,
+    ) -> Result<Self, HostEffectAllocationError> {
         let layout =
             Layout::array::<u8>(capacity).map_err(|_| HostEffectAllocationError::Overflow)?;
         let pointer = if capacity == 0 {
             NonNull::dangling()
         } else {
-            // SAFETY: `layout` is checked and the resulting pointer is owned
-            // by this value until its matching Drop deallocation.
-            NonNull::new(unsafe { alloc(layout) })
-                .ok_or(HostEffectAllocationError::AllocationFailed)?
+            NonNull::new(allocate(layout)).ok_or(HostEffectAllocationError::AllocationFailed)?
         };
         Ok(Self {
             pointer,
@@ -154,5 +163,20 @@ mod tests {
             ExactHostEffectBytes::new(usize::MAX, Arc::new(Claim)),
             Err(HostEffectAllocationError::Overflow)
         ));
+    }
+
+    #[test]
+    fn rejected_physical_allocation_releases_its_stage_claim() {
+        let ledger = ManagedHostEffectLedger::new(4);
+        let stage = ledger.reserve_stage(4).expect("stage");
+        let claim = stage
+            .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 4)
+            .expect("claim");
+        assert!(matches!(
+            ExactHostEffectBytes::new_with(4, claim, |_| std::ptr::null_mut()),
+            Err(HostEffectAllocationError::AllocationFailed)
+        ));
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
     }
 }
