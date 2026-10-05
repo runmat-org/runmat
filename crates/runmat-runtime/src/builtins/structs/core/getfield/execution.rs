@@ -15,6 +15,19 @@ pub(super) async fn getfield(
     rest: Vec<Value>,
     enforce_public_builtin_extension: bool,
 ) -> BuiltinResult<Value> {
+    let work = getfield_in_scope(runtime, base, rest, enforce_public_builtin_extension);
+    match runtime {
+        Some(runtime) => runtime.scope(work).await,
+        None => work.await,
+    }
+}
+
+async fn getfield_in_scope(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    rest: Vec<Value>,
+    enforce_public_builtin_extension: bool,
+) -> BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(errors::from_descriptor(&GETFIELD_ERROR_NOT_ENOUGH_INPUTS));
     }
@@ -98,5 +111,9 @@ pub(crate) async fn get_member_value_in_context(
     value: Value,
     name: &str,
 ) -> BuiltinResult<Value> {
-    object::get_field_value(runtime, value, name, false).await
+    let work = object::get_field_value(runtime, value, name, false);
+    match runtime {
+        Some(runtime) => runtime.scope(work).await,
+        None => work.await,
+    }
 }
