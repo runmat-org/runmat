@@ -73,7 +73,10 @@ pub(super) async fn readline_builtin(
     let receipt = match outcome {
         Ok(receipt) => receipt,
         Err(err) if err.kind() == TcpTransportErrorKind::Timeout => {
-            return Ok(empty_double_matrix())
+            if let Some(runtime) = &runtime {
+                runtime.cpu_cooperation().completed(0).await?;
+            }
+            return Ok(empty_double_matrix());
         }
         Err(err) => {
             let descriptor = match err.kind() {

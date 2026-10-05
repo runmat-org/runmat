@@ -134,6 +134,9 @@ pub(super) async fn write_builtin(
         None => prepare_default_payload(&data, byte_order)?,
     };
     if payload.bytes.is_empty() {
+        if let Some(runtime) = &runtime {
+            runtime.cpu_cooperation().completed(0).await?;
+        }
         return Ok(Value::Num(0.0));
     }
 
