@@ -202,3 +202,61 @@ fn canonical_dispatcher_passes_invocation_cooperation_to_datetime() {
     drop(call);
     assert!(dropped.get());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn one_large_cellstr_character_vector_suspends_during_bounded_decode() {
+    let text = format!("  2024-04-09{}", " ".repeat(16_384));
+    let input = Value::Cell(
+        runmat_value::CellArray::new(vec![Value::CharArray(CharArray::new_row(&text))], 1, 1)
+            .unwrap(),
+    );
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let dropped = Rc::new(Cell::new(false));
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(PendingDateService {
+            turns: turns.clone(),
+            dropped: dropped.clone(),
+            quantum: 2048,
+        }),
+        source.token(),
+    );
+    let mut call = Box::pin(super::super::constructor_builtin::datetime_builtin(
+        Some(runtime),
+        vec![
+            input.clone(),
+            Value::from("InputFormat"),
+            Value::from("yyyy-MM-dd"),
+        ],
+    ));
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert_eq!(
+        turns.get(),
+        1,
+        "second 1024-character decode chunk suspends"
+    );
+    source.cancel(CancellationReason::User);
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Ready(Err(_))
+    ));
+    drop(call);
+    assert!(dropped.get());
+
+    let result = futures::executor::block_on(super::super::constructor_builtin::datetime_builtin(
+        None,
+        vec![input, Value::from("InputFormat"), Value::from("yyyy-MM-dd")],
+    ))
+    .expect("cooperative whitespace scanning preserves the original date grammar");
+    let object = as_datetime(result);
+    assert_eq!(serial_tensor_for_object(&object).unwrap().shape, [1, 1]);
+    assert_eq!(
+        serial_tensor_for_object(&object).unwrap().materialize_f64(),
+        vec![serial_for_date(2024, 4, 9)]
+    );
+}

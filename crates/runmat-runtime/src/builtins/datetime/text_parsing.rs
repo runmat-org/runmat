@@ -56,7 +56,10 @@ pub(super) fn format_serial(serial: f64, format: &str) -> BuiltinResult<String> 
 }
 
 pub(super) fn parse_datetime_text(text: &str) -> Option<(NaiveDateTime, bool)> {
-    let trimmed = text.trim();
+    parse_datetime_text_trimmed(text.trim())
+}
+
+fn parse_datetime_text_trimmed(trimmed: &str) -> Option<(NaiveDateTime, bool)> {
     if trimmed.is_empty() {
         return None;
     }
@@ -91,12 +94,18 @@ pub(super) fn parse_datetime_text_with_input_format(
     text: &str,
     input_format: Option<&str>,
 ) -> Option<(NaiveDateTime, bool)> {
-    let trimmed = text.trim();
+    parse_datetime_text_with_input_format_trimmed(text.trim(), input_format)
+}
+
+fn parse_datetime_text_with_input_format_trimmed(
+    trimmed: &str,
+    input_format: Option<&str>,
+) -> Option<(NaiveDateTime, bool)> {
     if trimmed.is_empty() {
         return None;
     }
     let Some(input_format) = input_format else {
-        return parse_datetime_text(trimmed);
+        return parse_datetime_text_trimmed(trimmed);
     };
     let chrono_format = format_token_to_strftime(input_format);
     if let Ok(value) = NaiveDateTime::parse_from_str(trimmed, &chrono_format) {
@@ -219,6 +228,8 @@ pub(super) async fn parse_cell_text_input(
             )));
         }
         let mut text = String::new();
+        let mut first_non_whitespace = None;
+        let mut last_non_whitespace_end = 0;
         for chunk in chars.data.chunks(1024) {
             if let Some(budget) = budget.as_deref_mut() {
                 budget
@@ -234,7 +245,14 @@ pub(super) async fn parse_cell_text_input(
                 error.source = Some(Box::new(source));
                 error
             })?;
-            text.extend(chunk.iter().copied());
+            for character in chunk {
+                let start = text.len();
+                text.push(*character);
+                if !character.is_whitespace() {
+                    first_non_whitespace.get_or_insert(start);
+                    last_non_whitespace_end = text.len();
+                }
+            }
         }
         if chars.data.is_empty() {
             if let Some(budget) = budget.as_deref_mut() {
@@ -244,9 +262,12 @@ pub(super) async fn parse_cell_text_input(
                     .map_err(|source| datetime_execution_error(runtime, source))?;
             }
         }
-        let parsed = relative_datetime(text.trim())
-            .map(|value| (value, text.trim().eq_ignore_ascii_case("now")))
-            .or_else(|| parse_datetime_text_with_input_format(&text, input_format));
+        let trimmed = first_non_whitespace
+            .map(|start| &text[start..last_non_whitespace_end])
+            .unwrap_or("");
+        let parsed = relative_datetime(trimmed)
+            .map(|value| (value, trimmed.eq_ignore_ascii_case("now")))
+            .or_else(|| parse_datetime_text_with_input_format_trimmed(trimmed, input_format));
         let (naive, parsed_has_time) = parsed.ok_or_else(|| {
             datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
         })?;
@@ -266,13 +287,20 @@ pub(super) async fn parse_cell_text_input(
 }
 
 pub(super) fn relative_datetime(text: &str) -> Option<NaiveDateTime> {
+    if ![3, 5, 8, 9].contains(&text.len()) {
+        return None;
+    }
     let now = Local::now().naive_local();
-    match text.to_ascii_lowercase().as_str() {
-        "now" => Some(now),
-        "today" => Some(midnight(now.date())),
-        "tomorrow" => Some(midnight(now.date() + Duration::days(1))),
-        "yesterday" => Some(midnight(now.date() - Duration::days(1))),
-        _ => None,
+    if text.eq_ignore_ascii_case("now") {
+        Some(now)
+    } else if text.eq_ignore_ascii_case("today") {
+        Some(midnight(now.date()))
+    } else if text.eq_ignore_ascii_case("tomorrow") {
+        Some(midnight(now.date() + Duration::days(1)))
+    } else if text.eq_ignore_ascii_case("yesterday") {
+        Some(midnight(now.date() - Duration::days(1)))
+    } else {
+        None
     }
 }
 

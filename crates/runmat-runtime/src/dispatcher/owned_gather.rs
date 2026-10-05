@@ -40,7 +40,11 @@ fn gather_owned<'a>(
                     if let Some(budget) = budget.as_deref_mut() {
                         budget.checkpoint(1).await.map_err(execution_error)?;
                     }
-                    gathered.push(gather_owned(element, budget.as_deref_mut()).await?);
+                    if is_host_leaf(&element) {
+                        gathered.push(element);
+                    } else {
+                        gathered.push(gather_owned(element, budget.as_deref_mut()).await?);
+                    }
                 }
                 CellArray::new_with_shape(gathered, cell.shape)
                     .map(Value::Cell)
@@ -53,12 +57,7 @@ fn gather_owned<'a>(
             // These aggregate families can carry transient or resident
             // descendants. The borrowed canonical walk owns their semantics
             // until an exhaustive owned traversal is available.
-            aggregate @ (Value::GpuTensor(_)
-            | Value::Struct(_)
-            | Value::StructArray(_)
-            | Value::Object(_)
-            | Value::ObjectArray(_)
-            | Value::Closure(_)) => {
+            aggregate if !is_host_leaf(&aggregate) => {
                 let gather = gather_if_needed_async_impl(&aggregate);
                 match budget.as_deref() {
                     Some(budget) => budget
@@ -71,6 +70,20 @@ fn gather_owned<'a>(
             other => Ok(other),
         }
     })
+}
+
+fn is_host_leaf(value: &Value) -> bool {
+    !matches!(
+        value,
+        Value::Cell(_)
+            | Value::OutputList(_)
+            | Value::GpuTensor(_)
+            | Value::Struct(_)
+            | Value::StructArray(_)
+            | Value::Object(_)
+            | Value::ObjectArray(_)
+            | Value::Closure(_)
+    )
 }
 
 fn execution_error(source: ExecutionServiceError) -> RuntimeError {
