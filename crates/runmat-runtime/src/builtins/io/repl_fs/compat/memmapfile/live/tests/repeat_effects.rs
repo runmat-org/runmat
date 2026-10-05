@@ -247,3 +247,129 @@ fn abandoned_pending_mapped_read_releases_session_backing_without_replay() {
     drop(mapped);
     assert_eq!(provider.backing_drops.load(Ordering::SeqCst), 1);
 }
+
+struct NumericDownloadProvider {
+    owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    downloads: AtomicUsize,
+}
+
+impl runmat_accelerate_api::AccelProvider for NumericDownloadProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "memmapfile explicit control witness".into()
+    }
+    fn upload(
+        &self,
+        _: &runmat_accelerate_api::HostTensorView<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        anyhow::bail!("mapped method does not upload")
+    }
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(runmat_accelerate_api::HostTensorOwned {
+                data: vec![7.0],
+                shape: vec![1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+        })
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(runmat_accelerate_api::HostNumericTensorOwned {
+                data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![7.0]),
+                shape: vec![1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+        })
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn explicit_gpu_mapped_rhs_is_gated_then_gathered_once_in_runmat_mode() {
+    let _accel_lock = crate::builtins::common::test_support::accel_test_lock();
+    let _fs_lock = vfs::provider_override_lock();
+    let gpu = Box::leak(Box::new(NumericDownloadProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    unsafe { runmat_accelerate_api::register_provider(gpu) };
+    let _gpu_selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(gpu));
+    let allocation = gpu
+        .owner
+        .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+            data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![7.0]),
+            shape: vec![1, 1],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let explicit = allocation
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    #[cfg(target_arch = "wasm32")]
+    let root = PathBuf::from("/explicit-mapped");
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-explicit-mapped");
+    let provider = Arc::new(CountedProvider {
+        root,
+        bytes: Arc::new(Mutex::new(vec![0; 8])),
+        opens: Arc::new(AtomicUsize::new(0)),
+        reads: Arc::new(AtomicUsize::new(0)),
+        writes: Arc::new(AtomicUsize::new(0)),
+        pending_reads: false,
+        backing_drops: Arc::new(AtomicUsize::new(0)),
+    });
+    let _fs_selected = vfs::replace_provider(provider.clone());
+    let mapped = futures::executor::block_on(super::super::super::super::memmapfile_builtin(
+        None,
+        vec![
+            Value::String("data.bin".into()),
+            Value::String("Format".into()),
+            Value::String("double".into()),
+            Value::String("Writable".into()),
+            Value::Bool(true),
+        ],
+    ))
+    .unwrap();
+    let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let rejected = futures::executor::block_on(subsasgn(
+        None,
+        mapped.clone(),
+        property("Data"),
+        Value::GpuTensor(explicit.clone()),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        rejected.identifier(),
+        MEMMAPFILE_EXPLICIT_GPU_EXTENSION.error_identifier
+    );
+    assert_eq!(gpu.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.reads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.writes.load(Ordering::SeqCst), 0);
+    drop(strict);
+
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let updated = futures::executor::block_on(subsasgn(
+        None,
+        mapped,
+        property("Data"),
+        Value::GpuTensor(explicit),
+    ))
+    .unwrap();
+    assert!(matches!(updated, Value::Object(_)));
+    assert_eq!(gpu.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.writes.load(Ordering::SeqCst), 1);
+    assert_eq!(*provider.bytes.lock().unwrap(), 7.0f64.to_le_bytes());
+    assert_eq!(allocation.probe.retirements(), 0);
+}
