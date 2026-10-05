@@ -114,10 +114,10 @@ fn retained_utf8_replay_writes_exact_wide_integer_output_without_mirror() {
         tensor.integer_storage(),
         Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
     );
-    assert_eq!(
-        live.load(Ordering::SeqCst),
-        16 + 2 * std::mem::size_of::<usize>()
-    );
+    let exact_bytes =
+        runmat_value::ExactHostTensor2dAllocation::requested_bytes(NumericDType::U64, 1, 2)
+            .expect("canonical exact tensor owner layout");
+    assert_eq!(live.load(Ordering::SeqCst), exact_bytes);
     drop(tensor);
     assert_eq!(live.load(Ordering::SeqCst), 0);
 }

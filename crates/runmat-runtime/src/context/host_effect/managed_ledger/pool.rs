@@ -229,6 +229,7 @@ impl HostEffectStageReservation for PooledStageSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_execution::cancellation::CancellationSource;
     use std::sync::Barrier;
 
     #[test]
@@ -298,36 +299,53 @@ mod tests {
 
     #[test]
     fn temporary_claim_and_returned_output_outlive_distinct_stage_lifetimes() {
-        let ledger = ManagedHostEffectLedger::new(16);
-        let pool = ManagedHostEffectStagePool::new(&ledger, 1).unwrap();
+        let output_bytes =
+            4 + ManagedHostEffectStagePool::owned_output_claim_metadata_bytes() as u64;
+        let ledger = ManagedHostEffectLedger::new(8 + output_bytes);
+        let pool = ManagedHostEffectStagePool::new(&ledger, 2).unwrap();
         let first = pool.acquire(8).unwrap();
         let scratch = first
             .reservation()
             .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 4)
             .unwrap();
-        let headroom = first.reservation().reserve_output_headroom(4).unwrap();
-        let output = headroom.reserve_exact(4).unwrap();
+        let output_permit = first
+            .reservation()
+            .reserve_preallocated_output_permit(
+                output_bytes,
+                CancellationSource::new().token(),
+                Arc::new(AtomicU64::new(1)),
+                1,
+            )
+            .unwrap()
+            .expect("setup-owned output permit");
+        let output = output_permit.reserve_exact_claim(4).unwrap();
         first.reservation().retire_invocation();
-        assert_eq!(ledger.snapshot().live_claimed_bytes, 8);
-        assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 4 + output_bytes);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 8 + output_bytes);
         drop(first);
         assert!(matches!(
             pool.acquire(4),
             Err(HostEffectAllocationError::ExceedsCapacity)
         ));
         drop(scratch);
-        assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, output_bytes);
         let second = pool
             .acquire(4)
-            .expect("scratch retirement frees stage slot");
-        assert_eq!(second.generation, 2);
-        assert_eq!(ledger.snapshot().live_reserved_bytes, 8);
+            .expect("scratch retirement permits another preallocated stage slot");
+        assert_eq!(second.generation, 1);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, output_bytes + 4);
         second.reservation().retire_invocation();
         drop(second);
-        drop(headroom);
-        assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+        drop(output_permit);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, output_bytes);
         drop(output);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        let reused = pool
+            .acquire(4)
+            .expect("old output owner released its stage slot");
+        assert_eq!(reused.generation, 2);
+        drop(reused);
     }
 
     #[test]
