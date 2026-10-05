@@ -2,7 +2,7 @@
 //! resource and revision evidence; the existing placement service alone owns
 //! selection and feedback. Missing evidence is never interpreted as zero.
 
-use super::{RuntimeContext, RuntimeWholeWorkSelection};
+use super::{RuntimeContext, RuntimeManagedWholeWorkSelection, RuntimeWholeWorkSelection};
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -328,34 +328,54 @@ fn select_host_effect_inner(
     let expected_candidate_kind = candidate.kind;
     let selected = if stage.is_some() {
         let candidates = [candidate];
-        service.select_whole_work_borrowed_managed(WholeWorkPlacementRequestRef {
-            signature: &signature,
-            constraint: WholeWorkConstraint::AnyLegal,
-            candidates: &candidates,
-            resources: &resources,
-            // Planner alternates are disabled for a side-effecting single
-            // route; this does not assert that the effect can be replayed.
-            deterministic: true,
-            require_transactional_results: false,
-        })?
+        SelectedHostEffect::Managed(service.select_whole_work_borrowed_managed(
+            WholeWorkPlacementRequestRef {
+                signature: &signature,
+                constraint: WholeWorkConstraint::AnyLegal,
+                candidates: &candidates,
+                resources: &resources,
+                // Planner alternates are disabled for a side-effecting single
+                // route; this does not assert that the effect can be replayed.
+                deterministic: true,
+                require_transactional_results: false,
+            },
+        )?)
     } else {
-        service.select_whole_work(WholeWorkPlacementRequest {
+        SelectedHostEffect::Portable(service.select_whole_work(WholeWorkPlacementRequest {
             signature: signature.clone(),
             constraint: WholeWorkConstraint::AnyLegal,
             candidates: vec![candidate],
             resources,
             deterministic: true,
             require_transactional_results: false,
-        })?
+        })?)
     };
     if !admission.liveness_lease.is_current() {
         return Err(stale_resource());
     }
-    if selected.decision.signature != signature
-        || selected.decision.selected.node != request.operation
-        || selected.decision.selected.kind != expected_candidate_kind
-        || selected.decision.selected.candidate.parse::<Digest>() != Ok(expected_candidate_digest)
-    {
+    let valid_selection = match &selected {
+        SelectedHostEffect::Portable(selected) => {
+            selected.decision.signature == signature
+                && selected.decision.selected.node == request.operation
+                && selected.decision.selected.kind == expected_candidate_kind
+                && Digest::parse_canonical(&selected.decision.selected.candidate)
+                    == Some(expected_candidate_digest)
+        }
+        SelectedHostEffect::Managed(selected) => {
+            selected.identity
+                == signature.permit_identity().map_err(|source| {
+                    build_runtime_error("host effect signature identity is invalid")
+                        .with_identifier("RunMat:Placement:InvalidDecision")
+                        .with_source(source)
+                        .build()
+                })?
+                && selected.selected.node.as_str() == request.operation
+                && selected.selected.kind == expected_candidate_kind
+                && selected.selected.candidate == expected_candidate_digest
+                && selected.observation_is_current()
+        }
+    };
+    if !valid_selection {
         return Err(
             build_runtime_error("placement selected an unadmitted host effect route")
                 .with_identifier("RunMat:Placement:InvalidDecision")
@@ -423,12 +443,17 @@ fn selected_output_error(source: HostEffectAllocationError) -> crate::RuntimeErr
 /// finished. Dropping an unpolled/cancelled call releases it without feedback.
 pub struct HostEffectReceipt {
     runtime: RuntimeContext,
-    selected: RuntimeWholeWorkSelection,
+    selected: SelectedHostEffect,
     started: Instant,
     resource_liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
     output_allocation_permit: Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>,
     active_epoch: Arc<AtomicBool>,
     _stage: Option<HostEffectStagePermit>,
+}
+
+enum SelectedHostEffect {
+    Portable(RuntimeWholeWorkSelection),
+    Managed(RuntimeManagedWholeWorkSelection),
 }
 
 impl HostEffectReceipt {
@@ -502,11 +527,15 @@ impl HostEffectReceipt {
             stage.terminate_allocations();
         }
         if let Some(service) = self.runtime.service_ports().placement() {
-            let _ = service.observe_selected_whole_work(
-                &self.selected,
-                duration_ns_saturating(self.started.elapsed()).max(1),
-                outcome,
-            );
+            let elapsed = duration_ns_saturating(self.started.elapsed()).max(1);
+            let _ = match &self.selected {
+                SelectedHostEffect::Portable(selected) => {
+                    service.observe_selected_whole_work(selected, elapsed, outcome)
+                }
+                SelectedHostEffect::Managed(selected) => {
+                    service.observe_managed_whole_work(selected, elapsed, outcome)
+                }
+            };
         }
     }
 }

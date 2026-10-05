@@ -282,14 +282,12 @@ pub trait RuntimeWholeWorkObservationPermit: Send + Sync {
 /// allocating one dynamic observation permit per invocation.
 pub enum RuntimeWholeWorkObservationAuthority {
     Dynamic(std::sync::Arc<dyn RuntimeWholeWorkObservationPermit>),
-    Managed(super::ManagedObservationLease),
 }
 
 impl RuntimeWholeWorkObservationAuthority {
     pub fn is_current(&self) -> bool {
         match self {
             Self::Dynamic(permit) => permit.is_current(),
-            Self::Managed(lease) => lease.is_current(),
         }
     }
 }
@@ -300,6 +298,71 @@ pub struct RuntimeWholeWorkSelection {
     /// Selection-owned validity; a matching invalidation or profile import
     /// revokes late completion even before a deferred source is registered.
     pub observation_permit: Option<RuntimeWholeWorkObservationAuthority>,
+}
+
+/// Fixed-size complete-call decision retained by a managed finite route.
+/// Portable presentation is reconstructed only at an explicit export boundary.
+pub struct RuntimeManagedWholeWorkSelection {
+    pub identity: runmat_execution::PlacementPermitIdentity,
+    pub selected: runmat_execution::CompactSelectedExecutionCandidate,
+    pub kind: runmat_execution::WholeWorkDecisionKind,
+    pub predicted_total_ns: Option<u64>,
+    pub observation_lease: super::ManagedObservationLease,
+    #[cfg(test)]
+    pub(crate) test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    #[cfg(test)]
+    pub(crate) test_signature: runmat_execution::PlacementSignature,
+}
+
+impl RuntimeManagedWholeWorkSelection {
+    pub fn observation_is_current(&self) -> bool {
+        self.observation_lease.is_current()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_observation(
+        &self,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> runmat_execution::WholeWorkObservation {
+        runmat_execution::WholeWorkObservation {
+            signature: self.test_signature.clone(),
+            selected: self.selected.portable(),
+            elapsed_ns,
+            outcome,
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_managed_selection(
+    request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+) -> RuntimeManagedWholeWorkSelection {
+    let candidate = &request.candidates[0];
+    let identity = request
+        .signature
+        .permit_identity()
+        .expect("typed test signature");
+    let pool = super::ManagedObservationPool::new(
+        &super::host_effect::ManagedHostEffectLedger::new(4096),
+        1,
+    )
+    .expect("synthetic observation slot");
+    RuntimeManagedWholeWorkSelection {
+        identity,
+        selected: runmat_execution::CompactSelectedExecutionCandidate {
+            node: runmat_execution::PlacementOperationId::new(&request.signature.operation)
+                .expect("typed test operation"),
+            candidate: candidate.identity_digest(),
+            kind: candidate.kind,
+        },
+        kind: runmat_execution::WholeWorkDecisionKind::Unmeasured,
+        predicted_total_ns: None,
+        observation_lease: pool.acquire(identity, candidate.identity_digest()).unwrap(),
+        test_probe,
+        test_signature: request.signature.clone(),
+    }
 }
 
 impl RuntimeWholeWorkSelection {
@@ -408,9 +471,22 @@ pub trait RuntimePlacementService {
     fn select_whole_work_borrowed_managed(
         &self,
         _request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
-    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+    ) -> Result<RuntimeManagedWholeWorkSelection, RuntimeError> {
         Err(
             crate::build_runtime_error("managed whole-work placement is unavailable")
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .build(),
+        )
+    }
+
+    fn observe_managed_whole_work(
+        &self,
+        _selected: &RuntimeManagedWholeWorkSelection,
+        _elapsed_ns: u64,
+        _outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), RuntimeError> {
+        Err(
+            crate::build_runtime_error("managed whole-work feedback is unavailable")
                 .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
                 .build(),
         )

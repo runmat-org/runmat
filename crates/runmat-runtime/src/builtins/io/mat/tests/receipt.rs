@@ -134,16 +134,26 @@ impl RuntimePlacementService for Placement {
     fn select_whole_work_borrowed_managed(
         &self,
         request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
-    ) -> Result<RuntimeWholeWorkSelection, crate::RuntimeError> {
-        // Synthetic MAT placement fixture, not a production capacity owner.
-        self.select_whole_work(WholeWorkPlacementRequest {
-            signature: request.signature.clone(),
-            constraint: request.constraint,
-            candidates: request.candidates.to_vec(),
-            resources: request.resources.clone(),
-            deterministic: request.deterministic,
-            require_transactional_results: request.require_transactional_results,
-        })
+    ) -> Result<crate::context::RuntimeManagedWholeWorkSelection, crate::RuntimeError> {
+        request
+            .validate()
+            .expect("typed MAT host-effect test request");
+        self.selections.set(self.selections.get() + 1);
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        Ok(crate::context::test_managed_selection(
+            request,
+            Some(Box::new(Probe(self.probes.clone()))),
+        ))
+    }
+
+    fn observe_managed_whole_work(
+        &self,
+        _selected: &crate::context::RuntimeManagedWholeWorkSelection,
+        _elapsed_ns: u64,
+        outcome: WholeWorkObservationOutcome,
+    ) -> Result<(), crate::RuntimeError> {
+        self.observations.borrow_mut().push(outcome);
+        Ok(())
     }
 
     fn observe_whole_work(

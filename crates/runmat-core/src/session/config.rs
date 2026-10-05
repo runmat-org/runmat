@@ -124,7 +124,7 @@ impl RunMatSession {
     /// a host-effect resource certificate or change ordinary unbounded calls.
     pub fn install_managed_host_effect_placement(
         &mut self,
-        slots: usize,
+        capacity: runmat_accelerate::placement::ManagedPlacementCapacity,
     ) -> Result<(), RuntimeError> {
         let parallel = self
             .runtime_context
@@ -144,7 +144,7 @@ impl RunMatSession {
             runmat_accelerate::placement::PlacementSession::new_with_managed_observations(
                 runmat_accelerate::placement::PlacementSessionConfig::default(),
                 &ledger,
-                slots,
+                capacity,
             )
             .map_err(|source| {
                 runmat_runtime::build_runtime_error(
@@ -652,18 +652,28 @@ mod tests {
         let mut second = RunMatSession::with_options(false, false).unwrap();
         first.install_parallel_service(Rc::new(ManagedAllocation(ledger.clone())));
         second.install_parallel_service(Rc::new(ManagedAllocation(ledger.clone())));
+        let capacity = runmat_accelerate::placement::ManagedPlacementCapacity {
+            in_flight_slots: 1,
+            feedback_series: 1,
+            signature_bytes_per_series: 1024,
+        };
         first
-            .install_managed_host_effect_placement(1)
+            .install_managed_host_effect_placement(capacity)
             .expect("one preallocated slot on first session");
         let charged = ledger.snapshot().live_reserved_bytes;
         assert!(charged > 0);
         second
-            .install_managed_host_effect_placement(1)
+            .install_managed_host_effect_placement(capacity)
             .expect("independent session shares the ledger, not slot identity");
         assert_eq!(ledger.snapshot().live_reserved_bytes, charged * 2);
         let prior = first.placement_session.clone();
         let error = first
-            .install_managed_host_effect_placement(usize::MAX)
+            .install_managed_host_effect_placement(
+                runmat_accelerate::placement::ManagedPlacementCapacity {
+                    in_flight_slots: usize::MAX,
+                    ..capacity
+                },
+            )
             .expect_err("unrepresentable backing must not replace placement");
         assert_eq!(
             error.identifier(),

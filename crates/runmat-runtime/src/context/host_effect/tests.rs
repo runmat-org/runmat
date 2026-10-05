@@ -147,9 +147,31 @@ impl RuntimePlacementService for Placement {
     fn select_whole_work_borrowed_managed(
         &self,
         request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
-    ) -> Result<RuntimeWholeWorkSelection, crate::RuntimeError> {
-        // This test service supplies synthetic placement evidence only.
-        self.select_whole_work_borrowed(request)
+    ) -> Result<crate::context::RuntimeManagedWholeWorkSelection, crate::RuntimeError> {
+        request.validate().unwrap();
+        if let Some(callback) = self.on_select.borrow().as_ref() {
+            callback();
+        }
+        self.selections.set(self.selections.get() + 1);
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        Ok(crate::context::test_managed_selection(
+            request,
+            Some(Box::new(Probe(self.probes.clone()))),
+        ))
+    }
+    fn observe_managed_whole_work(
+        &self,
+        selected: &crate::context::RuntimeManagedWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), crate::RuntimeError> {
+        if let Some(callback) = self.on_observe.borrow().as_ref() {
+            callback();
+        }
+        self.observations
+            .borrow_mut()
+            .push(selected.test_observation(elapsed_ns, outcome));
+        Ok(())
     }
     fn observe_whole_work(
         &self,

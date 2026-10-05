@@ -174,16 +174,43 @@ impl RuntimePlacementService for Placement {
     fn select_whole_work_borrowed_managed(
         &self,
         request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
-    ) -> Result<RuntimeWholeWorkSelection, crate::RuntimeError> {
-        // Synthetic audio placement fixture, not a production capacity owner.
-        self.select_whole_work(WholeWorkPlacementRequest {
-            signature: request.signature.clone(),
-            constraint: request.constraint,
-            candidates: request.candidates.to_vec(),
-            resources: request.resources.clone(),
-            deterministic: request.deterministic,
-            require_transactional_results: request.require_transactional_results,
-        })
+    ) -> Result<crate::context::RuntimeManagedWholeWorkSelection, crate::RuntimeError> {
+        request.validate().expect("typed audio candidate");
+        let candidate = &request.candidates[0];
+        if let Some(available) = request.resources.memory_available_bytes {
+            let demand = match (
+                candidate.resources.retained_bytes,
+                candidate.resources.scratch_bytes,
+            ) {
+                (ResourceByteBound::Known(retained), ResourceByteBound::Known(scratch)) => {
+                    retained.checked_add(scratch)
+                }
+                _ => None,
+            };
+            if demand.is_none_or(|demand| demand > available) {
+                return Err(build_runtime_error("test audio memory limit")
+                    .with_identifier("RunMat:Placement:ResourceLimit")
+                    .build());
+            }
+        }
+        self.demands.borrow_mut().push(candidate.resources);
+        self.selections.set(self.selections.get() + 1);
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        Ok(crate::context::test_managed_selection(
+            request,
+            Some(Box::new(Probe(self.probes.clone()))),
+        ))
+    }
+    fn observe_managed_whole_work(
+        &self,
+        selected: &crate::context::RuntimeManagedWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), crate::RuntimeError> {
+        self.observations
+            .borrow_mut()
+            .push(selected.test_observation(elapsed_ns, outcome));
+        Ok(())
     }
     fn observe_whole_work(
         &self,

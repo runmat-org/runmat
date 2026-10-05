@@ -54,8 +54,9 @@ pub(crate) use local::{
     plan_local, LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest,
 };
 pub use session::{
-    ExplorationMode, PlacementFeedbackSeries, PlacementPlanError, PlacementProfileSnapshot,
-    PlacementSession, PlacementSessionConfig, PLACEMENT_PROFILE_SCHEMA_VERSION,
+    ExplorationMode, ManagedPlacementCapacity, PlacementFeedbackSeries, PlacementPlanError,
+    PlacementProfileSnapshot, PlacementSession, PlacementSessionConfig,
+    PLACEMENT_PROFILE_SCHEMA_VERSION,
 };
 
 pub use event::{

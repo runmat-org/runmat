@@ -13,6 +13,7 @@ use thiserror::Error;
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
 mod evidence;
 mod observation_permits;
+mod managed_feedback;
 mod pending;
 mod whole_work;
 #[cfg(test)]
@@ -52,6 +53,15 @@ pub struct PlacementSessionConfig {
     pub leave_relative_margin_basis_points: u32,
     pub exploration: ExplorationMode,
     pub exploration_max_overhead_basis_points: u32,
+}
+
+/// Explicit session setup capacities for requested Rust-managed backing.
+/// These are slot counts and serialized-signature bytes, not an RSS estimate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ManagedPlacementCapacity {
+    pub in_flight_slots: usize,
+    pub feedback_series: usize,
+    pub signature_bytes_per_series: usize,
 }
 
 impl Default for PlacementSessionConfig {
@@ -141,20 +151,11 @@ mod u128_decimal {
 
 impl PlacementFeedbackSeries {
     pub fn mean_ns(&self) -> Option<u64> {
-        (self.samples > 0).then(|| {
-            u64::try_from(self.total_elapsed_ns / u128::from(self.samples)).unwrap_or(u64::MAX)
-        })
+        evidence::FeedbackNumbers::from_series(self).mean_ns()
     }
 
     pub fn variance_ns2(&self) -> Option<u128> {
-        if self.samples < 2 {
-            return None;
-        }
-        let mean = self.total_elapsed_ns / u128::from(self.samples);
-        Some(
-            (self.total_squared_elapsed_ns / u128::from(self.samples))
-                .saturating_sub(mean.saturating_mul(mean)),
-        )
+        evidence::FeedbackNumbers::from_series(self).variance_ns2()
     }
 
     pub fn estimated_p95_ns(&self) -> Option<u64> {
@@ -185,6 +186,7 @@ pub struct PlacementSession {
     pending: pending::PendingFeedback,
     observation_permits: observation_permits::ObservationPermits,
     managed_observations: Option<runmat_runtime::context::ManagedObservationPool>,
+    managed_feedback: Option<managed_feedback::ManagedFeedbackPool>,
     whole_work_probes: Arc<Mutex<BTreeSet<whole_work::ProbeKey>>>,
 }
 
@@ -202,6 +204,7 @@ impl PlacementSession {
             pending: pending::PendingFeedback::default(),
             observation_permits: observation_permits::ObservationPermits::default(),
             managed_observations: None,
+            managed_feedback: None,
             whole_work_probes: Arc::default(),
         }
     }
@@ -211,12 +214,18 @@ impl PlacementSession {
     pub fn new_with_managed_observations(
         config: PlacementSessionConfig,
         ledger: &runmat_runtime::context::host_effect::ManagedHostEffectLedger,
-        slots: usize,
+        capacity: ManagedPlacementCapacity,
     ) -> Result<Self, runmat_runtime::context::host_effect::HostEffectAllocationError> {
         let managed_observations =
-            runmat_runtime::context::ManagedObservationPool::new(ledger, slots)?;
+            runmat_runtime::context::ManagedObservationPool::new(ledger, capacity.in_flight_slots)?;
+        let managed_feedback = managed_feedback::ManagedFeedbackPool::new(
+            ledger,
+            capacity.feedback_series,
+            capacity.signature_bytes_per_series,
+        )?;
         let mut session = Self::new(config);
         session.managed_observations = Some(managed_observations);
+        session.managed_feedback = Some(managed_feedback);
         Ok(session)
     }
 
@@ -334,6 +343,13 @@ impl PlacementSession {
     ) -> CandidateObservationEvidence {
         self.drain_observations();
         let state = self.state.borrow();
+        if let FeedbackCandidateKey::Canonical(candidate_digest) = candidate {
+            if let Some(observation) = self.managed_feedback.as_ref().and_then(|pool| {
+                pool.observed(signature.cache_key(), candidate_digest, kind, state.tick)
+            }) {
+                return observation;
+            }
+        }
         let key = (signature.cache_key(), candidate, kind);
         state.feedback.get(&key).map_or(
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
@@ -373,36 +389,17 @@ impl PlacementSession {
                 total_squared_elapsed_ns: 0,
                 latest_tick: 0,
             });
-        if feedback.succeeded {
-            if series.samples >= MAX_FEEDBACK_OBSERVATIONS {
-                series.samples = series.samples.div_ceil(2);
-                series.total_elapsed_ns = series.total_elapsed_ns.div_ceil(2);
-                series.total_squared_elapsed_ns = series.total_squared_elapsed_ns.div_ceil(2);
-            }
-            let elapsed_ns = if series.samples >= 4 {
-                let mean = series.mean_ns().unwrap_or(feedback.total_elapsed_ns).max(1);
-                feedback
-                    .total_elapsed_ns
-                    .clamp((mean / 4).max(1), mean.saturating_mul(4))
-            } else {
-                feedback.total_elapsed_ns.max(1)
-            };
-            series.samples = series.samples.saturating_add(1);
-            series.total_elapsed_ns = series
-                .total_elapsed_ns
-                .saturating_add(u128::from(elapsed_ns));
-            series.total_squared_elapsed_ns = series
-                .total_squared_elapsed_ns
-                .saturating_add(u128::from(elapsed_ns).saturating_mul(u128::from(elapsed_ns)));
-        } else {
-            series.failures = series
-                .failures
-                .saturating_add(1)
-                .min(MAX_FEEDBACK_OBSERVATIONS);
-        }
-        series.latest_tick = observation_tick;
-        let needs_replan =
-            !feedback.succeeded || series.samples <= 2 || series.samples.is_power_of_two();
+        let mut numbers = evidence::FeedbackNumbers::from_series(series);
+        let needs_replan = numbers.record(
+            feedback.total_elapsed_ns,
+            feedback.succeeded,
+            observation_tick,
+        );
+        series.samples = numbers.samples;
+        series.failures = numbers.failures;
+        series.total_elapsed_ns = numbers.total_elapsed_ns;
+        series.total_squared_elapsed_ns = numbers.total_squared_elapsed_ns;
+        series.latest_tick = numbers.latest_tick;
         if needs_replan {
             state.decisions.remove(&signature_key);
         }
@@ -413,6 +410,9 @@ impl PlacementSession {
     pub fn invalidate(&self, invalidation: PlacementInvalidation) {
         self.observation_permits.invalidate(&invalidation);
         if let Some(pool) = &self.managed_observations {
+            pool.invalidate(&invalidation);
+        }
+        if let Some(pool) = &self.managed_feedback {
             pool.invalidate(&invalidation);
         }
         self.pending.invalidate(&invalidation);
@@ -473,9 +473,21 @@ impl PlacementSession {
 
     pub fn profile_snapshot(&self) -> PlacementProfileSnapshot {
         self.drain_observations();
+        let mut feedback: Vec<_> = self.state.borrow().feedback.values().cloned().collect();
+        if let Some(pool) = &self.managed_feedback {
+            let managed = pool.profile_snapshot();
+            feedback.retain(|ordinary| {
+                !managed.iter().any(|series| {
+                    ordinary.signature.cache_key() == series.signature.cache_key()
+                        && ordinary.candidate == series.candidate
+                        && ordinary.kind == series.kind
+                })
+            });
+            feedback.extend(managed);
+        }
         PlacementProfileSnapshot {
             schema_version: PLACEMENT_PROFILE_SCHEMA_VERSION,
-            feedback: self.state.borrow().feedback.values().cloned().collect(),
+            feedback,
         }
     }
 
@@ -533,6 +545,9 @@ impl PlacementSession {
         self.observation_permits
             .invalidate(&PlacementInvalidation::All);
         if let Some(pool) = &self.managed_observations {
+            pool.invalidate(&PlacementInvalidation::All);
+        }
+        if let Some(pool) = &self.managed_feedback {
             pool.invalidate(&PlacementInvalidation::All);
         }
         let mut state = self.state.borrow_mut();
@@ -603,8 +618,10 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
     fn select_whole_work_borrowed_managed(
         &self,
         request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
-    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
-    {
+    ) -> Result<
+        runmat_runtime::context::RuntimeManagedWholeWorkSelection,
+        runmat_runtime::RuntimeError,
+    > {
         PlacementSession::select_whole_work_borrowed_managed(self, request).map_err(runtime_error)
     }
 
@@ -615,6 +632,86 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         kind: ExecutionCandidateKind,
     ) -> CandidateObservationEvidence {
         PlacementSession::observed_candidate_duration(self, signature, candidate, kind)
+    }
+    fn observe_selected_whole_work(
+        &self,
+        selected: &runmat_runtime::context::RuntimeWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if !selected.observation_is_current()
+            || matches!(
+                outcome,
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+                    | runmat_execution::WholeWorkObservationOutcome::Abandoned
+            )
+        {
+            return Ok(());
+        }
+        self.observe_whole_work(runmat_execution::WholeWorkObservation {
+            signature: selected.decision.signature.clone(),
+            selected: selected.decision.selected.clone(),
+            elapsed_ns,
+            outcome,
+        })
+    }
+    fn observe_managed_whole_work(
+        &self,
+        selected: &runmat_runtime::context::RuntimeManagedWholeWorkSelection,
+        elapsed_ns: u64,
+        outcome: runmat_execution::WholeWorkObservationOutcome,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        if !selected.observation_is_current()
+            || matches!(
+                outcome,
+                runmat_execution::WholeWorkObservationOutcome::Cancelled
+                    | runmat_execution::WholeWorkObservationOutcome::Abandoned
+            )
+        {
+            return Ok(());
+        }
+        let pool = self.managed_observations.as_ref().ok_or_else(|| {
+            runtime_error(PlacementPlanError {
+                code: "RunMat:Placement:InvalidFeedback",
+                message: "managed observation owner is absent".into(),
+            })
+        })?;
+        if !selected.observation_lease.same_owner(pool) {
+            return Err(runtime_error(PlacementPlanError {
+                code: "RunMat:Placement:InvalidFeedback",
+                message: "managed observation belongs to another session".into(),
+            }));
+        }
+        let key = managed_feedback::Key {
+            signature: selected.identity.signature,
+            permit: selected.identity,
+            candidate: selected.selected.candidate,
+            kind: selected.selected.kind,
+        };
+        let tick = self.state.borrow().tick;
+        let needs_replan = self
+            .managed_feedback
+            .as_ref()
+            .expect("managed feedback backing")
+            .record(
+                key,
+                elapsed_ns,
+                matches!(
+                    outcome,
+                    runmat_execution::WholeWorkObservationOutcome::Success
+                ),
+                tick,
+            )
+            .map_err(|source| {
+                runtime_error(PlacementPlanError {
+                    code: "RunMat:Placement:InvalidFeedback",
+                    message: source.to_string(),
+                })
+            })?;
+        if needs_replan {
+            self.state.borrow_mut().decisions.remove(&key.signature);
+        }
+        Ok(())
     }
     fn defer_feedback(
         &self,

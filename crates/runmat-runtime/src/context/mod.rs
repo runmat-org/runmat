@@ -47,6 +47,8 @@ pub use runtime::{
 };
 pub use scope::{ContextFuture, RuntimeContextGuard};
 pub(crate) use services::complete_process_output_requires_evidence;
+#[cfg(test)]
+pub(crate) use services::test_managed_selection;
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::RuntimeProcessService;
 pub use services::{
@@ -55,11 +57,11 @@ pub use services::{
     RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedInvocation,
     RuntimeDistributedRetirement, RuntimeDistributedService, RuntimeDistributedSnapshot,
     RuntimeErrorService, RuntimeForeignService, RuntimeHostEffectResourceService,
-    RuntimeHostService, RuntimeHttpService, RuntimeNativeService, RuntimeObjectService,
-    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
-    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
-    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
-    RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
+    RuntimeHostService, RuntimeHttpService, RuntimeManagedWholeWorkSelection, RuntimeNativeService,
+    RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
+    RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
+    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
+    RuntimeSpmdService, RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

@@ -32,33 +32,36 @@ fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() 
 #[test]
 fn managed_selection_uses_one_precharged_slot_and_fences_late_invalidation() {
     use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
-    use runmat_runtime::context::RuntimeWholeWorkObservationAuthority;
 
     let ledger = ManagedHostEffectLedger::new(16 * 1024);
     let session = PlacementSession::new_with_managed_observations(
         PlacementSessionConfig::default(),
         &ledger,
-        1,
+        super::super::ManagedPlacementCapacity {
+            in_flight_slots: 1,
+            feedback_series: 1,
+            signature_bytes_per_series: 1024,
+        },
     )
     .expect("managed slot backing");
     let other = PlacementSession::new_with_managed_observations(
         PlacementSessionConfig::default(),
         &ManagedHostEffectLedger::new(16 * 1024),
-        1,
+        super::super::ManagedPlacementCapacity {
+            in_flight_slots: 1,
+            feedback_series: 1,
+            signature_bytes_per_series: 1024,
+        },
     )
     .expect("independent session owner");
     let route = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
     let first = session
         .select_whole_work_borrowed_managed(route.as_ref())
         .expect("first managed call");
-    assert_eq!(first.decision.kind, WholeWorkDecisionKind::Exploratory);
-    assert!(first.probe.is_none());
-    let RuntimeWholeWorkObservationAuthority::Managed(lease) =
-        first.observation_permit.as_ref().expect("managed lease")
-    else {
-        panic!("finite call must not allocate dynamic observation permit");
-    };
-    assert!(!lease.same_owner(other.managed_observations.as_ref().unwrap()));
+    assert_eq!(first.kind, WholeWorkDecisionKind::Exploratory);
+    assert!(!first
+        .observation_lease
+        .same_owner(other.managed_observations.as_ref().unwrap()));
     assert!(first.observation_is_current());
     let exhausted = session.select_whole_work_borrowed_managed(route.as_ref());
     assert_eq!(
@@ -76,6 +79,52 @@ fn managed_selection_uses_one_precharged_slot_and_fences_late_invalidation() {
     assert!(ledger.snapshot().live_reserved_bytes > 0);
     drop(session);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
+fn managed_completion_uses_preallocated_series_and_preserves_portable_profile() {
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+
+    let ledger = ManagedHostEffectLedger::new(16 * 1024);
+    let session = PlacementSession::new_with_managed_observations(
+        PlacementSessionConfig::default(),
+        &ledger,
+        super::super::ManagedPlacementCapacity {
+            in_flight_slots: 1,
+            feedback_series: 1,
+            signature_bytes_per_series: 1024,
+        },
+    )
+    .unwrap();
+    let route = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
+    let candidate_digest = route.candidates[0].identity_digest();
+    for elapsed in [17, 19] {
+        let selection = session
+            .select_whole_work_borrowed_managed(route.as_ref())
+            .expect("managed admission before effects");
+        RuntimePlacementService::observe_managed_whole_work(
+            &session,
+            &selection,
+            elapsed,
+            WholeWorkObservationOutcome::Success,
+        )
+        .expect("inline managed feedback");
+    }
+    let observed = session.observed_candidate_duration_digest(
+        &route.signature,
+        candidate_digest,
+        ExecutionCandidateKind::SharedRuntime,
+    );
+    assert!(matches!(
+        observed,
+        CandidateObservationEvidence::Observed(_)
+    ));
+    let profile = session.profile_snapshot();
+    assert_eq!(profile.feedback.len(), 1);
+    assert_eq!(profile.feedback[0].signature, route.signature);
+    assert_eq!(profile.feedback[0].candidate, candidate_digest.to_string());
+    assert_eq!(profile.feedback[0].samples, 2);
+    assert!(ledger.snapshot().live_reserved_bytes > 0);
 }
 
 #[test]
