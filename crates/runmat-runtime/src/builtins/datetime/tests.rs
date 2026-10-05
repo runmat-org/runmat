@@ -6,7 +6,7 @@ use super::descriptors::DATESHIFT_INTEGER_INPUTS;
 use super::*;
 use super::{
     business_day_builtins::*, calendar_duration_builtins::*, component_builtins::*,
-    constructor_builtin::*, dateshift_builtin::*, legacy_builtins::*, operators::*,
+    dateshift_builtin::*, legacy_builtins::*, operators::*,
 };
 
 #[path = "tests/cooperation.rs"]
