@@ -25,6 +25,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "getfield",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
