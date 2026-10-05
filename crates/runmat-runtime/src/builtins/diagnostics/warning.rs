@@ -470,33 +470,39 @@ fn apply_state_struct(st: &StructValue) -> crate::BuiltinResult<()> {
         }
     } else if matches!(target, WarningTarget::Backtrace) {
         let state = state_raw.trim().to_ascii_lowercase();
-        match state.as_str() {
-            "on" => {
+        match WarningMode::parse(&state) {
+            Some(WarningMode::On) => {
                 warnings::with_policy(|policy| policy.set_backtrace(true));
             }
-            "off" | "default" => {
+            Some(WarningMode::Off) => {
                 warnings::with_policy(|policy| policy.set_backtrace(false));
             }
-            other => {
+            _ if state == "default" => {
+                warnings::with_policy(|policy| policy.set_backtrace(false));
+            }
+            _ => {
                 return Err(warning_default_error(format!(
                     "warning: unknown backtrace state '{}'",
-                    other
+                    state
                 )))
             }
         }
     } else if matches!(target, WarningTarget::Verbose) {
         let state = state_raw.trim().to_ascii_lowercase();
-        match state.as_str() {
-            "on" => {
+        match WarningMode::parse(&state) {
+            Some(WarningMode::On) => {
                 warnings::with_policy(|policy| policy.set_verbose(true));
             }
-            "off" | "default" => {
+            Some(WarningMode::Off) => {
                 warnings::with_policy(|policy| policy.set_verbose(false));
             }
-            other => {
+            _ if state == "default" => {
+                warnings::with_policy(|policy| policy.set_verbose(false));
+            }
+            _ => {
                 return Err(warning_default_error(format!(
                     "warning: unknown verbose state '{}'",
-                    other
+                    state
                 )))
             }
         }
