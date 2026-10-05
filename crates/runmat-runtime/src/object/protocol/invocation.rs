@@ -150,13 +150,46 @@ pub async fn invoke_object_end(
     component_count: usize,
     access: &super::ObjectAccessContext,
 ) -> Result<Option<Value>, RuntimeError> {
+    invoke_object_end_with_context(None, receiver, component_index, component_count, access).await
+}
+
+pub async fn invoke_object_end_in_context(
+    runtime: &RuntimeContext,
+    receiver: Value,
+    component_index: usize,
+    component_count: usize,
+    access: &super::ObjectAccessContext,
+) -> Result<Option<Value>, RuntimeError> {
+    invoke_object_end_with_context(
+        Some(runtime),
+        receiver,
+        component_index,
+        component_count,
+        access,
+    )
+    .await
+}
+
+async fn invoke_object_end_with_context(
+    runtime: Option<&RuntimeContext>,
+    receiver: Value,
+    component_index: usize,
+    component_count: usize,
+    access: &super::ObjectAccessContext,
+) -> Result<Option<Value>, RuntimeError> {
     let resolution = super::resolve_object_protocol(&receiver, super::ObjectProtocol::End, access)?;
     let ProtocolResolution::Method(method) = resolution else {
         return Ok(None);
     };
-    invoke_prepared_object_end(&method, receiver, component_index, component_count)
-        .await
-        .map(Some)
+    invoke_prepared_object_end_with_context(
+        runtime,
+        &method,
+        receiver,
+        component_index,
+        component_count,
+    )
+    .await
+    .map(Some)
 }
 
 pub async fn invoke_prepared_object_end(

@@ -22,6 +22,7 @@ struct SubscriptLevel {
 }
 
 async fn dispatch_num_arguments_overload(
+    runtime: Option<&crate::context::RuntimeContext>,
     target: Value,
     subscript: Value,
     indexing_context: Value,
@@ -33,12 +34,19 @@ async fn dispatch_num_arguments_overload(
     )? {
         crate::object::protocol::ProtocolResolution::DefaultIndexing => Ok(None),
         crate::object::protocol::ProtocolResolution::Method(method) => {
-            let sequence = crate::object::protocol::invoke_resolved_object_method(
-                &method,
-                vec![target, subscript, indexing_context],
-                1,
-            )
-            .await?;
+            let arguments = vec![target, subscript, indexing_context];
+            let sequence = match runtime {
+                Some(runtime) => {
+                    crate::object::protocol::invoke_resolved_object_method_in_context(
+                        runtime, &method, arguments, 1,
+                    )
+                    .await?
+                }
+                None => {
+                    crate::object::protocol::invoke_resolved_object_method(&method, arguments, 1)
+                        .await?
+                }
+            };
             Ok(Some(require_single_sequence(sequence)?))
         }
     }
@@ -167,9 +175,29 @@ async fn subsasgn_with_context(
 #[runtime_builtin(
     name = "numArgumentsFromSubscript",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
+pub async fn num_arguments_from_subscript_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    target: Value,
+    subscript: Value,
+    indexing_context: Value,
+) -> crate::BuiltinResult<Value> {
+    num_arguments_from_subscript_with_context(runtime.as_ref(), target, subscript, indexing_context)
+        .await
+}
+
 pub async fn num_arguments_from_subscript_builtin(
+    target: Value,
+    subscript: Value,
+    indexing_context: Value,
+) -> crate::BuiltinResult<Value> {
+    num_arguments_from_subscript_with_context(None, target, subscript, indexing_context).await
+}
+
+async fn num_arguments_from_subscript_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     target: Value,
     subscript: Value,
     indexing_context: Value,
@@ -183,6 +211,7 @@ pub async fn num_arguments_from_subscript_builtin(
     let context = parse_indexing_context(&indexing_context)?;
     if crate::object_receiver_class_name(&target).is_some() {
         if let Some(value) = dispatch_num_arguments_overload(
+            runtime,
             target.clone(),
             subscript.clone(),
             indexing_context.clone(),

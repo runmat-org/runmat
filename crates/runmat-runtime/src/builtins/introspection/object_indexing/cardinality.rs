@@ -125,7 +125,7 @@ pub(super) async fn assignment_cardinality_for_level(
     let context = indexing_context_value(IndexingContext::Assignment);
     if crate::object_receiver_class_name(target).is_some() {
         if let Some(value) =
-            dispatch_num_arguments_overload(target.clone(), descriptor, context).await?
+            dispatch_num_arguments_overload(None, target.clone(), descriptor, context).await?
         {
             return exact_output_count(&value);
         }
