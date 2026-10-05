@@ -1,15 +1,39 @@
 use crate::{IntegerStorage, NumericDType, NumericScalar, NumericStorage};
 use std::ffi::c_void;
+use std::sync::Arc;
 
 use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
 use super::{record_host_copy, AdoptedHostAllocation, HostCopyReason};
 
+#[derive(Debug)]
+struct OwnedIntegerStorage {
+    values: IntegerStorage,
+    // Only the original exact allocation carries its quota claim. Copy-on-
+    // write creates a distinct ordinary value in a subsequent operation.
+    _reservation: Option<Arc<dyn super::ExactHostAllocationReservation>>,
+}
+
+impl Clone for OwnedIntegerStorage {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            _reservation: None,
+        }
+    }
+}
+
+impl PartialEq for OwnedIntegerStorage {
+    fn eq(&self, other: &Self) -> bool {
+        self.values == other.values
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum HostNumericStorage {
     F64(HostData<f64>),
     F32(HostData<f32>),
-    Integer(IntegerStorage),
+    Integer(OwnedIntegerStorage),
 }
 
 /// Pointer-stable, copy-on-write host storage for a dense numeric value.
@@ -36,11 +60,12 @@ impl HostNumericBuffer {
             | NumericStorage::U8(_)
             | NumericStorage::U16(_)
             | NumericStorage::U32(_)
-            | NumericStorage::U64(_)) => HostNumericStorage::Integer(
-                storage
+            | NumericStorage::U64(_)) => HostNumericStorage::Integer(OwnedIntegerStorage {
+                values: storage
                     .into_integer_storage()
                     .expect("integer NumericStorage variant"),
-            ),
+                _reservation: None,
+            }),
         };
         Self {
             storage: HostBuffer::new(storage),
@@ -70,7 +95,7 @@ impl HostNumericBuffer {
             | NumericDType::U64 => {
                 return Err((
                     allocation,
-                    "adopted integer storage requires the typed integer-view migration".into(),
+                    "external adopted integer storage is unavailable; exact integer allocations use the owned typed constructor".into(),
                 ));
             }
         }?;
@@ -79,11 +104,23 @@ impl HostNumericBuffer {
         })
     }
 
+    pub(crate) fn from_exact_integer_storage(
+        values: IntegerStorage,
+        reservation: Arc<dyn super::ExactHostAllocationReservation>,
+    ) -> Self {
+        Self {
+            storage: HostBuffer::new(HostNumericStorage::Integer(OwnedIntegerStorage {
+                values,
+                _reservation: Some(reservation),
+            })),
+        }
+    }
+
     pub fn numeric_dtype(&self) -> NumericDType {
         match self.storage.get() {
             HostNumericStorage::F64(_) => NumericDType::F64,
             HostNumericStorage::F32(_) => NumericDType::F32,
-            HostNumericStorage::Integer(storage) => storage.numeric_dtype(),
+            HostNumericStorage::Integer(storage) => storage.values.numeric_dtype(),
         }
     }
 
@@ -91,7 +128,7 @@ impl HostNumericBuffer {
         match self.storage.get() {
             HostNumericStorage::F64(values) => values.as_slice().len(),
             HostNumericStorage::F32(values) => values.as_slice().len(),
-            HostNumericStorage::Integer(storage) => storage.len(),
+            HostNumericStorage::Integer(storage) => storage.values.len(),
         }
     }
 
@@ -105,7 +142,7 @@ impl HostNumericBuffer {
 
     pub fn integer_storage(&self) -> Option<&IntegerStorage> {
         match self.storage.get() {
-            HostNumericStorage::Integer(storage) => Some(storage),
+            HostNumericStorage::Integer(storage) => Some(&storage.values),
             _ => None,
         }
     }
@@ -129,7 +166,7 @@ impl HostNumericBuffer {
             HostNumericStorage::F64(values) => values.get(index).copied().map(NumericScalar::F64),
             HostNumericStorage::F32(values) => values.get(index).copied().map(NumericScalar::F32),
             HostNumericStorage::Integer(storage) => {
-                storage.value_at(index).map(NumericScalar::from)
+                storage.values.value_at(index).map(NumericScalar::from)
             }
         }
     }
@@ -142,7 +179,7 @@ impl HostNumericBuffer {
         match self.storage.get() {
             HostNumericStorage::F64(values) => values.to_vec(),
             HostNumericStorage::F32(values) => values.iter().copied().map(f64::from).collect(),
-            HostNumericStorage::Integer(storage) => storage.to_f64_vec(),
+            HostNumericStorage::Integer(storage) => storage.values.to_f64_vec(),
         }
     }
 
@@ -181,6 +218,7 @@ impl HostNumericBuffer {
                 values[index] = value;
             }
             HostNumericStorage::Integer(storage) => {
+                let storage = &mut storage.values;
                 let exact = match value {
                     NumericScalar::F64(value) => storage.cast_f64_assignment(value),
                     NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
@@ -222,7 +260,18 @@ impl HostNumericBuffer {
         match self.storage.make_mut() {
             HostNumericStorage::F64(values) => values.ensure_rust_vec().resize(len, 0.0),
             HostNumericStorage::F32(values) => values.ensure_rust_vec().resize(len, 0.0),
-            HostNumericStorage::Integer(storage) => resize_integer_zeroed(storage, len),
+            HostNumericStorage::Integer(storage) => {
+                if storage._reservation.is_some() {
+                    // Detach before any operation that can resize or move the
+                    // originally reserved block.
+                    let mut detached = storage.values.clone();
+                    resize_integer_zeroed(&mut detached, len);
+                    storage.values = detached;
+                    storage._reservation = None;
+                } else {
+                    resize_integer_zeroed(&mut storage.values, len);
+                }
+            }
         }
     }
 
@@ -254,7 +303,7 @@ impl HostNumericBuffer {
         match self.storage.get() {
             HostNumericStorage::F64(values) => values.as_ptr().cast_mut().cast(),
             HostNumericStorage::F32(values) => values.as_ptr().cast_mut().cast(),
-            HostNumericStorage::Integer(storage) => integer_data_pointer(storage),
+            HostNumericStorage::Integer(storage) => integer_data_pointer(&storage.values),
         }
     }
 
@@ -277,7 +326,7 @@ impl HostNumericBuffer {
         match self.storage.make_mut() {
             HostNumericStorage::F64(values) => values.as_mut_ptr().cast(),
             HostNumericStorage::F32(values) => values.as_mut_ptr().cast(),
-            HostNumericStorage::Integer(storage) => integer_data_pointer_mut(storage),
+            HostNumericStorage::Integer(storage) => integer_data_pointer_mut(&mut storage.values),
         }
     }
 
@@ -292,7 +341,13 @@ impl HostNumericBuffer {
         match self.storage.into_inner() {
             HostNumericStorage::F64(values) => NumericStorage::F64(values.into_vec()),
             HostNumericStorage::F32(values) => NumericStorage::F32(values.into_vec()),
-            HostNumericStorage::Integer(storage) => NumericStorage::from_integer_storage(storage),
+            HostNumericStorage::Integer(storage) => {
+                NumericStorage::from_integer_storage(if storage._reservation.is_some() {
+                    storage.values.clone()
+                } else {
+                    storage.values
+                })
+            }
         }
     }
 }
@@ -301,7 +356,7 @@ fn storage_is_adopted(storage: &HostNumericStorage) -> bool {
     match storage {
         HostNumericStorage::F64(values) => values.is_adopted(),
         HostNumericStorage::F32(values) => values.is_adopted(),
-        HostNumericStorage::Integer(_) => false,
+        HostNumericStorage::Integer(storage) => storage._reservation.is_some(),
     }
 }
 
@@ -314,7 +369,7 @@ fn copy_storage(destination: &mut HostNumericStorage, source: &HostNumericStorag
             destination.copy_from_slice(source)
         }
         (HostNumericStorage::Integer(destination), HostNumericStorage::Integer(source)) => {
-            copy_integer_storage(destination, source)
+            copy_integer_storage(&mut destination.values, &source.values)
         }
         _ => unreachable!("numeric dtype equality guarantees matching host storage"),
     }

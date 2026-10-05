@@ -1,14 +1,30 @@
-//! Exact-capacity floating host storage for routes with a physical byte permit.
+//! Exact-capacity numeric host storage for routes with a physical byte permit.
 //! This owner allocates once and transfers that same block to a tensor.
 
 use super::{
     AdoptedHostAllocation, HostAllocationProvenance, HostAllocationRelease, HostNumericBuffer,
 };
+use crate::IntegerStorage;
 use crate::NumericDType;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::fmt;
 use std::ptr::NonNull;
 use std::sync::Arc;
+
+mod integer;
+use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
+
+macro_rules! integer_slice_mut {
+    ($self:expr, $variant:ident) => {
+        match &mut $self.allocation {
+            ExactAllocation::Integer(allocation) => match &mut allocation.values {
+                IntegerStorage::$variant(values) => Some(values.as_mut_slice()),
+                _ => None,
+            },
+            ExactAllocation::Floating(_) => None,
+        }
+    };
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExactHostNumericAllocationError {
@@ -55,13 +71,18 @@ impl HostAllocationRelease for RustExactRelease {
     }
 }
 
-/// Initialized exact-capacity F32/F64 payload. The caller still must account
-/// for shape, source, codec, and other live allocations before claiming a
-/// complete-call finite route. Integer adoption is not yet supported.
+/// Initialized exact-capacity payload for all ten native numeric classes.
+/// The caller still must account for shape, source, codec, and other live
+/// allocations before claiming a complete-call finite route.
 pub struct ExactHostNumericAllocation {
-    allocation: AdoptedHostAllocation,
+    allocation: ExactAllocation,
     dtype: NumericDType,
     len: usize,
+}
+
+enum ExactAllocation {
+    Floating(AdoptedHostAllocation),
+    Integer(ExactIntegerStorage),
 }
 
 impl ExactHostNumericAllocation {
@@ -73,10 +94,22 @@ impl ExactHostNumericAllocation {
         let layout = match dtype {
             NumericDType::F32 => Layout::array::<f32>(len),
             NumericDType::F64 => Layout::array::<f64>(len),
-            _ => return Err(ExactHostNumericAllocationError::UnsupportedClass),
+            _ => integer_layout(dtype, len),
         }
         .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
         let reservation = permit.reserve_exact(layout.size())?;
+        if dtype.integer_class().is_some() {
+            return Ok(Self {
+                allocation: ExactAllocation::Integer(allocate_integer(
+                    dtype,
+                    len,
+                    layout,
+                    reservation,
+                )?),
+                dtype,
+                len,
+            });
+        }
         let provenance = HostAllocationProvenance {
             allocator: "runmat.exact-host-numeric.v1".into(),
             byte_length: layout.size(),
@@ -103,39 +136,81 @@ impl ExactHostNumericAllocation {
         // authority owns that layout until the final host buffer is dropped.
         let allocation = unsafe { AdoptedHostAllocation::new(pointer, provenance, release) };
         Ok(Self {
-            allocation,
+            allocation: ExactAllocation::Floating(allocation),
             dtype,
             len,
         })
     }
 
     pub fn capacity_bytes(&self) -> usize {
-        self.allocation.provenance().capacity_bytes
+        match &self.allocation {
+            ExactAllocation::Floating(allocation) => allocation.provenance().capacity_bytes,
+            ExactAllocation::Integer(allocation) => allocation.capacity_bytes(),
+        }
     }
 
     pub fn as_f32_slice_mut(&mut self) -> Option<&mut [f32]> {
         (self.dtype == NumericDType::F32).then(|| {
+            let ExactAllocation::Floating(allocation) = &mut self.allocation else {
+                unreachable!("floating dtype has floating allocation")
+            };
             // SAFETY: the owner is unique, aligned, initialized, and sized for
             // exactly `len` F32 elements until it is adopted.
             unsafe {
-                std::slice::from_raw_parts_mut(self.allocation.pointer().as_ptr().cast(), self.len)
+                std::slice::from_raw_parts_mut(allocation.pointer().as_ptr().cast(), self.len)
             }
         })
     }
 
     pub fn as_f64_slice_mut(&mut self) -> Option<&mut [f64]> {
         (self.dtype == NumericDType::F64).then(|| {
+            let ExactAllocation::Floating(allocation) = &mut self.allocation else {
+                unreachable!("floating dtype has floating allocation")
+            };
             // SAFETY: the owner is unique, aligned, initialized, and sized for
             // exactly `len` F64 elements until it is adopted.
             unsafe {
-                std::slice::from_raw_parts_mut(self.allocation.pointer().as_ptr().cast(), self.len)
+                std::slice::from_raw_parts_mut(allocation.pointer().as_ptr().cast(), self.len)
             }
         })
     }
 
+    pub fn as_i8_slice_mut(&mut self) -> Option<&mut [i8]> {
+        integer_slice_mut!(self, I8)
+    }
+    pub fn as_i16_slice_mut(&mut self) -> Option<&mut [i16]> {
+        integer_slice_mut!(self, I16)
+    }
+    pub fn as_i32_slice_mut(&mut self) -> Option<&mut [i32]> {
+        integer_slice_mut!(self, I32)
+    }
+    pub fn as_i64_slice_mut(&mut self) -> Option<&mut [i64]> {
+        integer_slice_mut!(self, I64)
+    }
+    pub fn as_u8_slice_mut(&mut self) -> Option<&mut [u8]> {
+        integer_slice_mut!(self, U8)
+    }
+    pub fn as_u16_slice_mut(&mut self) -> Option<&mut [u16]> {
+        integer_slice_mut!(self, U16)
+    }
+    pub fn as_u32_slice_mut(&mut self) -> Option<&mut [u32]> {
+        integer_slice_mut!(self, U32)
+    }
+    pub fn as_u64_slice_mut(&mut self) -> Option<&mut [u64]> {
+        integer_slice_mut!(self, U64)
+    }
+
     pub fn into_host_buffer(self) -> HostNumericBuffer {
-        HostNumericBuffer::try_adopt(self.allocation, self.dtype, self.len)
-            .unwrap_or_else(|(_, detail)| unreachable!("validated exact allocation: {detail}"))
+        match self.allocation {
+            ExactAllocation::Floating(allocation) => HostNumericBuffer::try_adopt(
+                allocation, self.dtype, self.len,
+            )
+            .unwrap_or_else(|(_, detail)| unreachable!("validated exact allocation: {detail}")),
+            ExactAllocation::Integer(allocation) => {
+                let (storage, reservation) = allocation.into_parts();
+                HostNumericBuffer::from_exact_integer_storage(storage, reservation)
+            }
+        }
     }
 }
 
