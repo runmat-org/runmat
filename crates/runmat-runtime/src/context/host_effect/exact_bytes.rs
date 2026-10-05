@@ -1,11 +1,12 @@
 //! Exact-capacity, stage-charged temporary bytes. This is an allocation owner,
 //! not a workload peak certificate or a replacement for pre-open admission.
 
-use super::{
-    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationReservation,
-};
+#[cfg(test)]
+use super::HostEffectLiveAllocationReservation;
+use super::{HostEffectAllocationError, HostEffectLiveAllocationClaim};
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr::NonNull;
+#[cfg(test)]
 use std::sync::Arc;
 
 pub struct ExactHostEffectBytes {
