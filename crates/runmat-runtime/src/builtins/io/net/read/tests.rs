@@ -1,11 +1,10 @@
 use super::*;
-use crate::builtins::io::net::client_state::{insert_client, remove_client_for_test};
-use crate::builtins::io::net::control::configure_stream;
-use crate::builtins::io::net::test_support::CountingDownloadProvider;
+use crate::builtins::io::net::test_support::{CountingDownloadProvider, TcpTestHost};
+use crate::context::RuntimeTcpByteOrder;
 use runmat_builtins::READ_DESCRIPTOR;
-use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, ObjectInstance, Tensor, Value};
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::thread;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -17,6 +16,7 @@ fn known_invalid_count_or_datatype_rejects_before_resident_control_download() {
     let resident_client = Value::GpuTensor(owner.resident());
     let resident_count = Value::GpuTensor(owner.resident());
     let invalid_datatype = futures::executor::block_on(read_builtin(
+        None,
         resident_client.clone(),
         vec![resident_count.clone(), Value::from("uint128")],
     ))
@@ -27,6 +27,7 @@ fn known_invalid_count_or_datatype_rejects_before_resident_control_download() {
     );
     assert_eq!(owner.downloads(), 0);
     let invalid_count = futures::executor::block_on(read_builtin(
+        None,
         resident_client,
         vec![Value::Num(0.0), resident_count],
     ))
@@ -35,29 +36,6 @@ fn known_invalid_count_or_datatype_rejects_before_resident_control_download() {
     assert_eq!(owner.downloads(), 0);
 }
 use std::time::Duration;
-
-fn make_client(stream: TcpStream, timeout: f64) -> Value {
-    let peer_addr = stream.peer_addr().expect("peer addr");
-    configure_stream(&stream, timeout).expect("configure stream");
-    let client_id = insert_client(stream, 0, peer_addr, timeout, "little-endian".to_string());
-    let mut st = StructValue::new();
-    st.fields.insert(
-        CLIENT_HANDLE_FIELD.to_string(),
-        Value::Int(IntValue::U64(client_id)),
-    );
-    Value::Struct(st)
-}
-
-fn client_id(client: &Value) -> u64 {
-    match client {
-        Value::Struct(st) => match st.fields.get(CLIENT_HANDLE_FIELD) {
-            Some(Value::Int(IntValue::U64(id))) => *id,
-            Some(Value::Int(iv)) => iv.to_i64() as u64,
-            other => panic!("unexpected id field {other:?}"),
-        },
-        other => panic!("expected struct, got {other:?}"),
-    }
-}
 
 fn assert_error_identifier(err: RuntimeError, expected: &str) {
     assert_eq!(err.identifier(), Some(expected));
@@ -101,21 +79,14 @@ fn typed_read_count_and_handle_parsers_are_exact() {
         assert!(maximum.is_err());
     }
 
-    let mut client = StructValue::new();
-    client.fields.insert(
-        CLIENT_HANDLE_FIELD.to_string(),
-        Value::Int(IntValue::I8(-1)),
-    );
-    let err = extract_client_id(&client).unwrap_err();
+    let host = TcpTestHost::new();
+    let detached = Value::Object(ObjectInstance::new(runmat_builtins::TCPCLIENT_CLASS));
+    let err = run_read(&host, detached, Vec::new()).unwrap_err();
     assert_error_identifier(err, READ_ERROR_INVALID_CLIENT.identifier.unwrap());
 }
 
-fn run_read(client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(read_builtin(client, rest))
-}
-
-fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-    crate::builtins::io::net::client_state::test_guard()
+fn run_read(host: &TcpTestHost, client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    futures::executor::block_on(read_builtin(Some(host.runtime.clone()), client, rest))
 }
 
 fn integer_bytes(storage: &IntegerStorage, order: ByteOrder) -> Vec<u8> {
@@ -191,7 +162,7 @@ fn read_descriptor_signatures_cover_core_forms() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn read_reads_requested_uint8_values() {
-    let _guard = net_guard();
+    let host = TcpTestHost::new();
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     let port = listener.local_addr().unwrap().port();
     let handle = thread::spawn(move || {
@@ -200,10 +171,9 @@ fn read_reads_requested_uint8_values() {
         stream.write_all(&payload).expect("write");
     });
 
-    let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    let client = make_client(stream, 1.0);
+    let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
 
-    let data = run_read(client.clone(), vec![Value::Num(6.0)]).expect("read");
+    let data = run_read(&host, client.clone(), vec![Value::Num(6.0)]).expect("read");
     let tensor = match data {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
@@ -212,7 +182,7 @@ fn read_reads_requested_uint8_values() {
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
     handle.join().expect("server thread");
-    remove_client_for_test(client_id(&client));
+    host.close(&client);
 }
 
 #[test]
@@ -279,7 +249,7 @@ fn read_default_uint8_and_explicit_single_output_classes_are_truthful() {
 
 #[test]
 fn read_requested_uint64_preserves_exact_socket_values() {
-    let _guard = net_guard();
+    let host = TcpTestHost::new();
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     let port = listener.local_addr().unwrap().port();
     let handle = thread::spawn(move || {
@@ -294,10 +264,13 @@ fn read_requested_uint64_preserves_exact_socket_values() {
             .expect("write");
     });
 
-    let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    let client = make_client(stream, 1.0);
-    let data =
-        run_read(client.clone(), vec![Value::Num(2.0), Value::from("uint64")]).expect("read");
+    let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
+    let data = run_read(
+        &host,
+        client.clone(),
+        vec![Value::Num(2.0), Value::from("uint64")],
+    )
+    .expect("read");
     let Value::Tensor(tensor) = data else {
         panic!("expected tensor");
     };
@@ -307,13 +280,13 @@ fn read_requested_uint64_preserves_exact_socket_values() {
     );
 
     handle.join().expect("server thread");
-    remove_client_for_test(client_id(&client));
+    host.close(&client);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn read_without_count_drains_available_bytes() {
-    let _guard = net_guard();
+    let host = TcpTestHost::new();
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     let port = listener.local_addr().unwrap().port();
     let handle = thread::spawn(move || {
@@ -323,10 +296,10 @@ fn read_without_count_drains_available_bytes() {
         stream.write_all(&payload).expect("write");
     });
 
-    let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    let client = make_client(stream, 1.0);
+    let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
+    host.wait_available(&client, 3);
 
-    let data = run_read(client.clone(), Vec::new()).expect("read");
+    let data = run_read(&host, client.clone(), Vec::new()).expect("read");
     let tensor = match data {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
@@ -335,13 +308,13 @@ fn read_without_count_drains_available_bytes() {
     assert_eq!(tensor.materialize_f64(), vec![42.0, 43.0, 44.0]);
 
     handle.join().expect("server thread");
-    remove_client_for_test(client_id(&client));
+    host.close(&client);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn read_respects_timeout() {
-    let _guard = net_guard();
+    let host = TcpTestHost::new();
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
     let port = listener.local_addr().unwrap().port();
     let _handle = thread::spawn(move || {
@@ -352,20 +325,16 @@ fn read_respects_timeout() {
         drop(stream);
     });
 
-    let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    let client = make_client(stream, 0.1);
+    let client = host.connect(port, 0.1, RuntimeTcpByteOrder::Little);
 
-    let err = run_read(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
+    let err = run_read(&host, client.clone(), vec![Value::Num(4.0)]).unwrap_err();
     assert_eq!(err.identifier(), READ_ERROR_TIMEOUT.identifier);
-    assert_eq!(err.message(), READ_ERROR_TIMEOUT.message);
+    assert!(err.message().contains(READ_ERROR_TIMEOUT.message));
     assert_eq!(err.gpu_gather_retry(), crate::GpuGatherRetry::Never);
-    let source = std::error::Error::source(&err)
-        .and_then(|source| source.downcast_ref::<io::Error>())
-        .expect("timed-out socket error remains the cause");
-    assert!(matches!(
-        source.kind(),
-        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-    ));
+    assert!(
+        std::error::Error::source(&err).is_some(),
+        "timed-out transport cause retained"
+    );
 
-    remove_client_for_test(client_id(&client));
+    host.close(&client);
 }

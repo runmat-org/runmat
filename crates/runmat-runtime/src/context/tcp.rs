@@ -104,6 +104,7 @@ pub enum RuntimeTcpReadMode {
 pub struct RuntimeTcpReadResult {
     bytes: Vec<u8>,
     connection_closed: bool,
+    byte_order: RuntimeTcpByteOrder,
     publication: Option<Box<dyn RuntimeTcpReadPublication>>,
 }
 
@@ -115,11 +116,13 @@ impl RuntimeTcpReadResult {
     pub fn new(
         bytes: Vec<u8>,
         connection_closed: bool,
+        byte_order: RuntimeTcpByteOrder,
         publication: Box<dyn RuntimeTcpReadPublication>,
     ) -> Self {
         Self {
             bytes,
             connection_closed,
+            byte_order,
             publication: Some(publication),
         }
     }
@@ -130,6 +133,10 @@ impl RuntimeTcpReadResult {
 
     pub fn connection_closed(&self) -> bool {
         self.connection_closed
+    }
+
+    pub fn byte_order(&self) -> RuntimeTcpByteOrder {
+        self.byte_order
     }
 
     pub fn publish(mut self) -> Vec<u8> {

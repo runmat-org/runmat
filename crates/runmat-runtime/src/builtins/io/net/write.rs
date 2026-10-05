@@ -1,5 +1,7 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
+use crate::context::RuntimeTcpIssuer;
+use crate::tcp::TcpTransportErrorKind;
 use runmat_builtins::{
     BuiltinErrorDescriptor, NetDataType as DataType, WRITE_ERROR_CONNECTION_CLOSED,
     WRITE_ERROR_INTERNAL, WRITE_ERROR_INVALID_CLIENT, WRITE_ERROR_INVALID_DATA,
@@ -9,14 +11,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericDType;
-use runmat_value::{IntValue, StructValue, Value};
-use std::io::{self, Write};
-use std::net::TcpStream;
+use runmat_value::{IntValue, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-use super::client_state::{client_handle, CLIENT_HANDLE_FIELD};
-use super::control::configure_stream;
 
 const BUILTIN_NAME: &str = "write";
 
@@ -63,27 +60,24 @@ fn map_write_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> 
 #[runtime_builtin(
     name = "write",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::write"
 )]
 pub(super) async fn write_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     client: Value,
     data: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     ensure_write_extensions(&data)?;
     let datatype = preflight_datatype(rest)?;
-    match &client {
-        Value::Struct(st) => {
-            extract_client_id(st)?;
-        }
-        Value::GpuTensor(_) => {}
-        _ => {
-            return Err(write_flow(
+    let authority = super::receiver::authority(&client, runmat_builtins::TCPCLIENT_CLASS)
+        .ok_or_else(|| {
+            write_flow(
                 &WRITE_ERROR_INVALID_CLIENT,
-                "write: expected tcpclient struct as first argument",
-            ));
-        }
-    }
+                "write: expected a live tcpclient object",
+            )
+        })?;
     if !matches!(
         &data,
         Value::GpuTensor(_)
@@ -102,10 +96,7 @@ pub(super) async fn write_builtin(
             "write: unsupported input type",
         ));
     }
-    super::transport::require_native_tcp(BUILTIN_NAME)?;
-    let client = gather_if_needed_async(&client)
-        .await
-        .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_CLIENT))?;
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
     let data = gather_if_needed_async(&data)
         .await
         .map_err(|flow| map_write_flow(flow, &WRITE_ERROR_INVALID_DATA))?;
@@ -119,50 +110,25 @@ pub(super) async fn write_builtin(
         )?),
     };
 
-    let client_struct = match &client {
-        Value::Struct(st) => st,
-        _ => {
-            return Err(write_flow(
-                &WRITE_ERROR_INVALID_CLIENT,
-                "write: expected tcpclient struct as first argument",
-            ))
-        }
-    };
-
-    let client_id = extract_client_id(client_struct)?;
-    let handle = client_handle(client_id).ok_or_else(|| {
-        write_flow(
-            &WRITE_ERROR_INVALID_CLIENT,
-            "write: tcpclient handle is no longer valid",
-        )
-    })?;
-
-    let (mut stream, timeout, byte_order) = {
-        let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
-        if !guard.connected {
-            return Err(write_error(&WRITE_ERROR_NOT_CONNECTED));
-        }
-        let timeout = guard.timeout;
-        let byte_order = parse_byte_order(&guard.byte_order);
-        let stream = guard.stream.try_clone().map_err(|err| {
-            super::error::with_source(
-                BUILTIN_NAME,
-                &WRITE_ERROR_INTERNAL,
-                format!("write: clone failed ({err})"),
-                err,
-            )
+    let issuer = RuntimeTcpIssuer::from_context(runtime.as_ref());
+    let status = service
+        .describe_client(issuer.clone(), authority.clone())
+        .await
+        .map_err(|err| {
+            let descriptor = if err.kind() == TcpTransportErrorKind::InvalidAuthority {
+                &WRITE_ERROR_INVALID_CLIENT
+            } else {
+                &WRITE_ERROR_INTERNAL
+            };
+            super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
         })?;
-        (stream, timeout, byte_order)
-    };
-
-    if let Err(err) = configure_stream(&stream, timeout) {
-        return Err(super::error::with_source(
-            BUILTIN_NAME,
-            &WRITE_ERROR_INTERNAL,
-            format!("write: unable to configure socket timeout ({err})"),
-            err,
-        ));
+    if !status.connected {
+        return Err(write_error(&WRITE_ERROR_NOT_CONNECTED));
     }
+    let byte_order = match status.byte_order {
+        crate::context::RuntimeTcpByteOrder::Little => ByteOrder::Little,
+        crate::context::RuntimeTcpByteOrder::Big => ByteOrder::Big,
+    };
 
     let payload = match datatype {
         Some(datatype) => prepare_payload(&data, datatype, byte_order)?,
@@ -172,17 +138,22 @@ pub(super) async fn write_builtin(
         return Ok(Value::Num(0.0));
     }
 
-    match write_bytes(&mut stream, &payload.bytes) {
-        Ok(_) => Ok(Value::Num(payload.elements as f64)),
-        Err(error) => {
-            if matches!(error, WriteError::ConnectionClosed(_)) {
-                if let Ok(mut guard) = handle.lock() {
-                    guard.connected = false;
-                }
-            }
-            Err(map_write_socket_error(error))
-        }
+    if let Some(runtime) = &runtime {
+        runtime.cpu_cooperation().completed(0).await?;
     }
+    service
+        .write(issuer, authority, payload.bytes)
+        .await
+        .map_err(|err| {
+            let descriptor = match err.kind() {
+                TcpTransportErrorKind::InvalidAuthority => &WRITE_ERROR_INVALID_CLIENT,
+                TcpTransportErrorKind::Closed => &WRITE_ERROR_CONNECTION_CLOSED,
+                TcpTransportErrorKind::Timeout => &WRITE_ERROR_TIMEOUT,
+                _ => &WRITE_ERROR_INTERNAL,
+            };
+            super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
+        })?;
+    Ok(Value::Num(payload.elements as f64))
 }
 
 fn ensure_write_extensions(data: &Value) -> BuiltinResult<()> {
@@ -852,14 +823,6 @@ fn extend_f64(buffer: &mut Vec<u8>, value: f64, order: ByteOrder) {
     }
 }
 
-fn parse_byte_order(text: &str) -> ByteOrder {
-    if text.eq_ignore_ascii_case("big-endian") || text.eq_ignore_ascii_case("big endian") {
-        ByteOrder::Big
-    } else {
-        ByteOrder::Little
-    }
-}
-
 fn scalar_string(value: &Value) -> BuiltinResult<String> {
     crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
         write_flow(
@@ -869,126 +832,16 @@ fn scalar_string(value: &Value) -> BuiltinResult<String> {
     })
 }
 
-fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
-    let id_value = struct_value
-        .fields
-        .get(CLIENT_HANDLE_FIELD)
-        .ok_or_else(|| {
-            write_flow(
-                &WRITE_ERROR_INVALID_CLIENT,
-                "write: tcpclient struct is missing internal handle",
-            )
-        })?;
-    match id_value {
-        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
-            write_flow(
-                &WRITE_ERROR_INVALID_CLIENT,
-                "write: tcpclient struct has invalid handle field",
-            )
-        }),
-        _ => Err(write_flow(
-            &WRITE_ERROR_INVALID_CLIENT,
-            "write: tcpclient struct has invalid handle field",
-        )),
-    }
-}
-
-enum WriteError {
-    Timeout(io::Error),
-    ConnectionClosed(Option<io::Error>),
-    Io(io::Error),
-}
-
-fn map_write_socket_error(error: WriteError) -> RuntimeError {
-    match error {
-        WriteError::Timeout(source) => {
-            super::error::with_source_exact_message(BUILTIN_NAME, &WRITE_ERROR_TIMEOUT, source)
-        }
-        WriteError::ConnectionClosed(Some(source)) => super::error::with_source_exact_message(
-            BUILTIN_NAME,
-            &WRITE_ERROR_CONNECTION_CLOSED,
-            source,
-        ),
-        WriteError::ConnectionClosed(None) => write_error(&WRITE_ERROR_CONNECTION_CLOSED),
-        WriteError::Io(source) => super::error::with_source(
-            BUILTIN_NAME,
-            &WRITE_ERROR_INTERNAL,
-            format!("write: socket error ({source})"),
-            source,
-        ),
-    }
-}
-
-fn write_bytes(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), WriteError> {
-    let mut offset = 0usize;
-    while offset < bytes.len() {
-        match stream.write(&bytes[offset..]) {
-            Ok(0) => return Err(WriteError::ConnectionClosed(None)),
-            Ok(n) => offset += n,
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => return Err(WriteError::Timeout(err)),
-            Err(err) if is_connection_closed_error(&err) => {
-                return Err(WriteError::ConnectionClosed(Some(err)))
-            }
-            Err(err) => return Err(WriteError::Io(err)),
-        }
-    }
-    Ok(())
-}
-
-fn is_timeout(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-    )
-}
-
-fn is_connection_closed_error(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::BrokenPipe
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::NotConnected
-            | io::ErrorKind::UnexpectedEof
-    )
-}
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::io::net::client_state::{insert_client, remove_client_for_test};
-    use crate::builtins::io::net::control::configure_stream;
-    use crate::builtins::io::net::test_support::CountingDownloadProvider;
+    use crate::builtins::io::net::test_support::{CountingDownloadProvider, TcpTestHost};
+    use crate::context::RuntimeTcpByteOrder;
     use runmat_builtins::WRITE_DESCRIPTOR;
-    use runmat_value::{CharArray, IntValue, IntegerStorage, SparseTensor, StructValue, Tensor};
-    use std::io::Read;
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::{Arc, Barrier};
+    use runmat_value::{CharArray, IntValue, IntegerStorage, ObjectInstance, SparseTensor, Tensor};
+    use std::io::{self, Read};
+    use std::net::TcpListener;
     use std::thread;
-
-    fn make_client(stream: TcpStream, timeout: f64, byte_order: &str) -> Value {
-        let peer_addr = stream.peer_addr().expect("peer addr");
-        configure_stream(&stream, timeout).expect("configure stream");
-        let client_id = insert_client(stream, 0, peer_addr, timeout, byte_order.to_string());
-        let mut st = StructValue::new();
-        st.fields.insert(
-            CLIENT_HANDLE_FIELD.to_string(),
-            Value::Int(IntValue::U64(client_id)),
-        );
-        Value::Struct(st)
-    }
-
-    fn client_id(client: &Value) -> u64 {
-        match client {
-            Value::Struct(st) => match st.fields.get(CLIENT_HANDLE_FIELD) {
-                Some(Value::Int(IntValue::U64(id))) => *id,
-                Some(Value::Int(iv)) => iv.to_i64() as u64,
-                other => panic!("unexpected id field {other:?}"),
-            },
-            other => panic!("expected struct, got {other:?}"),
-        }
-    }
 
     fn assert_error_identifier(err: RuntimeError, expected: &str) {
         assert_eq!(err.identifier(), Some(expected));
@@ -997,59 +850,76 @@ pub(crate) mod tests {
     #[test]
     fn terminal_socket_errors_retain_original_causes_without_replay() {
         use std::error::Error;
-
-        for (error, descriptor, kind) in [
+        for (kind, descriptor, io_kind) in [
             (
-                WriteError::Timeout(io::Error::new(io::ErrorKind::TimedOut, "send stalled")),
+                TcpTransportErrorKind::Timeout,
                 &WRITE_ERROR_TIMEOUT,
                 io::ErrorKind::TimedOut,
             ),
             (
-                WriteError::ConnectionClosed(Some(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "peer closed",
-                ))),
+                TcpTransportErrorKind::Closed,
                 &WRITE_ERROR_CONNECTION_CLOSED,
                 io::ErrorKind::BrokenPipe,
             ),
         ] {
-            let failure = map_write_socket_error(error);
+            let error = crate::tcp::TcpTransportError::with_source(
+                kind,
+                "TCP write failed",
+                io::Error::new(io_kind, "wire failure"),
+            );
+            let failure = super::super::error::with_source(
+                BUILTIN_NAME,
+                descriptor,
+                format!("write: {error}"),
+                error,
+            );
             assert_eq!(failure.identifier(), descriptor.identifier);
-            assert_eq!(failure.message(), descriptor.message);
+            assert!(failure.message().contains(descriptor.message));
             assert_eq!(failure.gpu_gather_retry(), crate::GpuGatherRetry::Never);
             assert_eq!(
                 Error::source(&failure)
+                    .and_then(|source| source.downcast_ref::<crate::tcp::TcpTransportError>())
+                    .and_then(Error::source)
                     .and_then(|source| source.downcast_ref::<io::Error>())
                     .map(io::Error::kind),
-                Some(kind),
+                Some(io_kind),
             );
         }
     }
 
     #[test]
-    fn typed_negative_client_handle_is_rejected() {
-        let mut client = StructValue::new();
-        client.fields.insert(
-            CLIENT_HANDLE_FIELD.to_string(),
-            Value::Int(IntValue::I8(-1)),
-        );
-        let err = extract_client_id(&client).unwrap_err();
+    fn detached_client_object_is_rejected() {
+        let host = TcpTestHost::new();
+        let client = Value::Object(ObjectInstance::new(runmat_builtins::TCPCLIENT_CLASS));
+        let err = run_write(&host, client, Value::Num(1.0), Vec::new()).unwrap_err();
         assert_error_identifier(err, WRITE_ERROR_INVALID_CLIENT.identifier.unwrap());
     }
 
-    fn run_write(client: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(write_builtin(client, data, rest))
+    fn run_write(
+        host: &TcpTestHost,
+        client: Value,
+        data: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        futures::executor::block_on(write_builtin(
+            Some(host.runtime.clone()),
+            client,
+            data,
+            rest,
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn known_invalid_datatype_and_arity_reject_before_payload_download() {
+        let host = TcpTestHost::new();
         let _lock = crate::builtins::common::test_support::accel_test_lock();
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
         let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
         let payload = Value::GpuTensor(owner.resident());
         let invalid_datatype = run_write(
+            &host,
             Value::Num(0.0),
             payload.clone(),
             vec![Value::from("uint128")],
@@ -1061,6 +931,7 @@ pub(crate) mod tests {
         );
         assert_eq!(owner.downloads(), 0);
         let overarity = run_write(
+            &host,
             Value::Num(0.0),
             payload,
             vec![Value::from("uint8"), Value::from("double")],
@@ -1085,6 +956,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_default_preserves_double_datatype() {
+        let host = TcpTestHost::new();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -1094,15 +966,15 @@ pub(crate) mod tests {
             received
         });
 
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0, "little-endian");
+        let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
-        let result = run_write(client.clone(), Value::Tensor(tensor), Vec::new()).expect("write");
+        let result =
+            run_write(&host, client.clone(), Value::Tensor(tensor), Vec::new()).expect("write");
         match result {
             Value::Num(count) => assert_eq!(count, 4.0),
             other => panic!("expected numeric result, got {other:?}"),
         }
-        remove_client_for_test(client_id(&client));
+        host.close(&client);
         let received = handle.join().expect("join");
         let expected = [1.0_f64, 2.0, 3.0, 4.0]
             .into_iter()
@@ -1114,6 +986,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_double_big_endian_encodes_correctly() {
+        let host = TcpTestHost::new();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -1123,10 +996,10 @@ pub(crate) mod tests {
             buf
         });
 
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0, "big-endian");
+        let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Big);
         let tensor = Tensor::new(vec![1.5, 2.5, 3.5], vec![1, 3]).unwrap();
         let result = run_write(
+            &host,
             client.clone(),
             Value::Tensor(tensor),
             vec![Value::from("double")],
@@ -1136,7 +1009,7 @@ pub(crate) mod tests {
             Value::Num(count) => assert_eq!(count, 3.0),
             other => panic!("expected numeric count, got {other:?}"),
         }
-        remove_client_for_test(client_id(&client));
+        host.close(&client);
 
         let received = handle.join().expect("join");
         let mut expected = Vec::new();
@@ -1179,9 +1052,10 @@ pub(crate) mod tests {
 
     #[test]
     fn write_extensions_are_gated_before_client_access() {
+        let host = TcpTestHost::new();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let data = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
-        let error = run_write(Value::Num(0.0), data, Vec::new())
+        let error = run_write(&host, Value::Num(0.0), data, Vec::new())
             .expect_err("strict mode rejects nonvector data before client access");
         assert_eq!(
             error.identifier(),
@@ -1191,11 +1065,16 @@ pub(crate) mod tests {
         let sparse =
             SparseTensor::new_integer(2, 1, vec![0, 1], vec![0], IntegerStorage::U8(vec![1]))
                 .unwrap();
-        let error = run_write(Value::Num(0.0), Value::SparseTensor(sparse), Vec::new())
-            .expect_err("strict mode rejects sparse data before client access");
+        let error = run_write(
+            &host,
+            Value::Num(0.0),
+            Value::SparseTensor(sparse),
+            Vec::new(),
+        )
+        .expect_err("strict mode rejects sparse data before client access");
         assert_eq!(error.identifier(), WRITE_SPARSE_EXTENSION.error_identifier);
 
-        let error = run_write(Value::Num(0.0), Value::Bool(true), Vec::new())
+        let error = run_write(&host, Value::Num(0.0), Value::Bool(true), Vec::new())
             .expect_err("strict mode rejects logical data before client access");
         assert_eq!(error.identifier(), WRITE_LOGICAL_EXTENSION.error_identifier);
 
@@ -1215,7 +1094,7 @@ pub(crate) mod tests {
             .handle
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("explicit immutable view");
-        let error = run_write(Value::Num(0.0), Value::GpuTensor(handle), Vec::new())
+        let error = run_write(&host, Value::Num(0.0), Value::GpuTensor(handle), Vec::new())
             .expect_err("strict mode rejects explicit GPU data before provider access");
         assert_eq!(
             error.identifier(),
@@ -1305,6 +1184,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_char_payload_encodes_ascii() {
+        let host = TcpTestHost::new();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {
@@ -1314,10 +1194,10 @@ pub(crate) mod tests {
             buf
         });
 
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0, "little-endian");
+        let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
         let chars = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
         let result = run_write(
+            &host,
             client.clone(),
             Value::CharArray(chars),
             vec![Value::from("char")],
@@ -1327,7 +1207,7 @@ pub(crate) mod tests {
             Value::Num(count) => assert_eq!(count, 6.0),
             other => panic!("expected numeric count, got {other:?}"),
         }
-        remove_client_for_test(client_id(&client));
+        host.close(&client);
         let received = handle.join().expect("join");
         assert_eq!(received, b"RunMat");
     }
@@ -1335,31 +1215,22 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn write_errors_when_client_disconnected() {
+        let host = TcpTestHost::new();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
         let port = listener.local_addr().unwrap().port();
-        let barrier = Arc::new(Barrier::new(2));
-        let thread_barrier = barrier.clone();
         let handle = thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept");
-            thread_barrier.wait();
             drop(stream);
         });
-
-        let stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        let client = make_client(stream, 1.0, "little-endian");
-        let id = client_id(&client);
-        if let Some(handle_ref) = client_handle(id) {
-            if let Ok(mut guard) = handle_ref.lock() {
-                guard.connected = false;
-            }
-        }
+        let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
+        handle.join().expect("peer closed");
+        host.wait_disconnected(&client);
 
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let err = run_write(client.clone(), Value::Tensor(tensor), Vec::new()).expect_err("write");
+        let err =
+            run_write(&host, client.clone(), Value::Tensor(tensor), Vec::new()).expect_err("write");
         assert_error_identifier(err, WRITE_ERROR_NOT_CONNECTED.identifier.unwrap());
 
-        remove_client_for_test(id);
-        barrier.wait();
-        handle.join().expect("join");
+        host.close(&client);
     }
 }

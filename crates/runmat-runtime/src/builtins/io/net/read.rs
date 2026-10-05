@@ -8,15 +8,11 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericStorage;
-use runmat_value::{CharArray, IntegerStorage, StructValue, Tensor, Value};
-use std::io::{self, Read};
-use std::net::TcpStream;
-use std::time::{Duration, Instant};
+use runmat_value::{CharArray, IntegerStorage, Tensor, Value};
 
+use crate::context::{RuntimeTcpByteOrder, RuntimeTcpIssuer, RuntimeTcpReadMode};
+use crate::tcp::TcpTransportErrorKind;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-use super::client_state::{client_handle, CLIENT_HANDLE_FIELD};
-use super::control::configure_stream;
 
 const BUILTIN_NAME: &str = "read";
 
@@ -50,118 +46,75 @@ fn read_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -
     read_error_with_detail(error, message)
 }
 
-fn map_control_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
 #[runtime_builtin(
     name = "read",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::net::read"
 )]
-pub(super) async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn read_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    client: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let known = preflight_known_arguments(&rest)?;
-    match &client {
-        Value::Struct(st) => {
-            extract_client_id(st)?;
-        }
-        Value::GpuTensor(_) => {}
-        _ => {
-            return Err(read_flow(
-                &READ_ERROR_INVALID_CLIENT,
-                "read: expected tcpclient struct as first argument",
-            ));
-        }
-    }
-    super::transport::require_native_tcp(BUILTIN_NAME)?;
-    let options = parse_arguments(rest, known).await?;
-    let client = gather_if_needed_async(&client)
-        .await
-        .map_err(|err| map_control_flow(err, &READ_ERROR_INVALID_CLIENT))?;
-
-    let client_struct = match &client {
-        Value::Struct(st) => st,
-        _ => {
-            return Err(read_flow(
-                &READ_ERROR_INVALID_CLIENT,
-                "read: expected tcpclient struct as first argument",
-            ))
-        }
-    };
-
-    let client_id = extract_client_id(client_struct)?;
-    let handle = client_handle(client_id).ok_or_else(|| {
-        read_flow(
-            &READ_ERROR_INVALID_CLIENT,
-            "read: tcpclient handle is no longer valid",
-        )
-    })?;
-
-    let (stream, timeout, byte_order, connected) = {
-        let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
-        if !guard.connected {
-            return Err(read_error(&READ_ERROR_NOT_CONNECTED));
-        }
-        let timeout = guard.timeout;
-        let byte_order = parse_byte_order(&guard.byte_order);
-        let stream = guard.stream.try_clone().map_err(|err| {
-            super::error::with_source(
-                BUILTIN_NAME,
-                &READ_ERROR_INTERNAL,
-                format!("read: clone failed ({err})"),
-                err,
-            )
-        })?;
-        (stream, timeout, byte_order, guard.connected)
-    };
-
-    // Ensure cloned descriptor uses the configured timeout.
-    if connected {
-        if let Err(err) = configure_stream(&stream, timeout) {
-            return Err(super::error::with_source(
-                BUILTIN_NAME,
-                &READ_ERROR_INTERNAL,
-                format!("read: unable to configure socket timeout ({err})"),
-                err,
-            ));
-        }
-    }
-
-    let element_size = options.datatype.element_size();
-    if let ReadMode::Count(count) = options.mode {
-        count.checked_mul(element_size).ok_or_else(|| {
+    let authority = super::receiver::authority(&client, runmat_builtins::TCPCLIENT_CLASS)
+        .ok_or_else(|| {
             read_flow(
-                &READ_ERROR_INVALID_COUNT,
-                "read: count and datatype size exceed the maximum supported byte count",
+                &READ_ERROR_INVALID_CLIENT,
+                "read: expected a live tcpclient object",
             )
         })?;
-    }
-    let mut stream = stream;
-    let read_result = perform_read(&mut stream, &options.mode, element_size)?;
-
-    if read_result.connection_closed {
-        if let Ok(mut guard) = handle.lock() {
-            guard.connected = false;
+    let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
+    let options = parse_arguments(rest, known).await?;
+    let element_size = options.datatype.element_size();
+    let mode = match options.mode {
+        ReadMode::Available => RuntimeTcpReadMode::Available,
+        ReadMode::Count(count) => {
+            RuntimeTcpReadMode::Count(count.checked_mul(element_size).ok_or_else(|| {
+                read_flow(
+                    &READ_ERROR_INVALID_COUNT,
+                    "read: count and datatype size exceed the maximum supported byte count",
+                )
+            })?)
         }
-    }
+    };
+    let read_result = service
+        .read(
+            RuntimeTcpIssuer::from_context(runtime.as_ref()),
+            authority,
+            mode,
+        )
+        .await
+        .map_err(|err| {
+            let error = match err.kind() {
+                TcpTransportErrorKind::InvalidAuthority => &READ_ERROR_INVALID_CLIENT,
+                TcpTransportErrorKind::Closed => &READ_ERROR_NOT_CONNECTED,
+                TcpTransportErrorKind::Timeout => &READ_ERROR_TIMEOUT,
+                _ => &READ_ERROR_INTERNAL,
+            };
+            super::error::with_source(BUILTIN_NAME, error, format!("read: {err}"), err)
+        })?;
 
     if let ReadMode::Count(count) = options.mode {
-        if read_result.bytes.is_empty() && count > 0 {
+        if read_result.bytes().is_empty() && count > 0 {
             return Err(read_error(&READ_ERROR_CONNECTION_CLOSED));
         }
         let expected = count.saturating_mul(element_size);
-        if read_result.bytes.len() != expected {
+        if read_result.bytes().len() != expected {
             return Err(read_error(&READ_ERROR_CONNECTION_CLOSED));
         }
     }
 
-    let value = bytes_to_value(&read_result.bytes, options.datatype, byte_order)?;
+    let byte_order = match read_result.byte_order() {
+        RuntimeTcpByteOrder::Little => ByteOrder::Little,
+        RuntimeTcpByteOrder::Big => ByteOrder::Big,
+    };
+    let value = bytes_to_value(read_result.bytes(), options.datatype, byte_order)?;
+    if let Some(runtime) = &runtime {
+        runtime.cpu_cooperation().completed(0).await?;
+    }
+    read_result.publish();
     Ok(value)
 }
 
@@ -181,151 +134,6 @@ struct ReadOptions {
 enum ByteOrder {
     Little,
     Big,
-}
-
-struct ReadOutcome {
-    bytes: Vec<u8>,
-    connection_closed: bool,
-}
-
-enum ReadError {
-    Timeout(io::Error),
-    ConnectionClosed,
-    Io(io::Error),
-}
-
-fn perform_read(
-    stream: &mut TcpStream,
-    mode: &ReadMode,
-    element_size: usize,
-) -> BuiltinResult<ReadOutcome> {
-    match read_from_stream(stream, mode, element_size) {
-        Ok(outcome) => Ok(outcome),
-        Err(ReadError::Timeout(err)) => Err(super::error::with_source_exact_message(
-            BUILTIN_NAME,
-            &READ_ERROR_TIMEOUT,
-            err,
-        )),
-        Err(ReadError::ConnectionClosed) => Err(read_error(&READ_ERROR_CONNECTION_CLOSED)),
-        Err(ReadError::Io(err)) => Err(super::error::with_source(
-            BUILTIN_NAME,
-            &READ_ERROR_INTERNAL,
-            format!("read: socket error ({err})"),
-            err,
-        )),
-    }
-}
-
-fn read_from_stream(
-    stream: &mut TcpStream,
-    mode: &ReadMode,
-    element_size: usize,
-) -> Result<ReadOutcome, ReadError> {
-    match mode {
-        ReadMode::Available => read_all_available(stream),
-        ReadMode::Count(count) => {
-            let total = count.saturating_mul(element_size);
-            read_exact_bytes(stream, total)
-        }
-    }
-}
-
-fn read_all_available(stream: &mut TcpStream) -> Result<ReadOutcome, ReadError> {
-    let mut buffer = [0u8; 4096];
-    let mut data = Vec::new();
-    let mut connection_closed = false;
-
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                connection_closed = true;
-                return Ok(ReadOutcome {
-                    bytes: Vec::new(),
-                    connection_closed,
-                });
-            }
-            Ok(n) => {
-                data.extend_from_slice(&buffer[..n]);
-                break;
-            }
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => return Err(ReadError::Timeout(err)),
-            Err(err) => return Err(ReadError::Io(err)),
-        }
-    }
-
-    let guard = NonBlockingGuard::enter(stream).map_err(ReadError::Io)?;
-    let mut guard = Some(guard);
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                connection_closed = true;
-                break;
-            }
-            Ok(n) => {
-                data.extend_from_slice(&buffer[..n]);
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => break,
-            Err(err) => return Err(ReadError::Io(err)),
-        }
-    }
-    drop(guard.take());
-
-    Ok(ReadOutcome {
-        bytes: data,
-        connection_closed,
-    })
-}
-
-fn read_exact_bytes(stream: &mut TcpStream, total: usize) -> Result<ReadOutcome, ReadError> {
-    if total == 0 {
-        return Ok(ReadOutcome {
-            bytes: Vec::new(),
-            connection_closed: false,
-        });
-    }
-
-    let mut buf = vec![0u8; total];
-    let mut offset = 0;
-    let timeout = stream.read_timeout().ok().flatten();
-    let start = Instant::now();
-    let _guard = if timeout.is_some() {
-        Some(NonBlockingGuard::enter(stream).map_err(ReadError::Io)?)
-    } else {
-        None
-    };
-    while offset < total {
-        match stream.read(&mut buf[offset..]) {
-            Ok(0) => return Err(ReadError::ConnectionClosed),
-            Ok(n) => {
-                offset += n;
-            }
-            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) if is_timeout(&err) => {
-                if let Some(timeout) = timeout {
-                    if start.elapsed() < timeout {
-                        std::thread::sleep(Duration::from_millis(5));
-                        continue;
-                    }
-                }
-                return Err(ReadError::Timeout(err));
-            }
-            Err(err) => return Err(ReadError::Io(err)),
-        }
-    }
-    Ok(ReadOutcome {
-        bytes: buf,
-        connection_closed: false,
-    })
-}
-
-fn is_timeout(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-    )
 }
 
 fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> BuiltinResult<Value> {
@@ -659,62 +467,6 @@ fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
             format!("read: unsupported datatype '{text}'"),
         )
     })
-}
-
-fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
-    let id_value = struct_field(struct_value, CLIENT_HANDLE_FIELD).ok_or_else(|| {
-        read_flow(
-            &READ_ERROR_INVALID_CLIENT,
-            "read: tcpclient struct is missing internal handle",
-        )
-    })?;
-    match id_value {
-        Value::Int(iv) => iv.try_to_u64().ok_or_else(|| {
-            read_flow(
-                &READ_ERROR_INVALID_CLIENT,
-                "read: tcpclient struct has invalid handle field",
-            )
-        }),
-        _ => Err(read_flow(
-            &READ_ERROR_INVALID_CLIENT,
-            "read: tcpclient struct has invalid handle field",
-        )),
-    }
-}
-
-fn struct_field<'a>(value: &'a StructValue, name: &str) -> Option<&'a Value> {
-    value.fields.get(name)
-}
-
-fn parse_byte_order(text: &str) -> ByteOrder {
-    if text.eq_ignore_ascii_case("big-endian") || text.eq_ignore_ascii_case("big endian") {
-        ByteOrder::Big
-    } else {
-        ByteOrder::Little
-    }
-}
-
-struct NonBlockingGuard {
-    stream: *const TcpStream,
-}
-
-impl NonBlockingGuard {
-    fn enter(stream: &TcpStream) -> io::Result<Self> {
-        stream.set_nonblocking(true)?;
-        Ok(NonBlockingGuard {
-            stream: stream as *const TcpStream,
-        })
-    }
-}
-
-impl Drop for NonBlockingGuard {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(stream) = self.stream.as_ref() {
-                let _ = stream.set_nonblocking(false);
-            }
-        }
-    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

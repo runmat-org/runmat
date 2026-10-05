@@ -212,6 +212,12 @@ pub(super) async fn read(
 ) -> Result<RuntimeTcpReadResult, TcpTransportError> {
     let client = registry::client(&registry, &issuer, &authority)?;
     let mut io = Arc::clone(&client.io).lock_owned().await;
+    if io.closed && io.unread.is_empty() {
+        return Err(TcpTransportError::new(
+            TcpTransportErrorKind::Closed,
+            "TCP client is disconnected",
+        ));
+    }
     let mut chunk = [0u8; 4096];
     match mode {
         RuntimeTcpReadMode::Count(count) => {
@@ -314,6 +320,7 @@ pub(super) async fn read(
     Ok(RuntimeTcpReadResult::new(
         bytes,
         closed,
+        client.byte_order,
         Box::new(ReadReceipt { guard: io }),
     ))
 }
