@@ -466,7 +466,10 @@ async fn portable_product_retains_names_for_lexical_and_session_bindings() {
     assert!(names.values().any(|name| name == "shared"));
 
     let envelope = unit.portable_envelope_for(Some("bindings")).unwrap();
-    assert_eq!(envelope.manifest.revisions.vm_layout_schema, 3);
+    assert_eq!(
+        envelope.manifest.revisions.vm_layout_schema,
+        runmat_vm::VM_LAYOUT_SCHEMA_VERSION
+    );
     assert_eq!(
         envelope.manifest.revisions.function_registry_schema,
         runmat_vm::FUNCTION_REGISTRY_SCHEMA_VERSION

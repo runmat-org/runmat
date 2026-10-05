@@ -17,12 +17,12 @@ pub fn semantic_closure_value(
     function: runmat_types::FunctionId,
     display_name: String,
     captures: Vec<Value>,
+    source_role: runmat_types::FunctionSourceRole,
 ) -> Value {
     Value::Closure(Closure {
         function_name: display_name,
         bound_function: Some(function.0),
-        source_role: crate::user_functions::source_function_for(function.0)
-            .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
+        source_role,
         captures,
     })
 }

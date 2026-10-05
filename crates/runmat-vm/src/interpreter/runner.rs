@@ -1070,10 +1070,10 @@ async fn run_interpreter_inner(
                 | Instr::CreateFunctionHandle(_)
                 | Instr::CreateExternalFunctionHandle(_)
                 | Instr::CreateMethodFunctionHandle(_)
-                | Instr::CreateBoundFunctionHandle(_, _)
-                | Instr::CreateExternalBoundFunctionHandle(_, _)
+                | Instr::CreateBoundFunctionHandle(_, _, _)
+                | Instr::CreateExternalBoundFunctionHandle(_, _, _)
                 | Instr::CreateClosure(_, _)
-                | Instr::CreateSemanticClosure(_, _, _)
+                | Instr::CreateSemanticClosure(_, _, _, _)
                 | Instr::LoadStaticProperty(_, _)
                 | Instr::LoadWorkspaceFirstStaticProperty { .. }
                 | Instr::RegisterClass { .. }

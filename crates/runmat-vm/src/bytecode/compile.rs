@@ -7084,7 +7084,7 @@ y = x^[1 2; 3 4];\n",
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name)
+            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name, _)
                 if name == "remote_inc"
         )));
 

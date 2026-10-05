@@ -586,7 +586,7 @@ fn nested_varargout_forwarding_with_nargout_slice_assignment_via_nested_feval() 
     assert!(
         entry.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 1) if name == "inner"
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 1, _) if name == "inner"
         )),
         "outer should lower string feval target to a captured semantic closure; instructions={:?}",
         entry.instructions
@@ -2507,7 +2507,7 @@ fn recursive_function_handle_call_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "fact"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, runmat_types::FunctionSourceRole::Local) if name == "fact"
         )),
         "recursive handle should carry semantic function identity"
     );
@@ -2532,7 +2532,7 @@ fn recursive_feval_string_call_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "fact"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "fact"
         )),
         "recursive feval string callee should carry semantic function identity"
     );
@@ -3423,7 +3423,7 @@ fn function_handle_index_call_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "semantic function handle index calls should carry semantic identity"
     );
@@ -3448,7 +3448,7 @@ fn function_handle_index_zero_output_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "semantic function handle zero-output index calls should carry semantic identity"
     );
@@ -3467,7 +3467,7 @@ fn function_handle_index_multi_output_executes() {
     let bytecode = compile_source(source).expect("compile semantic handle multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -3484,7 +3484,7 @@ fn function_handle_expand_single_output_executes() {
     let bytecode = compile_source(source).expect("compile semantic handle expanded single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
     )));
     assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
@@ -3502,7 +3502,7 @@ fn function_handle_expand_zero_output_executes() {
     let bytecode = compile_source(source).expect("compile semantic handle expanded zero-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
     )));
     assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
@@ -3520,7 +3520,7 @@ fn function_handle_expand_multi_output_executes() {
     let bytecode = compile_source(source).expect("compile semantic handle expanded multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
     )));
     assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,

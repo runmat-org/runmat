@@ -398,6 +398,7 @@ pub(super) fn evaluate_operand(
                             runmat_types::FunctionId(function.0 as usize),
                             name,
                             captures.into_iter().map(|capture| capture.value).collect(),
+                            target.source_role,
                         )
                     };
                     return Ok(state.arena.insert(value));

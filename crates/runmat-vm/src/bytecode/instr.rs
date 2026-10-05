@@ -497,10 +497,10 @@ pub enum Instr {
     CreateFunctionHandle(String),
     CreateExternalFunctionHandle(String),
     CreateMethodFunctionHandle(String),
-    CreateBoundFunctionHandle(FunctionId, String),
-    CreateExternalBoundFunctionHandle(FunctionId, String),
+    CreateBoundFunctionHandle(FunctionId, String, runmat_types::FunctionSourceRole),
+    CreateExternalBoundFunctionHandle(FunctionId, String, runmat_types::FunctionSourceRole),
     CreateClosure(String, usize),
-    CreateSemanticClosure(FunctionId, String, usize),
+    CreateSemanticClosure(FunctionId, String, usize, runmat_types::FunctionSourceRole),
     LoadStaticProperty(ClassIdentity, runmat_types::MemberName),
     LoadWorkspaceFirstStaticProperty {
         name: String,
@@ -736,8 +736,8 @@ impl Instr {
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateMethodFunctionHandle(_)
-            | Instr::CreateBoundFunctionHandle(_, _)
-            | Instr::CreateExternalBoundFunctionHandle(_, _)
+            | Instr::CreateBoundFunctionHandle(_, _, _)
+            | Instr::CreateExternalBoundFunctionHandle(_, _, _)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
             | Instr::LoadVarForStructAssignment(_)
@@ -964,7 +964,7 @@ impl Instr {
                 selection.output_count().and_then(|count| effect(2, count))
             }
             Instr::CreateClosure(_, capture_count)
-            | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
+            | Instr::CreateSemanticClosure(_, _, capture_count, _) => effect(*capture_count, 1),
             Instr::LoadStaticProperty(_, _) | Instr::LoadWorkspaceFirstStaticProperty { .. } => {
                 effect(0, 1)
             }

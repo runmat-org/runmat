@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Portable schema for serialized [`VmAssemblyLayout`] payloads.
-pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 3;
+pub const VM_LAYOUT_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VmSlotId(pub usize);
@@ -26,6 +26,7 @@ pub struct VmAssemblyLayout {
 pub struct VmFunctionLayout {
     pub function: FunctionId,
     pub display_name: String,
+    pub source_role: runmat_types::FunctionSourceRole,
     pub private_owner_scope: String,
     pub frame_abi: VmFrameAbi,
     pub binding_slots: HashMap<BindingId, VmSlotId>,
@@ -299,6 +300,7 @@ fn derive_function_layout(
     Ok(VmFunctionLayout {
         function: function.id,
         display_name: function.name.0.clone(),
+        source_role: hir.function_source_role(function),
         private_owner_scope: private_owner_scope_for_function(hir, function),
         frame_abi,
         binding_slots,
@@ -602,6 +604,7 @@ mod tests {
         let function_layout = |function| VmFunctionLayout {
             function,
             display_name: format!("function_{}", function.0),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             private_owner_scope: String::new(),
             frame_abi: VmFrameAbi {
                 fixed_inputs: Vec::new(),

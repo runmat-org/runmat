@@ -848,8 +848,15 @@ pub fn handle_create_semantic_closure(
     function: runmat_hir::FunctionId,
     display_name: String,
     capture_count: usize,
+    source_role: runmat_types::FunctionSourceRole,
 ) -> Result<MethodHandling, RuntimeError> {
-    call_closures::create_semantic_closure(stack, function, display_name, capture_count)?;
+    call_closures::create_semantic_closure(
+        stack,
+        function,
+        display_name,
+        capture_count,
+        source_role,
+    )?;
     Ok(MethodHandling::Completed)
 }
 

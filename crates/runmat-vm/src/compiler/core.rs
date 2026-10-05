@@ -4255,7 +4255,7 @@ impl Compiler {
                 Ok(())
             }
             CallableIdentity::AnonymousFunction(function) => {
-                let (captures, display_name) = self
+                let (captures, display_name, source_role) = self
                     .layout
                     .as_ref()
                     .and_then(|layout| layout.functions.get(function))
@@ -4264,7 +4264,13 @@ impl Compiler {
                             "missing VM layout for function handle target {function:?}"
                         ))
                     })
-                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
+                    .map(|layout| {
+                        (
+                            layout.captures.clone(),
+                            layout.display_name.clone(),
+                            layout.source_role,
+                        )
+                    })?;
                 for capture in &captures {
                     let slot = self.binding_slot(capture.binding)?;
                     self.emit(Instr::LoadVar(slot));
@@ -4273,6 +4279,7 @@ impl Compiler {
                     *function,
                     display_name,
                     captures.len(),
+                    source_role,
                 ));
                 Ok(())
             }
@@ -4283,26 +4290,38 @@ impl Compiler {
                 self.emit(Instr::CreateExternalBoundFunctionHandle(
                     *function,
                     display_name.clone(),
+                    runmat_types::FunctionSourceRole::Unknown,
                 ));
                 Ok(())
             }
             CallableIdentity::BoundFunction(function) => {
-                let Some((captures, display_name)) = self
+                let Some((captures, display_name, source_role)) = self
                     .layout
                     .as_ref()
                     .and_then(|layout| layout.functions.get(function))
-                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))
+                    .map(|layout| {
+                        (
+                            layout.captures.clone(),
+                            layout.display_name.clone(),
+                            layout.source_role,
+                        )
+                    })
                 else {
                     // External semantic function identities may not have a local VM layout in the
                     // current compilation unit. Keep the identity and emit a simple semantic handle.
                     self.emit(Instr::CreateBoundFunctionHandle(
                         *function,
                         format!("bound_function_{}", function.0),
+                        runmat_types::FunctionSourceRole::Unknown,
                     ));
                     return Ok(());
                 };
                 if captures.is_empty() {
-                    self.emit(Instr::CreateBoundFunctionHandle(*function, display_name));
+                    self.emit(Instr::CreateBoundFunctionHandle(
+                        *function,
+                        display_name,
+                        source_role,
+                    ));
                     return Ok(());
                 }
                 for capture in &captures {
@@ -4313,6 +4332,7 @@ impl Compiler {
                     *function,
                     display_name,
                     captures.len(),
+                    source_role,
                 ));
                 Ok(())
             }
@@ -4323,13 +4343,17 @@ impl Compiler {
         &mut self,
         name: &str,
     ) -> Result<bool, CompileError> {
-        let Some((function, captures, display_name)) =
+        let Some((function, captures, display_name, source_role)) =
             self.resolve_visible_semantic_function_layout(name)
         else {
             return Ok(false);
         };
         if captures.is_empty() {
-            self.emit(Instr::CreateBoundFunctionHandle(function, display_name));
+            self.emit(Instr::CreateBoundFunctionHandle(
+                function,
+                display_name,
+                source_role,
+            ));
             return Ok(true);
         }
         for capture in &captures {
@@ -4340,6 +4364,7 @@ impl Compiler {
             function,
             display_name,
             captures.len(),
+            source_role,
         ));
         Ok(true)
     }
@@ -4347,7 +4372,12 @@ impl Compiler {
     fn resolve_visible_semantic_function_layout(
         &self,
         name: &str,
-    ) -> Option<(FunctionId, Vec<crate::layout::VmCaptureSlot>, String)> {
+    ) -> Option<(
+        FunctionId,
+        Vec<crate::layout::VmCaptureSlot>,
+        String,
+        runmat_types::FunctionSourceRole,
+    )> {
         let layout = self.layout.as_ref()?;
         let current_function = self.function;
         if let Some(current) = current_function {
@@ -4367,6 +4397,7 @@ impl Compiler {
                         *function,
                         function_layout.captures.clone(),
                         function_layout.display_name.clone(),
+                        function_layout.source_role,
                     ));
                 }
             }
@@ -4390,6 +4421,7 @@ impl Compiler {
                     function,
                     function_layout.captures.clone(),
                     function_layout.display_name.clone(),
+                    function_layout.source_role,
                 )
             })
         })
@@ -4594,6 +4626,7 @@ mod tests {
             VmFunctionLayout {
                 function,
                 display_name: "test".into(),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 private_owner_scope: String::new(),
                 frame_abi: VmFrameAbi {
                     fixed_inputs: Vec::new(),

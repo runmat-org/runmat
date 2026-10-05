@@ -1358,7 +1358,12 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
     for instr in &mut bytecode.instructions {
         if let runmat_vm::Instr::CreateFunctionHandle(name) = instr {
             if let Some(function) = registry.resolve_name(name) {
-                *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
+                let role = registry
+                    .get(function)
+                    .map_or(runmat_types::FunctionSourceRole::Unknown, |definition| {
+                        definition.source_role
+                    });
+                *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone(), role);
             }
         }
     }
@@ -1451,8 +1456,13 @@ fn bind_semantic_callback_literals(
     }
 
     for (producer, function, display_name) in replacements {
+        let role = registry
+            .get(function)
+            .map_or(runmat_types::FunctionSourceRole::Unknown, |definition| {
+                definition.source_role
+            });
         bytecode.instructions[producer] =
-            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name);
+            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name, role);
     }
 }
 

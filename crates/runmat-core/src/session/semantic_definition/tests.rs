@@ -11,6 +11,7 @@ fn definition(id: usize, name: &str, callee: usize) -> FunctionBytecode {
         instructions: vec![Instr::CreateBoundFunctionHandle(
             FunctionId(callee),
             "callee".into(),
+            runmat_types::FunctionSourceRole::Unknown,
         )],
         ..Default::default()
     }

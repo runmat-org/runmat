@@ -41,8 +41,8 @@ pub(in crate::session) fn remap_semantic_function_instr(
     remap: &HashMap<FunctionId, FunctionId>,
 ) {
     match instr {
-        Instr::CreateSemanticClosure(function, _, _)
-        | Instr::CreateBoundFunctionHandle(function, _)
+        Instr::CreateSemanticClosure(function, _, _, _)
+        | Instr::CreateBoundFunctionHandle(function, _, _)
         | Instr::CreateSemanticFuture(function, _, _)
         | Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
         | Instr::CallSemanticFunctionMulti(function, _, _)
