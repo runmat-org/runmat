@@ -88,13 +88,13 @@ pub fn exception_from_error(
 /// caught from execution. User-constructed exceptions retain their public
 /// identifier, message, and stack without inventing an opaque source.
 pub fn error_from_exception(exception: runmat_value::MException) -> RuntimeError {
-    let (identifier, message, stack, original) = exception.into_parts();
-    if let Some(original) = original {
+    let parts = exception.into_parts();
+    if let Some(original) = parts.original {
         return RuntimeError::from_shared_original(original);
     }
-    build_runtime_error(message)
-        .with_identifier(identifier)
-        .with_call_stack(stack)
+    build_runtime_error(parts.message)
+        .with_identifier(parts.identifier)
+        .with_call_stack(parts.stack)
         .build()
 }
 

@@ -8,6 +8,14 @@ pub struct MException {
     original: Option<Arc<runmat_async::RuntimeError>>,
 }
 
+/// Language fields and the optional exact caught error, moved together.
+pub struct MExceptionParts {
+    pub identifier: String,
+    pub message: String,
+    pub stack: Vec<String>,
+    pub original: Option<Arc<runmat_async::RuntimeError>>,
+}
+
 impl MException {
     pub fn new(identifier: String, message: String) -> Self {
         Self {
@@ -39,15 +47,13 @@ impl MException {
     }
 
     /// Consume the exception without cloning the owner of its caught error.
-    pub fn into_parts(
-        self,
-    ) -> (
-        String,
-        String,
-        Vec<String>,
-        Option<Arc<runmat_async::RuntimeError>>,
-    ) {
-        (self.identifier, self.message, self.stack, self.original)
+    pub fn into_parts(self) -> MExceptionParts {
+        MExceptionParts {
+            identifier: self.identifier,
+            message: self.message,
+            stack: self.stack,
+            original: self.original,
+        }
     }
 }
 

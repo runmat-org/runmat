@@ -238,12 +238,18 @@ fn encode(
 /// A shared rethrow owner is still portable when its actual original is
 /// source-less. Do not mistake the owning wrapper for an opaque host cause.
 fn has_opaque_exception_source(error: &crate::RuntimeError) -> bool {
-    match error.source.as_deref() {
-        None => false,
-        Some(source) => match source.downcast_ref::<runmat_async::SharedRuntimeErrorSource>() {
-            Some(shared) => has_opaque_exception_source(shared.original()),
-            None => true,
-        },
+    let mut current = error;
+    loop {
+        match current.source.as_deref() {
+            None => return false,
+            Some(source) => {
+                let Some(shared) = source.downcast_ref::<runmat_async::SharedRuntimeErrorSource>()
+                else {
+                    return true;
+                };
+                current = shared.original();
+            }
+        }
     }
 }
 
