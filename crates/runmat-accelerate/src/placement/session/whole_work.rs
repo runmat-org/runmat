@@ -277,7 +277,7 @@ impl PlacementSession {
                     item.candidate.identity_digest(),
                     item.selected.kind,
                 );
-                lock_probes(&self.whole_work_probes).insert(key.clone());
+                lock_probes(&self.whole_work_probes).insert(key);
                 return Ok(SelectionDraft::Direct {
                     selected: item.selected.clone(),
                     kind: WholeWorkDecisionKind::Exploratory,
