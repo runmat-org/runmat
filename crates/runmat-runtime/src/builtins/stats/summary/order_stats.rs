@@ -54,6 +54,7 @@ use ordered::*;
 mod cooperative_sort;
 #[cfg(feature = "plot-core")]
 pub(crate) use cooperative_sort::stable_sort_non_nan_f64;
+#[cfg(feature = "plot-core")]
 pub(crate) use cooperative_sort::CooperativeSortError;
 
 mod quantiles;

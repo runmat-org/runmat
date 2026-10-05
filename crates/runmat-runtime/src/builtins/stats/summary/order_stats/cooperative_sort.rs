@@ -13,6 +13,7 @@ use crate::builtins::common::cooperative_sort::{
     stable_sort_by_sync, SortProgress, SortResourceError, StableSortWork,
 };
 
+#[cfg(any(feature = "plot-core", test))]
 #[derive(Debug)]
 pub(crate) enum CooperativeSortError {
     Resource(std::collections::TryReserveError),
