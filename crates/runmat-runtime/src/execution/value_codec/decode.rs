@@ -443,38 +443,44 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
         .enumerate()
         .map(|(index, value)| decode(value, &format!("{path}.capture[{index}]")))
         .collect::<Result<Vec<_>, _>>()?;
-    let bound_function = value
-        .owner_identity
-        .strip_prefix("bound:")
-        .map(|value| {
-            value
-                .parse()
-                .map_err(|_| ValueCodecError::invalid(path, "invalid bound callable identity"))
-        })
-        .transpose()?;
+    let binding = match value.owner {
+        runmat_execution::value::CallableOwner::Bound(origin) => {
+            let function =
+                crate::user_functions::resolve_binding_origin(origin).ok_or_else(|| {
+                    ValueCodecError::unsupported(path, "exact bound callable origin is unavailable")
+                })?;
+            Some(runmat_value::BoundFunctionBinding::portable(
+                function, origin,
+            ))
+        }
+        _ => None,
+    };
     if value.form == runmat_execution::value::CallableForm::Closure {
         return Ok(Value::Closure(Closure {
             function_name: value.qualified_name.clone(),
-            bound_function,
+            binding,
             source_role: value.source_role,
             source_file: value.source_file.clone(),
             captures,
         }));
     }
-    match value.owner_identity.as_str() {
-        "workspace" => Ok(Value::FunctionHandle(value.qualified_name.clone())),
-        "external" => Ok(Value::ExternalFunctionHandle(value.qualified_name.clone())),
-        "method" => Ok(Value::MethodFunctionHandle(value.qualified_name.clone())),
-        _ if bound_function.is_some() => Ok(Value::BoundFunctionHandle {
+    match value.owner {
+        runmat_execution::value::CallableOwner::Workspace => {
+            Ok(Value::FunctionHandle(value.qualified_name.clone()))
+        }
+        runmat_execution::value::CallableOwner::External => {
+            Ok(Value::ExternalFunctionHandle(value.qualified_name.clone()))
+        }
+        runmat_execution::value::CallableOwner::Method => {
+            Ok(Value::MethodFunctionHandle(value.qualified_name.clone()))
+        }
+        runmat_execution::value::CallableOwner::Bound(origin) => Ok(Value::BoundFunctionHandle {
             name: value.qualified_name.clone(),
-            function: bound_function.expect("checked above"),
+            function: binding.expect("resolved exact origin above").function,
+            authority: runmat_value::BoundFunctionAuthority::portable(origin),
             source_role: value.source_role,
             source_file: value.source_file.clone(),
         }),
-        _ => Err(ValueCodecError::unsupported(
-            path,
-            "callable owner is not available in this runtime",
-        )),
     }
 }
 

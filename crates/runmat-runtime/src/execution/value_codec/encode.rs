@@ -1,8 +1,8 @@
 use super::path::{field_path, index_path};
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableForm, CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue,
-    RegisteredData, RegisteredField, SparseValue, StructField, ValuePayload,
+    CallableForm, CallableOwner, CallableValue, DenseValue, ElementType, ExceptionValue,
+    InlineValue, RegisteredData, RegisteredField, SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
@@ -174,7 +174,7 @@ fn encode(
         }
         Value::OutputList(_) => return Err(ValueCodecError::transient_not_portable(path)),
         Value::FunctionHandle(name) => callable(
-            "workspace",
+            CallableOwner::Workspace,
             name,
             CallableForm::Handle,
             runmat_types::FunctionSourceRole::Unknown,
@@ -182,7 +182,7 @@ fn encode(
             Vec::new(),
         ),
         Value::ExternalFunctionHandle(name) => callable(
-            "external",
+            CallableOwner::External,
             name,
             CallableForm::Handle,
             runmat_types::FunctionSourceRole::Unknown,
@@ -190,7 +190,7 @@ fn encode(
             Vec::new(),
         ),
         Value::MethodFunctionHandle(name) => callable(
-            "method",
+            CallableOwner::Method,
             name,
             CallableForm::Handle,
             runmat_types::FunctionSourceRole::Method,
@@ -200,10 +200,17 @@ fn encode(
         Value::BoundFunctionHandle {
             name,
             function,
+            authority,
             source_role,
             source_file,
         } => callable(
-            &format!("bound:{function}"),
+            CallableOwner::Bound(
+                authority
+                    .export_origin(&crate::user_functions::current_session_lease())
+                    .ok_or_else(|| {
+                        ValueCodecError::unsupported(path, "bound callable has no portable origin")
+                    })?,
+            ),
             name,
             CallableForm::Handle,
             *source_role,
@@ -217,12 +224,19 @@ fn encode(
                 .enumerate()
                 .map(|(index, value)| encode(value, &format!("{path}.capture[{index}]"), purpose))
                 .collect::<Result<_, _>>()?;
-            let owner = closure
-                .bound_function
-                .map(|function| format!("bound:{function}"))
-                .unwrap_or_else(|| "workspace".into());
+            let owner = match &closure.binding {
+                Some(binding) => CallableOwner::Bound(
+                    binding
+                        .authority
+                        .export_origin(&crate::user_functions::current_session_lease())
+                        .ok_or_else(|| {
+                            ValueCodecError::unsupported(path, "closure has no portable origin")
+                        })?,
+                ),
+                None => CallableOwner::Workspace,
+            };
             callable(
-                &owner,
+                owner,
                 &closure.function_name,
                 CallableForm::Closure,
                 closure.source_role,
@@ -432,7 +446,7 @@ fn le_bytes<T: Copy, const N: usize>(values: &[T], encode: fn(T) -> [u8; N]) -> 
 }
 
 fn callable(
-    owner_identity: &str,
+    owner: CallableOwner,
     qualified_name: &str,
     form: CallableForm,
     source_role: runmat_types::FunctionSourceRole,
@@ -440,10 +454,10 @@ fn callable(
     captures: Vec<ValuePayload>,
 ) -> InlineValue {
     InlineValue::Callable(CallableValue {
-        owner_identity: owner_identity.into(),
+        owner,
         qualified_name: qualified_name.into(),
         callable_digest: CallableValue::identity_digest(
-            owner_identity,
+            owner,
             qualified_name,
             form,
             source_role,
