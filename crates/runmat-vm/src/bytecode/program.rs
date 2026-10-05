@@ -344,9 +344,8 @@ impl FunctionRegistry {
 
     pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
         if let Some(overlay) = &self.static_overlay {
-            if let Some(lease) = overlay.authority.local_lease(function.0) {
-                return self.get_owned(function, lease);
-            }
+            let lease = overlay.authority.local_lease(function.0)?;
+            return self.get_owned(function, lease);
         }
         self.functions.get(&function)
     }
