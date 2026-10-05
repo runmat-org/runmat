@@ -57,22 +57,24 @@ impl XlsReadOutputs {
 }
 
 impl XlsReadResult {
-    pub(super) fn from_cells(
+    pub(super) async fn from_cells(
         rows: Vec<Vec<SpreadsheetData>>,
         outputs: XlsReadOutputs,
+        cooperation: &mut TabularCooperation<'_>,
+        selected: &TabularFsPath,
     ) -> BuiltinResult<Self> {
         let num = if outputs.num {
-            Some(build_numeric_output(&rows)?)
+            Some(build_numeric_output(&rows, cooperation, selected).await?)
         } else {
             None
         };
         let txt = if outputs.txt {
-            Some(build_text_output(&rows)?)
+            Some(build_text_output(&rows, cooperation, selected).await?)
         } else {
             None
         };
         let raw = if outputs.raw {
-            Some(build_raw_output(&rows)?)
+            Some(build_raw_output(&rows, cooperation, selected).await?)
         } else {
             None
         };
@@ -103,8 +105,14 @@ impl XlsReadResult {
     }
 }
 
-fn build_numeric_output(rows: &[Vec<SpreadsheetData>]) -> BuiltinResult<Value> {
-    let Some((first_row, last_row, first_col, last_col)) = numeric_bounds(rows) else {
+async fn build_numeric_output(
+    rows: &[Vec<SpreadsheetData>],
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<Value> {
+    let Some((first_row, last_row, first_col, last_col)) =
+        numeric_bounds(rows, cooperation, selected).await?
+    else {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
             xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}"))
         })?;
@@ -118,7 +126,15 @@ fn build_numeric_output(rows: &[Vec<SpreadsheetData>]) -> BuiltinResult<Value> {
             "xlsread: numeric output is too large",
         )
     })?;
-    let mut data = vec![f64::NAN; data_len];
+    let mut data = Vec::new();
+    data.try_reserve_exact(data_len).map_err(|source| {
+        xlsread_error_with_source(
+            &XLSREAD_ERROR_TENSOR_BUILD,
+            "xlsread: numeric output allocation failed",
+            source,
+        )
+    })?;
+    data.resize(data_len, f64::NAN);
     for out_row in 0..row_count {
         for out_col in 0..col_count {
             let source_row = first_row + out_row;
@@ -130,6 +146,7 @@ fn build_numeric_output(rows: &[Vec<SpreadsheetData>]) -> BuiltinResult<Value> {
                 .unwrap_or(f64::NAN);
             data[out_row + out_col * row_count] = value;
         }
+        checkpoint_cells(cooperation, selected, col_count).await?;
     }
     let tensor = Tensor::new(data, vec![row_count, col_count]).map_err(|err| {
         xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}"))
@@ -137,7 +154,11 @@ fn build_numeric_output(rows: &[Vec<SpreadsheetData>]) -> BuiltinResult<Value> {
     Ok(Value::Tensor(tensor))
 }
 
-fn numeric_bounds(rows: &[Vec<SpreadsheetData>]) -> Option<(usize, usize, usize, usize)> {
+async fn numeric_bounds(
+    rows: &[Vec<SpreadsheetData>],
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<Option<(usize, usize, usize, usize)>> {
     let mut first_row = None;
     let mut last_row = None;
     let mut first_col = None;
@@ -151,47 +172,82 @@ fn numeric_bounds(rows: &[Vec<SpreadsheetData>]) -> Option<(usize, usize, usize,
                 last_col = Some(last_col.map_or(col_idx, |current: usize| current.max(col_idx)));
             }
         }
+        checkpoint_cells(cooperation, selected, row.len()).await?;
     }
     match (first_row, last_row, first_col, last_col) {
         (Some(first_row), Some(last_row), Some(first_col), Some(last_col)) => {
-            Some((first_row, last_row, first_col, last_col))
+            Ok(Some((first_row, last_row, first_col, last_col)))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
-fn build_text_output(rows: &[Vec<SpreadsheetData>]) -> BuiltinResult<Value> {
+async fn build_text_output(
+    rows: &[Vec<SpreadsheetData>],
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<Value> {
     let (row_count, col_count) = rectangular_shape(rows);
-    let mut values = Vec::with_capacity(row_count * col_count);
+    let mut values = output_values(row_count, col_count)?;
     for row_idx in 0..row_count {
         for col_idx in 0..col_count {
             let text = rows
                 .get(row_idx)
                 .and_then(|row| row.get(col_idx))
-                .and_then(cell_to_text)
-                .unwrap_or_default();
+                .map(|cell| cell_to_text(cell, cooperation, selected));
+            let text = match text {
+                Some(text) => text.await?.unwrap_or_default(),
+                None => String::new(),
+            };
             values.push(Value::from(text));
         }
+        checkpoint_cells(cooperation, selected, col_count).await?;
     }
     crate::make_cell(values, row_count, col_count)
         .map_err(|err| xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}")))
 }
 
-fn build_raw_output(rows: &[Vec<SpreadsheetData>]) -> BuiltinResult<Value> {
+async fn build_raw_output(
+    rows: &[Vec<SpreadsheetData>],
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<Value> {
     let (row_count, col_count) = rectangular_shape(rows);
-    let mut values = Vec::with_capacity(row_count * col_count);
+    let mut values = output_values(row_count, col_count)?;
     for row_idx in 0..row_count {
         for col_idx in 0..col_count {
             let value = rows
                 .get(row_idx)
                 .and_then(|row| row.get(col_idx))
-                .map(cell_to_raw)
-                .unwrap_or(Value::Num(f64::NAN));
+                .map(|cell| cell_to_raw(cell, cooperation, selected));
+            let value = match value {
+                Some(value) => value.await?,
+                None => Value::Num(f64::NAN),
+            };
             values.push(value);
         }
+        checkpoint_cells(cooperation, selected, col_count).await?;
     }
     crate::make_cell(values, row_count, col_count)
         .map_err(|err| xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}")))
+}
+
+fn output_values(rows: usize, cols: usize) -> BuiltinResult<Vec<Value>> {
+    let count = rows.checked_mul(cols).ok_or_else(|| {
+        xlsread_error_with(
+            &XLSREAD_ERROR_TENSOR_BUILD,
+            "xlsread: output shape exceeds addressable storage",
+        )
+    })?;
+    let mut values = Vec::new();
+    values.try_reserve_exact(count).map_err(|source| {
+        xlsread_error_with_source(
+            &XLSREAD_ERROR_TENSOR_BUILD,
+            "xlsread: output allocation failed",
+            source,
+        )
+    })?;
+    Ok(values)
 }
 
 fn rectangular_shape(rows: &[Vec<SpreadsheetData>]) -> (usize, usize) {
@@ -210,26 +266,64 @@ fn cell_to_numeric(cell: &SpreadsheetData) -> Option<f64> {
     }
 }
 
-fn cell_to_text(cell: &SpreadsheetData) -> Option<String> {
+async fn cell_to_text(
+    cell: &SpreadsheetData,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<Option<String>> {
     match cell {
         SpreadsheetData::String(text)
         | SpreadsheetData::DateTimeIso(text)
-        | SpreadsheetData::DurationIso(text) => Some(text.clone()),
-        SpreadsheetData::Error(err) => Some(err.to_string()),
-        _ => None,
+        | SpreadsheetData::DurationIso(text) => {
+            Ok(Some(copy_cell_text(text, cooperation, selected).await?))
+        }
+        SpreadsheetData::Error(err) => Ok(Some(err.to_string())),
+        _ => Ok(None),
     }
 }
 
-fn cell_to_raw(cell: &SpreadsheetData) -> Value {
-    match cell {
+async fn cell_to_raw(
+    cell: &SpreadsheetData,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<Value> {
+    Ok(match cell {
         SpreadsheetData::Int(value) => Value::Num(*value as f64),
         SpreadsheetData::Float(value) => Value::Num(*value),
         SpreadsheetData::Bool(value) => Value::Bool(*value),
         SpreadsheetData::DateTime(value) => Value::Num(value.as_f64()),
         SpreadsheetData::String(text)
         | SpreadsheetData::DateTimeIso(text)
-        | SpreadsheetData::DurationIso(text) => Value::from(text.clone()),
+        | SpreadsheetData::DurationIso(text) => {
+            Value::from(copy_cell_text(text, cooperation, selected).await?)
+        }
         SpreadsheetData::Error(err) => Value::from(err.to_string()),
         SpreadsheetData::Empty => Value::Num(f64::NAN),
+    })
+}
+
+pub(super) async fn copy_cell_text(
+    text: &str,
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<String> {
+    let mut copy = String::new();
+    copy.try_reserve(text.len()).map_err(|source| {
+        xlsread_error_with_source(
+            &XLSREAD_ERROR_TENSOR_BUILD,
+            "xlsread: text output allocation failed",
+            source,
+        )
+    })?;
+    let mut work = 0;
+    for character in text.chars() {
+        copy.push(character);
+        work += character.len_utf8();
+        if work >= 4096 {
+            checkpoint_cells(cooperation, selected, work).await?;
+            work = 0;
+        }
     }
+    checkpoint_cells(cooperation, selected, work).await?;
+    Ok(copy)
 }

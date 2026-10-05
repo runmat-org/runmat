@@ -65,8 +65,8 @@ pub(super) async fn read_spreadsheet(
                 )
             })?,
     };
-    let cells = selected_cells(&range, request.range)?;
-    XlsReadResult::from_cells(cells, outputs)
+    let cells = selected_cells(&range, request.range, cooperation, path).await?;
+    XlsReadResult::from_cells(cells, outputs, cooperation, path).await
 }
 
 async fn read_file_bytes(
@@ -84,6 +84,13 @@ async fn read_file_bytes(
             )
         })?;
     cooperation.completed(0).await?;
+    path.check().map_err(|source| {
+        xlsread_error_with_source(
+            &XLSREAD_ERROR_IO,
+            "xlsread: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
     let mut limited = file.take(MAX_XLSREAD_WORKBOOK_BYTES + 1);
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 64 * 1024];

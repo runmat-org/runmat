@@ -150,6 +150,21 @@ struct XlsReadRequest {
     range: Option<RangeSpec>,
 }
 
+async fn checkpoint_cells(
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    work: usize,
+) -> BuiltinResult<()> {
+    cooperation.completed(work).await?;
+    selected.check().map_err(|source| {
+        xlsread_error_with_source(
+            &XLSREAD_ERROR_IO,
+            "xlsread: captured filesystem authority was revoked",
+            source,
+        )
+    })
+}
+
 #[derive(Clone, Debug)]
 enum SheetSelector {
     Name(String),
@@ -394,3 +409,6 @@ use workbook::{
 #[cfg(test)]
 #[path = "xlsread/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "xlsread/tests/cooperation.rs"]
+mod cooperation_tests;

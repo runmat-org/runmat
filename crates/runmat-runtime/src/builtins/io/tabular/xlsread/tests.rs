@@ -540,8 +540,13 @@ fn explicit_range_preserves_raw_shape_with_blank_borders() {
 #[test]
 fn oversized_explicit_range_is_rejected_before_allocation() {
     let spec = parse_range_string("A1:XFD1048576").expect("maximum Excel range parses");
-    let rows = calamine::Range::new((0, 0), (0, 0));
-    let err = selected_cells(&rows, Some(spec)).expect_err("oversized range");
+    let err = super::range::validate_selected_shape(
+        spec.start_row as u32,
+        spec.start_col as u32,
+        spec.end_row.expect("end row") as u32,
+        spec.end_col.expect("end column") as u32,
+    )
+    .expect_err("oversized range");
     assert!(err.message().contains("selected range"));
 }
 
