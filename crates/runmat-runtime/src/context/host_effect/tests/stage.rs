@@ -138,6 +138,9 @@ fn staged_runtime(
     (runtime, placement, live, drops)
 }
 
+#[path = "stage/managed.rs"]
+mod managed;
+
 #[test]
 fn stage_reserves_before_effect_and_final_selection_owns_one_probe_and_observation() {
     let (runtime, placement, _live, drops) = staged_runtime(

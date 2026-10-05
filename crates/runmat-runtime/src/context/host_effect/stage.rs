@@ -6,6 +6,38 @@ use super::*;
 use runmat_execution::{PlacementRevision, ResourceByteBound};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// A closed classification of stage-owned temporary buffers. The kind does
+/// not change quota policy; every live claim competes for one scan envelope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostEffectLiveAllocationKind {
+    SourceStaging,
+    CodecWorkspace,
+    ParsedMetadata,
+    TemporaryResult,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostEffectAllocationError {
+    Unavailable,
+    Revoked,
+    Cancelled,
+    InvalidInvocation,
+    Overflow,
+    ExceedsStageEnvelope,
+    ExceedsCapacity,
+}
+
+impl std::fmt::Display for HostEffectAllocationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for HostEffectAllocationError {}
+
+/// The exact claim owner is held through the buffer's actual lifetime.
+pub trait HostEffectLiveAllocationReservation: std::fmt::Debug + Send + Sync {}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostEffectStageEvidence {
     pub authority_revision: Digest,
@@ -22,6 +54,15 @@ pub trait HostEffectStageReservation: Send + Sync {
     /// Capacity of the same managed-allocation ledger used for the scan and
     /// every exact output reservation. This is not a process-RSS certificate.
     fn capacity_bytes(&self) -> u64;
+    /// Draw a temporary allocation from the already precharged scan peak.
+    /// Implementers must not add these bytes again to global live capacity.
+    fn reserve_live_exact(
+        &self,
+        _kind: HostEffectLiveAllocationKind,
+        _bytes: usize,
+    ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
+        Err(HostEffectAllocationError::Unavailable)
+    }
     /// Atomically charge this exact output against the scan's live charge and
     /// all other reservations on this authority. Implementations must reject
     /// revocation and keep the charge until the returned owner is dropped.
@@ -133,6 +174,33 @@ impl HostEffectStagePermit {
 
     pub fn reservation(&self) -> Arc<dyn HostEffectStageReservation> {
         self.reservation.clone()
+    }
+
+    pub fn reserve_live_exact(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
+        if !self
+            .cancellation
+            .same_generation(&self.runtime.cancellation())
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        if self.cancellation.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let claim = self.reservation.reserve_live_exact(kind, bytes)?;
+        if self.cancellation.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        Ok(claim)
     }
 
     pub(super) fn output_permit(

@@ -16,10 +16,15 @@ use std::sync::Arc;
 
 mod workload;
 mod stage;
+mod managed_ledger;
 mod final_facts;
 pub use final_facts::HostEffectFinalFacts;
+pub use managed_ledger::{
+    ManagedHostEffectLedger, ManagedHostEffectLedgerSnapshot, ManagedHostEffectStageReservation,
+};
 pub use stage::{
     admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,
+    HostEffectAllocationError, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
     HostEffectStageAdmission, HostEffectStageEvidence, HostEffectStagePermit,
     HostEffectStageReservation,
 };
@@ -311,6 +316,23 @@ pub struct HostEffectReceipt {
 }
 
 impl HostEffectReceipt {
+    pub fn reserve_live_exact(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
+        if self.runtime.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.resource_liveness_lease.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        self._stage
+            .as_ref()
+            .ok_or(HostEffectAllocationError::Unavailable)?
+            .reserve_live_exact(kind, bytes)
+    }
+
     pub fn output_allocation_permit(
         &self,
     ) -> Option<Arc<dyn runmat_value::ExactHostAllocationPermit>> {
