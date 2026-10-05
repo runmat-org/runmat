@@ -7,6 +7,7 @@ use super::{
 };
 use crate::IntegerStorage;
 use crate::NumericDType;
+use crate::NumericScalar;
 use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
@@ -228,6 +229,63 @@ impl ExactHostNumericAllocation {
         match &self.allocation {
             ExactAllocation::Floating(allocation) => allocation.provenance().capacity_bytes,
             ExactAllocation::Integer(allocation) => allocation.capacity_bytes(),
+        }
+    }
+
+    /// Store one same-class value without replacing or cloning the admitted
+    /// backing allocation. Parser callers retain exact integer bits.
+    pub fn set_value(&mut self, index: usize, value: NumericScalar) -> Result<(), String> {
+        if index >= self.len {
+            return Err(format!(
+                "numeric index {index} exceeds {} elements",
+                self.len
+            ));
+        }
+        match (&mut self.allocation, value) {
+            (ExactAllocation::Floating(allocation), NumericScalar::F64(value))
+                if self.dtype == NumericDType::F64 =>
+            {
+                // SAFETY: the constructor allocated and initialized exactly
+                // `len` aligned F64 elements, and this owner is unique.
+                unsafe {
+                    allocation
+                        .pointer()
+                        .as_ptr()
+                        .cast::<f64>()
+                        .add(index)
+                        .write(value)
+                };
+                Ok(())
+            }
+            (ExactAllocation::Floating(allocation), NumericScalar::F32(value))
+                if self.dtype == NumericDType::F32 =>
+            {
+                // SAFETY: same ownership and checked index as the F64 arm.
+                unsafe {
+                    allocation
+                        .pointer()
+                        .as_ptr()
+                        .cast::<f32>()
+                        .add(index)
+                        .write(value)
+                };
+                Ok(())
+            }
+            (ExactAllocation::Integer(allocation), value) => allocation.values.set_value(
+                index,
+                value.into_int_value().ok_or_else(|| {
+                    format!(
+                        "cannot store {} in {} numeric storage",
+                        value.class_name(),
+                        self.dtype.class_name()
+                    )
+                })?,
+            ),
+            (_, value) => Err(format!(
+                "cannot store {} in {} numeric storage",
+                value.class_name(),
+                self.dtype.class_name()
+            )),
         }
     }
 

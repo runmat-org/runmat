@@ -110,6 +110,54 @@ fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
 }
 
 #[test]
+fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation() {
+    let float_quota = permit(16 + 2 * std::mem::size_of::<usize>());
+    let mut floats = ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 2, &float_quota)
+        .expect("exact floating owner");
+    let float_pointer = floats.as_f64_slice_mut().unwrap().as_ptr();
+    floats
+        .set_value(0, crate::NumericScalar::F64(-0.0))
+        .unwrap();
+    floats
+        .set_value(1, crate::NumericScalar::F64(f64::INFINITY))
+        .unwrap();
+    assert!(floats.set_value(2, crate::NumericScalar::F64(1.0)).is_err());
+    let tensor = floats.into_tensor().unwrap();
+    assert_eq!(tensor.as_f64_slice().unwrap().as_ptr(), float_pointer);
+    assert_eq!(
+        tensor.as_f64_slice().unwrap()[0].to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    drop(tensor);
+    assert_eq!(float_quota.retained.load(Ordering::SeqCst), 0);
+
+    let integer_quota = permit(16 + 2 * std::mem::size_of::<usize>());
+    let mut integers = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &integer_quota)
+        .expect("exact integer owner");
+    let integer_pointer = integers.as_u64_slice_mut().unwrap().as_ptr();
+    integers
+        .set_value(0, crate::NumericScalar::U64(9_007_199_254_740_993))
+        .unwrap();
+    integers
+        .set_value(1, crate::NumericScalar::U64(u64::MAX))
+        .unwrap();
+    assert!(integers
+        .set_value(0, crate::NumericScalar::F64(1.0))
+        .is_err());
+    let tensor = integers.into_tensor().unwrap();
+    assert_eq!(
+        unsafe { tensor.host_buffer().foreign_data_pointer() }.cast::<u64>(),
+        integer_pointer.cast_mut()
+    );
+    assert_eq!(
+        tensor.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+    );
+    drop(tensor);
+    assert_eq!(integer_quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn exact_float32_allocation_moves_into_tensor_without_payload_copy() {
     let permit = permit(12);
     let mut owned = ExactHostNumericAllocation::new(NumericDType::F32, 3, &permit).unwrap();
