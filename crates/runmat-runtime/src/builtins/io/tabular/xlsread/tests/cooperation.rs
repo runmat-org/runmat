@@ -149,3 +149,51 @@ fn numeric_scan_yields_inside_one_wide_row() {
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert!(dropped.get());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn selected_numeric_cells_yield_inside_one_wide_row() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(MemoryFsProvider::with_current_dir("/xlsread-output"));
+    let _restore = runmat_filesystem::replace_provider(provider);
+    let selected = TabularFsOwner::capture(Some(Path::new("/xlsread-output/input.xlsx")))
+        .expect("captured owner")
+        .path(PathBuf::from("/xlsread-output/input.xlsx"))
+        .expect("selected path");
+    let source = CancellationSource::new();
+    let runtime =
+        RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), source.token());
+    let turns = Rc::new(Cell::new(0usize));
+    let dropped = Rc::new(Cell::new(false));
+    let budget = pending_budget(&source, &turns, &dropped, 0);
+    let mut cooperation = TabularCooperation::with_test_budget(&runtime, BUILTIN_NAME, budget);
+    let mut range = calamine::Range::<SpreadsheetData>::new((0, 0), (0, 16_383));
+    range.set_value((0, 0), SpreadsheetData::Float(1.0));
+    let selection = super::range::RangeSpec {
+        start_row: 0,
+        start_col: 0,
+        end_row: Some(0),
+        end_col: Some(16_383),
+    };
+    let mut call = Box::pin(super::range::selected_cells(
+        &range,
+        Some(selection),
+        &mut cooperation,
+        &selected,
+    ));
+    assert!(matches!(
+        call.as_mut()
+            .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+        Poll::Pending
+    ));
+    assert_eq!(turns.get(), 1, "selection yielded after 1024 cells");
+    source.cancel(CancellationReason::User);
+    let Poll::Ready(Err(error)) = call
+        .as_mut()
+        .poll(&mut Context::from_waker(futures::task::noop_waker_ref()))
+    else {
+        panic!("cancelled selection must not complete the wide row")
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(dropped.get());
+}

@@ -416,6 +416,7 @@ pub(super) async fn selected_cells(
     validate_selected_shape(start_row, start_col, end_row, end_col)?;
 
     let mut rows = Vec::new();
+    let mut work = 0;
     for row_idx in start_row..=end_row {
         let mut row = Vec::new();
         for col_idx in start_col..=end_col {
@@ -424,15 +425,15 @@ pub(super) async fn selected_cells(
                 None => SpreadsheetData::Empty,
             };
             row.push(cell);
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
         rows.push(row);
-        checkpoint_cells(
-            cooperation,
-            selected,
-            usize::try_from(end_col - start_col + 1).unwrap_or(usize::MAX),
-        )
-        .await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
     if requested.is_some() {
         Ok(rows)
     } else {
