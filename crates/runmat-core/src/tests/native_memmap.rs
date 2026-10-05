@@ -29,6 +29,14 @@ function count = mappedRead(path)
   assert(isequal(value, uint8(2)));
   count = mappedCount;
 end
+function count = nestedMappedWrite(path)
+  global mappedCount
+  mappedCount = mappedCount + 1;
+  map = memmapfile(path, 'Writable', true);
+  holder = struct('map', map);
+  holder.map.Data(2) = uint8(9);
+  count = mappedCount;
+end
 "#;
 
 #[derive(Default)]
@@ -38,6 +46,9 @@ struct Evidence {
     completed_reads: AtomicUsize,
     retired_reads: AtomicUsize,
     retired_backings: AtomicUsize,
+    writes: AtomicUsize,
+    completed_writes: AtomicUsize,
+    retired_writes: AtomicUsize,
 }
 
 struct ReadFuture(Arc<Evidence>);
@@ -47,9 +58,18 @@ impl Drop for ReadFuture {
     }
 }
 
+struct WriteFuture(Arc<Evidence>);
+impl Drop for WriteFuture {
+    fn drop(&mut self) {
+        self.0.retired_writes.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 struct GatedBacking {
     inner: Box<dyn FsMappedBacking>,
     gate: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
+    write_gate: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
+    fail_write: bool,
     evidence: Arc<Evidence>,
 }
 
@@ -90,13 +110,34 @@ impl FsMappedBacking for GatedBacking {
         offset: u64,
         bytes: &[u8],
     ) -> Result<FsMappedWriteOutcome, FsMappedWriteFailure> {
-        self.inner.write_at(offset, bytes).await
+        self.evidence.writes.fetch_add(1, Ordering::SeqCst);
+        let _retirement = WriteFuture(self.evidence.clone());
+        let receiver = self.write_gate.lock().unwrap().take();
+        if let Some(receiver) = receiver {
+            receiver.await.map_err(|_| {
+                FsMappedWriteFailure::before_effect(io::Error::other(
+                    "mapped write gate was abandoned",
+                ))
+            })?;
+        }
+        if self.fail_write {
+            return Err(FsMappedWriteFailure::before_effect(io::Error::other(
+                "injected mapped write failure",
+            )));
+        }
+        let outcome = self.inner.write_at(offset, bytes).await?;
+        self.evidence
+            .completed_writes
+            .fetch_add(1, Ordering::SeqCst);
+        Ok(outcome)
     }
 }
 
 struct GatedProvider {
     memory: MemoryFsProvider,
     gate: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
+    write_gate: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
+    fail_write: bool,
     evidence: Arc<Evidence>,
 }
 
@@ -123,6 +164,8 @@ impl FsProvider for GatedProvider {
                 Box::new(GatedBacking {
                     inner,
                     gate: self.gate.clone(),
+                    write_gate: self.write_gate.clone(),
+                    fail_write: self.fail_write,
                     evidence: self.evidence.clone(),
                 }) as Box<dyn FsMappedBacking>
             }))
@@ -194,6 +237,8 @@ fn core_dropped_pending_mapped_read_retires_owner_and_fresh_call_reads_exact_byt
     let provider = Arc::new(GatedProvider {
         memory,
         gate: Arc::new(Mutex::new(Some(receiver))),
+        write_gate: Arc::new(Mutex::new(None)),
+        fail_write: false,
         evidence: evidence.clone(),
     });
     let _owner = replace_provider(provider);
@@ -237,5 +282,222 @@ fn core_dropped_pending_mapped_read_retires_owner_and_fresh_call_reads_exact_byt
         drop(fresh);
         drop(session);
         assert_eq!(evidence.retired_backings.load(Ordering::SeqCst), 2);
+    });
+}
+
+#[test]
+fn native_nested_mapped_write_resumes_once_and_drop_releases_pending_effect() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let memory = MemoryFsProvider::with_current_dir("/mapped-core");
+    memory
+        .write_project_path("/mapped-core/data.bin", &[1, 2, 3, 4])
+        .unwrap();
+    let (release, receiver) = oneshot::channel();
+    let evidence = Arc::new(Evidence::default());
+    let provider = Arc::new(GatedProvider {
+        memory,
+        gate: Arc::new(Mutex::new(None)),
+        write_gate: Arc::new(Mutex::new(Some(receiver))),
+        fail_write: false,
+        evidence: evidence.clone(),
+    });
+    let _owner = replace_provider(provider.clone());
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new("mapped-core-write@1", "nestedMappedWrite.m", SOURCE),
+            None,
+        ))
+        .unwrap();
+        let control = InvocationControl::default().force_generic_native();
+        block_on(session.invoke_executable(&unit, invocation("resetMappedCount", 0), &control))
+            .unwrap();
+        let mut pending = Box::pin(session.invoke_executable(
+            &unit,
+            invocation("nestedMappedWrite", 1),
+            &control,
+        ));
+        for _ in 0..8 {
+            let mut task = Context::from_waker(noop_waker_ref());
+            if let Poll::Ready(outcome) = pending.as_mut().poll(&mut task) {
+                panic!("nested write completed before backing suspension: {outcome:?}");
+            }
+            if evidence.writes.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+        }
+        assert_eq!(evidence.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.completed_writes.load(Ordering::SeqCst), 0);
+        release.send(()).unwrap();
+        let completed = block_on(pending).expect("resumed native nested write");
+        assert_eq!(completed.as_slice(), &[Value::Num(1.0)]);
+        assert_eq!(evidence.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.completed_writes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            provider
+                .memory
+                .read_project_path("/mapped-core/data.bin")
+                .unwrap(),
+            [1, 9, 3, 4]
+        );
+
+        let (abandoned_release, abandoned_receiver) = oneshot::channel();
+        *provider.write_gate.lock().unwrap() = Some(abandoned_receiver);
+        let mut abandoned = Box::pin(session.invoke_executable(
+            &unit,
+            invocation("nestedMappedWrite", 1),
+            &control,
+        ));
+        for _ in 0..8 {
+            let mut task = Context::from_waker(noop_waker_ref());
+            if let Poll::Ready(outcome) = abandoned.as_mut().poll(&mut task) {
+                panic!("second nested write completed before backing suspension: {outcome:?}");
+            }
+            if evidence.writes.load(Ordering::SeqCst) == 2 {
+                break;
+            }
+        }
+        assert_eq!(evidence.writes.load(Ordering::SeqCst), 2);
+        drop(abandoned);
+        assert!(abandoned_release.send(()).is_err());
+        assert_eq!(evidence.retired_writes.load(Ordering::SeqCst), 2);
+        assert_eq!(evidence.completed_writes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            provider
+                .memory
+                .read_project_path("/mapped-core/data.bin")
+                .unwrap(),
+            [1, 9, 3, 4]
+        );
+    });
+}
+
+#[test]
+fn native_nested_mapped_write_late_failure_is_not_replayed() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let memory = MemoryFsProvider::with_current_dir("/mapped-core");
+    memory
+        .write_project_path("/mapped-core/data.bin", &[1, 2, 3, 4])
+        .unwrap();
+    let (release, receiver) = oneshot::channel();
+    let evidence = Arc::new(Evidence::default());
+    let provider = Arc::new(GatedProvider {
+        memory,
+        gate: Arc::new(Mutex::new(None)),
+        write_gate: Arc::new(Mutex::new(Some(receiver))),
+        fail_write: true,
+        evidence: evidence.clone(),
+    });
+    let _owner = replace_provider(provider.clone());
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new("mapped-core-write-error@1", "nestedMappedWrite.m", SOURCE),
+            None,
+        ))
+        .unwrap();
+        let control = InvocationControl::default().force_generic_native();
+        let mut pending = Box::pin(session.invoke_executable(
+            &unit,
+            invocation("nestedMappedWrite", 1),
+            &control,
+        ));
+        for _ in 0..8 {
+            let mut task = Context::from_waker(noop_waker_ref());
+            if let Poll::Ready(outcome) = pending.as_mut().poll(&mut task) {
+                panic!("nested write failed before backing suspension: {outcome:?}");
+            }
+            if evidence.writes.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+        }
+        assert_eq!(evidence.writes.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
+        let error = block_on(pending).expect_err("injected write must fail");
+        let RunError::Runtime(error) = error else {
+            panic!("late mapped write must retain its runtime error: {error:?}");
+        };
+        assert_eq!(error.identifier(), Some("RunMat:memmapfile:WriteFailed"));
+        assert_eq!(evidence.writes.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.completed_writes.load(Ordering::SeqCst), 0);
+        assert_eq!(evidence.retired_writes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            provider
+                .memory
+                .read_project_path("/mapped-core/data.bin")
+                .unwrap(),
+            [1, 2, 3, 4]
+        );
+    });
+}
+
+#[test]
+fn native_nested_mapped_write_cancellation_retires_pending_effect() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let memory = MemoryFsProvider::with_current_dir("/mapped-core");
+    memory
+        .write_project_path("/mapped-core/data.bin", &[1, 2, 3, 4])
+        .unwrap();
+    let (release, receiver) = oneshot::channel();
+    let evidence = Arc::new(Evidence::default());
+    let provider = Arc::new(GatedProvider {
+        memory,
+        gate: Arc::new(Mutex::new(None)),
+        write_gate: Arc::new(Mutex::new(Some(receiver))),
+        fail_write: false,
+        evidence: evidence.clone(),
+    });
+    let _owner = replace_provider(provider.clone());
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new("mapped-core-write-cancel@1", "nestedMappedWrite.m", SOURCE),
+            None,
+        ))
+        .unwrap();
+        let interrupt = session.interrupt_handle();
+        let control = InvocationControl::default().force_generic_native();
+        let mut pending = Box::pin(session.invoke_executable(
+            &unit,
+            invocation("nestedMappedWrite", 1),
+            &control,
+        ));
+        for _ in 0..8 {
+            let mut task = Context::from_waker(noop_waker_ref());
+            if let Poll::Ready(outcome) = pending.as_mut().poll(&mut task) {
+                panic!("nested write completed before cancellation: {outcome:?}");
+            }
+            if evidence.writes.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+        }
+        assert_eq!(evidence.writes.load(Ordering::SeqCst), 1);
+        interrupt.cancel(runmat_execution::CancellationReason::User);
+        let mut cancelled = None;
+        for _ in 0..8 {
+            let mut task = Context::from_waker(noop_waker_ref());
+            if let Poll::Ready(result) = pending.as_mut().poll(&mut task) {
+                cancelled = Some(result);
+                break;
+            }
+        }
+        let error = cancelled
+            .expect("cancellation must wake the pending native write")
+            .expect_err("cancelled native write cannot publish success");
+        let RunError::Runtime(error) = error else {
+            panic!("native cancellation must retain its runtime cause: {error:?}");
+        };
+        assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
+        drop(pending);
+        assert!(release.send(()).is_err());
+        assert_eq!(evidence.retired_writes.load(Ordering::SeqCst), 1);
+        assert_eq!(evidence.completed_writes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            provider
+                .memory
+                .read_project_path("/mapped-core/data.bin")
+                .unwrap(),
+            [1, 2, 3, 4]
+        );
     });
 }
