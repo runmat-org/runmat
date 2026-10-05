@@ -40,3 +40,5 @@ pub use right_inverse::{
     RightInverseCertificate, RightInverseCheck, RightInverseError, RightInverseVerdict,
     RightInverseWorkEnvelope,
 };
+
+pub(crate) use operator::LinearPreparationReuse;

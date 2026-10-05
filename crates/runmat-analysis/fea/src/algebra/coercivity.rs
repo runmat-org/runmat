@@ -242,17 +242,13 @@ impl PreparedSolverAdmissibility {
             .transpose()
             .map_err(|error| CoercivityError::Encoding(error.to_string()))?;
         let coercivity = CoercivityCertificate::prove(matrix)?;
-        let prepared_rhs_identity = digest(RHS_DOMAIN, &rhs)?;
-        let mut evidence = Self {
+        Self::bind(
             coercivity,
-            source_nullspace_identity: source_prepared
+            rhs,
+            source_prepared
                 .as_ref()
                 .map(PreparedNullspaceEvidence::identity),
-            prepared_rhs_identity,
-            identity: Digest::sha256([]),
-        };
-        evidence.identity = evidence.expected_identity()?;
-        Ok(evidence)
+        )
     }
 
     pub(super) fn validate_for(
@@ -278,16 +274,42 @@ impl PreparedSolverAdmissibility {
         matrix: &RealSparseMatrix,
         rhs: &[f64],
     ) -> Result<Self, CoercivityError> {
+        Self::bind_existing_with_source(coercivity, matrix, rhs, None)
+    }
+
+    pub(super) fn bind_existing_with_source(
+        coercivity: CoercivityCertificate,
+        matrix: &RealSparseMatrix,
+        rhs: &[f64],
+        source: Option<&NullspaceEliminationEvidence>,
+    ) -> Result<Self, CoercivityError> {
         coercivity.validate_for(matrix)?;
+        let source_prepared = source
+            .map(|source| source.bind_prepared(matrix, rhs))
+            .transpose()
+            .map_err(|error| CoercivityError::Encoding(error.to_string()))?;
+        Self::bind(
+            coercivity,
+            rhs,
+            source_prepared
+                .as_ref()
+                .map(PreparedNullspaceEvidence::identity),
+        )
+    }
+
+    fn bind(
+        coercivity: CoercivityCertificate,
+        rhs: &[f64],
+        source_nullspace_identity: Option<Digest>,
+    ) -> Result<Self, CoercivityError> {
         let prepared_rhs_identity = digest(RHS_DOMAIN, &rhs)?;
         let mut evidence = Self {
             coercivity,
-            source_nullspace_identity: None,
+            source_nullspace_identity,
             prepared_rhs_identity,
             identity: Digest::sha256([]),
         };
         evidence.identity = evidence.expected_identity()?;
-        evidence.validate_for(matrix, rhs)?;
         Ok(evidence)
     }
 

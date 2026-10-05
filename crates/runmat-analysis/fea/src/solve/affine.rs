@@ -4,7 +4,7 @@ use crate::{
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
-    solve::linear::StructuralLinearSystemView,
+    solve::linear::{ScopedLinearSolveSettings, StructuralLinearSystemView},
     solve::{backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult},
 };
 
@@ -28,7 +28,7 @@ pub(super) fn solve_affine_constraint_system(
             |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
             None,
         ),
-        None,
+        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -65,7 +65,7 @@ pub(super) fn solve_affine_constraint_system_with_execution(
             },
             Some(plan),
         ),
-        admission,
+        ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
     )
 }
 
@@ -80,8 +80,10 @@ fn solve_affine_constraint_system_with_apply(
         impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
         Option<LocalExecutionPlan>,
     ),
-    admission: Option<&SolverAdmissionResourcePolicy>,
+    settings: ScopedLinearSolveSettings<'_>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let admission = settings.admission;
+    let reuse = settings.preparation;
     let (apply_full, dot, vector_plan) = operations;
     let expected_reduction = summary
         .constraint_matrix
@@ -144,11 +146,20 @@ fn solve_affine_constraint_system_with_apply(
         });
     }
 
-    let prepared = match PreparedRealLinearSystem::try_new(
-        reduced_operator,
-        reduced_rhs.clone(),
-        vec![false; reduction.reduced_dof_count],
-    ) {
+    let preparation = match reuse {
+        Some(reuse) => PreparedRealLinearSystem::try_new_reusing(
+            reduced_operator,
+            reduced_rhs.clone(),
+            vec![false; reduction.reduced_dof_count],
+            reuse,
+        ),
+        None => PreparedRealLinearSystem::try_new(
+            reduced_operator,
+            reduced_rhs.clone(),
+            vec![false; reduction.reduced_dof_count],
+        ),
+    };
+    let prepared = match preparation {
         Ok(prepared) => prepared,
         Err(error) => return Ok(rejected_affine_system(summary, &error.to_string())),
     };
@@ -473,98 +484,32 @@ fn transpose_apply(reduction: &AffineConstraintReduction, full: &[f64]) -> Vec<f
     reduced
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        planning::resource::{execute_scoped_chunks, LocalThreadCount, ScopedLocalExecutionError},
-        progress::{replace_fea_progress_context, FeaCancellationToken, FeaProgressContext},
-    };
-
-    fn coupled_reduction() -> AffineConstraintReduction {
-        let reduction = AffineConstraintReduction {
-            full_dof_count: 8,
-            reduced_dof_count: 3,
-            free_dof_indices: vec![0, 1, 2],
-            pivot_dof_indices: vec![3, 4, 5, 6, 7],
-            recovery_row_offsets: vec![0, 1, 2, 3, 5, 5, 7, 8, 10],
-            recovery_column_indices: vec![0, 1, 2, 0, 2, 0, 1, 2, 1, 2],
-            recovery_coefficients: vec![1.0, 1.0, 1.0, 0.25, -0.75, 2.0, -0.5, 1.5, -1.0, 0.125],
-            offset: vec![0.0, 0.0, 0.0, 0.001, -0.002, 0.0, 0.004, -0.001],
-        };
-        reduction.validate().unwrap();
-        reduction
-    }
-
-    #[test]
-    fn scoped_affine_forward_projection_and_lift_preserve_serial_bits() {
-        let reduction = coupled_reduction();
-        let reduced = [0.75, -2.0, 1.25];
-        let serial_linear = expand_linear(&reduction, &reduced, None).unwrap();
-        let serial_full = expand(&reduction, &reduced, None).unwrap();
-        let transpose_index = AffineTransposeIndex::new(&reduction);
-        for threads in [2, 3, 7, 8] {
-            let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
-            assert_eq!(
-                expand_linear(&reduction, &reduced, Some(plan)).unwrap(),
-                serial_linear
-            );
-            assert_eq!(
-                expand(&reduction, &reduced, Some(plan)).unwrap(),
-                serial_full
-            );
-            assert_eq!(
-                apply_reduced_operator(
-                    &reduction,
-                    &reduced,
-                    &|full| Ok(full.to_vec()),
-                    Some(plan),
-                    Some(&transpose_index),
-                )
-                .unwrap(),
-                transpose_apply(&reduction, &serial_linear),
-            );
-            assert_eq!(
-                transpose_index
-                    .apply(&reduction, &serial_linear, plan)
-                    .unwrap(),
-                transpose_apply(&reduction, &serial_linear),
-            );
-        }
-    }
-
-    #[test]
-    fn scoped_affine_projection_rejects_nested_execution_and_cancellation() {
-        let reduction = coupled_reduction();
-        let reduced = [0.75, -2.0, 1.25];
-        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
-        let transpose_index = AffineTransposeIndex::new(&reduction);
-        let full = expand_linear(&reduction, &reduced, None).unwrap();
-        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
-            Ok::<_, ()>(transpose_index.apply(&reduction, &full, plan))
-        })
-        .unwrap();
-        assert!(matches!(
-            &nested[0],
-            Err(ScopedSpmvError::Execution(
-                ScopedLocalExecutionError::NestedExecution
-            ))
-        ));
-
-        let cancellation = FeaCancellationToken::new();
-        cancellation.cancel();
-        let _context = replace_fea_progress_context(FeaProgressContext {
-            cancellation,
-            ..FeaProgressContext::default()
-        });
-        assert!(matches!(
-            transpose_index.apply(&reduction, &full, plan),
-            Err(ScopedSpmvError::Execution(
-                ScopedLocalExecutionError::Work {
-                    source: crate::algebra::SpmvWorkError::Cancelled,
-                    ..
-                }
-            ))
-        ));
-    }
+pub(super) fn solve_affine_constraint_system_reusing(
+    summary: &StructuralLinearSystemView<'_>,
+    reduction: &AffineConstraintReduction,
+    requested_backend: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    reuse: &mut crate::algebra::LinearPreparationReuse,
+) -> LinearSolveResult {
+    let mut settings =
+        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None);
+    settings.preparation = Some(reuse);
+    solve_affine_constraint_system_with_apply(
+        summary,
+        reduction,
+        requested_backend,
+        algebra_backend,
+        initial_guess,
+        (
+            |full: &[f64]| Ok(apply_k(summary.operator, full)),
+            |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
+            None,
+        ),
+        settings,
+    )
+    .expect("reference sparse application is infallible for an assembled system")
 }
+
+#[cfg(test)]
+mod tests;

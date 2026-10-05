@@ -73,6 +73,7 @@ fn scoped_authored_tolerance_refines_a_warm_start_accepted_by_default() {
                     plan,
                     admission: None,
                     relative_tolerance,
+                    preparation: None,
                 },
             )
             .unwrap()
@@ -105,6 +106,7 @@ fn invalid_scoped_tolerances_reject_before_cpu_or_provider_work() {
                     plan: LocalExecutionPlan::serial(),
                     admission: None,
                     relative_tolerance,
+                    preparation: None,
                 },
             )
             .unwrap();
@@ -442,4 +444,60 @@ fn cpu_and_accelerator_reject_unproved_semidefinite_system_before_iteration() {
         assert_eq!(result.device_apply_k_attempt_count, 0);
         assert_eq!(result.diagnostics[0].code, "FEA_INVALID_REAL_SYSTEM");
     }
+}
+
+#[test]
+fn warmed_preparation_keeps_exact_work_admission_and_original_pcg_result() {
+    let original = system([4.0, 3.0]);
+    let mut reuse = crate::algebra::LinearPreparationReuse::default();
+    let prepared = original.prepare_linear_reusing(&mut reuse).unwrap();
+    let (dimension, factors, updates, bytes) =
+        prepared.admissibility().unwrap().coercivity().work_counts();
+    let cold = solve_operator_system(
+        &original,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    let mut settings =
+        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None);
+    settings.preparation = Some(&mut reuse);
+    let warm = solve_operator_system_scoped(
+        &original,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        settings,
+    )
+    .unwrap();
+    assert_eq!(cold, warm);
+    let policy = crate::planning::resource::SolverAdmissionResourcePolicy {
+        dimension: Count(dimension),
+        factor_nonzero_upper_bound: Count(factors - 1),
+        update_count_upper_bound: Count(updates),
+        resident_bytes_upper_bound: ByteCount(bytes),
+    };
+    let rejected = solve_operator_system_scoped(
+        &original,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::Accelerator,
+        &CpuReferenceBackend,
+        None,
+        ScopedLinearSolveSettings {
+            plan: LocalExecutionPlan::serial(),
+            admission: Some(&policy),
+            relative_tolerance: 1e-8,
+            preparation: Some(&mut reuse),
+        },
+    )
+    .unwrap();
+    assert!(!rejected.converged);
+    assert_eq!(rejected.iterations, 0);
+    assert_eq!(rejected.device_apply_k_attempt_count, 0);
+    assert_eq!(
+        rejected.diagnostics[0].code,
+        "FEA_SOLVER_WORK_EXCEEDS_ADMISSION"
+    );
 }

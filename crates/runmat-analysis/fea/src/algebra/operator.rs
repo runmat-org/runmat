@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+mod linear_reuse;
+pub(crate) use linear_reuse::LinearPreparationReuse;
 
 use crate::constraints::AffineConstraintReduction;
 
@@ -199,16 +201,29 @@ impl AssembledRealSystem {
         rhs
     }
     pub fn prepare_linear(&self) -> Result<PreparedRealLinearSystem, RealSystemError> {
+        self.prepare_linear_with_reuse(None)
+    }
+    pub(crate) fn prepare_linear_reusing(
+        &self,
+        reuse: &mut LinearPreparationReuse,
+    ) -> Result<PreparedRealLinearSystem, RealSystemError> {
+        self.prepare_linear_with_reuse(Some(reuse))
+    }
+    fn prepare_linear_with_reuse(
+        &self,
+        reuse: Option<&mut LinearPreparationReuse>,
+    ) -> Result<PreparedRealLinearSystem, RealSystemError> {
         let stiffness = self.operators.stiffness();
         let rhs = self.linear_rhs();
         let matrix = stiffness
             .with_identity_constraints(&self.constrained_dofs)
             .map_err(|_| RealSystemError::ShapeMismatch)?;
-        PreparedRealLinearSystem::try_new_with_source(
+        PreparedRealLinearSystem::try_new_with_reuse(
             matrix,
             rhs,
             self.constrained_dofs.clone(),
             self.nullspace_evidence.as_ref(),
+            reuse,
         )
     }
 
@@ -382,6 +397,23 @@ impl PreparedRealLinearSystem {
         constrained_dofs: Vec<bool>,
         source: Option<&NullspaceEliminationEvidence>,
     ) -> Result<Self, RealSystemError> {
+        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, source, None)
+    }
+    pub(crate) fn try_new_reusing(
+        matrix: RealSparseMatrix,
+        rhs: Vec<f64>,
+        constrained_dofs: Vec<bool>,
+        reuse: &mut LinearPreparationReuse,
+    ) -> Result<Self, RealSystemError> {
+        Self::try_new_with_reuse(matrix, rhs, constrained_dofs, None, Some(reuse))
+    }
+    fn try_new_with_reuse(
+        matrix: RealSparseMatrix,
+        rhs: Vec<f64>,
+        constrained_dofs: Vec<bool>,
+        source: Option<&NullspaceEliminationEvidence>,
+        reuse: Option<&mut LinearPreparationReuse>,
+    ) -> Result<Self, RealSystemError> {
         if matrix.rows() != matrix.columns()
             || rhs.len() != matrix.rows()
             || constrained_dofs.len() != matrix.rows()
@@ -392,8 +424,11 @@ impl PreparedRealLinearSystem {
             return Err(RealSystemError::NonFiniteLoad { index });
         }
         let admissibility = Some(
-            PreparedSolverAdmissibility::prove(&matrix, &rhs, source)
-                .map_err(RealSystemError::Coercivity)?,
+            match reuse {
+                Some(reuse) => reuse.prepare(&matrix, &rhs, source),
+                None => PreparedSolverAdmissibility::prove(&matrix, &rhs, source),
+            }
+            .map_err(RealSystemError::Coercivity)?,
         );
         Ok(Self {
             matrix,

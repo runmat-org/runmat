@@ -20,7 +20,9 @@ use crate::{
 
 use super::{
     balance::{TransientBalanceHistory, TransientBalanceStep},
-    effective_solve::{solve_average_acceleration_step, solve_initial_acceleration},
+    effective_solve::{
+        solve_average_acceleration_step_reusing, solve_initial_acceleration_reusing,
+    },
     require_stable_system,
     state::SecondOrderState,
     EffectiveDynamicsSolveResult, TransientIntegrationInterval, TransientIntervalRetention,

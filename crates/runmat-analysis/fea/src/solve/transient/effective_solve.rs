@@ -1,13 +1,16 @@
 use thiserror::Error;
 
 use crate::{
-    algebra::{spmv, MatrixProperties, OperatorRole, RealSparseMatrix, RealSystemError},
+    algebra::{
+        spmv, LinearPreparationReuse, MatrixProperties, OperatorRole, RealSparseMatrix,
+        RealSystemError,
+    },
     assembly::AssemblySummary,
     constraints::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix},
     contracts::StructuralDynamicBalanceSnapshot,
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
-        linear::{solve_structural_system, LinearSolveResult},
+        linear::{solve_structural_system_reusing, LinearSolveResult},
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -45,6 +48,7 @@ struct EquilibriumRefinement<'a> {
     effective_operator: RealSparseMatrix,
     backend: LinearAlgebraBackendKind,
     target: f64,
+    preparation: &'a mut LinearPreparationReuse,
 }
 
 struct NormalizedCorrectionEquation {
@@ -109,12 +113,13 @@ impl ProjectedDynamicResidual {
 ///
 /// Prescribed and relation constraints are homogenized for acceleration. The authored
 /// displacement offset remains present in `u_0`; it is never interpreted as a force.
-pub(super) fn solve_initial_acceleration(
+pub(super) fn solve_initial_acceleration_reusing(
     summary: &AssemblySummary,
     displacement: Vec<f64>,
     velocity: Vec<f64>,
     backend: LinearAlgebraBackendKind,
     equilibrium_target: f64,
+    preparation: &mut LinearPreparationReuse,
 ) -> Result<EffectiveDynamicsSolveResult, EffectiveDynamicsSolveError> {
     validate_equilibrium_target(equilibrium_target)?;
     let placeholder =
@@ -150,6 +155,7 @@ pub(super) fn solve_initial_acceleration(
         backend,
         None,
         SpdPreconditionerKind::Jacobi,
+        preparation,
     )?;
     let mut acceleration = linear_solve.solution.clone();
     canonicalize_homogeneous_solution(&effective_summary.view(), &mut acceleration)?;
@@ -159,6 +165,7 @@ pub(super) fn solve_initial_acceleration(
         effective_operator: mass_operator,
         backend,
         target: equilibrium_target,
+        preparation,
     }
     .finish(acceleration, vec![linear_solve], |acceleration| {
         SecondOrderState::try_new(
@@ -171,12 +178,13 @@ pub(super) fn solve_initial_acceleration(
 }
 
 /// Advances one average-acceleration Newmark step against the operators and load in `summary`.
-pub(super) fn solve_average_acceleration_step(
+pub(super) fn solve_average_acceleration_step_reusing(
     summary: &AssemblySummary,
     state: &SecondOrderState,
     time_step_s: f64,
     backend: LinearAlgebraBackendKind,
     equilibrium_target: f64,
+    preparation: &mut LinearPreparationReuse,
 ) -> Result<EffectiveDynamicsSolveResult, EffectiveDynamicsSolveError> {
     validate_equilibrium_target(equilibrium_target)?;
     validate_constant_constraint_kinematics(summary, state, true)?;
@@ -198,6 +206,7 @@ pub(super) fn solve_average_acceleration_step(
         backend,
         Some(state.acceleration()),
         SpdPreconditionerKind::Jacobi,
+        preparation,
     )?;
     let mut acceleration = linear_solve.solution.clone();
     canonicalize_homogeneous_solution(&effective_summary.view(), &mut acceleration)?;
@@ -207,6 +216,7 @@ pub(super) fn solve_average_acceleration_step(
         effective_operator: step.effective_operator().clone(),
         backend,
         target: equilibrium_target,
+        preparation,
     }
     .finish(acceleration, vec![linear_solve], |acceleration| {
         step.complete(acceleration.to_vec())
@@ -216,7 +226,7 @@ pub(super) fn solve_average_acceleration_step(
 
 impl EquilibriumRefinement<'_> {
     fn finish(
-        &self,
+        self,
         mut acceleration: Vec<f64>,
         mut linear_solves: Vec<LinearSolveResult>,
         build_state: impl Fn(&[f64]) -> Result<SecondOrderState, EffectiveDynamicsSolveError>,
@@ -260,6 +270,7 @@ impl EquilibriumRefinement<'_> {
                 // The correction operator is SPD. ILU0 does not guarantee an SPD
                 // preconditioner and can break CG even when the operator is valid.
                 SpdPreconditionerKind::Jacobi,
+                self.preparation,
             )?;
             let mut correction_values = match correction_equation.expansion.as_ref() {
                 Some(reduction) => reduction
@@ -442,13 +453,15 @@ fn solve_effective_system(
     backend: LinearAlgebraBackendKind,
     initial_guess: Option<&[f64]>,
     preconditioner: SpdPreconditionerKind,
+    preparation: &mut LinearPreparationReuse,
 ) -> Result<LinearSolveResult, EffectiveDynamicsSolveError> {
-    let result = solve_structural_system(
+    let result = solve_structural_system_reusing(
         &summary.view(),
         preconditioner,
         backend,
         &CpuReferenceBackend,
         initial_guess,
+        preparation,
     );
     if !result.converged {
         return Err(EffectiveDynamicsSolveError::LinearSolveFailed {
@@ -499,3 +512,21 @@ fn norm(values: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(super) fn solve_initial_acceleration(
+    summary: &AssemblySummary,
+    displacement: Vec<f64>,
+    velocity: Vec<f64>,
+    backend: LinearAlgebraBackendKind,
+    equilibrium_target: f64,
+) -> Result<EffectiveDynamicsSolveResult, EffectiveDynamicsSolveError> {
+    solve_initial_acceleration_reusing(
+        summary,
+        displacement,
+        velocity,
+        backend,
+        equilibrium_target,
+        &mut LinearPreparationReuse::default(),
+    )
+}

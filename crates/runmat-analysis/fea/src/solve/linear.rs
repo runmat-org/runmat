@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 mod admission;
 mod input;
-pub(crate) use input::{solve_structural_system, StructuralLinearSystemView};
+pub(crate) use input::{solve_structural_system_reusing, StructuralLinearSystemView};
 mod diagnostics;
 mod settings;
 use diagnostics::SuccessfulDiagnostic;
@@ -210,7 +210,11 @@ fn solve_operator_system_with_apply(
         });
     }
 
-    let prepared = match operator.prepare_linear() {
+    let preparation = match settings.preparation {
+        Some(reuse) => operator.prepare_linear_reusing(reuse),
+        None => operator.prepare_linear(),
+    };
+    let prepared = match preparation {
         Ok(prepared) => prepared,
         Err(error) => {
             return Ok(invalid_system_result(

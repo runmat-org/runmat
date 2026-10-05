@@ -31,5 +31,9 @@ pub(super) fn proof_storage(
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
             .resident_bytes_limit()
     };
-    Ok(full.resident_bytes_limit().max(reduced))
+    add(
+        full.resident_bytes_limit().max(reduced),
+        crate::algebra::LinearPreparationReuse::RESIDENT_BYTES,
+        "transient retained exact solver certificate",
+    )
 }

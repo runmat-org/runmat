@@ -44,30 +44,13 @@ pub(crate) fn solve_structural_system(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
-    if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
-        return solve_affine_constraint_system(
-            summary,
-            reduction,
-            backend_kind,
-            algebra_backend,
-            initial_guess,
-        );
-    }
-    if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        return solve_multiplier_constraint_system(
-            summary,
-            matrix,
-            backend_kind,
-            algebra_backend,
-            initial_guess,
-        );
-    }
-    solve_operator_system(
-        summary.operator,
+    solve_structural_system_with_preparation(
+        summary,
         preconditioner_kind,
         backend_kind,
         algebra_backend,
         initial_guess,
+        None,
     )
 }
 
@@ -110,4 +93,89 @@ pub(super) fn solve_structural_system_with_execution(
         initial_guess,
         ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
     )
+}
+
+/// Shared structural routing with bounded process-local exact preparation reuse.
+pub(crate) fn solve_structural_system_reusing(
+    summary: &StructuralLinearSystemView<'_>,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    reuse: &mut crate::algebra::LinearPreparationReuse,
+) -> LinearSolveResult {
+    solve_structural_system_with_preparation(
+        summary,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        Some(reuse),
+    )
+}
+
+fn solve_structural_system_with_preparation(
+    summary: &StructuralLinearSystemView<'_>,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    mut reuse: Option<&mut crate::algebra::LinearPreparationReuse>,
+) -> LinearSolveResult {
+    if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
+        return match reuse {
+            Some(reuse) => crate::solve::affine::solve_affine_constraint_system_reusing(
+                summary,
+                reduction,
+                backend_kind,
+                algebra_backend,
+                initial_guess,
+                reuse,
+            ),
+            None => solve_affine_constraint_system(
+                summary,
+                reduction,
+                backend_kind,
+                algebra_backend,
+                initial_guess,
+            ),
+        };
+    }
+    if let Some(matrix) = summary.constraint_matrix.as_ref() {
+        if let Some(reuse) = reuse.as_mut() {
+            reuse.clear();
+        }
+        return solve_multiplier_constraint_system(
+            summary,
+            matrix,
+            backend_kind,
+            algebra_backend,
+            initial_guess,
+        );
+    }
+    match reuse {
+        None => solve_operator_system(
+            summary.operator,
+            preconditioner_kind,
+            backend_kind,
+            algebra_backend,
+            initial_guess,
+        ),
+        Some(reuse) => {
+            let mut settings = ScopedLinearSolveSettings::with_default_tolerance(
+                LocalExecutionPlan::serial(),
+                None,
+            );
+            settings.preparation = Some(reuse);
+            solve_operator_system_scoped(
+                summary.operator,
+                preconditioner_kind,
+                backend_kind,
+                algebra_backend,
+                initial_guess,
+                settings,
+            )
+            .expect("reference sparse application is infallible for a prepared system")
+        }
+    }
 }

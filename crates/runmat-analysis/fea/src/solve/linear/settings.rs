@@ -17,6 +17,7 @@ pub(crate) struct ScopedLinearSolveSettings<'a> {
     pub plan: LocalExecutionPlan,
     pub admission: Option<&'a SolverAdmissionResourcePolicy>,
     pub relative_tolerance: f64,
+    pub preparation: Option<&'a mut crate::algebra::LinearPreparationReuse>,
 }
 
 impl<'a> ScopedLinearSolveSettings<'a> {
@@ -28,6 +29,7 @@ impl<'a> ScopedLinearSolveSettings<'a> {
             plan,
             admission,
             relative_tolerance: DEFAULT_RELATIVE_TOLERANCE,
+            preparation: None,
         }
     }
 }

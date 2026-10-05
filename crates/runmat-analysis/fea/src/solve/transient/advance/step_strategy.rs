@@ -1,5 +1,5 @@
 use super::{
-    solve_average_acceleration_step, solve_initial_acceleration, AssemblySummary,
+    solve_average_acceleration_step_reusing, solve_initial_acceleration_reusing, AssemblySummary,
     EffectiveDynamicsSolveResult, LinearAlgebraBackendKind, SecondOrderState, SolverMethod,
     SolverPreconditioner, StructuralTransientSolverCounters, TransientSolveError,
 };
@@ -44,6 +44,7 @@ pub(in crate::solve::transient) struct DirectTransientStepStrategy<'a> {
     initial_summary: &'a AssemblySummary,
     backend_kind: LinearAlgebraBackendKind,
     residual_target: f64,
+    preparation: crate::algebra::LinearPreparationReuse,
 }
 
 impl<'a> DirectTransientStepStrategy<'a> {
@@ -56,6 +57,7 @@ impl<'a> DirectTransientStepStrategy<'a> {
             initial_summary,
             backend_kind,
             residual_target,
+            preparation: Default::default(),
         }
     }
 
@@ -96,12 +98,13 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
         summary: &AssemblySummary,
         initial: TransientInitialVectors,
     ) -> Result<TransientNumericalStepOutcome, String> {
-        solve_initial_acceleration(
+        solve_initial_acceleration_reusing(
             summary,
             initial.displacement,
             initial.velocity,
             self.backend_kind,
             self.residual_target,
+            &mut self.preparation,
         )
         .map_err(|error| error.to_string())
         .and_then(Self::outcome)
@@ -113,12 +116,13 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
         previous: &SecondOrderState,
         time_step_s: f64,
     ) -> Result<TransientNumericalStepOutcome, String> {
-        solve_average_acceleration_step(
+        solve_average_acceleration_step_reusing(
             summary,
             previous,
             time_step_s,
             self.backend_kind,
             self.residual_target,
+            &mut self.preparation,
         )
         .map_err(|error| error.to_string())
         .and_then(Self::outcome)
@@ -129,12 +133,13 @@ impl TransientStepStrategy for DirectTransientStepStrategy<'_> {
         summary: &AssemblySummary,
         previous: &SecondOrderState,
     ) -> Result<TransientNumericalStepOutcome, String> {
-        solve_initial_acceleration(
+        solve_initial_acceleration_reusing(
             summary,
             previous.displacement().to_vec(),
             previous.velocity().to_vec(),
             self.backend_kind,
             self.residual_target,
+            &mut self.preparation,
         )
         .map_err(|error| error.to_string())
         .and_then(Self::outcome)

@@ -62,6 +62,7 @@ impl SolidNewtonProblem<'_> {
                 plan: LocalExecutionPlan::serial(),
                 admission: self.solver_admission,
                 relative_tolerance: self.policy.linear_relative_tolerance,
+                preparation: None,
             },
         )
         .map_err(|e| SolidNewtonError::Evaluation(e.to_string()))?;

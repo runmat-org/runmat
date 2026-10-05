@@ -160,6 +160,7 @@ pub(super) fn solve(
             plan: crate::planning::resource::LocalExecutionPlan::serial(),
             admission,
             relative_tolerance: residual_target,
+            preparation: None,
         },
     )
     .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
