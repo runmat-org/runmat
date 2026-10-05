@@ -209,12 +209,11 @@ async fn build_text_output(
     let mut work = 0;
     for row_idx in 0..row_count {
         for col_idx in 0..col_count {
-            let text = rows
-                .get(row_idx)
-                .and_then(|row| row.get(col_idx))
-                .map(|cell| cell_to_text(cell, cooperation, selected));
-            let text = match text {
-                Some(text) => text.await?.unwrap_or_default(),
+            let cell = rows.get(row_idx).and_then(|row| row.get(col_idx));
+            let text = match cell {
+                Some(cell) => cell_to_text(cell, cooperation, selected)
+                    .await?
+                    .unwrap_or_default(),
                 None => String::new(),
             };
             values.push(Value::from(text));
@@ -240,12 +239,9 @@ async fn build_raw_output(
     let mut work = 0;
     for row_idx in 0..row_count {
         for col_idx in 0..col_count {
-            let value = rows
-                .get(row_idx)
-                .and_then(|row| row.get(col_idx))
-                .map(|cell| cell_to_raw(cell, cooperation, selected));
-            let value = match value {
-                Some(value) => value.await?,
+            let cell = rows.get(row_idx).and_then(|row| row.get(col_idx));
+            let value = match cell {
+                Some(cell) => cell_to_raw(cell, cooperation, selected).await?,
                 None => Value::Num(f64::NAN),
             };
             values.push(value);
