@@ -31,8 +31,8 @@ pub use managed_ledger::{
 pub use stage::{
     admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,
     HostEffectAllocationError, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
-    HostEffectStageAdmission, HostEffectStageEvidence, HostEffectStagePermit,
-    HostEffectStageReservation,
+    HostEffectOutputHeadroom, HostEffectStageAdmission, HostEffectStageEvidence,
+    HostEffectStagePermit, HostEffectStageReservation,
 };
 pub use workload::{
     AudioDecodeOutput, AudioFrameRange, DatasetHandleInput, DatasetHandleKey,
@@ -318,7 +318,11 @@ fn select_host_effect_inner(
     }
     let output_allocation_permit = match stage.as_ref() {
         Some(stage) => match retained_bytes {
-            ResourceByteBound::Known(bytes) => Some(stage.output_permit(bytes)),
+            ResourceByteBound::Known(bytes) => Some(
+                stage
+                    .output_permit(bytes)
+                    .map_err(|_| insufficient("selected output headroom is unavailable"))?,
+            ),
             ResourceByteBound::Unavailable(_) => None,
         },
         None => admission.output_allocation_permit,

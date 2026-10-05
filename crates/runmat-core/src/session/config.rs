@@ -104,9 +104,11 @@ impl RunMatSession {
                 old.same_owner(next) && old.snapshot().epoch == service.placement_resources().epoch
             });
             if !same_epoch_owner {
-                // Existing returned Values keep their exact charges until
-                // drop; only new claims on the superseded session owner stop.
-                old.revoke();
+                // The ledger may be shared with another session. Invalidate
+                // only this session's outstanding staged calls; existing
+                // returned Values retain their global charges until drop.
+                self.runtime_context
+                    .invalidate_host_effect_session_authority();
             }
         }
         let ports = self
@@ -546,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn rebind_preserves_same_managed_owner_but_revokes_a_replaced_epoch() {
+    fn rebind_preserves_same_managed_owner_and_invalidates_only_this_session() {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let first = ManagedHostEffectLedger::new_with_epoch(16, 5);
         session.install_parallel_service(Rc::new(ManagedAllocation(first.clone())));
@@ -557,11 +559,40 @@ mod tests {
 
         let replacement = ManagedHostEffectLedger::new_with_epoch(16, 6);
         session.install_parallel_service(Rc::new(ManagedAllocation(replacement.clone())));
-        assert!(!first.snapshot().current);
+        assert!(first.snapshot().current);
         assert_eq!(first.snapshot().live_reserved_bytes, 8);
-        assert!(first.reserve_stage(1).is_err());
+        assert!(first.reserve_stage(1).is_ok());
         assert!(replacement.reserve_stage(16).is_ok());
         drop(claim);
         assert_eq!(first.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[test]
+    fn one_session_rebind_does_not_revoke_another_sessions_shared_ledger() {
+        let shared = ManagedHostEffectLedger::new_with_epoch(16, 5);
+        let mut first = RunMatSession::with_options(false, false).unwrap();
+        let mut second = RunMatSession::with_options(false, false).unwrap();
+        first.install_parallel_service(Rc::new(ManagedAllocation(shared.clone())));
+        second.install_parallel_service(Rc::new(ManagedAllocation(shared.clone())));
+        let second_claim = shared.reserve_stage(8).expect("other session claim");
+
+        first.install_parallel_service(Rc::new(ManagedAllocation(
+            ManagedHostEffectLedger::new_with_epoch(16, 6),
+        )));
+        assert!(shared.snapshot().current);
+        assert_eq!(
+            second
+                .runtime_context()
+                .service_ports()
+                .parallel()
+                .expect("second session owner")
+                .placement_resources()
+                .memory_available_bytes,
+            Some(8)
+        );
+        let following = shared.reserve_stage(8).expect("second issuer remains live");
+        drop(following);
+        drop(second_claim);
+        assert_eq!(shared.snapshot().live_reserved_bytes, 0);
     }
 }

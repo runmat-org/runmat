@@ -70,16 +70,18 @@ fn retained_output_adds_global_charge_during_stage_overlap() {
     let ledger = ManagedHostEffectLedger::new(12);
     let stage = ledger.reserve_stage(8).expect("stage");
     let input = temp(&stage, 4).expect("live scan buffer");
-    let output = stage.reserve_output_bytes(4).expect("retained output");
+    let headroom = stage.reserve_output_headroom(4).expect("selected output");
+    let output = headroom.reserve_exact(4).expect("retained output");
     assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 8);
     assert_eq!(ledger.snapshot().peak_reserved_bytes, 12);
     assert_eq!(ledger.snapshot().peak_claimed_bytes, 8);
     assert_eq!(
-        stage.reserve_output_bytes(1).err(),
+        stage.reserve_output_headroom(1).err(),
         Some(HostEffectAllocationError::ExceedsCapacity)
     );
     drop(input);
+    drop(headroom);
     drop(stage);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 4);
@@ -90,11 +92,30 @@ fn retained_output_adds_global_charge_during_stage_overlap() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn dropped_exact_output_reuses_selected_headroom_without_recharging() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let stage = ledger.reserve_stage(8).expect("stage");
+    let headroom = stage.reserve_output_headroom(4).expect("selected output");
+    let first = headroom.reserve_exact(4).expect("first output");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+    drop(first);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    let replacement = headroom.reserve_exact(4).expect("reused headroom");
+    drop(headroom);
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    drop(replacement);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn revocation_and_overflow_are_typed_and_keep_existing_charges() {
     let full = ManagedHostEffectLedger::new(u64::MAX);
     let full_stage = full.reserve_stage(u64::MAX).expect("full stage");
     assert_eq!(
-        full_stage.reserve_output_bytes(1).err(),
+        full_stage.reserve_output_headroom(1).err(),
         Some(HostEffectAllocationError::Overflow)
     );
     drop(full_stage);
@@ -109,7 +130,7 @@ fn revocation_and_overflow_are_typed_and_keep_existing_charges() {
         Some(HostEffectAllocationError::Revoked)
     );
     assert_eq!(
-        stage.reserve_output_bytes(1).err(),
+        stage.reserve_output_headroom(1).err(),
         Some(HostEffectAllocationError::Revoked)
     );
     assert_eq!(

@@ -6,6 +6,8 @@ pub(super) struct StageReservationView {
     reservation: Weak<dyn HostEffectStageReservation>,
     active_epoch: Arc<AtomicBool>,
     cancellation: runmat_execution::cancellation::CancellationToken,
+    session_generation_owner: Arc<AtomicU64>,
+    session_generation: u64,
 }
 
 impl StageReservationView {
@@ -13,16 +15,22 @@ impl StageReservationView {
         reservation: Weak<dyn HostEffectStageReservation>,
         active_epoch: Arc<AtomicBool>,
         cancellation: runmat_execution::cancellation::CancellationToken,
+        session_generation_owner: Arc<AtomicU64>,
+        session_generation: u64,
     ) -> Self {
         Self {
             reservation,
             active_epoch,
             cancellation,
+            session_generation_owner,
+            session_generation,
         }
     }
 
     fn current_reservation(&self) -> Option<Arc<dyn HostEffectStageReservation>> {
-        (!self.cancellation.is_cancelled() && self.active_epoch.load(Ordering::Acquire))
+        (!self.cancellation.is_cancelled()
+            && self.active_epoch.load(Ordering::Acquire)
+            && self.session_generation_owner.load(Ordering::Acquire) == self.session_generation)
             .then(|| self.reservation.upgrade())
             .flatten()
             .filter(|owner| owner.is_current())
@@ -55,6 +63,9 @@ impl HostEffectStageReservation for StageReservationView {
         if self.cancellation.is_cancelled() {
             return Err(HostEffectAllocationError::Cancelled);
         }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
         let owner = self
             .current_reservation()
             .ok_or(HostEffectAllocationError::Revoked)?;
@@ -65,19 +76,19 @@ impl HostEffectStageReservation for StageReservationView {
         if self.cancellation.is_cancelled() {
             return Err(HostEffectAllocationError::Cancelled);
         }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
         Ok(claim)
     }
 
-    fn reserve_output_exact(
+    fn reserve_output_headroom(
         &self,
-        _bytes: usize,
-    ) -> Result<
-        Arc<dyn runmat_value::ExactHostAllocationReservation>,
-        runmat_value::ExactHostNumericAllocationError,
-    > {
+        _bytes: u64,
+    ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
         // This view exists for retained scan liveness. Only the receipt's
         // bounded output permit may reserve a physically retained result.
-        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+        Err(HostEffectAllocationError::Unavailable)
     }
 
     fn is_current(&self) -> bool {

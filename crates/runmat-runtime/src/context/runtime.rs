@@ -161,6 +161,21 @@ impl RuntimeContext {
         Arc::downgrade(&self.state.session_lease)
     }
 
+    /// Invalidate only this session's staged host-effect invocations when its
+    /// installed resource authority changes. Shared ledger owners remain
+    /// usable by other sessions and retain prior physical output charges.
+    pub fn invalidate_host_effect_session_authority(&self) {
+        self.state
+            .host_effect_generation
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn host_effect_session_generation(&self) -> (Arc<AtomicU64>, u64) {
+        let owner = self.state.host_effect_generation.clone();
+        let generation = owner.load(Ordering::Acquire);
+        (owner, generation)
+    }
+
     pub(crate) fn register_session_resource_cleanup(&self, cleanup: impl FnOnce() + 'static) {
         self.state
             .resource_cleanup

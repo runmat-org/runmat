@@ -43,6 +43,18 @@ impl std::error::Error for HostEffectAllocationError {}
 /// The exact claim owner is held through the buffer's actual lifetime.
 pub trait HostEffectLiveAllocationReservation: std::fmt::Debug + Send + Sync {}
 
+/// Owns output capacity selected for one whole call. An exact returned-value
+/// allocation transfers its bytes out of this precharge into its own lifetime.
+pub trait HostEffectOutputHeadroom: std::fmt::Debug + Send + Sync {
+    fn reserve_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<
+        Arc<dyn runmat_value::ExactHostAllocationReservation>,
+        runmat_value::ExactHostNumericAllocationError,
+    >;
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostEffectStageEvidence {
     pub authority_revision: Digest,
@@ -82,26 +94,25 @@ pub trait HostEffectStageReservation: Send + Sync {
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
         Err(HostEffectAllocationError::Unavailable)
     }
-    /// Atomically charge this exact output against the scan's live charge and
-    /// all other reservations on this authority. Implementations must reject
-    /// revocation and keep the charge until the returned owner is dropped.
-    /// The default deliberately makes staged returned values unavailable.
-    fn reserve_output_exact(
+    /// Atomically precharge selected output headroom before the receipt is
+    /// returned. Exact allocations consume this headroom without a second
+    /// capacity charge; unconsumed bytes are released with its owner.
+    fn reserve_output_headroom(
         &self,
-        _bytes: usize,
-    ) -> Result<
-        Arc<dyn runmat_value::ExactHostAllocationReservation>,
-        runmat_value::ExactHostNumericAllocationError,
-    > {
-        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+        _bytes: u64,
+    ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
+        Err(HostEffectAllocationError::Unavailable)
     }
     fn is_current(&self) -> bool;
 }
 
 struct StagedOutputPermit {
     reservation: Weak<dyn HostEffectStageReservation>,
+    headroom: Arc<dyn HostEffectOutputHeadroom>,
     active_epoch: Arc<AtomicBool>,
     cancellation: runmat_execution::cancellation::CancellationToken,
+    session_generation_owner: Arc<AtomicU64>,
+    session_generation: u64,
     max_output_bytes: u64,
     live_output_bytes: Arc<AtomicU64>,
 }
@@ -138,7 +149,10 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
         Arc<dyn runmat_value::ExactHostAllocationReservation>,
         runmat_value::ExactHostNumericAllocationError,
     > {
-        if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
+        if !self.active_epoch.load(Ordering::Acquire)
+            || self.cancellation.is_cancelled()
+            || self.session_generation_owner.load(Ordering::Acquire) != self.session_generation
+        {
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
         }
         let reservation = self
@@ -156,7 +170,7 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
                     .filter(|total| *total <= self.max_output_bytes)
             })
             .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
-        let authority_reservation = match reservation.reserve_output_exact(bytes) {
+        let authority_reservation = match self.headroom.reserve_exact(bytes) {
             Ok(reservation) => reservation,
             Err(error) => {
                 self.live_output_bytes
@@ -167,6 +181,7 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
         if !self.active_epoch.load(Ordering::Acquire)
             || self.cancellation.is_cancelled()
             || !reservation.is_current()
+            || self.session_generation_owner.load(Ordering::Acquire) != self.session_generation
         {
             self.live_output_bytes
                 .fetch_sub(requested, Ordering::SeqCst);
@@ -196,6 +211,8 @@ pub struct HostEffectStagePermit {
     revision: PlacementRevision,
     reservation: Arc<dyn HostEffectStageReservation>,
     active_epoch: Arc<AtomicBool>,
+    session_generation_owner: Arc<AtomicU64>,
+    session_generation: u64,
     pub(super) started: Instant,
 }
 
@@ -220,6 +237,8 @@ impl HostEffectStagePermit {
             Arc::downgrade(&self.reservation),
             self.active_epoch.clone(),
             self.cancellation.clone(),
+            self.session_generation_owner.clone(),
+            self.session_generation,
         ))
     }
 
@@ -230,6 +249,9 @@ impl HostEffectStagePermit {
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
         if !self.active_epoch.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
         }
         if !self
             .cancellation
@@ -253,6 +275,9 @@ impl HostEffectStagePermit {
         if !self.active_epoch.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
         Ok(claim)
     }
 
@@ -267,10 +292,16 @@ impl HostEffectStagePermit {
         {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
         if self.cancellation.is_cancelled() {
             return Err(HostEffectAllocationError::Cancelled);
         }
         if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(HostEffectAllocationError::Revoked);
         }
         self.reservation.promote_scan_envelope(new_reserved_bytes)?;
@@ -280,20 +311,33 @@ impl HostEffectStagePermit {
         if !self.reservation.is_current() {
             return Err(HostEffectAllocationError::Revoked);
         }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
         Ok(())
     }
 
     pub(super) fn output_permit(
         &self,
         max_output_bytes: u64,
-    ) -> Arc<dyn runmat_value::ExactHostAllocationPermit> {
-        Arc::new(StagedOutputPermit {
+    ) -> Result<Arc<dyn runmat_value::ExactHostAllocationPermit>, HostEffectAllocationError> {
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let headroom = self.reservation.reserve_output_headroom(max_output_bytes)?;
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        Ok(Arc::new(StagedOutputPermit {
             reservation: Arc::downgrade(&self.reservation),
+            headroom,
             active_epoch: self.active_epoch.clone(),
             cancellation: self.cancellation.clone(),
+            session_generation_owner: self.session_generation_owner.clone(),
+            session_generation: self.session_generation,
             max_output_bytes,
             live_output_bytes: Arc::new(AtomicU64::new(0)),
-        })
+        }))
     }
 
     pub(super) fn terminate_allocations(&self) {
@@ -301,6 +345,9 @@ impl HostEffectStagePermit {
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(stale_resource());
+        }
         let parallel_owner = self
             .runtime
             .service_ports()
@@ -420,6 +467,7 @@ pub fn try_admit_host_effect_stage(
     runtime: &RuntimeContext,
     request: HostEffectRequest<'_>,
 ) -> BuiltinResult<Option<HostEffectStagePermit>> {
+    let (session_generation_owner, session_generation) = runtime.host_effect_session_generation();
     if runtime.is_cancelled() {
         return Err(cancelled());
     }
@@ -463,6 +511,9 @@ pub fn try_admit_host_effect_stage(
     if !admission.reservation.is_current() {
         return Err(stale_resource());
     }
+    if session_generation_owner.load(Ordering::Acquire) != session_generation {
+        return Err(stale_resource());
+    }
     if admission.reservation.reserved_bytes() < scratch_bytes
         || admission.reservation.reserved_bytes() > admission.reservation.capacity_bytes()
         || admission.reservation.capacity_bytes() != after.capacity_bytes
@@ -494,6 +545,9 @@ pub fn try_admit_host_effect_stage(
     if !admission.reservation.is_current() {
         return Err(stale_resource());
     }
+    if session_generation_owner.load(Ordering::Acquire) != session_generation {
+        return Err(stale_resource());
+    }
     Ok(Some(HostEffectStagePermit {
         cancellation: runtime.cancellation(),
         runtime: runtime.clone(),
@@ -503,6 +557,8 @@ pub fn try_admit_host_effect_stage(
         revision,
         reservation: admission.reservation,
         active_epoch: Arc::new(AtomicBool::new(true)),
+        session_generation_owner,
+        session_generation,
         started: Instant::now(),
     }))
 }

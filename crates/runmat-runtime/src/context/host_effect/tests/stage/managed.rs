@@ -244,6 +244,52 @@ fn finished_receipt_closes_exact_byte_stage_view_without_releasing_live_buffer()
 }
 
 #[test]
+fn selected_receipt_precharges_output_before_physical_allocation() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let receipt = selected_receipt(&runtime);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert!(matches!(
+        ledger.reserve_stage(1).err(),
+        Some(HostEffectAllocationError::ExceedsCapacity)
+    ));
+    receipt.finish(WholeWorkObservationOutcome::Success);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(placement.observations.borrow().len(), 1);
+}
+
+#[test]
+fn shared_ledger_rebind_invalidates_only_issuing_session() {
+    let ledger = ManagedHostEffectLedger::new(24);
+    let (first_runtime, first_placement) = managed_runtime(&ledger, 24);
+    let (second_runtime, second_placement) = managed_runtime(&ledger, 24);
+    let first = admit_host_effect_stage(&first_runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("first session stage");
+    let second = admit_host_effect_stage(&second_runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("second session stage");
+    first_runtime.invalidate_host_effect_session_authority();
+    assert_eq!(
+        first.checkpoint().unwrap_err().identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    second.checkpoint().expect("other issuer remains current");
+    assert!(ledger.snapshot().current);
+    let receipt = select_host_effect_after_stage(
+        &second_runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        second,
+    )
+    .expect("other issuer may select and precharge output");
+    assert_eq!(first_placement.selections.get(), 0);
+    assert_eq!(second_placement.selections.get(), 1);
+    drop(first);
+    receipt.finish(WholeWorkObservationOutcome::Success);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt() {
     let ledger = ManagedHostEffectLedger::new(12);
     let (runtime, placement) = managed_runtime(&ledger, 12);
@@ -401,22 +447,26 @@ fn simultaneous_receipts_compete_for_retained_output_capacity() {
         .expect("first output permit")
         .reserve_exact(4)
         .expect("first retained output");
-    let second = selected_receipt(&runtime);
-    assert!(matches!(
-        second
-            .output_allocation_permit()
-            .expect("second output permit")
-            .reserve_exact(4),
-        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
-    ));
-    assert_eq!(ledger.snapshot().live_reserved_bytes, 20);
-    first.finish(WholeWorkObservationOutcome::Success);
+    let second_stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("second scan can use remaining eight bytes");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        second_stage,
+    )
+    .err()
+    .expect("second output headroom must be secured before return");
+    assert_eq!(error.identifier(), Some("RunMat:Placement:ResourceLimit"));
     assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+    first.finish(WholeWorkObservationOutcome::Success);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    let second = selected_receipt(&runtime);
     let second_output = second
         .output_allocation_permit()
         .expect("same second output permit")
         .reserve_exact(4)
-        .expect("capacity returned after first stage");
+        .expect("second selected receipt already owns headroom");
     assert_eq!(ledger.snapshot().live_reserved_bytes, 16);
     second.finish(WholeWorkObservationOutcome::Success);
     drop(first_output);

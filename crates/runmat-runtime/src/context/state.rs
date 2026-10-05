@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use runmat_types::SourceId;
@@ -32,6 +33,10 @@ pub struct RuntimeContextState {
     /// Non-serialized liveness authority shared by invocation generations of
     /// this session, but never by a parallel-lab fork or a new context.
     pub(crate) session_lease: Arc<()>,
+    /// Session-local generation for staged host-effect calls. A shared host
+    /// allocation ledger may be installed in multiple sessions; replacing
+    /// this session's service cannot revoke their common global owner.
+    pub(crate) host_effect_generation: Arc<AtomicU64>,
     pub(crate) resource_cleanup: SessionResourceCleanup,
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
@@ -65,6 +70,7 @@ impl RuntimeContextState {
         Self {
             local_identity,
             session_lease: Arc::new(()),
+            host_effect_generation: Arc::new(AtomicU64::new(0)),
             resource_cleanup: SessionResourceCleanup::default(),
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),

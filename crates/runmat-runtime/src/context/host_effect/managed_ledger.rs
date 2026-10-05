@@ -3,7 +3,7 @@
 
 use super::{
     HostEffectAllocationError, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
-    HostEffectStageReservation,
+    HostEffectOutputHeadroom, HostEffectStageReservation,
 };
 use runmat_value::{ExactHostAllocationReservation, ExactHostNumericAllocationError};
 use std::fmt;
@@ -134,11 +134,10 @@ pub struct ManagedHostEffectStageReservation {
 }
 
 impl ManagedHostEffectStageReservation {
-    pub fn reserve_output_bytes(
+    pub fn reserve_output_headroom(
         &self,
-        bytes: usize,
-    ) -> Result<Arc<dyn ExactHostAllocationReservation>, HostEffectAllocationError> {
-        let bytes = u64::try_from(bytes).map_err(|_| HostEffectAllocationError::Overflow)?;
+        bytes: u64,
+    ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
         let mut state = self.inner.ledger.lock().expect("host ledger lock");
         if !state.snapshot.current {
             return Err(HostEffectAllocationError::Revoked);
@@ -148,21 +147,16 @@ impl ManagedHostEffectStageReservation {
             .live_reserved_bytes
             .checked_add(bytes)
             .ok_or(HostEffectAllocationError::Overflow)?;
-        let claimed = state
-            .snapshot
-            .live_claimed_bytes
-            .checked_add(bytes)
-            .ok_or(HostEffectAllocationError::Overflow)?;
         if reserved > state.snapshot.capacity_bytes {
             return Err(HostEffectAllocationError::ExceedsCapacity);
         }
         state.snapshot.live_reserved_bytes = reserved;
         state.snapshot.peak_reserved_bytes = state.snapshot.peak_reserved_bytes.max(reserved);
-        state.snapshot.live_claimed_bytes = claimed;
-        state.snapshot.peak_claimed_bytes = state.snapshot.peak_claimed_bytes.max(claimed);
-        Ok(Arc::new(OutputClaim {
-            ledger: self.inner.ledger.clone(),
-            bytes,
+        Ok(Arc::new(ManagedOutputHeadroom {
+            inner: Arc::new(HeadroomInner {
+                ledger: self.inner.ledger.clone(),
+                unallocated: Mutex::new(bytes),
+            }),
         }))
     }
 }
@@ -251,12 +245,11 @@ impl HostEffectStageReservation for ManagedHostEffectStageReservation {
         }))
     }
 
-    fn reserve_output_exact(
+    fn reserve_output_headroom(
         &self,
-        bytes: usize,
-    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
-        self.reserve_output_bytes(bytes)
-            .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)
+        bytes: u64,
+    ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
+        ManagedHostEffectStageReservation::reserve_output_headroom(self, bytes)
     }
 
     fn is_current(&self) -> bool {
@@ -296,7 +289,67 @@ impl Drop for TemporaryClaim {
 
 struct OutputClaim {
     ledger: Arc<Mutex<LedgerState>>,
+    headroom: std::sync::Weak<HeadroomInner>,
     bytes: u64,
+}
+
+struct ManagedOutputHeadroom {
+    inner: Arc<HeadroomInner>,
+}
+
+struct HeadroomInner {
+    ledger: Arc<Mutex<LedgerState>>,
+    unallocated: Mutex<u64>,
+}
+
+impl fmt::Debug for ManagedOutputHeadroom {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ManagedOutputHeadroom")
+            .finish_non_exhaustive()
+    }
+}
+
+impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
+    fn reserve_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
+        let bytes =
+            u64::try_from(bytes).map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
+        let mut remaining = self.inner.unallocated.lock().expect("output headroom lock");
+        if bytes > *remaining {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
+        if !ledger.snapshot.current {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let claimed = ledger
+            .snapshot
+            .live_claimed_bytes
+            .checked_add(bytes)
+            .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
+        *remaining -= bytes;
+        ledger.snapshot.live_claimed_bytes = claimed;
+        ledger.snapshot.peak_claimed_bytes = ledger.snapshot.peak_claimed_bytes.max(claimed);
+        Ok(Arc::new(OutputClaim {
+            ledger: self.inner.ledger.clone(),
+            headroom: Arc::downgrade(&self.inner),
+            bytes,
+        }))
+    }
+}
+
+impl Drop for HeadroomInner {
+    fn drop(&mut self) {
+        let remaining = *self.unallocated.lock().expect("output headroom lock");
+        self.ledger
+            .lock()
+            .expect("host ledger lock")
+            .snapshot
+            .live_reserved_bytes -= remaining;
+    }
 }
 
 impl fmt::Debug for OutputClaim {
@@ -312,9 +365,16 @@ impl ExactHostAllocationReservation for OutputClaim {}
 
 impl Drop for OutputClaim {
     fn drop(&mut self) {
-        let mut state = self.ledger.lock().expect("host ledger lock");
-        state.snapshot.live_reserved_bytes -= self.bytes;
-        state.snapshot.live_claimed_bytes -= self.bytes;
+        if let Some(headroom) = self.headroom.upgrade() {
+            let mut remaining = headroom.unallocated.lock().expect("output headroom lock");
+            let mut state = self.ledger.lock().expect("host ledger lock");
+            *remaining += self.bytes;
+            state.snapshot.live_claimed_bytes -= self.bytes;
+        } else {
+            let mut state = self.ledger.lock().expect("host ledger lock");
+            state.snapshot.live_reserved_bytes -= self.bytes;
+            state.snapshot.live_claimed_bytes -= self.bytes;
+        }
     }
 }
 

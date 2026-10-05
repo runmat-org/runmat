@@ -28,14 +28,11 @@ impl HostEffectStageReservation for Reserved {
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
         self.inner.reserve_live_exact(kind, bytes)
     }
-    fn reserve_output_exact(
+    fn reserve_output_headroom(
         &self,
-        bytes: usize,
-    ) -> Result<
-        Arc<dyn runmat_value::ExactHostAllocationReservation>,
-        runmat_value::ExactHostNumericAllocationError,
-    > {
-        self.inner.reserve_output_exact(bytes)
+        bytes: u64,
+    ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
+        self.inner.reserve_output_headroom(bytes)
     }
     fn is_current(&self) -> bool {
         self.live.load(Ordering::SeqCst) && self.inner.is_current()
@@ -306,7 +303,7 @@ fn cancellation_after_scan_releases_reservation_without_a_probe() {
 }
 
 #[test]
-fn final_call_must_match_original_owner_identity_and_peak() {
+fn final_smaller_scratch_still_retains_original_stage_precharge() {
     let (runtime, placement, _, drops) = staged_runtime(
         ResourceByteBound::Known(16),
         ResourceByteBound::Known(8),
@@ -315,16 +312,16 @@ fn final_call_must_match_original_owner_identity_and_peak() {
     );
     let stage =
         admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue)).unwrap();
-    let error = select_host_effect_after_stage(
+    let receipt = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),
         HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
         stage,
     )
-    .err()
-    .expect("final route omits staged peak");
-    assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidStage"));
-    assert_eq!(placement.selections.get(), 0);
+    .expect("final smaller bound does not release live stage precharge");
+    assert_eq!(placement.selections.get(), 1);
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    receipt.finish(WholeWorkObservationOutcome::Success);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
 

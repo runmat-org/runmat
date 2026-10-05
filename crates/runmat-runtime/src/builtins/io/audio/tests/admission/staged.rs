@@ -3,10 +3,10 @@
 
 use super::*;
 use crate::context::host_effect::{
-    AudioDecodeOutput, HostEffectRequest, HostEffectResourceAdmission, HostEffectResourceEvidence,
-    HostEffectResourceLivenessLease, HostEffectStageAdmission, HostEffectStageEvidence,
-    HostEffectStageReservation, HostEffectWorkload, ManagedHostEffectLedger,
-    ManagedHostEffectStageReservation,
+    AudioDecodeOutput, HostEffectOutputHeadroom, HostEffectRequest, HostEffectResourceAdmission,
+    HostEffectResourceEvidence, HostEffectResourceLivenessLease, HostEffectStageAdmission,
+    HostEffectStageEvidence, HostEffectStageReservation, HostEffectWorkload,
+    ManagedHostEffectLedger, ManagedHostEffectStageReservation,
 };
 use crate::context::{RuntimeContext, RuntimeHostEffectResourceService, RuntimeServicePorts};
 use runmat_execution::{Digest, ResourceByteBound};
@@ -30,6 +30,30 @@ impl Drop for TestOutputReservation {
     }
 }
 impl ExactHostAllocationReservation for TestOutputReservation {}
+
+#[derive(Debug)]
+struct TestOutputHeadroom {
+    managed: Arc<dyn HostEffectOutputHeadroom>,
+    live_total: Arc<AtomicUsize>,
+    live_output: Arc<AtomicUsize>,
+}
+
+impl HostEffectOutputHeadroom for TestOutputHeadroom {
+    fn reserve_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
+        let managed = self.managed.reserve_exact(bytes)?;
+        self.live_total.fetch_add(bytes, Ordering::SeqCst);
+        self.live_output.fetch_add(bytes, Ordering::SeqCst);
+        Ok(Arc::new(TestOutputReservation {
+            _managed: managed,
+            live_total: self.live_total.clone(),
+            live_output: self.live_output.clone(),
+            bytes,
+        }))
+    }
+}
 
 struct TestStageReservation {
     managed: Arc<ManagedHostEffectStageReservation>,
@@ -71,18 +95,18 @@ impl HostEffectStageReservation for TestStageReservation {
     > {
         self.managed.reserve_live_exact(kind, bytes)
     }
-    fn reserve_output_exact(
+    fn reserve_output_headroom(
         &self,
-        bytes: usize,
-    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
-        let managed = self.managed.reserve_output_exact(bytes)?;
-        self.live_total.fetch_add(bytes, Ordering::SeqCst);
-        self.live_output.fetch_add(bytes, Ordering::SeqCst);
-        Ok(Arc::new(TestOutputReservation {
-            _managed: managed,
+        bytes: u64,
+    ) -> Result<
+        Arc<dyn HostEffectOutputHeadroom>,
+        crate::context::host_effect::HostEffectAllocationError,
+    > {
+        let managed = self.managed.reserve_output_headroom(bytes)?;
+        Ok(Arc::new(TestOutputHeadroom {
+            managed,
             live_total: self.live_total.clone(),
             live_output: self.live_output.clone(),
-            bytes,
         }))
     }
     fn is_current(&self) -> bool {
@@ -345,8 +369,8 @@ fn scan_and_exact_output_compete_in_one_managed_allocation_ledger() {
         live_total: live_total.clone(),
     };
     assert!(matches!(
-        reservation.reserve_output_exact(16),
-        Err(ExactHostNumericAllocationError::ExceedsPermit)
+        reservation.reserve_output_headroom(16).err(),
+        Some(crate::context::host_effect::HostEffectAllocationError::ExceedsCapacity)
     ));
     assert_eq!(live_total.load(Ordering::SeqCst), 128 * 1024);
     drop(reservation);
@@ -365,12 +389,14 @@ fn scan_and_exact_output_compete_in_one_managed_allocation_ledger() {
     };
     live_total.store(128 * 1024, Ordering::SeqCst);
     reservation.live_stage.store(128 * 1024, Ordering::SeqCst);
-    let output = reservation
-        .reserve_output_exact(16)
+    let headroom = reservation
+        .reserve_output_headroom(16)
         .expect("combined peak fits");
+    let output = headroom.reserve_exact(16).expect("exact output");
     assert_eq!(live_total.load(Ordering::SeqCst), 128 * 1024 + 16);
     drop(reservation);
     assert_eq!(live_total.load(Ordering::SeqCst), 16);
+    drop(headroom);
     drop(output);
     assert_eq!(live_total.load(Ordering::SeqCst), 0);
     assert_eq!(live_output.load(Ordering::SeqCst), 0);
