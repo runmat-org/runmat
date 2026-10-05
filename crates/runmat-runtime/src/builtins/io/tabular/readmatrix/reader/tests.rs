@@ -17,11 +17,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 fn fixture_path() -> PathBuf {
-    if cfg!(windows) {
-        PathBuf::from(r"C:\readmatrix-row\input.csv")
-    } else {
-        PathBuf::from("/readmatrix-row/input.csv")
-    }
+    // MemoryFsProvider has a virtual rooted namespace on every platform.
+    PathBuf::from("/readmatrix-row/input.csv")
 }
 
 fn selected_path(bytes: &[u8]) -> (runmat_filesystem::ProviderGuard, TabularFsPath) {
