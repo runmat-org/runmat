@@ -12,6 +12,9 @@ use std::sync::{
     Arc, Mutex,
 };
 
+mod pool;
+pub use pool::{ManagedHostEffectStagePool, ManagedHostEffectStageSlot};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ManagedHostEffectLedgerSnapshot {
     /// Immutable issuer epoch. Rebinding to a different epoch revokes new
@@ -105,7 +108,10 @@ impl ManagedHostEffectLedger {
             inner: Arc::new(StageInner {
                 ledger: self.state.clone(),
                 reserved_bytes: AtomicU64::new(reserved_bytes),
-                temporary: Mutex::new(TemporaryState { live_bytes: 0 }),
+                temporary: Mutex::new(TemporaryState {
+                    live_bytes: 0,
+                    retire_pending: false,
+                }),
             }),
         }))
     }
@@ -113,6 +119,7 @@ impl ManagedHostEffectLedger {
 
 struct TemporaryState {
     live_bytes: u64,
+    retire_pending: bool,
 }
 
 struct StageInner {
@@ -134,6 +141,18 @@ pub struct ManagedHostEffectStageReservation {
 }
 
 impl ManagedHostEffectStageReservation {
+    fn retire_pooled_invocation(&self) {
+        let mut temporary = self.inner.temporary.lock().expect("temporary ledger lock");
+        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
+        if temporary.live_bytes == 0 {
+            let reserved = self.inner.reserved_bytes.swap(0, Ordering::AcqRel);
+            ledger.snapshot.live_reserved_bytes -= reserved;
+            temporary.retire_pending = false;
+        } else {
+            temporary.retire_pending = true;
+        }
+    }
+
     pub fn reserve_output_headroom(
         &self,
         bytes: u64,
@@ -284,6 +303,11 @@ impl Drop for TemporaryClaim {
         let mut ledger = self.stage.ledger.lock().expect("host ledger lock");
         temporary.live_bytes -= self.bytes;
         ledger.snapshot.live_claimed_bytes -= self.bytes;
+        if temporary.live_bytes == 0 && temporary.retire_pending {
+            let reserved = self.stage.reserved_bytes.swap(0, Ordering::AcqRel);
+            ledger.snapshot.live_reserved_bytes -= reserved;
+            temporary.retire_pending = false;
+        }
     }
 }
 

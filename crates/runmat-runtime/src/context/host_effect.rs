@@ -30,7 +30,8 @@ pub(crate) fn hash_serializable<T: serde::Serialize>(facts: &T) -> Digest {
 pub use exact_bytes::ExactHostEffectBytes;
 pub use final_facts::HostEffectFinalFacts;
 pub use managed_ledger::{
-    ManagedHostEffectLedger, ManagedHostEffectLedgerSnapshot, ManagedHostEffectStageReservation,
+    ManagedHostEffectLedger, ManagedHostEffectLedgerSnapshot, ManagedHostEffectStagePool,
+    ManagedHostEffectStageReservation, ManagedHostEffectStageSlot,
 };
 pub use stage::{
     admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,

@@ -106,6 +106,14 @@ pub trait HostEffectStageReservation: Send + Sync {
         Err(HostEffectAllocationError::Unavailable)
     }
     fn is_current(&self) -> bool;
+
+    fn slot_generation(&self) -> Option<u64> {
+        None
+    }
+
+    /// A pooled owner may retire its generation when the unique invocation
+    /// permit drops. Dynamic reservations already release through Arc Drop.
+    fn retire_invocation(&self) {}
 }
 
 struct StagedOutputPermit {
@@ -202,6 +210,19 @@ pub struct HostEffectStageAdmission {
     pub reservation: Arc<dyn HostEffectStageReservation>,
 }
 
+struct PendingStageRetirement {
+    reservation: Arc<dyn HostEffectStageReservation>,
+    armed: bool,
+}
+
+impl Drop for PendingStageRetirement {
+    fn drop(&mut self) {
+        if self.armed {
+            self.reservation.retire_invocation();
+        }
+    }
+}
+
 /// Retains the original filesystem owner, authority, and pre-scan reservation
 /// across suspension. Only the matching complete call can consume it.
 pub struct HostEffectStagePermit {
@@ -212,6 +233,7 @@ pub struct HostEffectStagePermit {
     authority_revision: Digest,
     revision: PlacementRevision,
     reservation: Arc<dyn HostEffectStageReservation>,
+    slot_generation: Option<u64>,
     active_epoch: Arc<AtomicBool>,
     session_generation_owner: Arc<AtomicU64>,
     session_generation: u64,
@@ -368,6 +390,9 @@ impl HostEffectStagePermit {
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {
+        if self.reservation.slot_generation() != self.slot_generation {
+            return Err(stale_resource());
+        }
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(stale_resource());
         }
@@ -469,6 +494,7 @@ impl HostEffectStagePermit {
 impl Drop for HostEffectStagePermit {
     fn drop(&mut self) {
         self.active_epoch.store(false, Ordering::Release);
+        self.reservation.retire_invocation();
     }
 }
 
@@ -513,6 +539,10 @@ pub fn try_admit_host_effect_stage(
         .ok_or_else(|| insufficient("staged source resource service is absent"))?;
     let Some(admission) = resource_service.stage_admission(&request, runtime) else {
         return Ok(None);
+    };
+    let mut pending_retirement = PendingStageRetirement {
+        reservation: admission.reservation.clone(),
+        armed: true,
     };
     let managed =
         managed.ok_or_else(|| insufficient("staged scan has no managed allocation owner"))?;
@@ -575,7 +605,8 @@ pub fn try_admit_host_effect_stage(
     if session_generation_owner.load(Ordering::Acquire) != session_generation {
         return Err(stale_resource());
     }
-    Ok(Some(HostEffectStagePermit {
+    let slot_generation = admission.reservation.slot_generation();
+    let permit = HostEffectStagePermit {
         cancellation: runtime.cancellation(),
         runtime: runtime.clone(),
         identity: request_identity(&request),
@@ -583,11 +614,14 @@ pub fn try_admit_host_effect_stage(
         authority_revision: admission.evidence.authority_revision,
         revision,
         reservation: admission.reservation,
+        slot_generation,
         active_epoch: Arc::new(AtomicBool::new(true)),
         session_generation_owner,
         session_generation,
         started: Instant::now(),
-    }))
+    };
+    pending_retirement.armed = false;
+    Ok(Some(permit))
 }
 
 pub fn select_host_effect_after_stage(
