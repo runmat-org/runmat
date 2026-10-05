@@ -19,6 +19,7 @@ fn bound_callback_uses_semantic_identity() {
     let callback = Value::Closure(Closure {
         function_name: "cellfun_bound_fixture".into(),
         bound_function: Some(417),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         captures: vec![Value::Num(10.0)],
     });
     let result = call(
@@ -69,6 +70,7 @@ fn error_handler_receives_callback_failure() {
     let handler = Value::Closure(Closure {
         function_name: "cellfun_handler_fixture".into(),
         bound_function: Some(419),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         captures: vec![Value::Num(7.0)],
     });
     let result = call(

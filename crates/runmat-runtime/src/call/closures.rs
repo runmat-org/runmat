@@ -8,6 +8,7 @@ pub fn closure_value(function_name: String, captures: Vec<Value>) -> Value {
     Value::Closure(Closure {
         function_name,
         bound_function: None,
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         captures,
     })
 }
@@ -20,6 +21,8 @@ pub fn semantic_closure_value(
     Value::Closure(Closure {
         function_name: display_name,
         bound_function: Some(function.0),
+        source_role: crate::user_functions::source_function_for(function.0)
+            .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
         captures,
     })
 }
@@ -93,6 +96,7 @@ pub fn load_method_closure(
             let function_name =
                 external_qualified_display_name(object.class_name.display_name(), &name);
             Ok(Value::Closure(Closure {
+                source_role: runmat_types::FunctionSourceRole::Method,
                 bound_function: crate::user_functions::resolve_semantic_function_by_name(
                     &function_name,
                 ),
@@ -118,6 +122,7 @@ pub fn load_method_closure(
                     ));
                 }
                 return Ok(Value::Closure(Closure {
+                    source_role: runmat_types::FunctionSourceRole::Method,
                     bound_function: resolve_method_semantic_function_id(
                         &owner,
                         &name,
@@ -130,6 +135,7 @@ pub fn load_method_closure(
             let qualified_name = external_qualified_display_name(class_name.display_name(), &name);
             if runmat_builtins::builtin_name_is_known(&qualified_name) {
                 Ok(Value::Closure(Closure {
+                    source_role: runmat_types::FunctionSourceRole::Method,
                     bound_function: crate::user_functions::resolve_semantic_function_by_name(
                         &qualified_name,
                     ),

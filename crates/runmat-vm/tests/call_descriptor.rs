@@ -469,6 +469,7 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
         Value::Closure(Closure {
             function_name: "inc".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(10.0)],
         }),
         vec![Value::Num(2.0)],
@@ -498,6 +499,7 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
         Value::Closure(Closure {
             function_name: "inc".into(),
             bound_function: Some(4242),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(10.0)],
         }),
         vec![Value::Num(2.0)],

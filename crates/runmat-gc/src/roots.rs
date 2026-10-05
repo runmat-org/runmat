@@ -472,6 +472,7 @@ mod tests {
                 Value::Closure(Closure {
                     function_name: "f".into(),
                     bound_function: None,
+                    source_role: Default::default(),
                     captures: vec![listener],
                 }),
             );

@@ -1012,6 +1012,7 @@ mod tests {
         let raw = Value::Closure(Closure {
             function_name: "decay".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);
@@ -1020,6 +1021,7 @@ mod tests {
             Value::Closure(Closure {
                 function_name: "decay".into(),
                 bound_function: Some(48),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -1030,6 +1032,7 @@ mod tests {
         let raw = Value::Closure(Closure {
             function_name: "decay".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);

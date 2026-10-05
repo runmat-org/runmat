@@ -237,6 +237,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "capture_target".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::OutputList(Vec::new())],
         });
         let error = validate_spawn_capture(&closure).expect_err("transient closure must fail");
@@ -261,6 +262,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![gpu(&reject_provider().owner)],
         });
         assert_eq!(

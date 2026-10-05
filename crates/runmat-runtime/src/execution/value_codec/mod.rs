@@ -419,6 +419,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
             bound_function: Some(7),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(2.0)],
         });
         assert_eq!(
@@ -434,6 +435,36 @@ mod tests {
         };
         callable.qualified_name = "other_worker".into();
         assert!(decode_inline_value(&tampered).is_err());
+
+        let empty_anonymous = Value::Closure(runmat_value::Closure {
+            function_name: "display_is_not_authority".into(),
+            bound_function: Some(9),
+            source_role: runmat_types::FunctionSourceRole::Anonymous,
+            captures: Vec::new(),
+        });
+        assert_eq!(
+            decode_inline_value(&encode_inline_value(&empty_anonymous).unwrap()).unwrap(),
+            empty_anonymous,
+            "zero-capture closures must not become plain function handles"
+        );
+        let mut tampered_role = encode_inline_value(&empty_anonymous).unwrap();
+        let ValuePayload::Inline(ref mut inline) = tampered_role else {
+            unreachable!("runtime encoding is inline");
+        };
+        let InlineValue::Callable(callable) = inline.as_mut() else {
+            unreachable!("closure encoding is callable");
+        };
+        callable.source_role = runmat_types::FunctionSourceRole::Local;
+        assert!(decode_inline_value(&tampered_role).is_err());
+        let mut tampered_form = encode_inline_value(&empty_anonymous).unwrap();
+        let ValuePayload::Inline(ref mut inline) = tampered_form else {
+            unreachable!("runtime encoding is inline");
+        };
+        let InlineValue::Callable(callable) = inline.as_mut() else {
+            unreachable!("closure encoding is callable");
+        };
+        callable.form = runmat_execution::value::CallableForm::Handle;
+        assert!(decode_inline_value(&tampered_form).is_err());
 
         let mut structure = StructValue::new();
         let service = super::super::RuntimeExecutionService::new();

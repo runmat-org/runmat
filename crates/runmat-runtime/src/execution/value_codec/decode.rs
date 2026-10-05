@@ -452,10 +452,11 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
                 .map_err(|_| ValueCodecError::invalid(path, "invalid bound callable identity"))
         })
         .transpose()?;
-    if !captures.is_empty() {
+    if value.form == runmat_execution::value::CallableForm::Closure {
         return Ok(Value::Closure(Closure {
             function_name: value.qualified_name.clone(),
             bound_function,
+            source_role: value.source_role,
             captures,
         }));
     }

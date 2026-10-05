@@ -895,6 +895,7 @@ pub(crate) mod tests {
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: vec![Value::Num(9.0)],
             }),
             None,
@@ -905,6 +906,7 @@ pub(crate) mod tests {
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: Some(89),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -916,6 +918,7 @@ pub(crate) mod tests {
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: vec![Value::Num(9.0)],
             }),
             None,
@@ -926,6 +929,7 @@ pub(crate) mod tests {
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: vec![Value::Num(9.0)],
             })
         );

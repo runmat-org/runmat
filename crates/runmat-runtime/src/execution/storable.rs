@@ -31,6 +31,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "synthetic_callback".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::OutputList(Vec::new())],
         });
         assert_eq!(

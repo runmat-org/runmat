@@ -129,6 +129,7 @@ pub(crate) mod tests {
         let closure = Value::Closure(Closure {
             function_name: "some_func".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: Vec::new(),
         });
         let class_ref = Value::ClassRef("pkg.Type".into());

@@ -113,6 +113,7 @@ fn arrayfun_error_handler_recovers() {
     let handler = Value::Closure(Closure {
         function_name: "arrayfun_error_handler_fixture".into(),
         bound_function: Some(991),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         captures: vec![Value::Num(42.0)],
     });
     let result = call(

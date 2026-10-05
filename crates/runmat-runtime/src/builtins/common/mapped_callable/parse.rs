@@ -18,6 +18,8 @@ impl MappedCallable {
             Value::BoundFunctionHandle { name, function } => Ok(Self::Closure(Closure {
                 function_name: name,
                 bound_function: Some(function),
+                source_role: user_functions::source_function_for(function)
+                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
                 captures: Vec::new(),
             })),
             Value::Closure(closure) => Ok(Self::bind_closure(closure)),
@@ -44,6 +46,8 @@ impl MappedCallable {
             return Self::Closure(Closure {
                 function_name: name,
                 bound_function: Some(function),
+                source_role: user_functions::source_function_for(function)
+                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
                 captures: Vec::new(),
             });
         }

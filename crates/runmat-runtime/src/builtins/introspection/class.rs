@@ -340,6 +340,7 @@ pub(crate) mod tests {
         let closure = Value::Closure(Closure {
             function_name: "anon".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![],
         });
         assert_eq!(class_name_for_value(&closure), "function_handle");

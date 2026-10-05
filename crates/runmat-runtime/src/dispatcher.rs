@@ -1617,6 +1617,7 @@ mod tests {
         let value = Value::Closure(Closure {
             function_name: "worker".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
         });
         assert!(value_contains_gpu(&value));
@@ -1651,6 +1652,7 @@ mod tests {
         let value = Value::Closure(Closure {
             function_name: "worker".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
         });
         let err = futures::executor::block_on(gather_if_needed_async(&value))

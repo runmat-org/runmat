@@ -72,6 +72,7 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
     let callable = Callable::from_function(Value::Closure(Closure {
         function_name: "pkg.callback".into(),
         bound_function: None,
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         captures: vec![Value::Num(5.0)],
     }))
     .expect("closure callback should parse");
@@ -98,6 +99,7 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
     let callable = Callable::from_function(Value::Closure(Closure {
         function_name: "pkg.callback".into(),
         bound_function: None,
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         captures: vec![Value::Num(5.0)],
     }))
     .expect("closure callback should parse");

@@ -30,18 +30,23 @@ fn metadata_struct(function: String, kind: FunctionHandleKind, file: String) -> 
     Value::Struct(info)
 }
 
+fn role_kind(role: runmat_types::FunctionSourceRole) -> Option<FunctionHandleKind> {
+    Some(match role {
+        runmat_types::FunctionSourceRole::Primary | runmat_types::FunctionSourceRole::Method => {
+            FunctionHandleKind::Simple
+        }
+        runmat_types::FunctionSourceRole::Local => FunctionHandleKind::Scoped,
+        runmat_types::FunctionSourceRole::Nested => FunctionHandleKind::Nested,
+        runmat_types::FunctionSourceRole::Anonymous => FunctionHandleKind::Anonymous,
+        runmat_types::FunctionSourceRole::Unknown | runmat_types::FunctionSourceRole::Synthetic => {
+            return None
+        }
+    })
+}
+
 fn source_metadata(function: usize) -> Option<(FunctionHandleKind, String)> {
     let info = crate::user_functions::source_function_for(function)?;
-    let kind =
-        match info.role {
-            runmat_types::FunctionSourceRole::Primary
-            | runmat_types::FunctionSourceRole::Method => FunctionHandleKind::Simple,
-            runmat_types::FunctionSourceRole::Local => FunctionHandleKind::Scoped,
-            runmat_types::FunctionSourceRole::Nested => FunctionHandleKind::Nested,
-            runmat_types::FunctionSourceRole::Anonymous => FunctionHandleKind::Anonymous,
-            runmat_types::FunctionSourceRole::Unknown
-            | runmat_types::FunctionSourceRole::Synthetic => return None,
-        };
+    let kind = role_kind(info.role)?;
     let file = crate::source_context::source_info(info.source_id)
         .and_then(|source| source.fullpath_name)
         .map_or_else(String::new, |path| path.to_string());
@@ -63,10 +68,11 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
             Ok(metadata_struct(name, kind, file))
         }
         Value::Closure(closure) => {
-            let (kind, file) = closure
-                .bound_function
-                .and_then(source_metadata)
-                .unwrap_or((FunctionHandleKind::Unknown, String::new()));
+            let source = closure.bound_function.and_then(source_metadata);
+            let kind = role_kind(closure.source_role)
+                .or_else(|| source.as_ref().map(|(kind, _)| *kind))
+                .unwrap_or(FunctionHandleKind::Unknown);
+            let file = source.map_or_else(String::new, |(_, file)| file);
             Ok(metadata_struct(closure.function_name, kind, file))
         }
         _ => Err(crate::runtime_descriptor_error(
@@ -172,6 +178,7 @@ mod tests {
         let value = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "@anon0".into(),
             bound_function: Some(1),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: Vec::new(),
         }))
         .expect("functions succeeds");
@@ -225,5 +232,28 @@ mod tests {
                 &Value::String("/tmp/metadata_file.m".into())
             );
         }
+    }
+
+    #[test]
+    fn unbound_closure_uses_value_owned_role_without_name_heuristics() {
+        let anonymous = dispatch_functions(Value::Closure(runmat_value::Closure {
+            function_name: "plain_display_name".into(),
+            bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Anonymous,
+            captures: Vec::new(),
+        }))
+        .expect("anonymous metadata");
+        assert_eq!(
+            field(&anonymous, "type"),
+            &Value::String("anonymous".into())
+        );
+        let unknown = dispatch_functions(Value::Closure(runmat_value::Closure {
+            function_name: "@anon_display_is_not_authority".into(),
+            bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            captures: Vec::new(),
+        }))
+        .expect("unknown metadata");
+        assert_eq!(field(&unknown, "type"), &Value::String("unknown".into()));
     }
 }

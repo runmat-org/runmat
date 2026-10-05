@@ -206,6 +206,7 @@ mod tests {
             let closure = Value::Closure(Closure {
                 function_name: "callback".into(),
                 bound_function: None,
+                source_role: Default::default(),
                 captures: vec![Value::OutputList(vec![handle, listener])],
             });
 

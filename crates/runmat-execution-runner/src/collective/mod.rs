@@ -731,8 +731,13 @@ mod tests {
                 owner_identity: owner.into(),
                 qualified_name: name.into(),
                 callable_digest: runmat_execution::value::CallableValue::identity_digest(
-                    owner, name,
+                    owner,
+                    name,
+                    runmat_execution::value::CallableForm::Handle,
+                    runmat_types::FunctionSourceRole::Unknown,
                 ),
+                form: runmat_execution::value::CallableForm::Handle,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: Vec::new(),
             },
         )))

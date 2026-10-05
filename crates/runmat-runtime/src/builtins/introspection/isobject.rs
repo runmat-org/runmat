@@ -168,6 +168,7 @@ mod tests {
             Value::Closure(Closure {
                 function_name: "anon".into(),
                 bound_function: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: Vec::new(),
             }),
         ];

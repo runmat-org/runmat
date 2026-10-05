@@ -1,8 +1,8 @@
 use super::path::{field_path, index_path};
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, RegisteredData,
-    RegisteredField, SparseValue, StructField, ValuePayload,
+    CallableForm, CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue,
+    RegisteredData, RegisteredField, SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
@@ -173,11 +173,37 @@ fn encode(
             ))
         }
         Value::OutputList(_) => return Err(ValueCodecError::transient_not_portable(path)),
-        Value::FunctionHandle(name) => callable("workspace", name, Vec::new()),
-        Value::ExternalFunctionHandle(name) => callable("external", name, Vec::new()),
-        Value::MethodFunctionHandle(name) => callable("method", name, Vec::new()),
+        Value::FunctionHandle(name) => callable(
+            "workspace",
+            name,
+            CallableForm::Handle,
+            runmat_types::FunctionSourceRole::Unknown,
+            Vec::new(),
+        ),
+        Value::ExternalFunctionHandle(name) => callable(
+            "external",
+            name,
+            CallableForm::Handle,
+            runmat_types::FunctionSourceRole::Unknown,
+            Vec::new(),
+        ),
+        Value::MethodFunctionHandle(name) => callable(
+            "method",
+            name,
+            CallableForm::Handle,
+            runmat_types::FunctionSourceRole::Method,
+            Vec::new(),
+        ),
         Value::BoundFunctionHandle { name, function } => {
-            callable(&format!("bound:{function}"), name, Vec::new())
+            let role = crate::user_functions::source_function_for(*function)
+                .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
+            callable(
+                &format!("bound:{function}"),
+                name,
+                CallableForm::Handle,
+                role,
+                Vec::new(),
+            )
         }
         Value::Closure(closure) => {
             let captures = closure
@@ -190,7 +216,13 @@ fn encode(
                 .bound_function
                 .map(|function| format!("bound:{function}"))
                 .unwrap_or_else(|| "workspace".into());
-            callable(&owner, &closure.function_name, captures)
+            callable(
+                &owner,
+                &closure.function_name,
+                CallableForm::Closure,
+                closure.source_role,
+                captures,
+            )
         }
         Value::ClassRef(_) => {
             return Err(ValueCodecError::unsupported(
@@ -396,12 +428,21 @@ fn le_bytes<T: Copy, const N: usize>(values: &[T], encode: fn(T) -> [u8; N]) -> 
 fn callable(
     owner_identity: &str,
     qualified_name: &str,
+    form: CallableForm,
+    source_role: runmat_types::FunctionSourceRole,
     captures: Vec<ValuePayload>,
 ) -> InlineValue {
     InlineValue::Callable(CallableValue {
         owner_identity: owner_identity.into(),
         qualified_name: qualified_name.into(),
-        callable_digest: CallableValue::identity_digest(owner_identity, qualified_name),
+        callable_digest: CallableValue::identity_digest(
+            owner_identity,
+            qualified_name,
+            form,
+            source_role,
+        ),
+        form,
+        source_role,
         captures,
     })
 }

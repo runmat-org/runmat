@@ -244,20 +244,54 @@ pub struct CallableValue {
     pub owner_identity: String,
     pub qualified_name: String,
     pub callable_digest: Digest,
+    /// Required V2 callable identity fields. Historical V1 callables lack
+    /// these fields and cannot be restored with an invented function role.
+    pub form: CallableForm,
+    pub source_role: runmat_types::FunctionSourceRole,
     pub captures: Vec<ValuePayload>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallableForm {
+    Handle,
+    Closure,
+}
+
 impl CallableValue {
-    pub fn identity_digest(owner_identity: &str, qualified_name: &str) -> Digest {
-        let mut identity = b"runmat-callable-v1\0".to_vec();
+    pub fn identity_digest(
+        owner_identity: &str,
+        qualified_name: &str,
+        form: CallableForm,
+        source_role: runmat_types::FunctionSourceRole,
+    ) -> Digest {
+        let mut identity = b"runmat-callable-v2\0".to_vec();
         identity.extend_from_slice(owner_identity.as_bytes());
         identity.push(0);
         identity.extend_from_slice(qualified_name.as_bytes());
+        identity.push(0);
+        identity.push(match form {
+            CallableForm::Handle => 0,
+            CallableForm::Closure => 1,
+        });
+        identity.push(source_role as u8);
         Digest::sha256(identity)
     }
 
     pub fn validate_identity(&self) -> Result<(), ContractError> {
-        if self.callable_digest != Self::identity_digest(&self.owner_identity, &self.qualified_name)
+        if self.form == CallableForm::Handle && !self.captures.is_empty() {
+            return Err(ContractError::invalid(
+                "callable value",
+                "plain function handles cannot carry closure captures",
+            ));
+        }
+        if self.callable_digest
+            != Self::identity_digest(
+                &self.owner_identity,
+                &self.qualified_name,
+                self.form,
+                self.source_role,
+            )
         {
             return Err(ContractError::invalid(
                 "callable value",

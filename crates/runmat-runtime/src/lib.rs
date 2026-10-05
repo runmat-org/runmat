@@ -1812,6 +1812,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".into(),
             bound_function: Some(42),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: Vec::new(),
         });
 
@@ -1934,6 +1935,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "resolved_target".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(9.0)],
         });
 
@@ -1953,6 +1955,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "sin".into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: Vec::new(),
         });
 
@@ -2571,6 +2574,7 @@ mod tests {
                 Value::Closure(runmat_value::Closure {
                     function_name: "captured_fn".into(),
                     bound_function: None,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
                     captures: Vec::new(),
                 })
             )
@@ -2959,6 +2963,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![
                 base.clone(),
                 Value::String("deal".to_string()),
@@ -2991,6 +2996,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![
                 base.clone(),
                 Value::String("  deal  ".to_string()),
@@ -3019,6 +3025,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![
                 Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 Value::Num(1.0),
@@ -3551,6 +3558,7 @@ mod tests {
             let callback = Value::Closure(runmat_value::Closure {
                 function_name: "event_callback".into(),
                 bound_function: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
                 captures: vec![Value::Num(9.0)],
             });
             let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
@@ -3564,6 +3572,7 @@ mod tests {
                 Value::Closure(runmat_value::Closure {
                     function_name,
                     bound_function: Some(65),
+                    source_role: _,
                     captures,
                 }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
             ));
@@ -3704,6 +3713,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".into(),
             bound_function: Some(9044),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
             captures: vec![Value::Num(1.0)],
         });
 
