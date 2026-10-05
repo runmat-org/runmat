@@ -69,7 +69,7 @@ pub enum BoundFunctionAuthority {
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
         dependencies: Arc<[FunctionDefinitionLease]>,
-        indices: Arc<HashMap<usize, usize>>,
+        indices: Arc<HashMap<usize, Option<usize>>>,
         export: LocalExport,
     },
     Portable {
@@ -145,11 +145,16 @@ impl BoundFunctionAuthority {
         dependencies: Vec<FunctionDefinitionLease>,
         export: LocalExport,
     ) -> Self {
-        let indices = std::iter::once(&definition)
+        let mut indices = HashMap::with_capacity(dependencies.len() + 1);
+        for (index, lease) in std::iter::once(&definition)
             .chain(dependencies.iter())
             .enumerate()
-            .map(|(index, lease)| (lease.function(), index))
-            .collect();
+        {
+            indices
+                .entry(lease.function())
+                .and_modify(|known| *known = None)
+                .or_insert(Some(index));
+        }
         Self::Local {
             issuer,
             definition,
@@ -198,7 +203,7 @@ impl BoundFunctionAuthority {
         else {
             return None;
         };
-        match *indices.get(&function)? {
+        match (*indices.get(&function)?)? {
             0 => Some(definition),
             index => dependencies.get(index - 1),
         }
@@ -301,5 +306,20 @@ mod tests {
             panic!("local graph");
         };
         assert!(Arc::ptr_eq(left, right));
+    }
+
+    #[test]
+    fn conflicting_duplicate_local_lease_id_never_selects_an_arbitrary_body() {
+        let issuer = Arc::new(());
+        let first = Arc::new(FunctionDefinitionOwner::default());
+        let second = Arc::new(FunctionDefinitionOwner::default());
+        let binding = BoundFunctionBinding::local(
+            11,
+            Arc::downgrade(&issuer),
+            FunctionDefinitionOwner::issue(&first, 11),
+            vec![FunctionDefinitionOwner::issue(&second, 11)],
+            LocalExport::Ephemeral,
+        );
+        assert!(binding.authority.local_lease(11).is_none());
     }
 }
