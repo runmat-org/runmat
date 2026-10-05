@@ -8,7 +8,7 @@ const EFFECTS: &[EffectKind] = &[
     EffectKind::MayThrow,
 ];
 
-pub const GETPREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "getpref" },
     category: "io/repl_fs",
