@@ -12,6 +12,7 @@ use runmat_builtins::{
     XLSWRITE_ERROR_RANGE, XLSWRITE_ERROR_SHEET, XLSWRITE_EXPLICIT_GPU_EXTENSION,
     XLSWRITE_NUMERIC_RANGE_EXTENSION,
 };
+use runmat_filesystem::FsPublicationDisposition;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
@@ -78,7 +79,17 @@ async fn xlswrite_builtin(
 
     match write_spreadsheet(runtime.as_ref(), filename, data, rest).await {
         Ok(_) => Ok(status_outputs(true, None)),
-        Err(err) if captures_failure_as_outputs() && !is_cancelled(&err) => {
+        Err(err)
+            if captures_failure_as_outputs()
+                && !is_cancelled(&err)
+                && !matches!(
+                    write_owner::publication_error_disposition(&err),
+                    Some(
+                        FsPublicationDisposition::Published
+                            | FsPublicationDisposition::Indeterminate
+                    )
+                ) =>
+        {
             Ok(status_outputs(false, Some(&err)))
         }
         Err(err) => Err(err),

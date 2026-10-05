@@ -23,6 +23,23 @@ pub(in crate::builtins::io::tabular) fn interruption_error(
     error
 }
 
+/// Inspect the owning typed error chain; diagnostic spelling has no role in
+/// deciding whether a failed call may have changed its destination.
+pub(in crate::builtins::io::tabular) fn error_disposition(
+    error: &RuntimeError,
+) -> Option<FsPublicationDisposition> {
+    let mut current: &(dyn std::error::Error + 'static) = error;
+    loop {
+        if let Some(failure) = current.downcast_ref::<runmat_filesystem::FsPublicationFailure>() {
+            return Some(failure.disposition());
+        }
+        if let Some(interruption) = current.downcast_ref::<PublicationInterruption>() {
+            return Some(interruption.disposition());
+        }
+        current = current.source()?;
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct PublicationInterruption {
     disposition: FsPublicationDisposition,

@@ -18,7 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Values, residency, and status", paragraphs: &[
             "Numeric, sparse, logical, string, character, and heterogeneous cell inputs are supported. All eight native integer classes serialize from exact storage; cell contents must be scalar spreadsheet values.",
             "The operation writes files on the host and is a fusion boundary. Automatically resident values gather through their owning provider; explicit device intent requires RunMat mode. Outputs are host status/message values, not resident arrays.",
-            "`status = xlswrite(...)` returns true on success. `[status, message] = xlswrite(...)` captures a write failure as false and a struct with `message` and `identifier` fields. A statement call raises its error instead of returning status.",
+            "`status = xlswrite(...)` returns true on success. `[status, message] = xlswrite(...)` captures a known pre-publication failure as false and a struct with `message` and `identifier` fields. A statement call raises its error instead of returning status. If publication is known to have committed or its outcome cannot be determined, the call raises an error even when status outputs were requested; do not automatically retry it.",
             "A selected filesystem provider and directory are retained across materialization. Complete-call finite workbook/codec memory evidence is not certified for a constrained host budget.",
             "Historical example (Write a numeric matrix):\nstatus = xlswrite('measurements.xlsx', [1 2 3; 4 5 6]);",
             "Historical example (Write to a named worksheet and range):\nstatus = xlswrite('measurements.xlsx', {'Voltage', 1.5, true}, 'Data', 'B2');",
@@ -49,6 +49,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[
             BuiltinDocumentationLink { label: "xlswrite runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/xlswrite.rs") },
             BuiltinDocumentationLink { label: "Selected-provider writer", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/write_owner.rs") },
+            BuiltinDocumentationLink { label: "Publication outcome", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/tabular/write_owner/publication.rs") },
         ],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Workbook overlay, sheet/range, status capture, and exact integer cells", location: "builtins::io::tabular::xlswrite::tests" }],
         notes: &[],

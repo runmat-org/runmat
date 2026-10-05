@@ -14,6 +14,7 @@ use runmat_filesystem::{FsPublicationDisposition, FsPublicationFailure, FsStaged
 
 #[path = "write_owner/publication.rs"]
 mod publication;
+pub(super) use publication::error_disposition as publication_error_disposition;
 pub(super) use publication::interruption_error as publication_interruption_error;
 
 pub(super) type WriteLock = Arc<AsyncMutex<()>>;
@@ -389,14 +390,12 @@ mod tests {
             interruption.disposition(),
             FsPublicationDisposition::Indeterminate
         );
-        assert!(
-            matches!(
+        assert!(matches!(
                 interruption.source().and_then(|source| source
                     .downcast_ref::<crate::execution::ExecutionServiceError>(
                 )),
                 Some(crate::execution::ExecutionServiceError::Cancelled)
-            )
-        );
+            ));
         assert!(dropped.load(Ordering::SeqCst));
         assert_eq!(provider.read_project_path(&destination).unwrap(), b"old");
     }
