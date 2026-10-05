@@ -100,7 +100,8 @@ pub(super) async fn detect_delimiter(
     let sample = &lines[..lines.len().min(32)];
     let mut best: Option<(f64, Delimiter)> = None;
     for candidate in [',', '\t', ';', '|'] {
-        let mut counts = Vec::new();
+        let mut counts = [0usize; 32];
+        let mut count_len = 0usize;
         for (_, line) in sample {
             let mut fields = 1;
             let mut work = 0;
@@ -118,18 +119,19 @@ pub(super) async fn detect_delimiter(
                 checked_row_work(cooperation, path, work).await?;
             }
             if fields >= 2 {
-                counts.push(fields);
+                counts[count_len] = fields;
+                count_len += 1;
             }
         }
-        if counts.is_empty() {
+        if count_len == 0 {
             continue;
         }
-        let average = counts
+        let average = counts[..count_len]
             .iter()
             .copied()
             .map(|count| count as u128)
             .sum::<u128>() as f64
-            / counts.len() as f64;
+            / count_len as f64;
         if average >= 2.0
             && best
                 .as_ref()
