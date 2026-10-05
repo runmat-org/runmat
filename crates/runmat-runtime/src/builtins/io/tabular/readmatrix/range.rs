@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone)]
 pub(super) struct RangeSpec {
     pub(super) start_row: usize,
     pub(super) start_col: usize,

@@ -275,7 +275,7 @@ fn build_tcpclient_value(
     st.fields
         .insert("UserData".to_string(), default_user_data());
     let mut object = ObjectInstance::new(runmat_builtins::TCPCLIENT_CLASS);
-    object.properties = st.fields;
+    object.properties = st.fields.into_iter().collect();
     Value::Object(object.with_tcp_authority(authority))
 }
 

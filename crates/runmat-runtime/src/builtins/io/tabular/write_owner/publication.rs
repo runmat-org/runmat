@@ -1,7 +1,7 @@
 //! One publication attempt retains its exact poll and commit disposition.
 
 use std::cell::{Cell, RefCell};
-use std::future::{poll_fn, Future};
+use std::future::poll_fn;
 
 use crate::builtins::io::tabular::cooperation::await_io;
 use crate::context::RuntimeContext;

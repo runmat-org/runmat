@@ -500,7 +500,7 @@ fn build_tcpserver_object(
         .insert("UserData".to_string(), options.user_data.clone());
 
     let mut object = ObjectInstance::new(runmat_builtins::TCPSERVER_CLASS);
-    object.properties = st.fields;
+    object.properties = st.fields.into_iter().collect();
     Value::Object(object.with_tcp_authority(authority))
 }
 
