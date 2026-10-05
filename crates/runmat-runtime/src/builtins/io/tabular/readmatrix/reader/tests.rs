@@ -84,6 +84,33 @@ fn borrowed_field_scanner_preserves_quoted_and_multichar_forms() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn numeric_token_borrowed_fast_path_preserves_case_and_separator_semantics() {
+    let default = ReadMatrixOptions::default();
+    assert!(parse_numeric_token("nAn", &default, 1, 1)
+        .expect("mixed-case NaN")
+        .is_nan());
+    assert_eq!(
+        parse_numeric_token("+InFiNiTy", &default, 1, 2).expect("mixed-case infinity"),
+        f64::INFINITY
+    );
+    assert_eq!(
+        parse_integer_numeric_token("9007199254740993", &default, NumericDType::U64, 1, 3)
+            .expect("exact wide integer"),
+        NumericScalar::U64(9_007_199_254_740_993)
+    );
+    let nondefault = ReadMatrixOptions {
+        decimal_separator: ',',
+        thousands_separator: Some('.'),
+        ..ReadMatrixOptions::default()
+    };
+    assert_eq!(
+        parse_numeric_token("1.234,5", &nondefault, 2, 1).expect("grouping and decimal"),
+        1_234.5
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn borrowed_rows_retain_exact_wide_integer_range_and_row_diagnostics() {
     let _lock = runmat_filesystem::provider_override_lock();
     let (_restore, path) = selected_path(b"0,0\n9007199254740993,18446744073709551615\n");

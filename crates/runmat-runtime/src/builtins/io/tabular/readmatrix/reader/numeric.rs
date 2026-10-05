@@ -1,5 +1,6 @@
 use super::super::output::integer_element_dtype;
 use super::*;
+use std::borrow::Cow;
 
 pub(super) fn parse_numeric_token(
     token: &str,
@@ -23,14 +24,19 @@ pub(super) fn parse_numeric_token(
     if normalized.is_empty() {
         return Ok(options.empty_value_f64());
     }
-    let lower = normalized.to_ascii_lowercase();
-    if lower == "nan" {
+    if normalized.eq_ignore_ascii_case("nan") {
         return Ok(f64::NAN);
     }
-    if matches!(lower.as_str(), "inf" | "+inf" | "infinity" | "+infinity") {
+    if ["inf", "+inf", "infinity", "+infinity"]
+        .iter()
+        .any(|value| normalized.eq_ignore_ascii_case(value))
+    {
         return Ok(f64::INFINITY);
     }
-    if matches!(lower.as_str(), "-inf" | "-infinity") {
+    if ["-inf", "-infinity"]
+        .iter()
+        .any(|value| normalized.eq_ignore_ascii_case(value))
+    {
         return Ok(f64::NEG_INFINITY);
     }
     normalized.parse::<f64>().map_err(|_| {
@@ -99,14 +105,19 @@ pub(in crate::builtins::io::tabular::readmatrix) fn parse_integer_numeric_token(
     if normalized.is_empty() {
         return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
     }
-    let lower = normalized.to_ascii_lowercase();
-    if lower == "nan" {
+    if normalized.eq_ignore_ascii_case("nan") {
         return Ok(integer_scalar_from_f64(dtype, f64::NAN));
     }
-    if matches!(lower.as_str(), "inf" | "+inf" | "infinity" | "+infinity") {
+    if ["inf", "+inf", "infinity", "+infinity"]
+        .iter()
+        .any(|value| normalized.eq_ignore_ascii_case(value))
+    {
         return Ok(integer_scalar_from_f64(dtype, f64::INFINITY));
     }
-    if matches!(lower.as_str(), "-inf" | "-infinity") {
+    if ["-inf", "-infinity"]
+        .iter()
+        .any(|value| normalized.eq_ignore_ascii_case(value))
+    {
         return Ok(integer_scalar_from_f64(dtype, f64::NEG_INFINITY));
     }
     let invalid = || {
@@ -255,15 +266,15 @@ fn integer_scalar_from_f64(dtype: NumericDType, value: f64) -> NumericScalar {
     }
 }
 
-fn normalize_numeric_token(token: &str, options: &ReadMatrixOptions) -> String {
-    let mut text = token.to_string();
+fn normalize_numeric_token<'a>(token: &'a str, options: &ReadMatrixOptions) -> Cow<'a, str> {
+    let mut text = Cow::Borrowed(token);
     if let Some(thousands) = options.thousands_separator {
-        if thousands != options.decimal_separator {
-            text = text.chars().filter(|ch| *ch != thousands).collect();
+        if thousands != options.decimal_separator && text.contains(thousands) {
+            text = Cow::Owned(text.chars().filter(|ch| *ch != thousands).collect());
         }
     }
-    if options.decimal_separator != '.' {
-        text = text.replace(options.decimal_separator, ".");
+    if options.decimal_separator != '.' && text.contains(options.decimal_separator) {
+        text = Cow::Owned(text.replace(options.decimal_separator, "."));
     }
     text
 }
