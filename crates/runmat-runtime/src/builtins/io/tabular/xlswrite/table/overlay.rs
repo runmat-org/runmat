@@ -18,13 +18,9 @@ impl XlsTable {
         })?;
         checked_cell_count(required_rows, required_cols, "worksheet")?;
         let mut result = if required_rows > self.rows || required_cols > self.cols {
-            self.resize(
-                required_rows.max(self.rows),
-                required_cols.max(self.cols),
-                cooperation,
-                selected,
-            )
-            .await?
+            let rows = required_rows.max(self.rows);
+            let cols = required_cols.max(self.cols);
+            self.resize(rows, cols, cooperation, selected).await?
         } else {
             self
         };
