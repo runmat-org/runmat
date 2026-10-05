@@ -2,6 +2,7 @@ use super::*;
 use std::borrow::Cow;
 
 mod scan;
+mod bounded;
 use scan::{checked_row_work, collect_data_lines, detect_delimiter, split_fields};
 
 // Bounds synchronous work between checks; the execution service still owns
@@ -14,7 +15,45 @@ pub(super) async fn read_numeric_matrix(
     path: &TabularFsPath,
     options: &ReadMatrixOptions,
 ) -> BuiltinResult<Tensor> {
-    let bytes = read_file_bytes(runtime, cooperation, path).await?;
+    let file = await_io(runtime, BUILTIN_NAME, path.open_read_preferred())
+        .await?
+        .map_err(|source| {
+            readmatrix_error_with_source(
+                &READMATRIX_ERROR_IO_OPEN,
+                format!(
+                    "readmatrix: unable to read '{}': {source}",
+                    path.path().display()
+                ),
+                source,
+            )
+        })?;
+    cooperation.completed(0).await?;
+    match file {
+        TabularReadSource::Bounded(mut source)
+            if normalized_encoding_label(options.encoding.trim()).eq_ignore_ascii_case("utf-8") =>
+        {
+            if source.opened_extent() > MAX_READMATRIX_TEXT_BYTES {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_IO_READ,
+                    format!(
+                        "readmatrix: file exceeds maximum supported text size of {MAX_READMATRIX_TEXT_BYTES} bytes"
+                    ),
+                ));
+            }
+            let geometry = bounded::scan_utf8(&mut source, cooperation, path, options).await?;
+            bounded::fill_utf8(&mut source, &geometry, cooperation, path, options).await
+        }
+        other => read_numeric_matrix_from_bytes(cooperation, path, options, other).await,
+    }
+}
+
+async fn read_numeric_matrix_from_bytes(
+    cooperation: &mut TabularCooperation<'_>,
+    path: &TabularFsPath,
+    options: &ReadMatrixOptions,
+    file: TabularReadSource,
+) -> BuiltinResult<Tensor> {
+    let bytes = read_file_bytes(cooperation, path, file).await?;
     let decoded = decode_text_bytes(&bytes, &options.encoding)?;
     drop(bytes);
     let text = strip_utf8_bom(&decoded);
@@ -150,23 +189,10 @@ pub(super) async fn read_numeric_matrix(
 }
 
 async fn read_file_bytes(
-    runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,
+    file: TabularReadSource,
 ) -> BuiltinResult<Vec<u8>> {
-    let file = await_io(runtime, BUILTIN_NAME, path.open_read_preferred())
-        .await?
-        .map_err(|err| {
-            readmatrix_error_with_source(
-                &READMATRIX_ERROR_IO_OPEN,
-                format!(
-                    "readmatrix: unable to read '{}': {err}",
-                    path.path().display()
-                ),
-                err,
-            )
-        })?;
-    cooperation.completed(0).await?;
     path.check().map_err(|source| {
         readmatrix_error_with_source(
             &READMATRIX_ERROR_IO_READ,

@@ -21,7 +21,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use super::cooperation::{await_io, TabularCooperation};
-use super::path::{TabularFsOwner, TabularFsPath};
+use super::path::{TabularFsOwner, TabularFsPath, TabularReadSource};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};

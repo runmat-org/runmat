@@ -60,7 +60,7 @@ pub(super) async fn collect_data_lines<'a>(
     Ok(lines)
 }
 
-async fn has_nonwhitespace(
+pub(super) async fn has_nonwhitespace(
     line: &str,
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,

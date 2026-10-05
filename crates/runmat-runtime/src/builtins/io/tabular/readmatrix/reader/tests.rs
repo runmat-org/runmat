@@ -115,6 +115,126 @@ fn borrowed_rows_retain_exact_wide_integer_range_and_row_diagnostics() {
     assert!(error.message().contains("line 2 column 2"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn retained_seekable_utf8_scan_auto_detects_delimiter_without_reopening() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let directory = tempfile::tempdir().expect("isolated numeric-text source");
+    let file = directory.path().join("numbers.txt");
+    std::fs::write(&file, b"1;2\r\n3;4\r\n").expect("UTF-8 fixture");
+    let _restore =
+        runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::NativeFsProvider));
+    let selected = TabularFsOwner::capture(Some(&file))
+        .expect("captured provider")
+        .path(file)
+        .expect("selected native source");
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let matrix = block_on(read_numeric_matrix(
+        None,
+        &mut cooperation,
+        &selected,
+        &ReadMatrixOptions::default(),
+    ))
+    .expect("detected semicolon matrix");
+    assert_eq!(matrix.shape, vec![2, 2]);
+    assert_eq!(matrix.as_f64_slice(), Some(&[1.0, 3.0, 2.0, 4.0][..]));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn retained_seekable_utf8_scan_decodes_multibyte_header_across_chunk() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let directory = tempfile::tempdir().expect("isolated numeric-text source");
+    let file = directory.path().join("numbers.txt");
+    let mut input = vec![b'x'; 4094];
+    input.extend_from_slice("😀\n1,2\n".as_bytes());
+    std::fs::write(&file, input).expect("UTF-8 fixture");
+    let _restore =
+        runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::NativeFsProvider));
+    let selected = TabularFsOwner::capture(Some(&file))
+        .expect("captured provider")
+        .path(file)
+        .expect("selected native source");
+    let options = ReadMatrixOptions {
+        num_header_lines: 1,
+        delimiter: Some(Delimiter::Char(',')),
+        ..ReadMatrixOptions::default()
+    };
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let matrix = block_on(read_numeric_matrix(
+        None,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect("valid split UTF-8 code point");
+    assert_eq!(matrix.shape, vec![1, 2]);
+    assert_eq!(matrix.as_f64_slice(), Some(&[1.0, 2.0][..]));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn retained_seekable_utf8_scan_preserves_bom_range_and_exact_wide_integer() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let directory = tempfile::tempdir().expect("isolated numeric-text source");
+    let file = directory.path().join("numbers.csv");
+    std::fs::write(
+        &file,
+        b"\xef\xbb\xbfskip,skip\r\n1,2\r\n9007199254740993,18446744073709551615\r\n",
+    )
+    .expect("UTF-8 fixture");
+    let _restore =
+        runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::NativeFsProvider));
+    let selected = TabularFsOwner::capture(Some(&file))
+        .expect("captured provider")
+        .path(file.clone())
+        .expect("selected native source");
+    let mut options = ReadMatrixOptions::default();
+    options.encoding = "utf-8".to_string();
+    options.num_header_lines = 1;
+    options.delimiter = Some(Delimiter::Char(','));
+    options.set_output_type("uint64").expect("typed output");
+    options.range = Some(super::super::range::parse_range(&Value::from("A2:B2")).unwrap());
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let matrix = block_on(read_numeric_matrix(
+        None,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect("selected exact integer row");
+    assert_eq!(matrix.shape, vec![1, 2]);
+    assert_eq!(
+        matrix.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+    );
+
+    std::fs::write(&file, b"1,2\n3,not-a-number\n").expect("replacement fixture");
+    let error = block_on(read_numeric_matrix(
+        None,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect_err("first pass validates even rows outside requested Range");
+    assert!(error.message().contains("line 2 column 2"));
+
+    let mut malformed = b"skip,skip\nnot-a-number,1\n".to_vec();
+    for _ in 0..31 {
+        malformed.extend_from_slice(b"1,2\n");
+    }
+    malformed.extend_from_slice(b"1,\xff\n");
+    std::fs::write(&file, malformed).expect("later invalid encoding fixture");
+    let error = block_on(read_numeric_matrix(
+        None,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect_err("whole-source encoding error precedes numeric token error");
+    assert!(error.message().contains("invalid for Encoding 'utf-8'"));
+}
+
 struct PendingTurn(Rc<Cell<bool>>);
 
 impl Future for PendingTurn {
