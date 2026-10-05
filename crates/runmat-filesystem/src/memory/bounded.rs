@@ -248,4 +248,24 @@ mod tests {
         assert_eq!(&original, b"first");
         assert_eq!(provider.read_project_path("/source.csv").unwrap(), b"other");
     }
+
+    #[test]
+    fn provider_reset_does_not_retarget_retained_opened_source() {
+        let provider = MemoryFsProvider::new();
+        provider
+            .write_project_path("/source.csv", b"original")
+            .unwrap();
+        let mut opened =
+            futures::executor::block_on(provider.open_bounded_input(Path::new("/source.csv")))
+                .unwrap()
+                .unwrap();
+        provider.reset();
+        provider
+            .write_project_path("/source.csv", b"replacement")
+            .unwrap();
+        let mut bytes = [0u8; 8];
+        opened.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"original");
+        assert_eq!(opened.opened_extent(), 8);
+    }
 }
