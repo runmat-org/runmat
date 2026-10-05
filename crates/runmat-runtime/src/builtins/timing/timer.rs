@@ -6,6 +6,9 @@
 //! path rather than a background event thread; this keeps callback execution
 //! deterministic across native and wasm hosts.
 
+mod property;
+use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility};
+
 use runmat_builtins::{
     BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
@@ -48,22 +51,6 @@ const TIMER_CALLABLE_WAIT: &str = "__runmat_timer_wait";
 const TIMER_CALLABLE_DELETE: &str = "__runmat_timer_delete";
 
 const CALLBACK_PROPS: [&str; 4] = ["TimerFcn", "StartFcn", "StopFcn", "ErrorFcn"];
-const STRING_PROPS: [&str; 5] = [
-    "BusyMode",
-    "ExecutionMode",
-    "Name",
-    "Tag",
-    "ObjectVisibility",
-];
-const NUMERIC_PROPS: [&str; 3] = ["Period", "StartDelay", "TasksToExecute"];
-const READONLY_PROPS: [&str; 5] = [
-    "AveragePeriod",
-    "InstantPeriod",
-    "Running",
-    "TasksExecuted",
-    "Type",
-];
-
 thread_local! {
     static TIMER_REGISTRY: RefCell<Vec<HandleRef>> = const { RefCell::new(Vec::new()) };
     static TIMER_COUNTER: Cell<usize> = const { Cell::new(0) };
@@ -258,22 +245,24 @@ const TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION: runmat_builtins::BuiltinE
 pub const TIMERFIND_EXTENSIONS: [runmat_builtins::BuiltinExtensionDescriptor; 1] =
     [TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION];
 
-const TIMER_INTEGER_PROPERTY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const TIMER_INTEGER_PROPERTY_INPUT: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "Period, StartDelay, or TasksToExecute",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "Numeric timer properties accept native integer scalars. TasksToExecute remains an exact structural integer; duration properties cross one checked seconds boundary.",
-    }];
-const TIMER_INTEGER_USER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+    },
+];
+const TIMER_INTEGER_USER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "UserData",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "UserData accepts arbitrary values and preserves native integer class, shape, and payload without numeric conversion.",
-    }];
+    },
+];
 pub const TIMER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "t = timer(..., numeric_property, integer_value, ...)",
@@ -297,16 +286,17 @@ pub const TIMER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
     },
 ];
 
-const TIMERFIND_INTEGER_FILTER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
+const TIMERFIND_INTEGER_FILTER_INPUT: [BuiltinIntegerInputCapability; 1] = [
+    BuiltinIntegerInputCapability {
         name: "property value",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "Property filters compare integer values exactly, including signed values and values wider than binary64's exact integer range.",
-    }];
-pub const TIMERFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
+    },
+];
+pub const TIMERFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [
+    BuiltinIntegerCapabilityDescriptor {
         form: "timers = timerfind[all](..., property, integer_value, ...)",
         inputs: &TIMERFIND_INTEGER_FILTER_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
@@ -315,7 +305,8 @@ pub const TIMERFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "Native integer filters are normalized to an exact scalar representation and never routed through f64.",
-    }];
+    },
+];
 
 pub const TIMER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TIMER_SIGNATURES,
@@ -619,22 +610,17 @@ fn ensure_timer_class_registered() {
     }
 
     let mut properties = HashMap::new();
-    for name in CALLBACK_PROPS
-        .into_iter()
-        .chain(STRING_PROPS)
-        .chain(NUMERIC_PROPS)
-        .chain(READONLY_PROPS)
-        .chain(["UserData"])
-    {
+    for property in TimerProperty::ALL {
+        let name = property.name();
         properties.insert(
             name.into(),
             crate::class_registry::RuntimeProperty {
                 name: name.into(),
                 is_static: false,
                 is_constant: false,
-                is_dependent: is_timer_mutable_property(name),
+                is_dependent: !property.is_readonly(),
                 get_access: MemberAccess::Public,
-                set_access: if READONLY_PROPS.contains(&name) {
+                set_access: if property.is_readonly() {
                     MemberAccess::Private
                 } else {
                     MemberAccess::Public
@@ -650,13 +636,6 @@ fn ensure_timer_class_registered() {
         properties,
         methods,
     });
-}
-
-fn is_timer_mutable_property(name: &str) -> bool {
-    CALLBACK_PROPS.contains(&name)
-        || STRING_PROPS.contains(&name)
-        || NUMERIC_PROPS.contains(&name)
-        || name == "UserData"
 }
 
 fn default_timer_object(name: String) -> ObjectInstance {
@@ -738,21 +717,24 @@ fn apply_name_value_pairs(
     }
     let mut idx = 0usize;
     while idx < args.len() {
-        let name = canonical_property_name(&value_to_string(&args[idx])?)?;
-        if READONLY_PROPS.contains(&name.as_str()) {
+        let property = canonical_property_name(&value_to_string(&args[idx])?)?;
+        if property.is_readonly() {
             return Err(timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
-                format!("timer: property '{name}' is read-only"),
+                format!("timer: property '{}' is read-only", property.name()),
             ));
         }
-        let value = normalize_property_value(&name, args[idx + 1].clone())?;
-        if !constructor && running_is_on(object) && is_running_readonly_property(&name) {
+        let value = normalize_property_value(property, args[idx + 1].clone())?;
+        if !constructor && running_is_on(object) && property.frozen_while_running() {
             return Err(timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
-                format!("timer: property '{name}' cannot be changed while Running is on"),
+                format!(
+                    "timer: property '{}' cannot be changed while Running is on",
+                    property.name()
+                ),
             ));
         }
-        object.properties.insert(name, value);
+        object.properties.insert(property.name().to_string(), value);
         idx += 2;
     }
     Ok(())
@@ -797,7 +779,7 @@ async fn prepare_timer_name_value_args(args: &[Value], finding: bool) -> Builtin
     for pair in args.chunks_exact(2) {
         let property = canonical_property_name(&value_to_string(&pair[0])?)?;
         prepared.push(pair[0].clone());
-        if NUMERIC_PROPS.contains(&property.as_str()) {
+        if property.is_numeric() {
             if crate::builtins::common::validation::value_contains_explicit_gpu(&pair[1]) {
                 let extension = if finding {
                     &TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION
@@ -821,29 +803,20 @@ async fn prepare_timer_name_value_args(args: &[Value], finding: bool) -> Builtin
     Ok(prepared)
 }
 
-fn canonical_property_name(name: &str) -> BuiltinResult<String> {
+fn canonical_property_name(name: &str) -> BuiltinResult<TimerProperty> {
     let trimmed = name.trim();
-    for prop in CALLBACK_PROPS
-        .into_iter()
-        .chain(STRING_PROPS)
-        .chain(NUMERIC_PROPS)
-        .chain(READONLY_PROPS)
-        .chain(["UserData"])
-    {
-        if prop.eq_ignore_ascii_case(trimmed) {
-            return Ok(prop.to_string());
-        }
-    }
-    Err(timer_error(
-        &TIMER_ERROR_INVALID_PROPERTY,
-        format!("timer: unknown property '{trimmed}'"),
-    ))
+    TimerProperty::parse(trimmed).ok_or_else(|| {
+        timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            format!("timer: unknown property '{trimmed}'"),
+        )
+    })
 }
 
-fn normalize_property_value(name: &str, value: Value) -> BuiltinResult<Value> {
+fn normalize_property_value(name: TimerProperty, value: Value) -> BuiltinResult<Value> {
     match name {
-        "Period" => {
-            let seconds = numeric_scalar(&value, name)?;
+        TimerProperty::Period => {
+            let seconds = numeric_scalar(&value, name.name())?;
             if !seconds.is_finite() || seconds <= 0.001 {
                 return Err(timer_error(
                     &TIMER_ERROR_INVALID_PROPERTY,
@@ -852,8 +825,8 @@ fn normalize_property_value(name: &str, value: Value) -> BuiltinResult<Value> {
             }
             Ok(Value::Num(seconds))
         }
-        "StartDelay" => {
-            let seconds = numeric_scalar(&value, name)?;
+        TimerProperty::StartDelay => {
+            let seconds = numeric_scalar(&value, name.name())?;
             if !seconds.is_finite() || seconds < 0.0 {
                 return Err(timer_error(
                     &TIMER_ERROR_INVALID_PROPERTY,
@@ -862,33 +835,40 @@ fn normalize_property_value(name: &str, value: Value) -> BuiltinResult<Value> {
             }
             Ok(Value::Num(seconds))
         }
-        "TasksToExecute" => {
+        TimerProperty::TasksToExecute => {
             parse_tasks_to_execute_value(&value)?;
             if let Some(integer) = tensor::scalar_integer_value(&value) {
                 Ok(Value::Int(integer))
             } else {
-                Ok(Value::Num(numeric_scalar(&value, name)?.round()))
+                Ok(Value::Num(numeric_scalar(&value, name.name())?.round()))
             }
         }
-        "BusyMode" => match_string_choice(&value, name, &["drop", "error", "queue"]),
-        "ExecutionMode" => match_string_choice(
+        TimerProperty::BusyMode => {
+            parse_choice(&value, name, TimerBusyMode::parse, TimerBusyMode::spelling)
+        }
+        TimerProperty::ExecutionMode => parse_choice(
             &value,
             name,
-            &["singleShot", "fixedRate", "fixedDelay", "fixedSpacing"],
+            TimerExecutionMode::parse,
+            TimerExecutionMode::spelling,
         ),
-        "ObjectVisibility" => match_string_choice(&value, name, &["on", "off"]),
-        "Name" | "Tag" => Ok(Value::String(value_to_string(&value)?)),
-        "TimerFcn" | "StartFcn" | "StopFcn" | "ErrorFcn" => normalize_callback(value, name),
-        "UserData" => Ok(value),
+        TimerProperty::ObjectVisibility => parse_choice(
+            &value,
+            name,
+            TimerVisibility::parse,
+            TimerVisibility::spelling,
+        ),
+        TimerProperty::Name | TimerProperty::Tag => Ok(Value::String(value_to_string(&value)?)),
+        TimerProperty::TimerFcn
+        | TimerProperty::StartFcn
+        | TimerProperty::StopFcn
+        | TimerProperty::ErrorFcn => normalize_callback(value, name.name()),
+        TimerProperty::UserData => Ok(value),
         _ => Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
-            format!("timer: property '{name}' cannot be assigned"),
+            format!("timer: property '{}' cannot be assigned", name.name()),
         )),
     }
-}
-
-fn is_running_readonly_property(name: &str) -> bool {
-    matches!(name, "BusyMode" | "ExecutionMode" | "StartDelay")
 }
 
 fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
@@ -903,21 +883,26 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
         | Value::Cell(_) => Ok(value),
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
-            format!("timer: {name} must be text, a function handle, or a callback cell array, got {other:?}"),
+            format!(
+                "timer: {name} must be text, a function handle, or a callback cell array, got {other:?}"
+            ),
         )),
     }
 }
 
-fn match_string_choice(value: &Value, name: &str, choices: &[&str]) -> BuiltinResult<Value> {
+fn parse_choice<T: Copy>(
+    value: &Value,
+    name: TimerProperty,
+    parse: fn(&str) -> Option<T>,
+    spelling: fn(T) -> &'static str,
+) -> BuiltinResult<Value> {
     let text = value_to_string(value)?;
-    choices
-        .iter()
-        .find(|choice| choice.eq_ignore_ascii_case(text.trim()))
-        .map(|choice| Value::String((*choice).to_string()))
+    parse(&text)
+        .map(|choice| Value::String(spelling(choice).to_string()))
         .ok_or_else(|| {
             timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
-                format!("timer: invalid {name} value '{text}'"),
+                format!("timer: invalid {} value '{text}'", name.name()),
             )
         })
 }
@@ -1104,8 +1089,14 @@ async fn start_one_timer(handle: HandleRef, override_delay: Option<f64>) -> Buil
         return Err(err);
     }
 
-    let execution_mode = string_property(&handle, "ExecutionMode")?;
-    let tasks = if execution_mode.eq_ignore_ascii_case("singleShot") {
+    let execution_mode = TimerExecutionMode::parse(&string_property(&handle, "ExecutionMode")?)
+        .ok_or_else(|| {
+            timer_error(
+                &TIMER_ERROR_INVALID_PROPERTY,
+                "timer: invalid ExecutionMode value",
+            )
+        })?;
+    let tasks = if execution_mode == TimerExecutionMode::SingleShot {
         1usize
     } else {
         parse_tasks_to_execute_value(&property(&handle, "TasksToExecute")?)?
@@ -1266,7 +1257,7 @@ fn find_timers(args: Vec<Value>, include_invisible: bool) -> BuiltinResult<Value
     handles_to_result(matches)
 }
 
-fn parse_filters(args: &[Value]) -> BuiltinResult<Vec<(String, Value)>> {
+fn parse_filters(args: &[Value]) -> BuiltinResult<Vec<(TimerProperty, Value)>> {
     if !args.len().is_multiple_of(2) {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
@@ -1293,9 +1284,9 @@ fn normalize_find_value(value: Value) -> Value {
     }
 }
 
-fn filters_match(handle: &HandleRef, filters: &[(String, Value)]) -> BuiltinResult<bool> {
+fn filters_match(handle: &HandleRef, filters: &[(TimerProperty, Value)]) -> BuiltinResult<bool> {
     for (name, expected) in filters {
-        let actual = normalize_find_value(property(handle, name)?);
+        let actual = normalize_find_value(property(handle, name.name())?);
         if !timer_values_equal(&actual, expected) {
             return Ok(false);
         }
@@ -1470,13 +1461,12 @@ mod tests {
             let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
             assert_eq!(builtin.integer_capabilities.len(), capabilities, "{name}");
             assert_eq!(builtin.extensions.len(), 1, "{name}");
-            assert!(builtin
-                .integer_capabilities
-                .iter()
-                .all(|capability| capability
+            assert!(builtin.integer_capabilities.iter().all(|capability| {
+                capability
                     .inputs
                     .iter()
-                    .all(|input| input.classes.len() == 8)));
+                    .all(|input| input.classes.len() == 8)
+            }));
         }
     }
 
