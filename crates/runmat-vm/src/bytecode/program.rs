@@ -250,6 +250,15 @@ pub struct FunctionArgumentValidation {
 #[derive(Debug, Clone, Default)]
 pub struct FunctionRegistry {
     data: std::sync::Arc<FunctionRegistryData>,
+    static_overlay: Option<std::sync::Arc<StaticDefinitionOverlay>>,
+}
+
+/// Exact bodies reachable through a retained bound value. Dynamic name calls
+/// use the published registry, never these old definitions.
+#[derive(Debug, Clone)]
+struct StaticDefinitionOverlay {
+    authority: runmat_value::BoundFunctionAuthority,
+    bodies: HashMap<FunctionId, FunctionBytecode>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -277,6 +286,7 @@ impl std::ops::Deref for FunctionRegistry {
 
 impl std::ops::DerefMut for FunctionRegistry {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        self.static_overlay = None;
         let data = std::sync::Arc::make_mut(&mut self.data);
         data.execution_stacks.take();
         data
@@ -293,6 +303,7 @@ impl<'de> Deserialize<'de> for FunctionRegistry {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         FunctionRegistryData::deserialize(deserializer).map(|data| Self {
             data: std::sync::Arc::new(data),
+            static_overlay: None,
         })
     }
 }
@@ -328,11 +339,67 @@ impl FunctionRegistry {
                 retired: HashMap::new(),
                 execution_stacks: OnceLock::new(),
             }),
+            static_overlay: None,
         }
     }
 
     pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
+        self.static_overlay
+            .as_ref()
+            .and_then(|overlay| overlay.bodies.get(&function))
+            .or_else(|| self.functions.get(&function))
+    }
+
+    /// The currently published body, regardless of a retained static call
+    /// graph. Name-based and workspace calls must use this lookup.
+    pub fn get_current(&self, function: FunctionId) -> Option<&FunctionBytecode> {
         self.functions.get(&function)
+    }
+
+    pub fn current_view(&self) -> Self {
+        Self {
+            data: std::sync::Arc::clone(&self.data),
+            static_overlay: None,
+        }
+    }
+
+    /// A compiler-bound static edge in a retained body selects its exact
+    /// leased callee. Ordinary current static calls remain numeric because
+    /// their current published bytecode already selects the current body.
+    pub fn static_binding(
+        &self,
+        function: FunctionId,
+    ) -> Option<runmat_value::BoundFunctionBinding> {
+        let overlay = self.static_overlay.as_ref()?;
+        let runmat_value::BoundFunctionAuthority::Local {
+            issuer,
+            definition,
+            dependencies,
+            export,
+        } = &overlay.authority
+        else {
+            return None;
+        };
+        let Some(selected) = std::iter::once(definition)
+            .chain(dependencies.iter())
+            .find(|lease| lease.function() == function.0)
+        else {
+            // A stale or malformed static edge in an old body must not fall
+            // through to the new numeric body at that same ID.
+            return Some(runmat_value::BoundFunctionBinding::unavailable(function.0));
+        };
+        let other_dependencies = std::iter::once(definition)
+            .chain(dependencies.iter())
+            .filter(|lease| lease.function() != function.0)
+            .cloned()
+            .collect();
+        Some(runmat_value::BoundFunctionBinding::local(
+            function.0,
+            issuer.clone(),
+            selected.clone(),
+            other_dependencies,
+            *export,
+        ))
     }
 
     /// A bound value carries the exact definition lease. Numeric IDs only
@@ -375,15 +442,20 @@ impl FunctionRegistry {
         else {
             return None;
         };
-        let mut view = self.clone();
+        let mut bodies = HashMap::with_capacity(dependencies.len() + 1);
         for lease in std::iter::once(definition).chain(dependencies.iter()) {
             let id = FunctionId(lease.function());
             let body = self.get_owned(id, lease)?;
-            view.functions.insert(id, body.clone());
+            bodies.insert(id, body.clone());
         }
         self.get_owned(function, definition)?;
-        view.execution_stacks.take();
-        Some(view)
+        Some(Self {
+            data: std::sync::Arc::clone(&self.data),
+            static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
+                authority: authority.clone(),
+                bodies,
+            })),
+        })
     }
 
     /// Retain the complete statically bound call/closure graph behind a
@@ -506,6 +578,12 @@ impl FunctionRegistry {
 
     /// Returns the stack required by this function and its reachable callees.
     pub fn execution_stack(&self, function: FunctionId) -> runmat_types::ExecutionStackRequirement {
+        if self.static_overlay.is_some() {
+            // The cached published-body graph does not describe retained old
+            // definitions. Until an overlay-specific analysis is available,
+            // choose the conservative native process-stack route.
+            return runmat_types::ExecutionStackRequirement::Process;
+        }
         *self
             .execution_stacks
             .get_or_init(|| {

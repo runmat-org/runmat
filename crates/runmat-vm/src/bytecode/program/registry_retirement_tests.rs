@@ -193,8 +193,29 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
     let old = registry
         .owned_view(FunctionId(1), &authority)
         .expect("old owned definition and helper");
+    assert!(std::sync::Arc::ptr_eq(&old.data, &registry.data));
     assert!(old.get(FunctionId(1)).is_some());
     assert!(old.get(FunctionId(2)).is_some());
+    assert!(old.static_binding(FunctionId(2)).is_some());
+    let helper_binding = old.static_binding(FunctionId(2)).unwrap();
+    assert!(matches!(
+        &helper_binding.authority,
+        runmat_value::BoundFunctionAuthority::Local { definition, .. }
+            if definition.matches(&old.get(FunctionId(2)).unwrap().definition_owner)
+    ));
+    assert!(old.static_binding(FunctionId(5)).is_some());
+    assert!(!old
+        .static_binding(FunctionId(5))
+        .unwrap()
+        .authority
+        .admits_local(&std::sync::Arc::downgrade(&session)));
+    assert_eq!(old.current_view().get(FunctionId(1)), None);
+    assert_eq!(
+        old.current_view()
+            .get(FunctionId(4))
+            .map(|f| f.display_name.as_str()),
+        Some("first")
+    );
     assert_eq!(old.resolve_name("first"), Some(FunctionId(4)));
     assert_eq!(old.resolve_name("second"), Some(FunctionId(5)));
     assert!(registry.get(FunctionId(1)).is_none());
