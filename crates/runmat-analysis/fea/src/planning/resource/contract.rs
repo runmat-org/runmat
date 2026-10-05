@@ -25,7 +25,10 @@ mod accuracy_demand;
 mod acoustic_demand;
 mod electrical_static_demand;
 mod fluid_demand;
-pub use fluid_demand::{FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand};
+pub use fluid_demand::{
+    FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand,
+    FluidTransientBlockResourceDemand,
+};
 mod magnetic_recovery_demand;
 mod nonlinear_recovery_demand;
 pub use nonlinear_recovery_demand::NonlinearFieldRecoveryResourceDemand;
@@ -86,7 +89,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 77;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 78;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -260,6 +263,7 @@ pub enum PartitioningPolicy {
 pub enum FeaResourcePhase {
     AcousticFrequencyAssembly(AnalysisWorkloadIdentity),
     FluidSteadySolve(AnalysisWorkloadIdentity),
+    FluidTransientBlock(AnalysisWorkloadIdentity),
     FluidFieldRecovery(FieldRecoveryRequestIdentity),
     AcousticHarmonic(AnalysisWorkloadIdentity),
     ElectricalStatic(AnalysisWorkloadIdentity),
@@ -363,6 +367,7 @@ pub use observation_demand::{
 pub enum FeaResourceDemand {
     AcousticFrequencyAssembly(AcousticFrequencyAssemblyResourceDemand),
     FluidSteadySolve(FluidSteadySolveResourceDemand),
+    FluidTransientBlock(FluidTransientBlockResourceDemand),
     FluidFieldRecovery(FluidFieldRecoveryResourceDemand),
     AcousticHarmonic(AcousticHarmonicResourceDemand),
     ElectricalStatic(ElectricalStaticResourceDemand),

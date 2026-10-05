@@ -1,7 +1,7 @@
 use super::*;
 use runmat_analysis_core::*;
 impl FluidTransientWorkload {
-    pub(super) fn selected_step(&self) -> AnalysisExecutionResult<&ProcedureStep> {
+    pub(crate) fn selected_step(&self) -> AnalysisExecutionResult<&ProcedureStep> {
         let [step] = self.model.sequence.steps.as_slice() else {
             return Err(invalid(
                 "portable transient fluid requires one authored resource-owning step",
@@ -14,7 +14,7 @@ impl FluidTransientWorkload {
         }
         Ok(step)
     }
-    pub(super) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
+    pub(crate) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
         Ok(self.policy.maximum_resident_bytes.min(
             self.selected_step()?
                 .accuracy

@@ -119,6 +119,7 @@ identity_type!(StructuralBucklingWorkloadIdentity);
 pub enum AnalysisWorkKind {
     SolveNonlinearSolidBlock,
     SolveFluidSteady,
+    SolveFluidTransientBlock,
     SolveThermal,
     SolveAcousticHarmonic,
     AssembleAcousticFrequencyResult,

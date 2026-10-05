@@ -15,23 +15,65 @@ pub fn require_fluid_source_decode_budget(
     plan: &FeaResourcePlan,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<()> {
-    plan.validate_identity()?;
-    let FeaResourceDemand::FluidSteadySolve(demand) = &plan.input.demand else {
-        return Err(AnalysisBridgeError::Identity(
-            "Fluid task resource family differs",
-        ));
-    };
-    if plan.input.phase
-        != runmat_analysis_fea::planning::resource::FeaResourcePhase::FluidSteadySolve(
-            demand.projection.workload,
-        )
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "Fluid solve phase differs from source workload",
-        ));
-    }
-    let kinds = [
+    require_original_fluid_decode_budget(
+        inputs,
+        plan,
+        limits,
         AnalysisNumericalObjectKind::FluidSteadyWorkload,
+    )
+}
+pub fn require_fluid_transient_source_decode_budget(
+    inputs: &[PreparedAnalysisObjects],
+    plan: &FeaResourcePlan,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<()> {
+    require_original_fluid_decode_budget(
+        inputs,
+        plan,
+        limits,
+        AnalysisNumericalObjectKind::FluidTransientBlockWorkload,
+    )
+}
+fn require_original_fluid_decode_budget(
+    inputs: &[PreparedAnalysisObjects],
+    plan: &FeaResourcePlan,
+    limits: ObjectInventoryLimits,
+    kind: AnalysisNumericalObjectKind,
+) -> AnalysisBridgeResult<()> {
+    plan.validate_identity()?;
+    use runmat_analysis_fea::planning::resource::FeaResourcePhase;
+    let (workload, topology_digest, actual_decode_resident_bytes, source_inputs) =
+        match (&plan.input.demand, kind) {
+            (
+                FeaResourceDemand::FluidSteadySolve(d),
+                AnalysisNumericalObjectKind::FluidSteadyWorkload,
+            ) if plan.input.phase == FeaResourcePhase::FluidSteadySolve(d.projection.workload) => (
+                d.projection.workload,
+                d.projection.topology_digest,
+                d.projection.actual_decode_resident_bytes,
+                &d.inputs,
+            ),
+            (
+                FeaResourceDemand::FluidTransientBlock(d),
+                AnalysisNumericalObjectKind::FluidTransientBlockWorkload,
+            ) if plan.input.phase
+                == FeaResourcePhase::FluidTransientBlock(d.projection.workload) =>
+            {
+                (
+                    d.projection.workload,
+                    d.projection.topology_digest,
+                    d.projection.actual_decode_resident_bytes,
+                    &d.inputs,
+                )
+            }
+            _ => {
+                return Err(AnalysisBridgeError::Identity(
+                    "Fluid task resource family or phase differs",
+                ))
+            }
+        };
+    let kinds = [
+        kind,
         AnalysisNumericalObjectKind::Mesh,
         AnalysisNumericalObjectKind::ResourcePlan,
     ];
@@ -53,15 +95,13 @@ pub fn require_fluid_source_decode_budget(
         validate_inventory(&input.objects, limits)?;
         authenticate_fluid_source_objects(input, input.manifest.kind)?;
         match input.manifest.kind {
-            AnalysisNumericalObjectKind::FluidSteadyWorkload
-                if input.manifest.logical_identity != demand.projection.workload.digest() =>
-            {
+            kind if kind == kinds[0] && input.manifest.logical_identity != workload.digest() => {
                 return Err(AnalysisBridgeError::Identity(
                     "Fluid workload closure differs from admitted source",
                 ));
             }
             AnalysisNumericalObjectKind::Mesh
-                if input.manifest.logical_identity != demand.projection.topology_digest =>
+                if input.manifest.logical_identity != topology_digest =>
             {
                 return Err(AnalysisBridgeError::Identity(
                     "Fluid mesh closure differs from admitted source",
@@ -83,8 +123,8 @@ pub fn require_fluid_source_decode_budget(
                 })?;
         }
     }
-    if encoded != demand.inputs.encoded_payload_bytes.0
-        || encoded > demand.inputs.decoded_resident_bytes_admission_budget.0
+    if encoded != source_inputs.encoded_payload_bytes.0
+        || encoded > source_inputs.decoded_resident_bytes_admission_budget.0
     {
         return Err(AnalysisBridgeError::Identity(
             "Fluid original source exceeds admitted decode budget",
@@ -94,9 +134,8 @@ pub fn require_fluid_source_decode_budget(
     // must then rederive serde allocation authority before any typed source decode;
     // a self-hashed carried budget is not evidence of its actual expansion cost.
     let facts = crate::prepared_input_resource_facts_without_resource_plan(inputs)?;
-    if facts != demand.inputs
-        || facts.decoded_resident_bytes_admission_budget
-            < demand.projection.actual_decode_resident_bytes
+    if &facts != source_inputs
+        || facts.decoded_resident_bytes_admission_budget < actual_decode_resident_bytes
     {
         return Err(AnalysisBridgeError::Identity(
             "Fluid actual source decode profile differs from admitted budget",

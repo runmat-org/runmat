@@ -19,7 +19,7 @@ mod chain;
 mod closed_reference;
 mod pressure_state;
 
-fn task(
+pub(crate) fn task(
     nonzero: bool,
     chunk: usize,
 ) -> (

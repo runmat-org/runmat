@@ -82,6 +82,10 @@ pub fn build_resource_plan(
             )
         }
         (
+            FeaResourcePhase::FluidTransientBlock(workload),
+            FeaResourceDemand::FluidTransientBlock(demand),
+        ) if *workload == demand.projection.workload => fluid::transient(input.clone(), demand),
+        (
             FeaResourcePhase::FluidSteadySolve(workload),
             FeaResourceDemand::FluidSteadySolve(demand),
         ) if *workload == demand.projection.workload => fluid::solve(input.clone(), demand),

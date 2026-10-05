@@ -4,12 +4,19 @@ mod accuracy;
 mod acoustic;
 mod electrical_static;
 mod fluid;
+pub(crate) mod fluid_transient;
+pub use contract::FluidTransientBlockResourceDemand;
 pub use contract::{FluidFieldRecoveryResourceDemand, FluidSteadySolveResourceDemand};
 pub use fluid::{
     build_fluid_field_recovery_resource_plan, build_fluid_steady_resource_plan,
     derive_fluid_steady_resource_projection, fluid_field_recovery_shape,
     fluid_steady_result_payload_bytes_upper_bound, validate_fluid_steady_prepared_facts,
     FluidSteadyResourceProjection, PreparedFluidSteadyResourceFacts,
+};
+pub use fluid_transient::{
+    build_fluid_transient_block_resource_plan, derive_fluid_transient_block_resource_projection,
+    prepare_fluid_transient_resources, FluidTransientBlockResourceProjection,
+    PreparedFluidTransientResources,
 };
 mod magnetic_recovery;
 mod magnetic_static;

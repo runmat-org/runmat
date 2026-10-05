@@ -37,6 +37,8 @@ pub enum AnalysisNumericalObjectKind {
     NonlinearSolidBlockArtifact,
     NonlinearSolidStudyCompletion,
     FluidSteadyWorkload,
+    FluidTransientBlockWorkload,
+    FluidTransientCheckpoint,
     FluidStudyCompletion,
     AcousticStudyCompletion,
     ElectricalStudyCompletion,

@@ -11,7 +11,7 @@ use crate::{
 use runmat_analysis_core::{AnalysisConstraint, AnalysisModel, ProcedureSettings, ProcedureStepId};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 /// Frozen numerical intent borrowing original authority and initial U/p-reference/p/q.
 /// The selected range indexes intervals; [a,b) ends at schedule point b.
@@ -37,7 +37,7 @@ pub struct FluidTransientBlockResult {
     identity: Digest,
     start_ordinal: usize,
     end_ordinal: usize,
-    original: Vec<CanonicalFluidResult>,
+    original: Arc<Vec<CanonicalFluidResult>>,
 }
 impl FluidTransientBlockResult {
     /// Structural transport only. Original source-bound recovery remains mandatory.
@@ -218,7 +218,7 @@ impl<'a> FluidTransientBlock<'a> {
             identity: self.identity,
             start_ordinal: self.range.start,
             end_ordinal: self.range.end,
-            original,
+            original: Arc::new(original),
         })
     }
     /// Re-evaluate every original interval, borrowing its retained original predecessor.

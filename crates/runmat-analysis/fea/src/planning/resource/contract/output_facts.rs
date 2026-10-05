@@ -9,6 +9,10 @@ impl FeaResourceDemand {
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
             (
+                Self::FluidTransientBlock(demand),
+                AnalysisNumericalObjectKind::FluidTransientCheckpoint,
+            ) => Some(&demand.output),
+            (
                 Self::StructuralNonlinearPipeline(demand),
                 AnalysisNumericalObjectKind::NumericalReceipt,
             ) => match &demand.block_transport {

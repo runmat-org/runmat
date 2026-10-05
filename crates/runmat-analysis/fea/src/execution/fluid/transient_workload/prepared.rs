@@ -1,10 +1,10 @@
 use super::*;
 use crate::{admission::AnalysisRunIdentity, physics::cfd::canonical::CanonicalFluidInitialState};
 pub struct PreparedFluidTransient<'a> {
-    pub(super) workload: &'a FluidTransientWorkload,
-    pub(super) source: super::super::source::PreparedFluidSource,
-    pub(super) initial: CanonicalFluidInitialState,
-    pub(super) formulation: AnalysisRunIdentity,
+    pub(crate) workload: &'a FluidTransientWorkload,
+    pub(crate) source: super::super::source::PreparedFluidSource,
+    pub(crate) initial: CanonicalFluidInitialState,
+    pub(crate) formulation: AnalysisRunIdentity,
 }
 impl PreparedFluidTransient<'_> {
     pub fn initial_state(&self) -> &CanonicalFluidInitialState {

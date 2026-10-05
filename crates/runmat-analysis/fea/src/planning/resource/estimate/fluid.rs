@@ -95,3 +95,40 @@ pub(super) fn recovery(
         ),
     )
 }
+
+pub(super) fn transient(
+    input: FeaResourcePlanningInput,
+    demand: &crate::planning::resource::FluidTransientBlockResourceDemand,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let p = &demand.projection;
+    if p.start_interval >= p.end_interval
+        || p.charged_operator_work == 0
+        || p.phase_resident_bytes.0 == 0
+        || demand.inputs.encoded_payload_bytes != p.canonical_input_bytes
+        || demand.inputs.decoded_resident_bytes_admission_budget < p.actual_decode_resident_bytes
+        || demand.output.encoded_payload_bytes_upper_bound != p.checkpoint_encoded_bytes
+        || demand.output.construction_resident_bytes_admission_budget < p.checkpoint_resident_bytes
+        || !input.worker.accelerators.is_empty()
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "fluid transient original host demand differs".into(),
+        ));
+    }
+    let retained = ByteCount(add(
+        demand.inputs.transport_closure_bytes.0,
+        implicit_resource_plan_input_facts()?
+            .transport_closure_bytes
+            .0,
+        "fluid transient input transport",
+    )?);
+    build_host_phase_resource_plan(
+        input,
+        HostPhaseAccounting::host_only(
+            p.topology_digest,
+            &demand.inputs,
+            p.phase_resident_bytes,
+            retained,
+            &[&demand.output],
+        ),
+    )
+}

@@ -69,8 +69,7 @@ fn ramp() -> Signal<Velocity> {
         provenance: SignalProvenance::Authored,
     }
 }
-#[test]
-fn transient_workload_retains_authored_initial_time_source_properties_and_cold_original_history() {
+pub(super) fn accelerating_transient() -> (FluidTransientWorkload, SolverMeshArtifact) {
     let (mut w, m) = authored_transient();
     w.model.signals.push(PhysicalSignal::Velocity(ramp()));
     for constraint in &mut w.model.constraints {
@@ -105,6 +104,11 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
             value: InitialValue::Uniform(Pressure::new(101325.)),
             applies_before_step_id: "advance".into(),
         }));
+    (w, m)
+}
+#[test]
+fn transient_workload_retains_authored_initial_time_source_properties_and_cold_original_history() {
+    let (w, m) = accelerating_transient();
     let cold_workload =
         FluidTransientWorkload::from_canonical_bytes(&w.canonical_bytes().unwrap()).unwrap();
     assert_eq!(cold_workload, w);

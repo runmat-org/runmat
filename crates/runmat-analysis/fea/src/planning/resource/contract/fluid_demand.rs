@@ -22,3 +22,11 @@ pub struct FluidFieldRecoveryResourceDemand {
     pub inputs: PreparedInputResourceFacts,
     pub output: PreparedOutputResourceFacts,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FluidTransientBlockResourceDemand {
+    pub projection: crate::planning::resource::FluidTransientBlockResourceProjection,
+    pub inputs: PreparedInputResourceFacts,
+    pub output: PreparedOutputResourceFacts,
+}

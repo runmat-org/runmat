@@ -20,6 +20,16 @@ mod fluid_source_admission;
 mod fluid_steady_plan;
 mod fluid_steady_result;
 mod fluid_steady_task;
+mod fluid_transient_plan;
+mod fluid_transient_task;
+pub use fluid_transient_plan::{
+    prepare_fluid_transient_inputs, project_fluid_transient_checkpoint_output,
+    rederive_fluid_transient_resource_plan, require_fluid_transient_source_closure,
+    PreparedFluidTransientInputs,
+};
+pub use fluid_transient_task::{
+    prepare_fluid_transient_task, FluidTransientTaskPreparation, PreparedFluidTransientTask,
+};
 mod nonlinear_block;
 mod nonlinear_study;
 mod study_closure;
@@ -72,7 +82,9 @@ pub use fluid_field_recovery::{
     require_fluid_recovery_source_decode_budget, FluidFieldRecoveryPreparation,
     PreparedFluidFieldRecovery,
 };
-pub use fluid_source_admission::require_fluid_source_decode_budget;
+pub use fluid_source_admission::{
+    require_fluid_source_decode_budget, require_fluid_transient_source_decode_budget,
+};
 pub use fluid_steady_plan::{
     prepare_fluid_steady_inputs, rederive_fluid_steady_resource_plan, PreparedFluidSteadyInputs,
 };

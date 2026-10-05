@@ -613,4 +613,5 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
 
 mod closed_reference;
 
+mod checkpoint;
 mod transient_workload;

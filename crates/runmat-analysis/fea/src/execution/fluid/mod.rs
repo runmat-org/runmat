@@ -10,7 +10,11 @@ pub use receipt::{
 mod profile;
 mod result;
 pub use fields::fluid_native_field_definition_inventory;
+mod checkpoint;
 mod source;
+pub use checkpoint::{
+    FluidTransientBlockWorkload, FluidTransientCheckpoint, PreparedFluidTransientContinuation,
+};
 #[cfg(test)]
 pub(crate) mod tests;
 mod time_block;

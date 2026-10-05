@@ -1,3 +1,4 @@
+mod fluid;
 use runmat_analysis_core::{AnalysisModel, AnalysisSequence, ProcedureStep};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -368,13 +369,6 @@ impl NumericalPlanIdentity {
         topology: Digest,
     ) -> AnalysisExecutionResult<Self> {
         Self::derive("acoustic-frequency-numerical-plan", &(workload, topology))
-    }
-    /// Original steady finite-volume workload and mesh; independent of placement/chunks.
-    pub fn from_fluid_steady_workload(
-        workload: AnalysisWorkloadIdentity,
-        topology: Digest,
-    ) -> AnalysisExecutionResult<Self> {
-        Self::derive("fluid-steady-numerical-plan", &(workload, topology))
     }
     /// Original electric-phasor Maxwell workload and mesh, never worker placement.
     pub fn from_maxwell_harmonic_workload(
