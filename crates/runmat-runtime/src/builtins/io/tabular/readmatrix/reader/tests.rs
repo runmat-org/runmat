@@ -84,6 +84,32 @@ fn borrowed_field_scanner_preserves_quoted_and_multichar_forms() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn staged_field_scanner_reuses_exact_scratch_without_retaining_field_text() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let (_restore, path) = selected_path(b"1\n");
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let mut scratch = crate::context::host_effect::ExactHostEffectBytes::test_buffer(64);
+    scratch.append(&[0xff]).expect("seed invalid scratch bytes");
+    let mut seen = Vec::new();
+    let count = block_on(scan::for_each_field_ref(
+        "\"1,2\",3,\"4\"\"5\"",
+        &Delimiter::Char(','),
+        &mut cooperation,
+        &path,
+        Some(&mut scratch),
+        |_, field| {
+            seen.push(field.as_str().to_owned());
+            Ok(())
+        },
+    ))
+    .expect("staged quoted fields");
+    assert_eq!(count, 3);
+    assert_eq!(seen, ["1,2", "3", "4\"5"]);
+    assert!(scratch.as_bytes().is_empty());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn numeric_token_borrowed_fast_path_preserves_case_and_separator_semantics() {
     let default = ReadMatrixOptions::default();
     assert!(parse_numeric_token("nAn", &default, 1, 1)

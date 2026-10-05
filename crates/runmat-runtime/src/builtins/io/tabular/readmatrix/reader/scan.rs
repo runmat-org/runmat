@@ -1,12 +1,13 @@
 //! Borrowed text rows and bounded field scanning for one readmatrix call.
 
-use std::borrow::Cow;
-
 use super::{
     readmatrix_error_with, readmatrix_error_with_source, Delimiter, TabularCooperation,
     TabularFsPath, READMATRIX_ERROR_IO_READ, READMATRIX_ERROR_TENSOR_BUILD, ROW_WORK_CHUNK,
 };
 use crate::{BuiltinResult, RuntimeError};
+
+mod fields;
+pub(super) use fields::{for_each_field, for_each_field_ref, split_fields};
 
 fn field_overflow() -> RuntimeError {
     readmatrix_error_with(
@@ -169,166 +170,4 @@ pub(super) async fn detect_delimiter(
         }
     }
     Ok(None)
-}
-
-pub(super) async fn split_fields<'a>(
-    line: &'a str,
-    delimiter: &Delimiter,
-    cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
-) -> BuiltinResult<Vec<Cow<'a, str>>> {
-    let mut fields = Vec::new();
-    for_each_field(line, delimiter, cooperation, path, |_, field| {
-        fields.push(field);
-        Ok(())
-    })
-    .await?;
-    Ok(fields)
-}
-
-/// A single tokenizer authority for both the legacy collected route and the
-/// bounded scan/fill route. The latter need not retain a row-sized field Vec.
-pub(super) async fn for_each_field<'a>(
-    line: &'a str,
-    delimiter: &Delimiter,
-    cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
-    mut visit: impl FnMut(usize, Cow<'a, str>) -> BuiltinResult<()>,
-) -> BuiltinResult<usize> {
-    match delimiter {
-        Delimiter::Char(ch) => visit_char_fields(line, *ch, cooperation, path, &mut visit).await,
-        Delimiter::String(pattern) => {
-            visit_string_fields(line, pattern, cooperation, path, &mut visit).await
-        }
-        Delimiter::Whitespace => visit_whitespace_fields(line, cooperation, path, &mut visit).await,
-    }
-}
-
-async fn visit_char_fields<'a>(
-    line: &'a str,
-    delimiter: char,
-    cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
-    visit: &mut impl FnMut(usize, Cow<'a, str>) -> BuiltinResult<()>,
-) -> BuiltinResult<usize> {
-    let mut count = 0usize;
-    let mut start = 0;
-    let mut segment_start = 0;
-    let mut owned: Option<String> = None;
-    let mut in_quotes = false;
-    let mut chars = line.char_indices().peekable();
-    let mut work = 0;
-    while let Some((index, ch)) = chars.next() {
-        work += ch.len_utf8();
-        if ch == '"' {
-            let value = owned.get_or_insert_with(String::new);
-            value.push_str(&line[segment_start..index]);
-            if in_quotes && chars.peek().is_some_and(|(_, next)| *next == '"') {
-                let (_, escaped) = chars.next().expect("peeked escaped quote");
-                work += escaped.len_utf8();
-                value.push('"');
-                segment_start = index + ch.len_utf8() + escaped.len_utf8();
-            } else {
-                in_quotes = !in_quotes;
-                segment_start = index + ch.len_utf8();
-            }
-        } else if ch == delimiter && !in_quotes {
-            let field = match owned.take() {
-                Some(mut value) => {
-                    value.push_str(&line[segment_start..index]);
-                    Cow::Owned(value)
-                }
-                None => Cow::Borrowed(&line[start..index]),
-            };
-            visit(count, field)?;
-            count = count.checked_add(1).ok_or_else(field_overflow)?;
-            start = index + ch.len_utf8();
-            segment_start = start;
-        }
-        if work >= ROW_WORK_CHUNK {
-            checked_row_work(cooperation, path, work).await?;
-            work = 0;
-        }
-    }
-    let field = match owned {
-        Some(mut value) => {
-            value.push_str(&line[segment_start..]);
-            Cow::Owned(value)
-        }
-        None => Cow::Borrowed(&line[start..]),
-    };
-    visit(count, field)?;
-    count = count.checked_add(1).ok_or_else(field_overflow)?;
-    checked_row_work(cooperation, path, work).await?;
-    Ok(count)
-}
-
-async fn visit_string_fields<'a>(
-    line: &'a str,
-    pattern: &str,
-    cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
-    visit: &mut impl FnMut(usize, Cow<'a, str>) -> BuiltinResult<()>,
-) -> BuiltinResult<usize> {
-    let mut count = 0usize;
-    let mut start = 0;
-    let mut index = 0;
-    let mut work = 0;
-    while index < line.len() {
-        if line[index..].starts_with(pattern) {
-            visit(count, Cow::Borrowed(&line[start..index]))?;
-            count = count.checked_add(1).ok_or_else(field_overflow)?;
-            index += pattern.len();
-            start = index;
-            work += pattern.len();
-        } else {
-            let width = line[index..]
-                .chars()
-                .next()
-                .expect("remaining text")
-                .len_utf8();
-            index += width;
-            work += width;
-        }
-        if work >= ROW_WORK_CHUNK {
-            checked_row_work(cooperation, path, work).await?;
-            work = 0;
-        }
-    }
-    visit(count, Cow::Borrowed(&line[start..]))?;
-    count = count.checked_add(1).ok_or_else(field_overflow)?;
-    checked_row_work(cooperation, path, work).await?;
-    Ok(count)
-}
-
-async fn visit_whitespace_fields<'a>(
-    line: &'a str,
-    cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
-    visit: &mut impl FnMut(usize, Cow<'a, str>) -> BuiltinResult<()>,
-) -> BuiltinResult<usize> {
-    let mut count = 0usize;
-    let mut start = None;
-    let mut work = 0;
-    for (index, ch) in line.char_indices() {
-        if ch.is_whitespace() {
-            if let Some(begin) = start.take() {
-                visit(count, Cow::Borrowed(&line[begin..index]))?;
-                count = count.checked_add(1).ok_or_else(field_overflow)?;
-            }
-        } else if start.is_none() {
-            start = Some(index);
-        }
-        work += ch.len_utf8();
-        if work >= ROW_WORK_CHUNK {
-            checked_row_work(cooperation, path, work).await?;
-            work = 0;
-        }
-    }
-    if let Some(begin) = start {
-        visit(count, Cow::Borrowed(&line[begin..]))?;
-        count = count.checked_add(1).ok_or_else(field_overflow)?;
-    }
-    checked_row_work(cooperation, path, work).await?;
-    Ok(count)
 }

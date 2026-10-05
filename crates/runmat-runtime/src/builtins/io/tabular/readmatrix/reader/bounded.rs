@@ -76,6 +76,7 @@ pub(super) async fn scan_utf8(
     options: &ReadMatrixOptions,
     staged_line: Option<ExactHostEffectBytes>,
     staged_samples: Option<ExactHostEffectBytes>,
+    mut staged_field: Option<ExactHostEffectBytes>,
 ) -> BuiltinResult<BoundedScanGeometry> {
     let mut reader = RowReader::new(source, staged_line);
     let mut sample = SampleRows::new(staged_samples);
@@ -122,6 +123,7 @@ pub(super) async fn scan_utf8(
             options,
             cooperation,
             path,
+            staged_field.as_mut(),
         )
         .await;
         match result {
@@ -147,6 +149,7 @@ pub(super) async fn scan_utf8(
                 options,
                 cooperation,
                 path,
+                staged_field.as_mut(),
             )
             .await
             {
@@ -179,15 +182,29 @@ async fn validate_row(
     options: &ReadMatrixOptions,
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,
+    staged_field: Option<&mut ExactHostEffectBytes>,
 ) -> BuiltinResult<usize> {
-    scan::for_each_field(text, delimiter, cooperation, path, |index, field| {
-        if let Some(dtype) = integer_dtype {
-            parse_integer_numeric_token(&field, options, dtype, line_number, index + 1)?;
-        } else {
-            validate_numeric_token(&field, options, line_number, index + 1)?;
-        }
-        Ok(())
-    })
+    scan::for_each_field_ref(
+        text,
+        delimiter,
+        cooperation,
+        path,
+        staged_field,
+        |index, field| {
+            if let Some(dtype) = integer_dtype {
+                parse_integer_numeric_token(
+                    field.as_str(),
+                    options,
+                    dtype,
+                    line_number,
+                    index + 1,
+                )?;
+            } else {
+                validate_numeric_token(field.as_str(), options, line_number, index + 1)?;
+            }
+            Ok(())
+        },
+    )
     .await
 }
 

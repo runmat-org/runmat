@@ -41,6 +41,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     path: &TabularFsPath,
     options: &ReadMatrixOptions,
     staged_line: Option<ExactHostEffectBytes>,
+    mut staged_field: Option<ExactHostEffectBytes>,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
     let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
@@ -80,11 +81,12 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
             integer: &mut integer,
             floating: &mut floating,
         };
-        let field_count = scan::for_each_field(
+        let field_count = scan::for_each_field_ref(
             reader.text(),
             &geometry.delimiter,
             cooperation,
             path,
+            staged_field.as_mut(),
             |source_col, field| {
                 if selected
                     && semantic_error.is_none()
@@ -92,7 +94,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
                     && source_col - first_col < cols
                 {
                     if let Err(error) = target.write(
-                        field.as_ref(),
+                        field.as_str(),
                         source_col,
                         data_row - first_row,
                         line_number,
