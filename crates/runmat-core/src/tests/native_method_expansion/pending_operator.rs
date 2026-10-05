@@ -59,15 +59,35 @@ fn with_operator(test: impl FnOnce(&mut RunMatSession, &crate::ExecutableUnit, A
             .expect("write operator class");
         // Companion class discovery is tied to a real primary source path.
         // The compiled in-memory source must also exist beside its class file.
-        std::fs::write(directory.path().join("pendingOperator.m"), SOURCE)
+        std::fs::write(directory.path().join("pending_operator_driver.m"), SOURCE)
             .expect("write operator source");
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("PendingOperator.m")).unwrap(),
+            CLASS
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("pending_operator_driver.m")).unwrap(),
+            SOURCE
+        );
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
         let _cwd = super::super::push_cwd(directory.path());
         let mut session = RunMatSession::with_options(false, false).expect("operator session");
         let unit = block_on(session.compile_executable_unit(
-            ExecutableSource::new("pending-operator@1", "pendingOperator.m", SOURCE),
+            ExecutableSource::new("pending-operator@1", "pending_operator_driver.m", SOURCE),
             None,
         ))
         .expect("compile operator functions");
+        assert!(
+            unit.bytecode()
+                .instructions
+                .iter()
+                .any(|instruction| matches!(
+                    instruction,
+                    runmat_vm::Instr::RegisterClass { name, .. }
+                        if name.display_name() == "PendingOperator"
+                )),
+            "compiled native unit must retain the companion class registration"
+        );
         let calls = Arc::new(AtomicUsize::new(0));
         test(&mut session, &unit, calls);
     });
