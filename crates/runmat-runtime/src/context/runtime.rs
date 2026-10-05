@@ -439,9 +439,26 @@ impl RuntimeContext {
         super::ActiveCatchFuture::new(self, exception, future)
     }
 
+    pub fn scope_active_catch_shared<F: Future>(
+        &self,
+        exception: Option<Rc<runmat_value::MException>>,
+        future: F,
+    ) -> super::ActiveCatchFuture<F> {
+        super::ActiveCatchFuture::new_shared(self, exception, future)
+    }
+
     pub fn enter_active_catch(
         &self,
         exception: Option<runmat_value::MException>,
+    ) -> super::ActiveCatchGuard {
+        super::ActiveCatchGuard::enter(self.local_identity(), exception.map(Rc::new))
+    }
+
+    /// Enter one synchronous poll with an already-owned exception. This is
+    /// used by execution engines to avoid cloning exception payloads per poll.
+    pub fn enter_active_catch_shared(
+        &self,
+        exception: Option<Rc<runmat_value::MException>>,
     ) -> super::ActiveCatchGuard {
         super::ActiveCatchGuard::enter(self.local_identity(), exception)
     }

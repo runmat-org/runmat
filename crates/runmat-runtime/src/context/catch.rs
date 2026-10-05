@@ -5,45 +5,96 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::MException;
 use std::cell::RefCell;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 
 runmat_thread_local! {
-    static ACTIVE_CATCHES: RefCell<Vec<(RuntimeContextLocalId, Option<MException>)>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_CATCHES: RefCell<Vec<ActiveCatchFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+struct ActiveCatchFrame {
+    token: u64,
+    owner: RuntimeContextLocalId,
+    exception: Option<Rc<MException>>,
 }
 
 #[must_use]
+/// A thread-local scope that cannot cross threads.
+///
+/// ```compile_fail
+/// fn require_send<T: Send>() {}
+/// require_send::<runmat_runtime::context::ActiveCatchGuard>();
+/// ```
 pub struct ActiveCatchGuard {
-    owner: RuntimeContextLocalId,
+    token: u64,
+    _local_affinity: PhantomData<Rc<()>>,
 }
 
 impl ActiveCatchGuard {
-    pub(super) fn enter(owner: RuntimeContextLocalId, exception: Option<MException>) -> Self {
-        ACTIVE_CATCHES.with(|stack| stack.borrow_mut().push((owner, exception)));
-        Self { owner }
+    pub(super) fn enter(owner: RuntimeContextLocalId, exception: Option<Rc<MException>>) -> Self {
+        let token = ACTIVE_CATCHES.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            let mut token = stack.last().map_or(1, |frame| frame.token.wrapping_add(1));
+            while stack.iter().any(|frame| frame.token == token) {
+                token = token.wrapping_add(1);
+            }
+            stack.push(ActiveCatchFrame {
+                token,
+                owner,
+                exception,
+            });
+            token
+        });
+        Self {
+            token,
+            _local_affinity: PhantomData,
+        }
     }
 }
 
 impl Drop for ActiveCatchGuard {
     fn drop(&mut self) {
         ACTIVE_CATCHES.with(|stack| {
-            let popped = stack.borrow_mut().pop();
-            debug_assert_eq!(popped.as_ref().map(|(owner, _)| *owner), Some(self.owner));
+            let mut stack = stack.borrow_mut();
+            let position = stack
+                .iter()
+                .rposition(|frame| frame.token == self.token)
+                .expect("active catch guard must own its stack frame");
+            stack.remove(position);
         });
     }
 }
 
+/// Poll/drop scope tied to its originating thread-local runtime.
+///
+/// ```compile_fail
+/// fn require_send<T: Send>() {}
+/// require_send::<runmat_runtime::context::ActiveCatchFuture<std::future::Ready<()>>>();
+/// ```
 pub struct ActiveCatchFuture<F> {
     owner: RuntimeContextLocalId,
-    exception: Option<MException>,
+    exception: Option<Rc<MException>>,
+    // An active catch scope is bound to this thread-local runtime owner.
+    _local_affinity: PhantomData<Rc<()>>,
     future: Option<Pin<Box<F>>>,
 }
 
 impl<F> ActiveCatchFuture<F> {
     pub(super) fn new(runtime: &RuntimeContext, exception: Option<MException>, future: F) -> Self {
+        Self::new_shared(runtime, exception.map(Rc::new), future)
+    }
+
+    pub(super) fn new_shared(
+        runtime: &RuntimeContext,
+        exception: Option<Rc<MException>>,
+        future: F,
+    ) -> Self {
         Self {
             owner: runtime.local_identity(),
             exception,
+            _local_affinity: PhantomData,
             future: Some(Box::pin(future)),
         }
     }
@@ -85,8 +136,8 @@ pub(super) fn active_for(runtime: &RuntimeContext) -> Option<MException> {
             .borrow()
             .iter()
             .rev()
-            .find(|(owner, _)| *owner == runtime.local_identity())
-            .and_then(|(_, exception)| exception.clone())
+            .find(|frame| frame.owner == runtime.local_identity())
+            .and_then(|frame| frame.exception.as_deref().cloned())
     })
 }
 
@@ -160,5 +211,21 @@ mod tests {
         drop(pending);
         assert_eq!(drops.get(), 1);
         assert!(first.active_catch_exception().is_none());
+    }
+
+    #[test]
+    fn an_out_of_order_guard_removes_only_its_own_frame() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let outer = runtime
+            .enter_active_catch(Some(MException::new("RunMat:outer".into(), "outer".into())));
+        let inner = runtime
+            .enter_active_catch(Some(MException::new("RunMat:inner".into(), "inner".into())));
+        drop(outer);
+        assert_eq!(
+            runtime.active_catch_exception().unwrap().identifier,
+            "RunMat:inner"
+        );
+        drop(inner);
+        assert!(runtime.active_catch_exception().is_none());
     }
 }
