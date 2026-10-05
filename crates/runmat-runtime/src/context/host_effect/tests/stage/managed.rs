@@ -282,6 +282,7 @@ fn offered_stage_without_parallel_managed_owner_fails_before_selection() {
                 .with_host_effect_resources(Rc::new(ManagedResources {
                     ledger: stage_ledger.clone(),
                     revision: Digest::sha256(b"managed-stage-v1"),
+                    returned_value_bytes: 4,
                 })),
         );
     let error = try_admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
@@ -309,6 +310,7 @@ fn foreign_stage_ledger_rejects_before_selection_and_releases_its_charge() {
                 .with_host_effect_resources(Rc::new(ManagedResources {
                     ledger: stage_ledger.clone(),
                     revision: Digest::sha256(b"managed-stage-v1"),
+                    returned_value_bytes: 4,
                 })),
         );
     let error = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
