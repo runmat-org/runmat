@@ -896,12 +896,13 @@ pub(crate) mod tests {
             vec![Value::from("ConnectTimeout"), Value::Num(0.05)],
         )
         .unwrap_err();
-        assert!(
-            Error::source(&err)
-                .and_then(|source| source.downcast_ref::<io::Error>())
-                .is_some(),
-            "connect failure retains its socket cause"
-        );
+        let transport = Error::source(&err)
+            .and_then(|source| source.downcast_ref::<crate::tcp::TcpTransportError>())
+            .expect("connect failure retains typed transport cause");
+        assert_eq!(transport.kind(), crate::tcp::TcpTransportErrorKind::Io);
+        assert!(Error::source(transport)
+            .and_then(|source| source.downcast_ref::<io::Error>())
+            .is_some());
         assert_error_identifier(err, TCPCLIENT_ERROR_CONNECT_FAILED.identifier.unwrap());
     }
 }

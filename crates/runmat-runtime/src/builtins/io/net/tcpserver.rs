@@ -563,7 +563,7 @@ pub(crate) mod tests {
 
     struct TestServer {
         value: Value,
-        _service: Rc<NativeTcpService>,
+        _runtime: RuntimeContext,
         _driver: tokio::runtime::Runtime,
     }
 
@@ -595,10 +595,15 @@ pub(crate) mod tests {
         let runtime =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
                 .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
-        let value = driver.block_on(tcpserver_builtin(Some(runtime), address, port, rest))?;
+        let value = driver.block_on(tcpserver_builtin(
+            Some(runtime.clone()),
+            address,
+            port,
+            rest,
+        ))?;
         Ok(TestServer {
             value,
-            _service: service,
+            _runtime: runtime,
             _driver: driver,
         })
     }
@@ -875,12 +880,13 @@ pub(crate) mod tests {
         )
         .expect_err("occupied port rejects bind");
         assert_eq!(error.identifier(), TCPSERVER_ERROR_BIND_FAILED.identifier);
-        assert!(
-            Error::source(&error)
-                .and_then(|source| source.downcast_ref::<std::io::Error>())
-                .is_some(),
-            "bind failure retains the operating-system cause"
-        );
+        let transport = Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::tcp::TcpTransportError>())
+            .expect("bind failure retains typed transport cause");
+        assert_eq!(transport.kind(), crate::tcp::TcpTransportErrorKind::Io);
+        assert!(Error::source(transport)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .is_some());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

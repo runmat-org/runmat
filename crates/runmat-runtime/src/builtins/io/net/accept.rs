@@ -380,14 +380,33 @@ pub(crate) mod tests {
             vec![Value::from("Timeout"), Value::Num(-1.0)],
         )
         .expect_err("invalid timeout rejects before resident server download");
-        assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_NAME_VALUE.identifier);
+        assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_SERVER.identifier);
         let err = run_accept(
             &runtime,
             server,
             vec![Value::from("Backlog"), Value::Num(1.0)],
         )
         .expect_err("unknown option rejects before resident server download");
-        assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_NAME_VALUE.identifier);
+        assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_SERVER.identifier);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let server = _driver
+                .block_on(tcpserver_builtin(
+                    Some(runtime.clone()),
+                    Value::from("127.0.0.1"),
+                    Value::Num(0.0),
+                    vec![],
+                ))
+                .expect("live server authority");
+            for options in [
+                vec![Value::from("Timeout"), Value::Num(-1.0)],
+                vec![Value::from("Backlog"), Value::Num(1.0)],
+            ] {
+                let err = run_accept(&runtime, server.clone(), options)
+                    .expect_err("invalid controls reject on valid server authority");
+                assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_NAME_VALUE.identifier);
+            }
+        }
         assert_eq!(owner.downloads(), 0);
     }
 

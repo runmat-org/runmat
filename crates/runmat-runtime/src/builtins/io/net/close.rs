@@ -209,6 +209,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nested_invalid_tcp_container_has_no_partial_close() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::String("clients".into()),
