@@ -414,6 +414,14 @@ impl FunctionRegistry {
         function: FunctionId,
         authority: &runmat_value::BoundFunctionAuthority,
     ) -> Option<Self> {
+        if self
+            .static_overlay
+            .as_ref()
+            .is_some_and(|overlay| overlay.authority.shares_local_graph(authority))
+        {
+            self.get_owned(function, authority.local_lease(function.0)?)?;
+            return Some(self.clone());
+        }
         let runmat_value::BoundFunctionAuthority::Local {
             definition,
             dependencies,

@@ -209,6 +209,35 @@ impl BoundFunctionAuthority {
         }
     }
 
+    /// Two derived static bindings share one immutable issued dependency
+    /// graph. This is not an authority check by itself; the selected lease is
+    /// still validated against the executable registry at the call boundary.
+    pub fn shares_local_graph(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                Self::Local {
+                    issuer: left_issuer,
+                    definition: left_definition,
+                    dependencies: left_dependencies,
+                    indices: left_indices,
+                    export: left_export,
+                },
+                Self::Local {
+                    issuer: right_issuer,
+                    definition: right_definition,
+                    dependencies: right_dependencies,
+                    indices: right_indices,
+                    export: right_export,
+                }
+            ) if Weak::ptr_eq(left_issuer, right_issuer)
+                && left_definition == right_definition
+                && Arc::ptr_eq(left_dependencies, right_dependencies)
+                && Arc::ptr_eq(left_indices, right_indices)
+                && left_export == right_export
+        )
+    }
+
     pub fn export_origin(&self, current: &Weak<()>) -> Option<FunctionBindingOrigin> {
         match self {
             Self::Local {
