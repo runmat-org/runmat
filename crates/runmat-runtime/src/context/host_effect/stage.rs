@@ -29,6 +29,7 @@ pub enum HostEffectAllocationError {
     Overflow,
     ExceedsStageEnvelope,
     ExceedsCapacity,
+    AllocationFailed,
 }
 
 impl std::fmt::Display for HostEffectAllocationError {
@@ -194,6 +195,17 @@ pub struct HostEffectStagePermit {
 }
 
 impl HostEffectStagePermit {
+    /// Allocate an exact-capacity temporary buffer from this invocation's
+    /// precharged scan envelope. The returned owner retains its live claim.
+    pub fn allocate_exact_bytes(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        capacity: usize,
+    ) -> Result<super::ExactHostEffectBytes, HostEffectAllocationError> {
+        let claim = self.reserve_live_exact(kind, capacity)?;
+        super::ExactHostEffectBytes::new(capacity, claim)
+    }
+
     pub fn filesystem(&self) -> &Arc<dyn runmat_filesystem::FsProvider> {
         &self.filesystem
     }

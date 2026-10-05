@@ -22,6 +22,8 @@ mod stage;
 mod managed_ledger;
 mod output_permit;
 mod final_facts;
+mod exact_bytes;
+pub use exact_bytes::ExactHostEffectBytes;
 pub use final_facts::HostEffectFinalFacts;
 pub use managed_ledger::{
     ManagedHostEffectLedger, ManagedHostEffectLedgerSnapshot, ManagedHostEffectStageReservation,
