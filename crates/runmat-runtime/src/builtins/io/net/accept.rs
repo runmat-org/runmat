@@ -369,6 +369,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn known_invalid_timeout_rejects_before_resident_server_download() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let (runtime, _driver) = test_runtime();
         let _lock = crate::builtins::common::test_support::accel_test_lock();
         let owner = Box::leak(Box::new(CountingDownloadProvider::new()));
