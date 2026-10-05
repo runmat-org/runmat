@@ -46,6 +46,7 @@ fn physical_merit_and_outlet_admissibility_reject_speculative_images() {
                 vec![defect; n],
                 &mut history,
                 ordinary.clone(),
+                None,
             )
             .unwrap();
             assert_eq!(retained, ordinary, "backflow={backflow}, defect={defect}");
@@ -84,6 +85,7 @@ fn speculative_coefficient_overflow_keeps_validated_ordinary_fields() {
             vec![defect; n],
             &mut history,
             original.clone(),
+            None,
         )
         .unwrap();
         assert_eq!(retained, original);

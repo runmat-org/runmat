@@ -7,6 +7,7 @@
 mod acceleration;
 mod boundary;
 mod boundary_balances;
+mod continuity;
 mod flux_evidence;
 mod forcing;
 mod geometry_ops;
@@ -21,6 +22,7 @@ mod recovery;
 mod resources;
 #[cfg(test)]
 mod tests;
+mod transient;
 mod velocity_gradient;
 
 use crate::topology::{AnalysisProjection, FiniteVolumeTopology};
@@ -36,6 +38,7 @@ pub use boundary_balances::CanonicalFluidBoundaryBalance;
 pub use flux_evidence::CanonicalFluidFaceForces;
 pub use recovery::CanonicalFluidResidual;
 pub use resources::CanonicalFluidReservation;
+pub use transient::{CanonicalFluidBackwardEulerStep, CanonicalFluidFields};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -327,12 +330,15 @@ impl<'a> CanonicalFluidProblem<'a> {
     }
 }
 
+const INPUT_IDENTITY_LIMITS: runmat_canonical_codec::CanonicalLimits =
+    runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32);
+
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(
         b"runmat-canonical-fluid/v3\0",
         domain,
         value,
-        runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32),
+        INPUT_IDENTITY_LIMITS,
     )
     .map(Digest::sha256)
     .map_err(|_| CanonicalFluidError::Resource("canonical input identity encoding"))

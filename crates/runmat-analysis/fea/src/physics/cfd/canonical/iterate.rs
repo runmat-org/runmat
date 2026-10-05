@@ -4,13 +4,31 @@ use super::{
 };
 
 pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResult, Error> {
+    solve_with_time(p, None, None, p.numerical_input_identity)
+}
+
+pub(super) fn solve_with_time(
+    p: &CanonicalFluidProblem<'_>,
+    initial: Option<super::transient::CanonicalFluidFields<'_>>,
+    time: Option<super::transient::TimeDerivative<'_>>,
+    numerical_input_identity: runmat_execution::Digest,
+) -> Result<CanonicalFluidResult, Error> {
     if crate::is_fea_cancelled() {
         return Err(Error::Cancelled);
     }
     let n = p.topology.cells.len();
-    let mut u = vec![[0.0; 3]; n];
-    let mut pressure_fluctuation = vec![0.0; n];
-    let mut q = pressure::h_flux(p, &u, &vec![[0.0; 3]; n])?;
+    let (mut u, mut pressure_fluctuation, mut q) = match initial {
+        Some(fields) => (
+            fields.velocity_m_per_s.to_vec(),
+            fields.pressure_fluctuation_pa.to_vec(),
+            fields.face_volume_flux_m3_per_s.to_vec(),
+        ),
+        None => {
+            let u = vec![[0.0; 3]; n];
+            let q = pressure::h_flux(p, &u, &vec![[0.0; 3]; n])?;
+            (u, vec![0.0; n], q)
+        }
+    };
     let mut linear_iterations = 0;
     let mut last = [f64::INFINITY; 5];
     let mut acceleration_history = None;
@@ -18,12 +36,13 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
         if crate::is_fea_cancelled() {
             return Err(Error::Cancelled);
         }
-        let m = momentum::assemble(
+        let m = momentum::assemble_with_time(
             p,
             &u,
             &pressure_fluctuation,
             &q,
             momentum::MomentumMode::SolverTrial,
+            time,
         )?;
         let mut predicted = vec![[0.0; 3]; n];
         for k in 0..3 {
@@ -88,7 +107,7 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
             acceleration_history = None;
             continue;
         }
-        let residual = recovery::evaluate(p, &u, &pressure_fluctuation, &q)?;
+        let residual = recovery::evaluate_with_time(p, &u, &pressure_fluctuation, &q, time)?;
         let residual = super::acceleration::consider(
             p,
             super::acceleration::Fields {
@@ -99,6 +118,7 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
             pressure_defect,
             &mut acceleration_history,
             residual,
+            time,
         )?;
         last = [
             residual.momentum_relative,
@@ -125,7 +145,7 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(CanonicalFluidResult {
-                numerical_input_identity: p.numerical_input_identity,
+                numerical_input_identity,
                 authored_authority_identity: p.authored_authority_identity,
                 velocity_m_per_s: u,
                 pressure_pa,

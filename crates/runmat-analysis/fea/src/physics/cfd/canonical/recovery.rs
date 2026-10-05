@@ -1,7 +1,7 @@
 //! Evaluate retained physical fields without a solve, replacement field or RHS.
 use super::{
-    boundary::FaceBoundary, geometry_ops::*, momentum, pressure, CanonicalFluidError as Error,
-    CanonicalFluidProblem, CanonicalFluidResult,
+    geometry_ops::*, momentum, pressure, CanonicalFluidError as Error, CanonicalFluidProblem,
+    CanonicalFluidResult,
 };
 use crate::algebra::spmv;
 
@@ -45,7 +45,16 @@ pub(super) fn recover(
     p: &CanonicalFluidProblem<'_>,
     original: &CanonicalFluidResult,
 ) -> Result<CanonicalFluidResidual, Error> {
-    if original.numerical_input_identity != p.numerical_input_identity
+    recover_with_time(p, original, p.numerical_input_identity, None)
+}
+
+pub(super) fn recover_with_time(
+    p: &CanonicalFluidProblem<'_>,
+    original: &CanonicalFluidResult,
+    numerical_input_identity: runmat_execution::Digest,
+    time: Option<super::transient::TimeDerivative<'_>>,
+) -> Result<CanonicalFluidResidual, Error> {
+    if original.numerical_input_identity != numerical_input_identity
         || original.authored_authority_identity != p.authored_authority_identity
     {
         return Err(Error::Invalid("retained original input binding"));
@@ -73,11 +82,12 @@ pub(super) fn recover(
     }
     p.pressure_reference_plan
         .validate(p, &original.pressure_fluctuation_pa)?;
-    let r = evaluate(
+    let r = evaluate_with_time(
         p,
         &original.velocity_m_per_s,
         &original.pressure_fluctuation_pa,
         &original.face_volume_flux_m3_per_s,
+        time,
     )?;
     if !r.accepted(p.policy.physical_relative_tolerance) {
         return Err(Error::Invalid("retained original physical equations"));
@@ -88,11 +98,22 @@ pub(super) fn recover(
     Ok(r)
 }
 
+#[cfg(test)]
 pub(super) fn evaluate(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
     pressure_fluctuation_pa: &[f64],
     q: &[f64],
+) -> Result<CanonicalFluidResidual, Error> {
+    evaluate_with_time(p, u, pressure_fluctuation_pa, q, None)
+}
+
+pub(super) fn evaluate_with_time(
+    p: &CanonicalFluidProblem<'_>,
+    u: &[V],
+    pressure_fluctuation_pa: &[f64],
+    q: &[f64],
+    time: Option<super::transient::TimeDerivative<'_>>,
 ) -> Result<CanonicalFluidResidual, Error> {
     let n = p.topology.cells.len();
     if u.len() != n
@@ -106,12 +127,13 @@ pub(super) fn evaluate(
     {
         return Err(Error::Invalid("retained field shape/value"));
     }
-    let m = momentum::assemble(
+    let m = momentum::assemble_with_time(
         p,
         u,
         pressure_fluctuation_pa,
         q,
         momentum::MomentumMode::Original,
+        time,
     )?;
     let mut rm = vec![[0.0; 3]; n];
     let mut momentum_norm = 0.0f64;
@@ -136,35 +158,14 @@ pub(super) fn evaluate(
     let qh = pressure::h_flux(p, u, &pressure_term)?;
     let rf = pressure::coefficients(p, &rau)?;
     let constitutive = pressure::corrected_flux(p, &qh, &rf, pressure_fluctuation_pa)?;
-    let mut continuity = vec![0.0; n];
-    let mut flux_scale = vec![0.0; n];
-    let mut global_flux = 0.0;
+    let continuity = super::continuity::evaluate(p, q)?;
     let mut discrepancy = 0.0f64;
     let mut discrepancy_scale = 0.0f64;
-    for (i, f) in p.topology.faces.iter().enumerate() {
-        continuity[f.owner] += q[i];
-        flux_scale[f.owner] += q[i].abs();
-        if let Some(c) = f.neighbor {
-            continuity[c] -= q[i];
-            flux_scale[c] += q[i].abs();
-        } else {
-            global_flux += q[i];
-            if let FaceBoundary::Velocity { value, .. } = p.boundaries[i] {
-                let exact = dot(value, f.owner_area_vector_m2);
-                if q[i] != exact {
-                    return Err(Error::Invalid("retained prescribed boundary flux"));
-                }
-            }
-        }
-        discrepancy = discrepancy.hypot(q[i] - constitutive[i]);
-        discrepancy_scale = discrepancy_scale.hypot(q[i].abs() + constitutive[i].abs());
+    for (actual, expected) in q.iter().zip(&constitutive) {
+        discrepancy = discrepancy.hypot(actual - expected);
+        discrepancy_scale = discrepancy_scale.hypot(actual.abs() + expected.abs());
     }
-    let local = continuity
-        .iter()
-        .zip(&flux_scale)
-        .map(|(r, s)| relative(r.abs(), *s))
-        .collect::<Vec<_>>();
-    let continuity_relative = local.iter().copied().fold(0.0, f64::max);
+    let continuity_relative = continuity.relative.iter().copied().fold(0.0, f64::max);
     let momentum_relative = relative(momentum_norm, momentum_scale);
     let flux_constitutive_relative = relative(discrepancy, discrepancy_scale);
     let face_forces = super::flux_evidence::evaluate(p, u, pressure_fluctuation_pa, q)?;
@@ -200,6 +201,15 @@ pub(super) fn evaluate(
         global_momentum = sub(global_momentum, body);
         global_scale += norm(body);
     }
+    if let Some(time) = time {
+        for c in 0..n {
+            let inertia = time.force(p, c, u[c])?;
+            independent_cells[c] = add(independent_cells[c], inertia);
+            local_scales[c] += norm(inertia);
+            global_momentum = add(global_momentum, inertia);
+            global_scale += norm(inertia);
+        }
+    }
     let cell_momentum_relative = independent_cells
         .iter()
         .zip(&local_scales)
@@ -213,18 +223,18 @@ pub(super) fn evaluate(
         cell_momentum_n: independent_cells,
         cell_algebraic_momentum_n: rm,
         cell_momentum_relative,
-        cell_continuity_m3_per_s: continuity,
-        cell_continuity_relative: local,
+        cell_continuity_m3_per_s: continuity.cell,
+        cell_continuity_relative: continuity.relative,
         global_momentum_n: global_momentum,
         global_momentum_relative,
-        global_boundary_flux_m3_per_s: global_flux,
+        global_boundary_flux_m3_per_s: continuity.global,
         momentum_relative,
         continuity_relative,
         flux_constitutive_relative,
     })
 }
 
-fn relative(numerator: f64, denominator: f64) -> f64 {
+pub(super) fn relative(numerator: f64, denominator: f64) -> f64 {
     if !numerator.is_finite() || !denominator.is_finite() {
         f64::INFINITY
     } else if denominator == 0.0 {

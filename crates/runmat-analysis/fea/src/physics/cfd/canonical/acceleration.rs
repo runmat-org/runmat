@@ -23,6 +23,7 @@ pub(super) fn consider(
     pressure_defect: Vec<f64>,
     history: &mut Option<History>,
     original: recovery::CanonicalFluidResidual,
+    time: Option<super::transient::TimeDerivative<'_>>,
 ) -> Result<recovery::CanonicalFluidResidual, Error> {
     let Some(policy) = p.policy.fixed_point_acceleration else {
         return Ok(original);
@@ -90,7 +91,8 @@ pub(super) fn consider(
     }
     // Backflow, nonfinite geometry actions or any failed original recovery reject
     // this speculative proposal. The already-validated ordinary SIMPLE image remains.
-    let Ok(trial) = recovery::evaluate(p, &velocity, &candidate.image, &flux) else {
+    let Ok(trial) = recovery::evaluate_with_time(p, &velocity, &candidate.image, &flux, time)
+    else {
         return Ok(original);
     };
     if merit(&trial) >= merit(&original) {

@@ -19,12 +19,24 @@ pub(super) enum MomentumMode {
     SolverTrial,
 }
 
+#[cfg(test)]
 pub(super) fn assemble(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
     pressure_fluctuation: &[f64],
     q: &[f64],
     mode: MomentumMode,
+) -> Result<Momentum, Error> {
+    assemble_with_time(p, u, pressure_fluctuation, q, mode, None)
+}
+
+pub(super) fn assemble_with_time(
+    p: &CanonicalFluidProblem<'_>,
+    u: &[V],
+    pressure_fluctuation: &[f64],
+    q: &[f64],
+    mode: MomentumMode,
+    time: Option<super::transient::TimeDerivative<'_>>,
 ) -> Result<Momentum, Error> {
     let n = u.len();
     let mut a = linear::assembler(p, "incompressible-newtonian-momentum")?;
@@ -91,6 +103,14 @@ pub(super) fn assemble(
                 }
                 FaceBoundary::Interior => return Err(Error::Invalid("missing exterior law")),
             }
+        }
+    }
+    if let Some(time) = time {
+        for c in 0..n {
+            let coefficient = time.coefficient(p, c)?;
+            a.add(c, c, coefficient);
+            diagonal[c] += coefficient;
+            rhs[c] = add(rhs[c], scale(time.previous_velocity[c], coefficient));
         }
     }
     if mode == MomentumMode::SolverTrial {

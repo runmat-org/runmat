@@ -3,7 +3,7 @@ use runmat_analysis_core::{
     BoundaryOperator, FluidConstraint, FluidConstraintKind, PrescribedValue, Pressure, Velocity,
 };
 
-fn closed(n: usize, velocity: [f64; 3], reference: f64) -> fixture::Fixture {
+pub(super) fn closed(n: usize, velocity: [f64; 3], reference: f64) -> fixture::Fixture {
     let mut f = case(n, ReferenceCase::Couette, false);
     for c in &mut f.constraints {
         let FluidConstraintKind::PrescribedVelocity { value, .. } = &mut c.kind else {
