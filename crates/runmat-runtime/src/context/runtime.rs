@@ -467,6 +467,12 @@ impl RuntimeContext {
         super::catch::active_for(self)
     }
 
+    /// Snapshot a caller's active catch for a nested invocation without
+    /// copying its payload. The callee's own lexical catch may override it.
+    pub fn active_catch_exception_shared(&self) -> Option<Rc<runmat_value::MException>> {
+        super::catch::active_shared_for(self)
+    }
+
     /// Activate this context for one synchronous executor or foreign-host
     /// extent. Async code should use [`Self::scope`] so the context is removed
     /// across yields.

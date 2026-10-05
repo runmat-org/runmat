@@ -131,13 +131,17 @@ impl<F> Drop for ActiveCatchFuture<F> {
 impl<F> Unpin for ActiveCatchFuture<F> {}
 
 pub(super) fn active_for(runtime: &RuntimeContext) -> Option<MException> {
+    active_shared_for(runtime).as_deref().cloned()
+}
+
+pub(super) fn active_shared_for(runtime: &RuntimeContext) -> Option<Rc<MException>> {
     ACTIVE_CATCHES.with(|stack| {
         stack
             .borrow()
             .iter()
             .rev()
             .find(|frame| frame.owner == runtime.local_identity())
-            .and_then(|frame| frame.exception.as_deref().cloned())
+            .and_then(|frame| frame.exception.clone())
     })
 }
 
