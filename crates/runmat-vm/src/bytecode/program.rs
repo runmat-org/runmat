@@ -1097,11 +1097,15 @@ fn validate_catch_scope_metadata(
         return Err("bytecode lexical catch metadata length does not match instructions".into());
     }
     let mut targets = std::collections::HashSet::new();
+    let mut declared_scopes = std::collections::HashSet::new();
     for instruction in instructions {
         if let Instr::EnterTry {
             scope, catch_pc, ..
         } = instruction
         {
+            if !declared_scopes.insert(runmat_mir::CatchScopeId(*scope)) {
+                return Err("bytecode lexical catch scope is declared more than once".into());
+            }
             if !targets.insert(*catch_pc) {
                 return Err("bytecode catch entry PC is ambiguous".into());
             }
@@ -1109,6 +1113,13 @@ fn validate_catch_scope_metadata(
                 return Err("bytecode catch entry has no matching lexical scope".into());
             }
         }
+    }
+    if catch_scopes
+        .iter()
+        .flatten()
+        .any(|scope| !declared_scopes.contains(scope))
+    {
+        return Err("bytecode catch membership names an undeclared lexical scope".into());
     }
     Ok(())
 }
@@ -1141,6 +1152,22 @@ mod function_registry_tests {
         bytecode.catch_scopes[1] = Some(runmat_mir::CatchScopeId(7));
         assert!(bytecode.validate_catch_scope_metadata().is_ok());
         bytecode.catch_scopes.pop();
+        assert!(bytecode.validate_catch_scope_metadata().is_err());
+        bytecode
+            .catch_scopes
+            .push(Some(runmat_mir::CatchScopeId(7)));
+        bytecode.instructions.push(Instr::Return);
+        bytecode
+            .catch_scopes
+            .push(Some(runmat_mir::CatchScopeId(8)));
+        assert!(bytecode.validate_catch_scope_metadata().is_err());
+        bytecode.catch_scopes[2] = None;
+        bytecode.instructions[1] = Instr::EnterTry {
+            scope: 7,
+            catch_pc: 2,
+            catch_var: None,
+        };
+        bytecode.catch_scopes[2] = Some(runmat_mir::CatchScopeId(7));
         assert!(bytecode.validate_catch_scope_metadata().is_err());
     }
 

@@ -198,7 +198,7 @@ fn verify_function(
     }
 
     let mut all_values = BTreeSet::new();
-    let catch_scope_ids: BTreeSet<_> = function
+    let catch_scope_declarations: BTreeMap<_, _> = function
         .blocks
         .iter()
         .filter(|block| {
@@ -207,32 +207,45 @@ fn verify_function(
                 NativeTerminatorKind::TryCatch { .. }
             )
         })
-        .map(|block| runmat_mir::CatchScopeId(block.id.0 as usize))
+        .map(|block| (runmat_mir::CatchScopeId(block.id.0 as usize), block))
         .collect();
     let mut all_instructions = BTreeSet::new();
     let mut all_safepoints = BTreeSet::new();
     let mut actual_sites = BTreeSet::new();
     for block in &function.blocks {
-        if block
-            .catch_scopes
-            .iter()
-            .any(|scope| !catch_scope_ids.contains(scope))
-            || block.catch_scopes.windows(2).any(|pair| pair[0] == pair[1])
-        {
+        let mut seen_scopes = BTreeSet::new();
+        if block.catch_scopes.iter().enumerate().any(|(depth, scope)| {
+            !seen_scopes.insert(*scope)
+                || catch_scope_declarations
+                    .get(scope)
+                    .is_none_or(|declaration| {
+                        declaration.catch_scopes.as_slice() != &block.catch_scopes[..depth]
+                    })
+        }) {
             return Err(error(
                 "native.ir.catch_scope",
-                "block catch membership names a missing or repeated lexical scope",
+                "block catch membership names a missing, repeated, or misparented lexical scope",
             ));
         }
-        if let NativeTerminatorKind::TryCatch { catch_edge, .. } = &block.terminator.kind {
+        if let NativeTerminatorKind::TryCatch {
+            try_edge,
+            catch_edge,
+            ..
+        } = &block.terminator.kind
+        {
             let expected = runmat_mir::CatchScopeId(block.id.0 as usize);
-            if !function.blocks.iter().any(|candidate| {
-                candidate.id == catch_edge.target
-                    && candidate.catch_scopes.last() == Some(&expected)
-            }) {
+            let mut catch_ancestry = block.catch_scopes.clone();
+            catch_ancestry.push(expected);
+            if blocks
+                .get(&try_edge.target)
+                .is_none_or(|candidate| candidate.catch_scopes != block.catch_scopes)
+                || blocks
+                    .get(&catch_edge.target)
+                    .is_none_or(|candidate| candidate.catch_scopes != catch_ancestry)
+            {
                 return Err(error(
                     "native.ir.catch_scope",
-                    "catch target does not carry its MIR lexical catch scope",
+                    "try and catch targets do not carry the declared MIR lexical ancestry",
                 ));
             }
         }

@@ -284,6 +284,88 @@ fn native_ir_rejects_forged_lexical_catch_membership() {
     assert_eq!(assembly.verify().unwrap_err().code, "native.ir.catch_scope");
 }
 
+#[test]
+fn native_ir_rejects_repeated_and_misparented_catch_membership() {
+    let mut mir = function(vec![assignment(1)]);
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    let original_return = body.blocks[0].terminator.clone();
+    body.blocks[0].terminator = MirTerminator {
+        kind: MirTerminatorKind::TryCatch {
+            try_block: BasicBlockId(1),
+            catch_block: BasicBlockId(2),
+            catch_binding: None,
+        },
+        span: original_return.span,
+    };
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(1),
+        statements: Vec::new(),
+        terminator: original_return.clone(),
+    });
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(2),
+        statements: Vec::new(),
+        terminator: original_return,
+    });
+    body.catch_scopes
+        .insert(BasicBlockId(2), vec![runmat_mir::CatchScopeId(0)]);
+    let valid = lower(&mir);
+    valid.verify().unwrap();
+
+    let mut repeated = valid.clone();
+    repeated.functions[0].blocks[2]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(0));
+    assert_eq!(repeated.verify().unwrap_err().code, "native.ir.catch_scope");
+
+    let mut misparented = valid;
+    misparented.functions[0].blocks[1]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(0));
+    assert_eq!(
+        misparented.verify().unwrap_err().code,
+        "native.ir.catch_scope"
+    );
+
+    // The repeated scope is separated by a valid inner scope, so an adjacent
+    // windows(2) duplicate check would have accepted the forged ancestry.
+    let body = mir.bodies.get_mut(&FunctionId(0)).unwrap();
+    let inner_return = body.blocks[2].terminator.clone();
+    body.blocks[2].terminator = MirTerminator {
+        kind: MirTerminatorKind::TryCatch {
+            try_block: BasicBlockId(3),
+            catch_block: BasicBlockId(4),
+            catch_binding: None,
+        },
+        span: inner_return.span,
+    };
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(3),
+        statements: Vec::new(),
+        terminator: inner_return.clone(),
+    });
+    body.blocks.push(BasicBlock {
+        id: BasicBlockId(4),
+        statements: Vec::new(),
+        terminator: inner_return,
+    });
+    body.catch_scopes
+        .insert(BasicBlockId(3), vec![runmat_mir::CatchScopeId(0)]);
+    body.catch_scopes.insert(
+        BasicBlockId(4),
+        vec![runmat_mir::CatchScopeId(0), runmat_mir::CatchScopeId(2)],
+    );
+    let mut nonadjacent = lower(&mir);
+    nonadjacent.verify().unwrap();
+    nonadjacent.functions[0].blocks[4]
+        .catch_scopes
+        .push(runmat_mir::CatchScopeId(0));
+    assert_eq!(
+        nonadjacent.verify().unwrap_err().code,
+        "native.ir.catch_scope"
+    );
+}
+
 fn lower(mir: &MirAssembly) -> runmat_native_codegen::NativeAssembly {
     let analysis = runmat_mir::analysis::analyze_assembly(mir);
     let manifest = manifest(analysis.revision.schema_version);
