@@ -202,3 +202,56 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     .expect("bounded snapshot read");
     assert_eq!(read.publish(), payload);
 }
+
+#[test]
+fn status_observes_peer_eof_without_consuming_socket_bytes() {
+    let (driver, service) = service();
+    let server = futures::executor::block_on(service.bind(
+        RuntimeTcpIssuer::Process,
+        RuntimeTcpBind {
+            address: "127.0.0.1".into(),
+            port: 0,
+            io_timeout: None,
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("bind");
+    let client = futures::executor::block_on(service.connect(
+        RuntimeTcpIssuer::Process,
+        RuntimeTcpConnect {
+            host: "127.0.0.1".into(),
+            port: server.local_addr.port(),
+            connect_timeout: Some(Duration::from_secs(2)),
+            io_timeout: None,
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("connect");
+    let accepted = futures::executor::block_on(service.accept(
+        RuntimeTcpIssuer::Process,
+        server.authority,
+        None,
+    ))
+    .expect("accept");
+    assert!(futures::executor::block_on(
+        service.close(RuntimeTcpIssuer::Process, client.authority)
+    )
+    .expect("close peer"));
+    let status = driver.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = service
+                    .describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone())
+                    .await
+                    .expect("status");
+                if !status.connected {
+                    break status;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("EOF observed")
+    });
+    assert_eq!(status.bytes_available, 0);
+}

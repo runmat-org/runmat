@@ -1,5 +1,5 @@
 use super::registry::{self, Client, ClientIo, Registry, Resource, Server};
-use super::unread::socket_unread_bytes;
+use super::unread::{socket_snapshot, SocketSnapshot};
 use crate::context::{
     RuntimeTcpBind, RuntimeTcpClient, RuntimeTcpClientStatus, RuntimeTcpConnect, RuntimeTcpIssuer,
     RuntimeTcpReadMode, RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer,
@@ -164,12 +164,16 @@ struct ReadReceipt {
     guard: tokio::sync::OwnedMutexGuard<ClientIo>,
 }
 
-fn available_snapshot(io: &ClientIo) -> Result<usize, TcpTransportError> {
-    let socket_bytes = socket_unread_bytes(&io.stream)
+fn available_snapshot(io: &ClientIo) -> Result<(usize, bool), TcpTransportError> {
+    let SocketSnapshot {
+        unread_bytes: socket_bytes,
+        peer_closed,
+    } = socket_snapshot(&io.stream)
         .map_err(|source| io_error("TCP unread-byte query failed", source))?;
-    io.unread.len().checked_add(socket_bytes).ok_or_else(|| {
+    let count = io.unread.len().checked_add(socket_bytes).ok_or_else(|| {
         TcpTransportError::new(TcpTransportErrorKind::Io, "TCP unread-byte count overflow")
-    })
+    })?;
+    Ok((count, peer_closed))
 }
 
 pub(super) async fn describe_client(
@@ -179,9 +183,9 @@ pub(super) async fn describe_client(
 ) -> Result<RuntimeTcpClientStatus, TcpTransportError> {
     let client = registry::client(&registry, &issuer, &authority)?;
     let io = Arc::clone(&client.io).lock_owned().await;
-    let bytes_available = available_snapshot(&io)?;
+    let (bytes_available, peer_closed) = available_snapshot(&io)?;
     Ok(RuntimeTcpClientStatus {
-        connected: !io.closed && !*client.closed.borrow(),
+        connected: !io.closed && !peer_closed && !*client.closed.borrow(),
         bytes_available,
         byte_order: client.byte_order,
         timeout: client.timeout,
@@ -230,7 +234,10 @@ pub(super) async fn read(
         RuntimeTcpReadMode::Available => {
             // Freeze a non-consuming entry snapshot. A continuously sending
             // peer cannot keep this invocation alive or grow its allocation.
-            let target = available_snapshot(&io)?;
+            let (target, peer_closed) = available_snapshot(&io)?;
+            if peer_closed {
+                io.closed = true;
+            }
             while io.unread.len() < target && !io.closed {
                 if *client.closed.borrow() {
                     return Err(TcpTransportError::new(
