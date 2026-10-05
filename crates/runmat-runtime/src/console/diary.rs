@@ -65,12 +65,7 @@ impl Default for DiaryState {
 }
 
 fn open_sink(filename: &Path) -> io::Result<DiarySink> {
-    let (provider, resolved_path) = if fs::is_absolute_provider_path(filename) {
-        (fs::current_provider(), filename.to_path_buf())
-    } else {
-        let (provider, cwd) = fs::current_provider_with_current_dir()?;
-        (provider, cwd.join(filename))
-    };
+    let (provider, resolved_path) = fs::capture_provider_path(filename)?;
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     // This optional lease is a provider-configuration guard, not a claim that

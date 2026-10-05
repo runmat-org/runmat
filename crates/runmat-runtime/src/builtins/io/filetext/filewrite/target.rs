@@ -11,27 +11,17 @@ pub(super) struct OutputTarget {
 
 impl OutputTarget {
     pub(super) fn capture(path: PathBuf) -> BuiltinResult<Self> {
-        if fs::is_absolute_provider_path(&path) {
-            return Ok(Self {
-                provider: fs::current_provider(),
-                path,
-            });
-        }
-        let (provider, current_dir) =
-            fs::current_provider_with_current_dir().map_err(|source| {
-                filewrite_error_with_source(
-                    format!(
-                        "{}: unable to resolve current folder: {source}",
-                        FILEWRITE_ERROR_IO.message
-                    ),
-                    &FILEWRITE_ERROR_IO,
-                    source,
-                )
-            })?;
-        Ok(Self {
-            provider,
-            path: current_dir.join(path),
-        })
+        let (provider, path) = fs::capture_provider_path(&path).map_err(|source| {
+            filewrite_error_with_source(
+                format!(
+                    "{}: unable to resolve current folder: {source}",
+                    FILEWRITE_ERROR_IO.message
+                ),
+                &FILEWRITE_ERROR_IO,
+                source,
+            )
+        })?;
+        Ok(Self { provider, path })
     }
 
     pub(super) fn path(&self) -> &Path {

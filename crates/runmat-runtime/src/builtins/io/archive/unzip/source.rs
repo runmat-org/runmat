@@ -123,22 +123,49 @@ async fn local_archive_to_temp_file(
     Ok(temp)
 }
 
-pub(super) type CapturedFilesystem = (std::sync::Arc<dyn vfs::FsProvider>, PathBuf);
+pub(super) struct CapturedFilesystem {
+    pub(super) provider: std::sync::Arc<dyn vfs::FsProvider>,
+    cwd: Option<PathBuf>,
+}
 
 fn captured_cwd<'a>(
     captured: &'a mut Option<CapturedFilesystem>,
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<&'a Path> {
     if captured.is_none() {
-        *captured = Some(vfs::current_provider_with_current_dir().map_err(|err| {
+        let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|err| {
             unzip_error_with_source(
                 descriptor,
                 format!("unzip: unable to resolve current folder: {err}"),
                 err,
             )
-        })?);
+        })?;
+        *captured = Some(CapturedFilesystem {
+            provider,
+            cwd: Some(cwd),
+        });
     }
-    Ok(captured.as_ref().expect("captured filesystem").1.as_path())
+    let captured = captured.as_mut().expect("captured filesystem");
+    if captured.cwd.is_none() {
+        let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|err| {
+            unzip_error_with_source(
+                descriptor,
+                format!("unzip: unable to resolve current folder: {err}"),
+                err,
+            )
+        })?;
+        if !std::sync::Arc::ptr_eq(&provider, &captured.provider) {
+            return Err(unzip_error_with(
+                descriptor,
+                "unzip: filesystem authority changed during path capture",
+            ));
+        }
+        captured.cwd = Some(cwd);
+    }
+    Ok(captured
+        .cwd
+        .as_deref()
+        .expect("relative path has captured CWD"))
 }
 
 pub(super) fn resolve_archive_path(
@@ -148,7 +175,15 @@ pub(super) fn resolve_archive_path(
     let expanded = expand_user_path(text.trim(), BUILTIN_NAME)
         .map_err(|msg| unzip_error_with(&UNZIP_ERROR_FILENAME, msg))?;
     let path = PathBuf::from(expanded);
-    if vfs::is_absolute_provider_path(&path) {
+    let provider = captured
+        .as_ref()
+        .map(|owner| owner.provider.clone())
+        .unwrap_or_else(vfs::current_provider);
+    if provider.path_namespace().is_absolute(&path) {
+        captured.get_or_insert(CapturedFilesystem {
+            provider,
+            cwd: None,
+        });
         Ok(path)
     } else {
         Ok(captured_cwd(captured, &UNZIP_ERROR_IO)?.join(path))
@@ -164,7 +199,15 @@ pub(super) fn resolve_output_folder(
             let expanded = expand_user_path(raw.trim(), BUILTIN_NAME)
                 .map_err(|msg| unzip_error_with(&UNZIP_ERROR_OUTPUT_FOLDER, msg))?;
             let path = PathBuf::from(expanded);
-            if vfs::is_absolute_provider_path(&path) {
+            let provider = captured
+                .as_ref()
+                .map(|owner| owner.provider.clone())
+                .unwrap_or_else(vfs::current_provider);
+            if provider.path_namespace().is_absolute(&path) {
+                captured.get_or_insert(CapturedFilesystem {
+                    provider,
+                    cwd: None,
+                });
                 Ok(path)
             } else {
                 Ok(captured_cwd(captured, &UNZIP_ERROR_OUTPUT_FOLDER)?.join(path))

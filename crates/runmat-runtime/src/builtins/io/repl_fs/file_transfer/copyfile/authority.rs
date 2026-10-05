@@ -64,7 +64,7 @@ impl CopyFilesystem {
     }
 
     fn path(&self, path: &Path) -> PathBuf {
-        if vfs::is_absolute_provider_path(path) {
+        if self.provider.path_namespace().is_absolute(path) {
             path.to_path_buf()
         } else {
             self.cwd.join(path)

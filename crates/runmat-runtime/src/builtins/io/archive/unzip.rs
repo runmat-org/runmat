@@ -180,7 +180,7 @@ impl ResolvedUnzipRequest {
             ),
         };
         let filesystem = captured_filesystem
-            .map(|(provider, _)| provider)
+            .map(|owner| owner.provider)
             .unwrap_or_else(vfs::current_provider);
         Ok(Self {
             archive,

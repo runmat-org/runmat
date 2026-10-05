@@ -12,18 +12,13 @@ pub(super) struct ImportInput {
 
 impl ImportInput {
     pub(super) fn capture(path: PathBuf) -> BuiltinResult<Self> {
-        let (provider, path) = if fs::is_absolute_provider_path(&path) {
-            (fs::current_provider(), path)
-        } else {
-            let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|err| {
-                importdata_error_with_source(
-                    &IMPORTDATA_ERROR_IO,
-                    "importdata: unable to capture current folder",
-                    err,
-                )
-            })?;
-            (provider, cwd.join(path))
-        };
+        let (provider, path) = fs::capture_provider_path(&path).map_err(|err| {
+            importdata_error_with_source(
+                &IMPORTDATA_ERROR_IO,
+                "importdata: unable to capture current folder",
+                err,
+            )
+        })?;
         let has_resource_lease = provider.resource_lease().is_some();
         let resource = fs::capture_resource_lease(provider.clone());
         if has_resource_lease && resource.is_none() {

@@ -22,14 +22,17 @@ pub(crate) async fn directory_in(
     path: &Path,
 ) -> io::Result<Vec<ListedEntry>> {
     let mut listed = Vec::new();
-    for entry in provider.read_dir(&resolve(cwd, path)).await? {
+    for entry in provider.read_dir(&resolve(provider, cwd, path)).await? {
         let entry_path = entry.path().to_path_buf();
         let recursable = entry.is_dir();
-        let metadata = match provider.metadata(&resolve(cwd, &entry_path)).await {
+        let metadata = match provider
+            .metadata(&resolve(provider, cwd, &entry_path))
+            .await
+        {
             Ok(metadata) => metadata,
             Err(_) => {
                 provider
-                    .symlink_metadata(&resolve(cwd, &entry_path))
+                    .symlink_metadata(&resolve(provider, cwd, &entry_path))
                     .await?
             }
         };
@@ -49,7 +52,7 @@ async fn matching_directory(
     cwd: &Path,
     path: &Path,
 ) -> io::Result<Vec<ListedEntry>> {
-    match provider.metadata(&resolve(cwd, path)).await {
+    match provider.metadata(&resolve(provider, cwd, path)).await {
         Ok(metadata) if metadata.is_dir() => directory_in(provider, cwd, path).await,
         Ok(_) => Ok(Vec::new()),
         Err(error)
@@ -122,9 +125,13 @@ pub(crate) async fn matching_in(
 
     let mut listed = Vec::with_capacity(paths.len());
     for path in paths {
-        let metadata = match provider.metadata(&resolve(cwd, &path)).await {
+        let metadata = match provider.metadata(&resolve(provider, cwd, &path)).await {
             Ok(metadata) => metadata,
-            Err(_) => provider.symlink_metadata(&resolve(cwd, &path)).await?,
+            Err(_) => {
+                provider
+                    .symlink_metadata(&resolve(provider, cwd, &path))
+                    .await?
+            }
         };
         listed.push(ListedEntry {
             path,
@@ -135,8 +142,8 @@ pub(crate) async fn matching_in(
     Ok(listed)
 }
 
-fn resolve(cwd: &Path, path: &Path) -> PathBuf {
-    if vfs::is_absolute_provider_path(path) {
+fn resolve(provider: &dyn FsProvider, cwd: &Path, path: &Path) -> PathBuf {
+    if provider.path_namespace().is_absolute(path) {
         path.to_path_buf()
     } else {
         cwd.join(path)

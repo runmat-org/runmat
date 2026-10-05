@@ -56,28 +56,19 @@ impl FsInputLease {
         error: &'static BuiltinErrorDescriptor,
         builtin: &'static str,
     ) -> BuiltinResult<Self> {
-        if fs::is_absolute_provider_path(&path) {
-            let provider = fs::current_provider();
-            return Ok(Self {
-                resource: fs::capture_resource_lease(provider.clone()),
-                provider,
-                path,
-            });
-        }
-        let (provider, current_dir) =
-            fs::current_provider_with_current_dir().map_err(|source| {
-                build_runtime_error(format!(
-                    "{builtin}: unable to resolve current folder: {source}"
-                ))
-                .with_builtin(builtin)
-                .with_identifier(error.identifier.unwrap_or("RunMat:audio:Io"))
-                .with_source(source)
-                .build()
-            })?;
+        let (provider, path) = fs::capture_provider_path(&path).map_err(|source| {
+            build_runtime_error(format!(
+                "{builtin}: unable to resolve current folder: {source}"
+            ))
+            .with_builtin(builtin)
+            .with_identifier(error.identifier.unwrap_or("RunMat:audio:Io"))
+            .with_source(source)
+            .build()
+        })?;
         Ok(Self {
             resource: fs::capture_resource_lease(provider.clone()),
             provider,
-            path: current_dir.join(path),
+            path,
         })
     }
 

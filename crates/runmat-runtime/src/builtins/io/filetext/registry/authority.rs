@@ -60,12 +60,7 @@ pub(crate) struct FileFilesystem {
 
 impl FileFilesystem {
     pub(crate) fn capture(path: &Path) -> io::Result<Self> {
-        let (provider, path) = if fs::is_absolute_provider_path(path) {
-            (fs::current_provider(), path.to_path_buf())
-        } else {
-            let (provider, cwd) = fs::current_provider_with_current_dir()?;
-            (provider, cwd.join(path))
-        };
+        let (provider, path) = fs::capture_provider_path(path)?;
         let has_lease = provider.resource_lease().is_some();
         let lease = fs::capture_resource_lease(provider.clone());
         if has_lease && lease.is_none() {

@@ -15,19 +15,14 @@ pub(super) struct CapturedFsPath {
 
 impl CapturedFsPath {
     pub(super) fn capture(path: PathBuf, builtin: &'static str) -> BuiltinResult<Self> {
-        let (provider, path) = if vfs::is_absolute_provider_path(&path) {
-            (vfs::current_provider(), path)
-        } else {
-            let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|source| {
-                build_runtime_error(format!(
-                    "{builtin}: cannot resolve current folder: {source}"
-                ))
-                .with_builtin(builtin)
-                .with_source(source)
-                .build()
-            })?;
-            (provider, cwd.join(path))
-        };
+        let (provider, path) = vfs::capture_provider_path(&path).map_err(|source| {
+            build_runtime_error(format!(
+                "{builtin}: cannot resolve current folder: {source}"
+            ))
+            .with_builtin(builtin)
+            .with_source(source)
+            .build()
+        })?;
         let resource = vfs::capture_resource_lease(Arc::clone(&provider));
         Ok(Self {
             provider,

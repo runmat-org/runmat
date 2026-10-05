@@ -18,12 +18,7 @@ pub(crate) struct MatFsPath {
 
 impl MatFsPath {
     pub(crate) fn capture(path: PathBuf) -> io::Result<Self> {
-        let (provider, path) = if fs::is_absolute_provider_path(&path) {
-            (fs::current_provider(), path)
-        } else {
-            let (provider, cwd) = fs::current_provider_with_current_dir()?;
-            (provider, cwd.join(path))
-        };
+        let (provider, path) = fs::capture_provider_path(&path)?;
         let resource = fs::capture_resource_lease(provider.clone());
         Ok(Self {
             provider,

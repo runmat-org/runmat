@@ -1014,16 +1014,12 @@ pub async fn write_array_payload_async(
 fn captured_storage_root(
     root: &Path,
 ) -> BuiltinResult<(std::sync::Arc<dyn fs::FsProvider>, PathBuf)> {
-    if fs::is_absolute_provider_path(root) {
-        return Ok((fs::current_provider(), root.to_path_buf()));
-    }
-    let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|source| {
+    fs::capture_provider_path(root).map_err(|source| {
         data_error_with_source(
             format!("failed to capture data storage directory: {source}"),
             source,
         )
-    })?;
-    Ok((provider, cwd.join(root)))
+    })
 }
 
 pub async fn write_array_payload_on(

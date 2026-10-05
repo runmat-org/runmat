@@ -1696,7 +1696,10 @@ fn required_f64(value: Option<f64>, label: &str) -> Result<f64, String> {
 }
 
 fn resolve_document_path(base_dir: &Path, path: &Path) -> PathBuf {
-    if runmat_filesystem::is_absolute_provider_path(path) {
+    if runmat_filesystem::current_provider()
+        .path_namespace()
+        .is_absolute(path)
+    {
         path.to_path_buf()
     } else {
         base_dir.join(path)

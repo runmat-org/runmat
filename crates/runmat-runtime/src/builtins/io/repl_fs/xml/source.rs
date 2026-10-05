@@ -31,7 +31,7 @@ impl XmlPathOwner {
     }
 
     pub(super) fn resolve(self, path: PathBuf) -> XmlFsPath {
-        let path = if fs::is_absolute_provider_path(&path) {
+        let path = if self.provider.path_namespace().is_absolute(&path) {
             path
         } else {
             self.cwd.join(path)
@@ -46,12 +46,7 @@ impl XmlPathOwner {
 
 impl XmlFsPath {
     pub(super) fn capture(path: PathBuf) -> io::Result<Self> {
-        let (provider, path) = if fs::is_absolute_provider_path(&path) {
-            (fs::current_provider(), path)
-        } else {
-            let (provider, cwd) = fs::current_provider_with_current_dir()?;
-            (provider, cwd.join(path))
-        };
+        let (provider, path) = fs::capture_provider_path(&path)?;
         let lease = capture_lease(&provider)?;
         Ok(Self {
             provider,

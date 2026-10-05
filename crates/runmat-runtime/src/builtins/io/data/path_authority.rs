@@ -17,24 +17,32 @@ impl DataPathAuthority {
     /// The parsed path set is fixed before any filesystem effect. Absolute-only
     /// calls do not need a working directory, including when it is unavailable.
     pub(super) fn capture(paths: &[impl AsRef<Path>]) -> BuiltinResult<Self> {
-        Self::capture_with(
-            paths,
-            fs::current_provider,
-            fs::current_provider_with_current_dir,
-        )
+        let paths = paths
+            .iter()
+            .map(|path| path.as_ref())
+            .collect::<Vec<&Path>>();
+        let (provider, cwd) = fs::capture_provider_for_paths(&paths).map_err(|source| {
+            data_error_with_source(
+                format!("data: failed to capture current directory: {source}"),
+                source,
+            )
+        })?;
+        Ok(Self { provider, cwd })
     }
 
+    #[cfg(test)]
     fn capture_with(
         paths: &[impl AsRef<Path>],
         absolute_provider: impl FnOnce() -> Arc<dyn FsProvider>,
         relative_provider_and_dir: impl FnOnce() -> std::io::Result<(Arc<dyn FsProvider>, PathBuf)>,
     ) -> BuiltinResult<Self> {
+        let provider = absolute_provider();
         if paths
             .iter()
-            .all(|path| fs::is_absolute_provider_path(path.as_ref()))
+            .all(|path| provider.path_namespace().is_absolute(path.as_ref()))
         {
             return Ok(Self {
-                provider: absolute_provider(),
+                provider,
                 cwd: None,
             });
         }
@@ -52,7 +60,7 @@ impl DataPathAuthority {
 
     pub(super) fn resolve(&self, path: impl AsRef<Path>) -> BuiltinResult<PathBuf> {
         let path = path.as_ref();
-        if fs::is_absolute_provider_path(path) {
+        if self.provider.path_namespace().is_absolute(path) {
             Ok(path.to_path_buf())
         } else {
             self.cwd.as_ref().map(|cwd| cwd.join(path)).ok_or_else(|| {
@@ -179,8 +187,8 @@ mod tests {
     #[test]
     fn absolute_path_does_not_require_working_directory() {
         fn verify(provider: Arc<dyn FsProvider>, source: &Path, target: &Path) {
-            assert!(fs::is_absolute_provider_path(source));
-            assert!(fs::is_absolute_provider_path(target));
+            assert!(provider.path_namespace().is_absolute(source));
+            assert!(provider.path_namespace().is_absolute(target));
             let source_text = source.to_str().expect("fixture path is Unicode");
             let target_text = target.to_str().expect("fixture path is Unicode");
             let authority = DataPathAuthority::capture_with(
@@ -217,17 +225,26 @@ mod tests {
                 Path::new("/data/target.data"),
             );
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let provider = Arc::new(fs::MemoryFsProvider::new());
+            provider
+                .write_project_path("/data/source.data", b"captured")
+                .expect("virtual fixture source");
+            verify(
+                provider,
+                Path::new("/data/source.data"),
+                Path::new("/data/target.data"),
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn relative_path_requires_captured_directory_and_retains_source() {
-        #[cfg(windows)]
-        const ABSOLUTE: &str = "C:\\data\\source.data";
-        #[cfg(not(windows))]
         const ABSOLUTE: &str = "/data/source.data";
-        assert!(fs::is_absolute_provider_path(Path::new(ABSOLUTE)));
         let provider: Arc<dyn FsProvider> = Arc::new(fs::MemoryFsProvider::new());
+        assert!(provider.path_namespace().is_absolute(Path::new(ABSOLUTE)));
         for paths in [[ABSOLUTE, "target.data"], ["source.data", "target.data"]] {
             let error = DataPathAuthority::capture_with(
                 &paths,
