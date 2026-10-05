@@ -24,6 +24,17 @@ pub fn exact_local_binding(runtime: &RuntimeContext, function: usize) -> BoundFu
     )
 }
 
+pub fn exact_portable_binding(function: usize, fixture: &str) -> BoundFunctionBinding {
+    let ordinal = u32::try_from(function).expect("fixture function ordinal");
+    BoundFunctionBinding::portable(
+        function,
+        runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256(fixture),
+            function: runmat_types::ProgramFunctionId(ordinal),
+        },
+    )
+}
+
 pub fn exact_local_handle(runtime: &RuntimeContext, name: &str, function: usize) -> Value {
     exact_local_value(name, exact_local_binding(runtime, function))
 }

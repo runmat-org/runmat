@@ -1047,9 +1047,13 @@ mod tests {
 
     fn with_test_function(
         f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    ) -> crate::user_functions::FunctionInvokerGuard {
+    ) -> (
+        crate::user_functions::FunctionInvokerGuard,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
         let f = Arc::new(f);
-        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        let bound = bound_forwarder();
+        let numeric = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, args, _requested_outputs| {
                 let f = Arc::clone(&f);
                 let a = match &args[0] {
@@ -1062,7 +1066,26 @@ mod tests {
                 };
                 Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(a, b))) })
             },
-        )))
+        )));
+        (numeric, bound)
+    }
+
+    fn test_bound(name: &str, function: usize) -> Value {
+        crate::user_functions::test_support::exact_local_value(
+            name,
+            crate::user_functions::test_support::exact_portable_binding(function, "fsurf fixture"),
+        )
+    }
+
+    fn bound_forwarder() -> crate::user_functions::BoundFunctionInvokerGuard {
+        crate::user_functions::test_support::install_bound_forwarders(
+            [1, 11, 12, 13]
+                .into_iter()
+                .map(|id| {
+                    crate::user_functions::test_support::exact_portable_binding(id, "fsurf fixture")
+                })
+                .collect(),
+        )
     }
 
     #[test]
@@ -1245,6 +1268,7 @@ mod tests {
 
     #[test]
     fn fsurf_resident_integer_callback_is_gated_before_provider_access() {
+        let _bound = bound_forwarder();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, _requested_outputs| {
                 crate::sequence::single_value_future(async {
@@ -1261,18 +1285,8 @@ mod tests {
             },
         )));
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(call_surface_function(
-            &Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
-            0.0,
-            0.0,
-        ))
-        .expect_err("resident integer callback is rejected before gather");
+        let error = block_on(call_surface_function(&test_bound("surface", 1), 0.0, 0.0))
+            .expect_err("resident integer callback is rejected before gather");
         assert_eq!(
             error.identifier(),
             INTEGER_CALLBACK_OUTPUT_EXTENSION.error_identifier
@@ -1342,13 +1356,7 @@ mod tests {
         let _invoker = with_test_function(|x, y| x * x + y);
 
         let handle = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            test_bound("surface", 1),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(3.0),
@@ -1407,30 +1415,13 @@ mod tests {
                 })
             },
         )));
+        let _bound = bound_forwarder();
 
         let handle = block_on(fsurf_builtin(vec![
             Value::Num(ax),
-            Value::BoundFunctionHandle {
-                name: "x".into(),
-                function: 11,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(11),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
-            Value::BoundFunctionHandle {
-                name: "y".into(),
-                function: 12,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(12),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
-            Value::BoundFunctionHandle {
-                name: "z".into(),
-                function: 13,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(13),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            test_bound("x", 11),
+            test_bound("y", 12),
+            test_bound("z", 13),
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
             ),
@@ -1467,13 +1458,7 @@ mod tests {
         });
 
         let handle = block_on(fsurf_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            test_bound("surface", 1),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(2.0),

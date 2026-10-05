@@ -1514,6 +1514,11 @@ mod tests {
     #[test]
     fn timer_start_runs_function_callback_and_updates_state() {
         let _lock = TIMER_TEST_LOCK.lock().unwrap();
+        let binding = crate::user_functions::test_support::exact_portable_binding(
+            1,
+            "timer start callback fixture",
+        );
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         reset_timer_state_for_tests();
         let calls = Arc::new(Mutex::new(0usize));
         let invoker_calls = calls.clone();
@@ -1539,13 +1544,7 @@ mod tests {
         )));
         let timer = block_on(timer_builtin(vec![
             Value::String("TimerFcn".into()),
-            Value::BoundFunctionHandle {
-                name: "tick".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            crate::user_functions::test_support::exact_local_value("tick", binding),
             Value::String("ExecutionMode".into()),
             Value::String("fixedSpacing".into()),
             Value::String("TasksToExecute".into()),
@@ -1617,6 +1616,11 @@ mod tests {
     #[test]
     fn timer_tasks_to_execute_preserves_typed_integer_storage_exactly() {
         let _lock = TIMER_TEST_LOCK.lock().unwrap();
+        let binding = crate::user_functions::test_support::exact_portable_binding(
+            1,
+            "timer typed task count fixture",
+        );
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         reset_timer_state_for_tests();
         let calls = Arc::new(Mutex::new(0usize));
         let invoker_calls = calls.clone();
@@ -1634,13 +1638,7 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tasks");
         let timer = block_on(timer_builtin(vec![
             Value::String("TimerFcn".into()),
-            Value::BoundFunctionHandle {
-                name: "tick".into(),
-                function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            crate::user_functions::test_support::exact_local_value("tick", binding),
             Value::String("ExecutionMode".into()),
             Value::String("fixedSpacing".into()),
             Value::String("TasksToExecute".into()),
