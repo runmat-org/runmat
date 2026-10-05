@@ -150,19 +150,36 @@ impl RuntimePlacementService for Placement {
         request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
     ) -> Result<crate::context::RuntimeManagedWholeWorkSelection, crate::RuntimeError> {
         request.validate().unwrap();
+        let candidate = &request.candidates[0];
+        if let Some(available) = request.resources.memory_available_bytes {
+            let demand = match (
+                candidate.resources.retained_bytes,
+                candidate.resources.scratch_bytes,
+            ) {
+                (ResourceByteBound::Known(retained), ResourceByteBound::Known(scratch)) => {
+                    retained.checked_add(scratch)
+                }
+                _ => None,
+            };
+            if demand.is_none_or(|demand| demand > available) {
+                return Err(build_runtime_error("test placement resource limit")
+                    .with_identifier("RunMat:Placement:ResourceLimit")
+                    .build());
+            }
+        }
         if let Some(callback) = self.on_select.borrow().as_ref() {
             callback();
         }
         self.selections.set(self.selections.get() + 1);
         self.probes.fetch_add(1, Ordering::SeqCst);
-        Ok(crate::context::test_managed_selection(
+        crate::context::test_managed_selection(
             request,
             Some(Box::new(Probe(self.probes.clone()))),
             self.managed_ledger
                 .borrow()
                 .as_ref()
                 .expect("staged fixture ledger"),
-        ))
+        )
     }
     fn observe_managed_whole_work(
         &self,

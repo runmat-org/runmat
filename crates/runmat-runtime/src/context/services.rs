@@ -340,14 +340,21 @@ pub(crate) fn test_managed_selection(
     request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
     test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
     ledger: &super::host_effect::ManagedHostEffectLedger,
-) -> RuntimeManagedWholeWorkSelection {
+) -> Result<RuntimeManagedWholeWorkSelection, RuntimeError> {
     let candidate = &request.candidates[0];
     let identity = request
         .signature
         .permit_identity()
         .expect("typed test signature");
-    let pool = super::ManagedObservationPool::synthetic_unaccounted_for_tests(ledger);
-    RuntimeManagedWholeWorkSelection {
+    let pool = super::ManagedObservationPool::synthetic_unaccounted_for_tests(ledger).map_err(
+        |source| {
+            crate::build_runtime_error("test managed observation authority is unavailable")
+                .with_identifier("RunMat:Placement:StaleResourceAuthority")
+                .with_source(source)
+                .build()
+        },
+    )?;
+    Ok(RuntimeManagedWholeWorkSelection {
         identity,
         selected: runmat_execution::CompactSelectedExecutionCandidate {
             node: runmat_execution::PlacementOperationId::new(&request.signature.operation)
@@ -357,10 +364,17 @@ pub(crate) fn test_managed_selection(
         },
         kind: runmat_execution::WholeWorkDecisionKind::Unmeasured,
         predicted_total_ns: None,
-        observation_lease: pool.acquire(identity, candidate.identity_digest()).unwrap(),
+        observation_lease: pool
+            .acquire(identity, candidate.identity_digest())
+            .map_err(|source| {
+                crate::build_runtime_error("test managed observation selection is unavailable")
+                    .with_identifier("RunMat:Placement:StaleResourceAuthority")
+                    .with_source(source)
+                    .build()
+            })?,
         _test_probe: test_probe,
         test_signature: Box::new(request.signature.clone()),
-    }
+    })
 }
 
 impl RuntimeWholeWorkSelection {

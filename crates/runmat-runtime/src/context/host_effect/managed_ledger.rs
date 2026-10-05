@@ -209,7 +209,10 @@ impl ManagedHostEffectStageReservation {
         Ok(Arc::new(ManagedOutputHeadroom {
             inner: Arc::new(HeadroomInner {
                 ledger: self.inner.ledger.clone(),
-                unallocated: Mutex::new(bytes),
+                state: Mutex::new(HeadroomState {
+                    unallocated: bytes,
+                    active: true,
+                }),
             }),
         }))
     }
@@ -359,7 +362,12 @@ struct ManagedOutputHeadroom {
 
 struct HeadroomInner {
     ledger: Arc<Mutex<LedgerState>>,
-    unallocated: Mutex<u64>,
+    state: Mutex<HeadroomState>,
+}
+
+struct HeadroomState {
+    unallocated: u64,
+    active: bool,
 }
 
 impl fmt::Debug for ManagedOutputHeadroom {
@@ -377,8 +385,8 @@ impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
     ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
         let bytes =
             u64::try_from(bytes).map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
-        let mut remaining = self.inner.unallocated.lock().expect("output headroom lock");
-        if bytes > *remaining {
+        let mut headroom = self.inner.state.lock().expect("output headroom lock");
+        if !headroom.active || bytes > headroom.unallocated {
             return Err(ExactHostNumericAllocationError::ExceedsPermit);
         }
         let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
@@ -390,7 +398,7 @@ impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
             .live_claimed_bytes
             .checked_add(bytes)
             .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
-        *remaining -= bytes;
+        headroom.unallocated -= bytes;
         ledger.snapshot.live_claimed_bytes = claimed;
         ledger.snapshot.peak_claimed_bytes = ledger.snapshot.peak_claimed_bytes.max(claimed);
         Ok(Arc::new(OutputClaim {
@@ -399,11 +407,22 @@ impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
             bytes,
         }))
     }
+
+    fn retire_invocation(&self) {
+        let mut headroom = self.inner.state.lock().expect("output headroom lock");
+        if !headroom.active {
+            return;
+        }
+        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
+        ledger.snapshot.live_reserved_bytes -= headroom.unallocated;
+        headroom.unallocated = 0;
+        headroom.active = false;
+    }
 }
 
 impl Drop for HeadroomInner {
     fn drop(&mut self) {
-        let remaining = *self.unallocated.lock().expect("output headroom lock");
+        let remaining = self.state.lock().expect("output headroom lock").unallocated;
         self.ledger
             .lock()
             .expect("host ledger lock")
@@ -426,9 +445,13 @@ impl ExactHostAllocationReservation for OutputClaim {}
 impl Drop for OutputClaim {
     fn drop(&mut self) {
         if let Some(headroom) = self.headroom.upgrade() {
-            let mut remaining = headroom.unallocated.lock().expect("output headroom lock");
+            let mut headroom = headroom.state.lock().expect("output headroom lock");
             let mut state = self.ledger.lock().expect("host ledger lock");
-            *remaining += self.bytes;
+            if headroom.active {
+                headroom.unallocated += self.bytes;
+            } else {
+                state.snapshot.live_reserved_bytes -= self.bytes;
+            }
             state.snapshot.live_claimed_bytes -= self.bytes;
         } else {
             let mut state = self.ledger.lock().expect("host ledger lock");

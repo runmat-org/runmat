@@ -197,14 +197,14 @@ impl RuntimePlacementService for Placement {
         self.demands.borrow_mut().push(candidate.resources);
         self.selections.set(self.selections.get() + 1);
         self.probes.fetch_add(1, Ordering::SeqCst);
-        Ok(crate::context::test_managed_selection(
+        crate::context::test_managed_selection(
             request,
             Some(Box::new(Probe(self.probes.clone()))),
             self.managed_ledger
                 .borrow()
                 .as_ref()
                 .expect("staged audio ledger"),
-        ))
+        )
     }
     fn observe_managed_whole_work(
         &self,

@@ -61,6 +61,12 @@ pub trait HostEffectOutputHeadroom: std::fmt::Debug + Send + Sync {
         Arc<dyn runmat_value::ExactHostAllocationReservation>,
         runmat_value::ExactHostNumericAllocationError,
     >;
+
+    /// End this invocation's ability to allocate output and release any
+    /// unclaimed precharge. Claims already transferred to values remain live
+    /// until those values drop. External owners can retain their existing
+    /// drop-based behavior when they do not support explicit retirement.
+    fn retire_invocation(&self) {}
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -448,7 +454,13 @@ impl HostEffectStagePermit {
     pub(super) fn output_permit(
         &self,
         max_output_bytes: u64,
-    ) -> Result<Arc<dyn runmat_value::ExactHostAllocationPermit>, HostEffectAllocationError> {
+    ) -> Result<
+        (
+            Arc<dyn runmat_value::ExactHostAllocationPermit>,
+            Option<Arc<dyn HostEffectOutputHeadroom>>,
+        ),
+        HostEffectAllocationError,
+    > {
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(HostEffectAllocationError::Revoked);
         }
@@ -466,22 +478,23 @@ impl HostEffectStagePermit {
             {
                 return Err(HostEffectAllocationError::Revoked);
             }
-            return Ok(permit);
+            return Ok((permit, None));
         }
         let headroom = self.reservation.reserve_output_headroom(max_output_bytes)?;
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(HostEffectAllocationError::Revoked);
         }
-        Ok(Arc::new(StagedOutputPermit {
+        let permit = Arc::new(StagedOutputPermit {
             reservation: Arc::downgrade(&self.reservation),
-            headroom,
+            headroom: headroom.clone(),
             active_epoch: self.active_epoch.clone(),
             cancellation: self.cancellation.clone(),
             session_generation_owner: self.session_generation_owner.clone(),
             session_generation: self.session_generation,
             max_output_bytes,
             live_output_bytes: Arc::new(AtomicU64::new(0)),
-        }))
+        });
+        Ok((permit, Some(headroom)))
     }
 
     pub(super) fn terminate_allocations(&self) {

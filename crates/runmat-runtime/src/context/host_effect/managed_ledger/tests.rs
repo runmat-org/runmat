@@ -111,6 +111,60 @@ fn dropped_exact_output_reuses_selected_headroom_without_recharging() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn terminal_headroom_releases_unclaimed_bytes_despite_retained_permission_view() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let stage = ledger.reserve_stage(8).expect("stage");
+    let headroom = stage.reserve_output_headroom(4).expect("selected output");
+    let output = headroom.reserve_exact(2).expect("retained output");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+    headroom.retire_invocation();
+    headroom.retire_invocation();
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 10);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 2);
+    assert!(matches!(
+        headroom.reserve_exact(1),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 2);
+    drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    drop(headroom);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn terminal_headroom_and_final_claim_drop_refund_once_when_concurrent() {
+    use std::sync::Barrier;
+
+    let ledger = ManagedHostEffectLedger::new(12);
+    let stage = ledger.reserve_stage(8).expect("stage");
+    let headroom = stage.reserve_output_headroom(4).expect("selected output");
+    let claim = headroom.reserve_exact(2).expect("retained output");
+    let start = Arc::new(Barrier::new(2));
+    std::thread::scope(|scope| {
+        let start_worker = start.clone();
+        let worker = scope.spawn(move || {
+            start_worker.wait();
+            drop(claim);
+        });
+        start.wait();
+        headroom.retire_invocation();
+        worker.join().expect("claim drop worker");
+    });
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert!(matches!(
+        headroom.reserve_exact(1),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn revocation_and_overflow_are_typed_and_keep_existing_charges() {
     let full = ManagedHostEffectLedger::new(u64::MAX);
     let full_stage = full.reserve_stage(u64::MAX).expect("full stage");

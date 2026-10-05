@@ -4,6 +4,7 @@ use std::error::Error;
 struct ManagedResources {
     ledger: ManagedHostEffectLedger,
     revision: Digest,
+    returned_value_bytes: u64,
 }
 
 struct PooledResources {
@@ -209,7 +210,7 @@ impl RuntimeHostEffectResourceService for ManagedResources {
             test_admission(HostEffectResourceEvidence {
                 authority_revision: self.revision,
                 scratch_bytes: ResourceByteBound::Known(8),
-                returned_value_bytes: ResourceByteBound::Known(4),
+                returned_value_bytes: ResourceByteBound::Known(self.returned_value_bytes),
             })
         })
     }
@@ -218,6 +219,14 @@ impl RuntimeHostEffectResourceService for ManagedResources {
 fn managed_runtime(
     ledger: &ManagedHostEffectLedger,
     capacity: u64,
+) -> (RuntimeContext, Rc<Placement>) {
+    managed_runtime_with_output(ledger, capacity, 4)
+}
+
+fn managed_runtime_with_output(
+    ledger: &ManagedHostEffectLedger,
+    capacity: u64,
+    returned_value_bytes: u64,
 ) -> (RuntimeContext, Rc<Placement>) {
     assert_eq!(ledger.snapshot().capacity_bytes, capacity);
     let placement = Rc::new(Placement::default());
@@ -230,6 +239,7 @@ fn managed_runtime(
                 .with_host_effect_resources(Rc::new(ManagedResources {
                     ledger: ledger.clone(),
                     revision: Digest::sha256(b"managed-stage-v1"),
+                    returned_value_bytes,
                 }))
                 .with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
         );
@@ -642,8 +652,14 @@ fn revoked_selected_headroom_reports_stale_authority_with_cause() {
 
 #[test]
 fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt() {
-    let ledger = ManagedHostEffectLedger::new(12);
-    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let output_bytes = runmat_value::ExactHostNumericAllocation::requested_bytes(
+        runmat_value::NumericDType::F32,
+        1,
+    )
+    .expect("canonical exact float owner layout") as u64;
+    let capacity = 8 + output_bytes;
+    let ledger = ManagedHostEffectLedger::new(capacity);
+    let (runtime, placement) = managed_runtime_with_output(&ledger, capacity, output_bytes);
     let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
         .expect("precharged stage");
     let scan = stage
@@ -669,9 +685,9 @@ fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt()
     )
     .expect("physical four-byte output")
     .into_host_buffer();
-    assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
-    assert_eq!(ledger.snapshot().live_claimed_bytes, 12);
-    assert_eq!(ledger.snapshot().peak_claimed_bytes, 12);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, capacity);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, capacity);
+    assert_eq!(ledger.snapshot().peak_claimed_bytes, capacity);
     receipt.finish(WholeWorkObservationOutcome::Success);
     assert!(matches!(
         permit.reserve_exact(1),
@@ -681,7 +697,7 @@ fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt()
     drop(scan);
     drop(parsed);
     // A retained permission view must not pin the obsolete scan precharge.
-    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, output_bytes);
     drop(output);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     drop(permit);

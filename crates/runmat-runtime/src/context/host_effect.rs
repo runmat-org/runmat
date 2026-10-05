@@ -35,9 +35,9 @@ pub use managed_ledger::{
 };
 pub use stage::{
     admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,
-    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
-    HostEffectOutputHeadroom, HostEffectStageAdmission, HostEffectStageEvidence,
-    HostEffectStagePermit, HostEffectStageReservation,
+    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind,
+    HostEffectLiveAllocationReservation, HostEffectOutputHeadroom, HostEffectStageAdmission,
+    HostEffectStageEvidence, HostEffectStagePermit, HostEffectStageReservation,
 };
 pub use workload::{
     AudioDecodeOutput, AudioFrameRange, DatasetHandleInput, DatasetHandleKey,
@@ -386,14 +386,16 @@ fn select_host_effect_inner(
                 .build(),
         );
     }
-    let output_allocation_permit = match stage.as_ref() {
+    let (output_allocation_permit, output_headroom_to_retire) = match stage.as_ref() {
         Some(stage) => match retained_bytes {
             ResourceByteBound::Known(bytes) => {
-                Some(stage.output_permit(bytes).map_err(selected_output_error)?)
+                let (permit, headroom) =
+                    stage.output_permit(bytes).map_err(selected_output_error)?;
+                (Some(permit), headroom)
             }
-            ResourceByteBound::Unavailable(_) => None,
+            ResourceByteBound::Unavailable(_) => (None, None),
         },
-        None => admission.output_allocation_permit,
+        None => (admission.output_allocation_permit, None),
     };
     Ok(Some(HostEffectReceipt {
         runtime: runtime.clone(),
@@ -403,6 +405,7 @@ fn select_host_effect_inner(
             .map_or_else(Instant::now, |stage| stage.started),
         resource_liveness_lease: admission.liveness_lease,
         output_allocation_permit,
+        output_headroom_to_retire,
         active_epoch: stage.as_ref().map_or_else(
             || Arc::new(AtomicBool::new(true)),
             HostEffectStagePermit::active_epoch,
@@ -451,6 +454,7 @@ pub struct HostEffectReceipt {
     started: Instant,
     resource_liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
     output_allocation_permit: Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>,
+    output_headroom_to_retire: Option<Arc<dyn HostEffectOutputHeadroom>>,
     active_epoch: Arc<AtomicBool>,
     _stage: Option<HostEffectStagePermit>,
 }
@@ -533,6 +537,9 @@ impl HostEffectReceipt {
         // Observation is an external callback. The measured invocation is
         // already terminal, so no retained permit can admit work inside it.
         self.active_epoch.store(false, Ordering::Release);
+        if let Some(headroom) = self.output_headroom_to_retire.as_ref() {
+            headroom.retire_invocation();
+        }
         if let Some(stage) = self._stage.as_ref() {
             stage.terminate_allocations();
         }
@@ -553,6 +560,9 @@ impl HostEffectReceipt {
 impl Drop for HostEffectReceipt {
     fn drop(&mut self) {
         self.active_epoch.store(false, Ordering::Release);
+        if let Some(headroom) = self.output_headroom_to_retire.as_ref() {
+            headroom.retire_invocation();
+        }
     }
 }
 
