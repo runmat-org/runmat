@@ -67,6 +67,43 @@ fn method_output_bounds_precede_path_parse_and_mapped_effects() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn explicit_gpu_method_controls_are_gated_before_path_or_receiver_work() {
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap()
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let reference = futures::executor::block_on(subsref(
+        None,
+        Value::Num(0.0),
+        Value::GpuTensor(handle.clone()),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        reference.identifier(),
+        MEMMAPFILE_EXPLICIT_GPU_EXTENSION.error_identifier
+    );
+    let assignment = futures::executor::block_on(subsasgn(
+        None,
+        Value::Num(0.0),
+        property("Data"),
+        Value::GpuTensor(handle),
+    ))
+    .unwrap_err();
+    assert_eq!(
+        assignment.identifier(),
+        MEMMAPFILE_EXPLICIT_GPU_EXTENSION.error_identifier
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
     let _lock = vfs::provider_override_lock();
     #[cfg(target_arch = "wasm32")]

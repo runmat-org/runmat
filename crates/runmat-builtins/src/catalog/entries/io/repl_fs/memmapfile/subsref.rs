@@ -47,7 +47,7 @@ pub const MEMMAPFILE_SUBSREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalog
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &[super::MEMMAPFILE_EXPLICIT_GPU_EXTENSION],
     integer_capabilities: &contract::INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,

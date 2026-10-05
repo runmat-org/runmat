@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use runmat_builtins::{
-    MEMMAPFILE_CLASS, MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_SUBSASGN_DESCRIPTOR,
-    MEMMAPFILE_SUBSREF_DESCRIPTOR,
+    MEMMAPFILE_CLASS, MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+    MEMMAPFILE_SUBSASGN_DESCRIPTOR, MEMMAPFILE_SUBSREF_DESCRIPTOR,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
@@ -92,6 +92,12 @@ pub async fn subsref(
         &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
         SUBSREF,
     )?;
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&subscript) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+            SUBSREF,
+        )?;
+    }
     ensure_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     if path.steps().len() > 1 && member(&path.steps()[0])? == Property::Data {
@@ -123,6 +129,14 @@ pub async fn subsasgn(
         &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
         SUBSASGN,
     )?;
+    if crate::builtins::common::validation::value_contains_explicit_gpu(&subscript)
+        || crate::builtins::common::validation::value_contains_explicit_gpu(&rhs)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
+            SUBSASGN,
+        )?;
+    }
     ensure_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     if path.steps().len() > 1 && member(&path.steps()[0])? == Property::Data {
