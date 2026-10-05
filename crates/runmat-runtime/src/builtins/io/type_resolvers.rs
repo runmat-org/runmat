@@ -97,5 +97,4 @@ mod tests {
         Type::Struct { known_fields: None }
     );
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
-
 }
