@@ -1,5 +1,8 @@
-use runmat_async::{runtime_error, RuntimeError, RuntimeErrorSourceBound};
+use runmat_async::{
+    runtime_error, RuntimeError, RuntimeErrorSourceBound, SharedRuntimeErrorSource,
+};
 use std::error::Error;
+use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 type Owner = std::sync::Arc<()>;
@@ -48,6 +51,46 @@ fn forwarding_bound_retains_nested_exact_source_and_local_owner_until_final_drop
     assert_eq!(leaf.to_string(), "retained original cause");
     assert!(weak.upgrade().is_some());
     drop(outer);
+    assert!(weak.upgrade().is_none());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn shared_rethrow_retains_the_original_and_its_downcastable_cause() {
+    let owner = Owner::new(());
+    let weak = Owner::downgrade(&owner);
+    let original = Arc::new(
+        runtime_error("source failure")
+            .with_identifier("RunMat:Test:Original")
+            .with_call_stack(vec!["origin".into()])
+            .with_phase("execution")
+            .with_gpu_gather_retry(runmat_async::GpuGatherRetry::Never)
+            .with_failure_origin(runmat_async::RuntimeFailureOrigin::LanguageEvaluation)
+            .with_source(RetainedCause(owner))
+            .build(),
+    );
+    let caught = Arc::clone(&original);
+    let reraised = RuntimeError::from_shared_original(caught);
+    assert_eq!(reraised.identifier(), Some("RunMat:Test:Original"));
+    assert_eq!(reraised.context.call_stack, ["origin"]);
+    assert_eq!(reraised.context.phase.as_deref(), Some("execution"));
+    assert_eq!(
+        reraised.gpu_gather_retry,
+        runmat_async::GpuGatherRetry::Never
+    );
+    assert_eq!(
+        reraised.failure_origin,
+        runmat_async::RuntimeFailureOrigin::LanguageEvaluation
+    );
+    let shared = reraised
+        .source()
+        .unwrap()
+        .downcast_ref::<SharedRuntimeErrorSource>()
+        .unwrap();
+    assert!(std::ptr::eq(shared.original(), original.as_ref()));
+    assert!(shared.original().source().unwrap().is::<RetainedCause>());
+    drop(reraised);
+    drop(original);
     assert!(weak.upgrade().is_none());
 }
 

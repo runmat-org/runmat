@@ -17,13 +17,13 @@ pub fn redirect_exception_to_catch(
     refresh_vars: impl Fn(&[Value]),
 ) -> ExceptionHandling {
     if let Some(handler) = try_stack.pop() {
+        let mex = runmat_runtime::runtime_error::exception_from_error(err);
+        *last_exception = Some(mex.clone());
         if let Some(var_idx) = handler.catch_var {
             if var_idx >= vars.len() {
                 vars.resize(var_idx + 1, Value::Num(0.0));
                 refresh_vars(vars);
             }
-            let mex = runmat_runtime::runtime_error::exception_from_error(&err);
-            *last_exception = Some(mex.clone());
             vars[var_idx] = Value::MException(mex);
             refresh_vars(vars);
             mark_workspace_assigned(var_idx);

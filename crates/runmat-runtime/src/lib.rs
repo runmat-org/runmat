@@ -539,9 +539,7 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
 
 pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     match e {
-        Value::MException(me) => Err(build_runtime_error(me.message)
-            .with_identifier(me.identifier)
-            .build()),
+        Value::MException(me) => Err(runtime_error::error_from_exception(me)),
         Value::String(s) => Err(build_runtime_error(s).build()),
         other => Err(build_runtime_error(format!("RunMat:error: {other:?}")).build()),
     }

@@ -11,6 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 runmat-accelerate-api = { workspace = true }
+runmat-async = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-gc-api = { workspace = true }
 runmat-thread-local = { workspace = true }

@@ -49,26 +49,52 @@ pub fn semantic_error(identifier: &str, message: impl Into<String>) -> RuntimeEr
 ///
 /// Executors own control transfer and frame/source decoration; Runtime owns
 /// the stable conversion from its semantic error contract to `MException`.
-pub fn exception_from_error(error: &RuntimeError) -> runmat_value::MException {
-    if let Some(identifier) = error.identifier() {
-        return runmat_value::MException::new(identifier.to_string(), error.message().to_string());
-    }
-    let message = error.message();
-    if let Some(index) = message.rfind(": ") {
-        let (identifier, detail) = message.split_at(index);
-        return runmat_value::MException::new(
+pub fn exception_from_error(
+    error: impl Into<std::sync::Arc<RuntimeError>>,
+) -> runmat_value::MException {
+    let original = error.into();
+    let error = original.as_ref();
+    let (identifier, message) = if let Some(identifier) = error.identifier() {
+        (identifier.to_string(), error.message().to_string())
+    } else if let Some(index) = error.message().rfind(": ") {
+        let (identifier, detail) = error.message().split_at(index);
+        (
             exception_identifier(identifier),
             detail.trim_start_matches(':').trim().to_string(),
-        );
-    }
-    if let Some(index) = message.rfind(':') {
-        let (identifier, detail) = message.split_at(index);
-        return runmat_value::MException::new(
+        )
+    } else if let Some(index) = error.message().rfind(':') {
+        let (identifier, detail) = error.message().split_at(index);
+        (
             exception_identifier(identifier),
             detail.trim_start_matches(':').trim().to_string(),
-        );
+        )
+    } else {
+        (exception_identifier(""), error.message().to_string())
+    };
+    let stack = if error.context.call_stack.is_empty() {
+        error
+            .context
+            .call_frames
+            .iter()
+            .map(|frame| frame.function.clone())
+            .collect()
+    } else {
+        error.context.call_stack.clone()
+    };
+    runmat_value::MException::from_runtime_error(identifier, message, stack, original)
+}
+
+/// Rethrow an exception using its original typed runtime failure when it was
+/// caught from execution. User-constructed exceptions retain their public
+/// identifier, message, and stack without inventing an opaque source.
+pub fn error_from_exception(exception: runmat_value::MException) -> RuntimeError {
+    if let Some(original) = exception.original() {
+        return RuntimeError::from_shared_original(std::sync::Arc::clone(original));
     }
-    runmat_value::MException::new(exception_identifier(""), message.to_string())
+    build_runtime_error(exception.message)
+        .with_identifier(exception.identifier)
+        .with_call_stack(exception.stack)
+        .build()
 }
 
 fn exception_identifier(identifier: &str) -> String {
@@ -126,6 +152,7 @@ mod tests {
     use super::*;
     use crate::context::{RuntimeContext, RuntimeContextGuard};
     use crate::execution::RuntimeExecutionService;
+    use std::error::Error;
     use std::rc::Rc;
 
     #[test]
@@ -147,7 +174,7 @@ mod tests {
     #[test]
     fn caught_exception_materialization_preserves_structured_and_legacy_errors() {
         let structured = semantic_error("IndexOutOfBounds", "bad index");
-        let exception = exception_from_error(&structured);
+        let exception = exception_from_error(structured);
         assert_eq!(exception.identifier, "RunMat:IndexOutOfBounds");
         assert_eq!(exception.message, "bad index");
 
@@ -155,8 +182,43 @@ mod tests {
         context.set_error_namespace("Acme");
         let _scope = RuntimeContextGuard::enter(context);
         let legacy = crate::build_runtime_error("legacy detail").build();
-        let exception = exception_from_error(&legacy);
+        let exception = exception_from_error(legacy);
         assert_eq!(exception.identifier, "Acme:error");
         assert_eq!(exception.message, "legacy detail");
+    }
+
+    #[test]
+    fn rethrow_preserves_original_frames_policy_and_downcastable_source() {
+        let original = build_runtime_error("inner failure")
+            .with_identifier("RunMat:diagnostics:Inner")
+            .with_builtin("source")
+            .with_call_frames(vec![CallFrame {
+                function: "origin".into(),
+                source_id: Some(7),
+                span: Some((3, 8)),
+            }])
+            .with_span((3, 5).into())
+            .with_phase("execution")
+            .with_gpu_gather_retry(GpuGatherRetry::Never)
+            .with_failure_origin(RuntimeFailureOrigin::LanguageEvaluation)
+            .with_source(std::io::Error::other("typed original cause"))
+            .build();
+        let caught = exception_from_error(original);
+        assert_eq!(caught.stack, ["origin"]);
+        let reraised = error_from_exception(caught);
+        assert_eq!(reraised.identifier(), Some("RunMat:diagnostics:Inner"));
+        assert_eq!(reraised.context.call_frames[0].source_id, Some(7));
+        assert_eq!(reraised.context.phase.as_deref(), Some("execution"));
+        assert_eq!(reraised.gpu_gather_retry, GpuGatherRetry::Never);
+        assert_eq!(
+            reraised.failure_origin,
+            RuntimeFailureOrigin::LanguageEvaluation
+        );
+        let shared = reraised
+            .source()
+            .unwrap()
+            .downcast_ref::<runmat_async::SharedRuntimeErrorSource>()
+            .expect("exact original runtime error owner");
+        assert!(shared.original().source().unwrap().is::<std::io::Error>());
     }
 }

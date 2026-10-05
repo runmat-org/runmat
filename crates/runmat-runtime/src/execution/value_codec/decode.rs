@@ -1,6 +1,6 @@
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, SparseValue, ValueLimits,
-    ValuePayload,
+    CallableValue, DenseValue, ElementType, ExceptionFailureOrigin, ExceptionGpuGatherRetry,
+    ExceptionRuntimeMetadata, ExceptionValue, InlineValue, SparseValue, ValueLimits, ValuePayload,
 };
 use runmat_value::{
     CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
@@ -9,6 +9,7 @@ use runmat_value::{
 };
 
 use super::ValueCodecError;
+use std::sync::Arc;
 
 #[path = "decode/aggregate.rs"]
 mod aggregate;
@@ -426,11 +427,72 @@ fn decode_exception(value: &ExceptionValue, path: &str) -> Result<Value, ValueCo
             "nested exception causes are not represented by the current runtime MException",
         ));
     }
-    Ok(Value::MException(MException {
-        identifier: value.identifier.clone(),
-        message: value.message.clone(),
-        stack: value.stack.clone(),
-    }))
+    let exception = if let Some(metadata) = &value.runtime {
+        MException::from_runtime_error(
+            value.identifier.clone(),
+            value.message.clone(),
+            value.stack.clone(),
+            Arc::new(decode_exception_runtime(value, metadata, path)?),
+        )
+    } else {
+        let mut exception = MException::new(value.identifier.clone(), value.message.clone());
+        exception.stack = value.stack.clone();
+        exception
+    };
+    Ok(Value::MException(exception))
+}
+
+fn decode_exception_runtime(
+    value: &ExceptionValue,
+    metadata: &ExceptionRuntimeMetadata,
+    path: &str,
+) -> Result<crate::RuntimeError, ValueCodecError> {
+    fn local(value: u64, path: &str) -> Result<usize, ValueCodecError> {
+        usize::try_from(value)
+            .map_err(|_| ValueCodecError::invalid(path, "exception metadata exceeds local width"))
+    }
+    fn span(
+        value: Option<(u64, u64)>,
+        path: &str,
+    ) -> Result<Option<(usize, usize)>, ValueCodecError> {
+        value
+            .map(|(start, length)| Ok((local(start, path)?, local(length, path)?)))
+            .transpose()
+    }
+    let call_frames = metadata
+        .call_frames
+        .iter()
+        .map(|frame| {
+            Ok(crate::CallFrame {
+                function: frame.function.clone(),
+                source_id: frame.source_id.map(|id| local(id, path)).transpose()?,
+                span: span(frame.span, path)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ValueCodecError>>()?;
+    let mut error = crate::RuntimeError::new(value.message.clone());
+    error.identifier = Some(value.identifier.clone());
+    error.span = span(metadata.span, path)?.map(Into::into);
+    error.context = crate::ErrorContext {
+        builtin: metadata.builtin.clone(),
+        task_id: metadata.task_id.clone(),
+        call_frames,
+        call_frames_elided: local(metadata.call_frames_elided, path)?,
+        call_stack: metadata.call_stack.clone(),
+        phase: metadata.phase.clone(),
+    };
+    error.gpu_gather_retry = match metadata.gpu_gather_retry {
+        ExceptionGpuGatherRetry::Legacy => crate::GpuGatherRetry::Legacy,
+        ExceptionGpuGatherRetry::Never => crate::GpuGatherRetry::Never,
+        ExceptionGpuGatherRetry::Requested => crate::GpuGatherRetry::Requested,
+    };
+    error.failure_origin = match metadata.failure_origin {
+        ExceptionFailureOrigin::Unclassified => runmat_async::RuntimeFailureOrigin::Unclassified,
+        ExceptionFailureOrigin::LanguageEvaluation => {
+            runmat_async::RuntimeFailureOrigin::LanguageEvaluation
+        }
+    };
+    Ok(error)
 }
 
 fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCodecError> {

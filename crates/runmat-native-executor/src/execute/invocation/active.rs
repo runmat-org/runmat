@@ -107,8 +107,9 @@ impl ActiveInvocation {
         &mut self,
         error: runmat_runtime::RuntimeError,
     ) -> NativeExecutorResult<()> {
+        let original = std::sync::Arc::new(self.state.annotate_error(error));
         let exception = self.state.arena.insert(runmat_value::Value::MException(
-            runmat_runtime::runtime_error::exception_from_error(&error),
+            runmat_runtime::runtime_error::exception_from_error(original.clone()),
         ));
         let native_exception = runmat_runtime::native::NativeException {
             handle: exception.handle,
@@ -122,7 +123,9 @@ impl ActiveInvocation {
             self.resume_pending = false;
             return Ok(());
         }
-        Err(NativeExecutorError::from(self.state.annotate_error(error)))
+        Err(NativeExecutorError::from(self.state.annotate_error(
+            runmat_runtime::RuntimeError::from_shared_original(original),
+        )))
     }
 
     /// Resume a guard failure in the generic native version at the exact site.
@@ -192,10 +195,10 @@ impl ActiveInvocation {
                 }
                 NativeExitKind::EXCEPTION => {
                     let error = self.state.last_error.take().unwrap_or_else(|| {
-                        runmat_runtime::runtime_error::semantic_error(
+                        std::sync::Arc::new(runmat_runtime::runtime_error::semantic_error(
                             "NativeException",
                             "native execution returned an exception without host error state",
-                        )
+                        ))
                     });
                     if let Some(target) =
                         super::super::site::redirect_exception(&mut self.state, exit.exception)?
@@ -203,7 +206,9 @@ impl ActiveInvocation {
                         self.install_resume_target(target)?;
                         continue;
                     }
-                    return Err(NativeExecutorError::from(self.state.annotate_error(error)));
+                    return Err(NativeExecutorError::from(self.state.annotate_error(
+                        runmat_runtime::RuntimeError::from_shared_original(error),
+                    )));
                 }
                 NativeExitKind::CANCELLED => return Err(NativeExecutorError::Cancelled),
                 NativeExitKind::SUSPENDED => {

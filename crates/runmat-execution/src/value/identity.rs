@@ -1,6 +1,9 @@
 use minicbor::Encoder;
 
-use super::{ExceptionValue, InlineValue, RegisteredData, ValueLimits, ValuePayload};
+use super::{
+    ExceptionFailureOrigin, ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue,
+    InlineValue, RegisteredData, ValueLimits, ValuePayload,
+};
 use crate::{ContractError, Digest};
 
 pub(super) fn logical_digest(payload: &ValuePayload) -> Result<Digest, ContractError> {
@@ -256,7 +259,81 @@ fn encode_exception(
     for cause in &value.causes {
         encode_exception(encoder, cause)?;
     }
-    encoder.null().map(|_| ()).map_err(encoding)
+    match &value.runtime {
+        Some(runtime) => encode_exception_runtime(encoder, runtime),
+        None => encoder.null().map(|_| ()).map_err(encoding),
+    }
+}
+
+fn encode_exception_runtime(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    runtime: &ExceptionRuntimeMetadata,
+) -> Result<(), ContractError> {
+    encoder.array(9).map_err(encoding)?;
+    encode_optional_span(encoder, runtime.span)?;
+    encode_optional_text(encoder, runtime.builtin.as_deref())?;
+    encode_optional_text(encoder, runtime.task_id.as_deref())?;
+    encoder
+        .array(runtime.call_frames.len() as u64)
+        .map_err(encoding)?;
+    for frame in &runtime.call_frames {
+        encoder
+            .array(3)
+            .and_then(|encoder| encoder.str(&frame.function))
+            .map_err(encoding)?;
+        match frame.source_id {
+            Some(source_id) => encoder.u64(source_id).map(|_| ()).map_err(encoding)?,
+            None => encoder.null().map(|_| ()).map_err(encoding)?,
+        }
+        encode_optional_span(encoder, frame.span)?;
+    }
+    encoder.u64(runtime.call_frames_elided).map_err(encoding)?;
+    encoder
+        .array(runtime.call_stack.len() as u64)
+        .map_err(encoding)?;
+    for frame in &runtime.call_stack {
+        encoder.str(frame).map_err(encoding)?;
+    }
+    encode_optional_text(encoder, runtime.phase.as_deref())?;
+    encoder
+        .u8(match runtime.gpu_gather_retry {
+            ExceptionGpuGatherRetry::Legacy => 0,
+            ExceptionGpuGatherRetry::Never => 1,
+            ExceptionGpuGatherRetry::Requested => 2,
+        })
+        .map_err(encoding)?;
+    encoder
+        .u8(match runtime.failure_origin {
+            ExceptionFailureOrigin::Unclassified => 0,
+            ExceptionFailureOrigin::LanguageEvaluation => 1,
+        })
+        .map(|_| ())
+        .map_err(encoding)
+}
+
+fn encode_optional_span(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    span: Option<(u64, u64)>,
+) -> Result<(), ContractError> {
+    match span {
+        Some((start, length)) => encoder
+            .array(2)
+            .and_then(|encoder| encoder.u64(start))
+            .and_then(|encoder| encoder.u64(length))
+            .map(|_| ())
+            .map_err(encoding),
+        None => encoder.null().map(|_| ()).map_err(encoding),
+    }
+}
+
+fn encode_optional_text(
+    encoder: &mut Encoder<&mut Vec<u8>>,
+    text: Option<&str>,
+) -> Result<(), ContractError> {
+    match text {
+        Some(text) => encoder.str(text).map(|_| ()).map_err(encoding),
+        None => encoder.null().map(|_| ()).map_err(encoding),
+    }
 }
 
 fn encode_payloads(

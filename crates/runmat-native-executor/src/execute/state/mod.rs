@@ -48,7 +48,7 @@ pub(super) struct HostState {
     pub locals: Vec<NativeValueRef>,
     pub values: BTreeMap<NativeValueId, NativeValueRef>,
     pub roots: Vec<NativeRoot>,
-    pub last_error: Option<RuntimeError>,
+    pub last_error: Option<Arc<RuntimeError>>,
     pub host_failure: Option<NativeExecutorError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,

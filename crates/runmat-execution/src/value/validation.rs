@@ -292,6 +292,25 @@ impl ValidationBudget<'_> {
         for frame in &value.stack {
             self.text(frame)?;
         }
+        if let Some(runtime) = &value.runtime {
+            if let Some(builtin) = &runtime.builtin {
+                self.text(builtin)?;
+            }
+            if let Some(task_id) = &runtime.task_id {
+                self.text(task_id)?;
+            }
+            self.elements(runtime.call_frames.len() as u64)?;
+            for frame in &runtime.call_frames {
+                self.text(&frame.function)?;
+            }
+            self.elements(runtime.call_stack.len() as u64)?;
+            for frame in &runtime.call_stack {
+                self.text(frame)?;
+            }
+            if let Some(phase) = &runtime.phase {
+                self.text(phase)?;
+            }
+        }
         self.elements(value.causes.len() as u64)?;
         for cause in &value.causes {
             self.node(depth + 1)?;

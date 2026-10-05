@@ -237,6 +237,43 @@ pub struct ExceptionValue {
     pub message: String,
     pub stack: Vec<String>,
     pub causes: Vec<ExceptionValue>,
+    /// Source-less caught runtime errors retain structured metadata across
+    /// portable execution transport. Opaque live causes are not serialized.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<ExceptionRuntimeMetadata>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ExceptionGpuGatherRetry {
+    Legacy,
+    Never,
+    Requested,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ExceptionFailureOrigin {
+    Unclassified,
+    LanguageEvaluation,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExceptionCallFrame {
+    pub function: String,
+    pub source_id: Option<u64>,
+    pub span: Option<(u64, u64)>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExceptionRuntimeMetadata {
+    pub span: Option<(u64, u64)>,
+    pub builtin: Option<String>,
+    pub task_id: Option<String>,
+    pub call_frames: Vec<ExceptionCallFrame>,
+    pub call_frames_elided: u64,
+    pub call_stack: Vec<String>,
+    pub phase: Option<String>,
+    pub gpu_gather_retry: ExceptionGpuGatherRetry,
+    pub failure_origin: ExceptionFailureOrigin,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -324,5 +361,43 @@ impl ResidentFence {
                 .validate_for_attempt(accelerator.attempt_id)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod exception_protocol_tests {
+    use super::*;
+
+    #[test]
+    fn optional_runtime_metadata_changes_logical_identity_without_breaking_legacy_payload() {
+        let old_json = serde_json::json!({
+            "identifier": "RunMat:old",
+            "message": "failure",
+            "stack": ["origin"],
+            "causes": []
+        });
+        let old: ExceptionValue = serde_json::from_value(old_json).unwrap();
+        assert!(old.runtime.is_none());
+        let old_payload = ValuePayload::Inline(Box::new(InlineValue::Exception(old.clone())));
+        let old_digest = old_payload.logical_digest().unwrap();
+
+        let mut newer = old;
+        newer.runtime = Some(ExceptionRuntimeMetadata {
+            span: Some((2, 5)),
+            builtin: Some("error".into()),
+            task_id: None,
+            call_frames: vec![ExceptionCallFrame {
+                function: "origin".into(),
+                source_id: Some(7),
+                span: Some((2, 5)),
+            }],
+            call_frames_elided: 0,
+            call_stack: vec!["origin".into()],
+            phase: Some("execution".into()),
+            gpu_gather_retry: ExceptionGpuGatherRetry::Never,
+            failure_origin: ExceptionFailureOrigin::LanguageEvaluation,
+        });
+        let newer_payload = ValuePayload::Inline(Box::new(InlineValue::Exception(newer)));
+        assert_ne!(old_digest, newer_payload.logical_digest().unwrap());
     }
 }

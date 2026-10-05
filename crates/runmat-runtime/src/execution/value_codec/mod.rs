@@ -258,10 +258,10 @@ mod tests {
         );
         structure.insert(
             "error",
-            Value::MException(MException {
-                identifier: "RunMat:test".into(),
-                message: "failure".into(),
-                stack: vec!["main:1".into()],
+            Value::MException({
+                let mut error = MException::new("RunMat:test".into(), "failure".into());
+                error.stack = vec!["main:1".into()];
+                error
             }),
         );
         let value = Value::Struct(structure);
@@ -567,6 +567,44 @@ mod tests {
             ValueCodecError::Unsupported { ref path, rule }
                 if path == "$" && rule.contains("registered codec")
         ));
+    }
+
+    #[test]
+    fn source_less_caught_exception_round_trips_typed_runtime_metadata() {
+        let original = crate::build_runtime_error("failure")
+            .with_identifier("RunMat:portable:Failure")
+            .with_call_frames(vec![crate::CallFrame {
+                function: "origin".into(),
+                source_id: Some(11),
+                span: Some((2, 5)),
+            }])
+            .with_phase("execution")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build();
+        let caught = Value::MException(crate::runtime_error::exception_from_error(original));
+        let payload = encode_inline_value(&caught).expect("source-less exception is portable");
+        let decoded = decode_inline_value(&payload).expect("portable exception decode");
+        let Value::MException(decoded) = decoded else {
+            panic!("expected exception");
+        };
+        let original = decoded.original().expect("typed runtime provenance");
+        assert_eq!(original.context.call_frames[0].source_id, Some(11));
+        assert_eq!(original.context.phase.as_deref(), Some("execution"));
+        assert_eq!(original.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(decoded.stack, ["origin"]);
+    }
+
+    #[test]
+    fn caught_exception_with_live_cause_is_not_silently_serialized() {
+        let original = crate::build_runtime_error("failure")
+            .with_source(std::io::Error::other("opaque cause"))
+            .build();
+        let caught = Value::MException(crate::runtime_error::exception_from_error(original));
+        for result in [encode_inline_value(&caught), encode_durable_value(&caught)] {
+            assert!(
+                matches!(result, Err(ValueCodecError::Unsupported { rule, .. }) if rule.contains("live opaque cause"))
+            );
+        }
     }
 
     #[test]

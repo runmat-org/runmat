@@ -1226,20 +1226,12 @@ pub async fn resolve_imported_builtin(
 pub fn rethrow_without_explicit_exception(
     name: &str,
     args: &[Value],
-    last_identifier: Option<&str>,
-    last_message: Option<&str>,
+    last_exception: Option<&runmat_value::MException>,
 ) -> Option<RuntimeError> {
     match VmIntrinsicExceptionBuiltin::classify(name) {
-        Some(VmIntrinsicExceptionBuiltin::Rethrow) if args.is_empty() => {
-            if let (Some(identifier), Some(message)) = (last_identifier, last_message) {
-                return Some(
-                    build_runtime_error(message.to_string())
-                        .with_identifier(identifier.to_string())
-                        .build(),
-                );
-            }
-            None
-        }
+        Some(VmIntrinsicExceptionBuiltin::Rethrow) if args.is_empty() => last_exception
+            .cloned()
+            .map(runmat_runtime::runtime_error::error_from_exception),
         _ => None,
     }
 }
@@ -1324,8 +1316,10 @@ mod tests {
         let err = rethrow_without_explicit_exception(
             "rethrow",
             &[],
-            Some("RunMat:Original"),
-            Some("boom"),
+            Some(&runmat_value::MException::new(
+                "RunMat:Original".into(),
+                "boom".into(),
+            )),
         )
         .expect("rethrow should preserve prior exception");
         assert_eq!(err.identifier(), Some("RunMat:Original"));

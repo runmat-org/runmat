@@ -1,4 +1,5 @@
 use std::error::Error as StdError;
+use std::sync::Arc;
 
 use miette::SourceSpan;
 use thiserror::Error;
@@ -77,6 +78,35 @@ pub struct RuntimeError {
     pub failure_origin: RuntimeFailureOrigin,
 }
 
+/// An owning reference to the exact error caught by an exception value.
+///
+/// A rethrow may have several live references to that original error (for
+/// example, a catch variable and the VM's active exception). This source is
+/// not a formatted copy: traversing `source()` reaches the original
+/// `RuntimeError` and its downcastable provider or host cause.
+#[derive(Debug)]
+pub struct SharedRuntimeErrorSource {
+    original: Arc<RuntimeError>,
+}
+
+impl SharedRuntimeErrorSource {
+    pub fn original(&self) -> &RuntimeError {
+        &self.original
+    }
+}
+
+impl std::fmt::Display for SharedRuntimeErrorSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.original)
+    }
+}
+
+impl StdError for SharedRuntimeErrorSource {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.original.as_ref())
+    }
+}
+
 /// Producer-owned failure provenance, independent of diagnostic spelling or
 /// host presentation policy. Unclassified failures must not be retried based
 /// on their message or identifier.
@@ -100,6 +130,26 @@ pub enum GpuGatherRetry {
 }
 
 impl RuntimeError {
+    /// Recover the original caught error when it has one owner; otherwise
+    /// retain that exact original as an owning source while copying only its
+    /// language-visible metadata into the new outward error.
+    pub fn from_shared_original(original: Arc<Self>) -> Self {
+        match Arc::try_unwrap(original) {
+            Ok(error) => error,
+            Err(original) => Self {
+                message: original.message.clone(),
+                span: original.span.clone(),
+                source: Some(Box::new(SharedRuntimeErrorSource {
+                    original: original.clone(),
+                })),
+                identifier: original.identifier.clone(),
+                context: original.context.clone(),
+                gpu_gather_retry: original.gpu_gather_retry,
+                failure_origin: original.failure_origin,
+            },
+        }
+    }
+
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),

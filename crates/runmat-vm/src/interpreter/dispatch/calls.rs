@@ -316,12 +316,9 @@ async fn handle_builtin_call_inner(
         call_builtins::resolve_imported_builtin(runtime, name, imports, &args, requested_outputs)
             .await?;
     if result.is_err() {
-        if let Some(err) = call_builtins::rethrow_without_explicit_exception(
-            name,
-            &args,
-            last_exception.as_ref().map(|e| e.identifier.as_str()),
-            last_exception.as_ref().map(|e| e.message.as_str()),
-        ) {
+        if let Some(err) =
+            call_builtins::rethrow_without_explicit_exception(name, &args, last_exception.as_ref())
+        {
             return Err(err);
         }
     }

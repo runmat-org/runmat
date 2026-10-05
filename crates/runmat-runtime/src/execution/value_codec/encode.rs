@@ -1,7 +1,8 @@
 use super::path::{field_path, index_path};
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionValue, InlineValue, RegisteredData,
+    CallableValue, DenseValue, ElementType, ExceptionCallFrame, ExceptionFailureOrigin,
+    ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue, InlineValue, RegisteredData,
     RegisteredField, SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
@@ -198,12 +199,26 @@ fn encode(
                 "class metadata references are session-bound",
             ))
         }
-        Value::MException(value) => InlineValue::Exception(ExceptionValue {
-            identifier: value.identifier.clone(),
-            message: value.message.clone(),
-            stack: value.stack.clone(),
-            causes: Vec::new(),
-        }),
+        Value::MException(value) => {
+            let runtime = if let Some(original) = value.original() {
+                if original.source.is_some() {
+                    return Err(ValueCodecError::unsupported(
+                        path,
+                        "caught exception has a live opaque cause and cannot be transferred or stored",
+                    ));
+                }
+                Some(exception_runtime_metadata(original, path)?)
+            } else {
+                None
+            };
+            InlineValue::Exception(ExceptionValue {
+                identifier: value.identifier.clone(),
+                message: value.message.clone(),
+                stack: value.stack.clone(),
+                causes: Vec::new(),
+                runtime,
+            })
+        }
         Value::Future(_) | Value::Task(_) | Value::Pool(_) | Value::Job(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
@@ -403,6 +418,65 @@ fn callable(
         qualified_name: qualified_name.into(),
         callable_digest: CallableValue::identity_digest(owner_identity, qualified_name),
         captures,
+    })
+}
+
+fn exception_runtime_metadata(
+    error: &crate::RuntimeError,
+    path: &str,
+) -> Result<ExceptionRuntimeMetadata, ValueCodecError> {
+    fn portable(value: usize, path: &str) -> Result<u64, ValueCodecError> {
+        u64::try_from(value).map_err(|_| {
+            ValueCodecError::invalid(path, "exception metadata exceeds portable limits")
+        })
+    }
+    fn span(
+        value: Option<(usize, usize)>,
+        path: &str,
+    ) -> Result<Option<(u64, u64)>, ValueCodecError> {
+        value
+            .map(|(start, length)| Ok((portable(start, path)?, portable(length, path)?)))
+            .transpose()
+    }
+    let call_frames = error
+        .context
+        .call_frames
+        .iter()
+        .map(|frame| {
+            Ok(ExceptionCallFrame {
+                function: frame.function.clone(),
+                source_id: frame.source_id.map(|id| portable(id, path)).transpose()?,
+                span: span(frame.span, path)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ValueCodecError>>()?;
+    Ok(ExceptionRuntimeMetadata {
+        span: span(
+            error
+                .span
+                .as_ref()
+                .map(|value| (value.offset(), value.len())),
+            path,
+        )?,
+        builtin: error.context.builtin.clone(),
+        task_id: error.context.task_id.clone(),
+        call_frames,
+        call_frames_elided: portable(error.context.call_frames_elided, path)?,
+        call_stack: error.context.call_stack.clone(),
+        phase: error.context.phase.clone(),
+        gpu_gather_retry: match error.gpu_gather_retry {
+            crate::GpuGatherRetry::Legacy => ExceptionGpuGatherRetry::Legacy,
+            crate::GpuGatherRetry::Never => ExceptionGpuGatherRetry::Never,
+            crate::GpuGatherRetry::Requested => ExceptionGpuGatherRetry::Requested,
+        },
+        failure_origin: match error.failure_origin {
+            runmat_async::RuntimeFailureOrigin::Unclassified => {
+                ExceptionFailureOrigin::Unclassified
+            }
+            runmat_async::RuntimeFailureOrigin::LanguageEvaluation => {
+                ExceptionFailureOrigin::LanguageEvaluation
+            }
+        },
     })
 }
 
