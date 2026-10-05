@@ -1,9 +1,2 @@
-use runmat_builtins::{ResolveContext, Type};
-
-pub fn warning_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-pub fn error_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
-}
+// The generated diagnostics parent still references this leaf until composition
+// removes it. All migrated diagnostic identities now use catalog inference.
