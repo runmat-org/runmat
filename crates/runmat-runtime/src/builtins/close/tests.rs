@@ -1,5 +1,5 @@
-use super::contract::CLOSE_VARIADIC_TARGETS_EXTENSION;
 use super::*;
+use runmat_builtins::CLOSE_VARIADIC_TARGETS_EXTENSION;
 use runmat_builtins::{BuiltinIntegerBackendRule, BuiltinIntegerComputationDomain};
 use runmat_value::{IntegerStorage, Tensor, Value};
 
@@ -19,7 +19,7 @@ fn compatibility_mode_rejects_all_integer_figure_number_classes() {
 
     for storage in storages {
         let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).expect("figure"));
-        let err = futures::executor::block_on(close_builtin(vec![value]))
+        let err = futures::executor::block_on(close_builtin(None, vec![value]))
             .expect_err("typed integer extension must be gated");
         assert_eq!(
             err.identifier(),
@@ -42,10 +42,13 @@ fn close_integer_capability_is_structural_and_host_only() {
 #[test]
 fn compatibility_mode_rejects_separate_variadic_targets_before_dispatch() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let err = futures::executor::block_on(close_builtin(vec![
-        Value::String("clients".into()),
-        Value::String("servers".into()),
-    ]))
+    let err = futures::executor::block_on(close_builtin(
+        None,
+        vec![
+            Value::String("clients".into()),
+            Value::String("servers".into()),
+        ],
+    ))
     .expect_err("RunMat-only variadic close targets");
     assert_eq!(
         err.identifier(),
@@ -64,7 +67,7 @@ fn resident_numeric_figure_target_rejects_without_provider_dispatch() {
         .expect("resident numeric target");
     let caller_alias = allocation.handle.clone();
     let resident = Value::GpuTensor(allocation.handle);
-    let err = futures::executor::block_on(close_builtin(vec![resident]))
+    let err = futures::executor::block_on(close_builtin(None, vec![resident]))
         .expect_err("resident figure target");
     assert!(!err.message().to_ascii_lowercase().contains("provider"));
     assert_eq!(allocation.probe.retirements(), 0);
@@ -77,7 +80,7 @@ fn resident_numeric_figure_target_rejects_without_provider_dispatch() {
 #[test]
 fn invalid_network_structure_uses_canonical_invalid_handle_error() {
     let invalid = Value::Struct(runmat_value::StructValue::new());
-    let err = futures::executor::block_on(close_builtin(vec![invalid]))
+    let err = futures::executor::block_on(close_builtin(None, vec![invalid]))
         .expect_err("invalid networking handle");
     assert_eq!(err.identifier(), Some("RunMat:close:InvalidHandle"));
     assert!(CLOSE_DESCRIPTOR

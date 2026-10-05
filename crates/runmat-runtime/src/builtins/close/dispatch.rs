@@ -2,23 +2,27 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 #[cfg(not(feature = "plot-core"))]
-use super::contract::CLOSE_ERROR_INVALID_ARGUMENT;
-use super::contract::{CLOSE_INTEGER_FIGURE_NUMBER_EXTENSION, CLOSE_VARIADIC_TARGETS_EXTENSION};
+use runmat_builtins::CLOSE_ERROR_INVALID_ARGUMENT;
+use runmat_builtins::{
+    CLOSE_DESCRIPTOR, CLOSE_ERROR_TOO_MANY_OUTPUTS, CLOSE_INTEGER_FIGURE_NUMBER_EXTENSION,
+    CLOSE_VARIADIC_TARGETS_EXTENSION,
+};
 
 #[runtime_builtin(
     name = "close",
-    category = "general",
-    summary = "Close figures or networking resources.",
-    keywords = "close,figure,tcpclient,tcpserver,networking",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(crate::builtins::io::type_resolvers::close_type),
-    descriptor(crate::builtins::close::CLOSE_DESCRIPTOR),
-    extensions(crate::builtins::close::CLOSE_EXTENSIONS),
-    integer_capabilities(crate::builtins::close::CLOSE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::close"
 )]
-pub async fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn close_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &CLOSE_DESCRIPTOR,
+        &CLOSE_ERROR_TOO_MANY_OUTPUTS,
+        "close",
+    )?;
     if args.len() > 1 {
         crate::compatibility::ensure_builtin_extension_enabled(
             &CLOSE_VARIADIC_TARGETS_EXTENSION,
@@ -31,7 +35,9 @@ pub async fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "close",
         )?;
     }
-    if let Some(status) = crate::builtins::io::net::close::close_if_network_targets(&args).await? {
+    if let Some(status) =
+        crate::builtins::io::net::close::close_if_network_targets(runtime.as_ref(), &args).await?
+    {
         return Ok(status);
     }
 
