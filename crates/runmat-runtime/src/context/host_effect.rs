@@ -481,6 +481,12 @@ impl HostEffectReceipt {
     pub fn output_allocation_permit(
         &self,
     ) -> Option<Arc<dyn runmat_value::ExactHostAllocationPermit>> {
+        // The staged authority already checks this receipt's epoch,
+        // cancellation, session generation, and captured reservation. Reuse
+        // its owner instead of allocating a second forwarding Arc per call.
+        if self._stage.is_some() {
+            return self.output_allocation_permit.clone();
+        }
         self.output_allocation_permit.as_ref().map(|permit| {
             Arc::new(output_permit::ReceiptOutputPermit::new(
                 Arc::downgrade(permit),
