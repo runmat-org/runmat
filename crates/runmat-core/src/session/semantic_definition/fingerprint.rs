@@ -9,6 +9,7 @@ pub(crate) fn fingerprint(
     // HashSet iteration order is not stable, so canonicalize those fields explicitly.
     let runmat_vm::FunctionBytecode {
         function,
+        definition_owner: _,
         display_name,
         class_method_owner,
         private_owner_scope,

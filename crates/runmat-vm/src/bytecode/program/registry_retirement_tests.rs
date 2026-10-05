@@ -69,3 +69,41 @@ fn same_identity_refresh_preserves_aliases_and_updates_source_membership() {
     assert!(registry.functions_for_source(SourceId(7)).is_empty());
     assert!(registry.get(FunctionId(3)).is_some());
 }
+
+#[test]
+fn leased_old_body_survives_name_republication_without_becoming_name_visible() {
+    let mut registry = registry();
+    let old_owner = registry
+        .get(FunctionId(1))
+        .unwrap()
+        .definition_owner
+        .clone();
+    let lease = runmat_value::FunctionDefinitionOwner::issue(&old_owner);
+    registry.insert_replacing_name(function(4, "first", 7));
+    assert_eq!(registry.resolve_name("first"), Some(FunctionId(4)));
+    assert!(registry.get(FunctionId(1)).is_none());
+    assert_eq!(
+        registry
+            .get_owned(FunctionId(1), &lease)
+            .unwrap()
+            .display_name,
+        "first"
+    );
+    let wrong = runmat_value::FunctionDefinitionOwner::issue(
+        &registry.get(FunctionId(4)).unwrap().definition_owner,
+    );
+    assert!(registry.get_owned(FunctionId(1), &wrong).is_none());
+    drop(lease);
+    registry.insert_replacing_name(function(5, "second", 8));
+    assert!(registry.retired.get(&FunctionId(1)).is_none());
+}
+
+#[test]
+fn reused_numeric_id_never_executes_retired_body() {
+    let mut registry = registry();
+    let lease = runmat_value::FunctionDefinitionOwner::issue(
+        &registry.get(FunctionId(1)).unwrap().definition_owner,
+    );
+    registry.insert_replacing_name(function(1, "first", 7));
+    assert!(registry.get_owned(FunctionId(1), &lease).is_none());
+}

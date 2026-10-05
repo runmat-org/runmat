@@ -51,9 +51,17 @@ impl Default for ExecutionContext {
     }
 }
 
+fn fresh_definition_owner() -> std::sync::Arc<runmat_value::FunctionDefinitionOwner> {
+    std::sync::Arc::new(runmat_value::FunctionDefinitionOwner::default())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionBytecode {
     pub function: FunctionId,
+    /// Process-local identity of this immutable definition. Serialized
+    /// artifacts hydrate a fresh owner; they never import a local lease.
+    #[serde(skip, default = "fresh_definition_owner")]
+    pub definition_owner: std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
     pub display_name: String,
     pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     #[serde(default)]
@@ -114,6 +122,7 @@ impl Default for FunctionBytecode {
     fn default() -> Self {
         Self {
             function: FunctionId(0),
+            definition_owner: fresh_definition_owner(),
             display_name: String::new(),
             class_method_owner: None,
             private_owner_scope: String::new(),
@@ -237,6 +246,10 @@ pub struct FunctionRegistry {
     pub names: HashMap<String, FunctionId>,
     #[serde(default)]
     pub source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>>,
+    /// Session-only old bodies that have live callable leases. They are never
+    /// name-resolvable or serialized into a portable executable artifact.
+    #[serde(skip)]
+    retired: HashMap<FunctionId, Vec<FunctionBytecode>>,
     #[serde(skip)]
     execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
 }
@@ -259,12 +272,39 @@ impl FunctionRegistry {
             functions,
             names,
             source_functions,
+            retired: HashMap::new(),
             execution_stacks: OnceLock::new(),
         }
     }
 
     pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
         self.functions.get(&function)
+    }
+
+    /// A bound value carries the exact definition lease. Numeric IDs only
+    /// narrow the lookup; they never authorize a replacement body.
+    pub fn get_owned(
+        &self,
+        function: FunctionId,
+        lease: &runmat_value::FunctionDefinitionLease,
+    ) -> Option<&FunctionBytecode> {
+        if let Some(current) = self.functions.get(&function) {
+            // Reusing a number for another definition invalidates old bound
+            // calls; nested static calls in that old body would otherwise be
+            // ambiguous. Core assigns monotonic numbers for this reason.
+            return lease.matches(&current.definition_owner).then_some(current);
+        }
+        self.retired
+            .get(&function)?
+            .iter()
+            .find(|body| lease.matches(&body.definition_owner))
+    }
+
+    fn prune_retired(&mut self) {
+        self.retired.retain(|_, bodies| {
+            bodies.retain(|body| body.definition_owner.has_handles());
+            !bodies.is_empty()
+        });
     }
 
     pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
@@ -285,6 +325,7 @@ impl FunctionRegistry {
 
     pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
         self.execution_stacks.take();
+        self.prune_retired();
         if let Some(previous) = self.resolve_name(&function.display_name) {
             if previous != function.function {
                 self.remove(previous);
@@ -293,7 +334,11 @@ impl FunctionRegistry {
         let function_id = function.function;
         // Refreshing an existing identity does not retire its live aliases,
         // but its previous source membership must still be detached.
-        self.detach_definition(function_id);
+        if let Some(old) = self.detach_definition(function_id) {
+            if old.definition_owner.has_handles() {
+                self.retired.entry(function_id).or_default().push(old);
+            }
+        }
         self.names
             .insert(function.display_name.clone(), function_id);
         if let Some(source_id) = function.source_id {
@@ -307,8 +352,15 @@ impl FunctionRegistry {
 
     pub fn remove(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
         self.execution_stacks.take();
+        self.prune_retired();
         let removed = self.detach_definition(function)?;
         self.names.retain(|_, target| *target != function);
+        if removed.definition_owner.has_handles() {
+            self.retired
+                .entry(function)
+                .or_default()
+                .push(removed.clone());
+        }
         Some(removed)
     }
 
@@ -1093,6 +1145,7 @@ mod function_registry_tests {
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
         FunctionBytecode {
             function: FunctionId(id),
+            definition_owner: fresh_definition_owner(),
             display_name: display_name.into(),
             class_method_owner: None,
             private_owner_scope: private_owner_scope.to_string(),

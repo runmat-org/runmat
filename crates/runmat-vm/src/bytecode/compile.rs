@@ -823,6 +823,9 @@ fn compile_semantic_functions(
             function.id,
             FunctionBytecode {
                 function: function.id,
+                definition_owner: std::sync::Arc::new(
+                    runmat_value::FunctionDefinitionOwner::default(),
+                ),
                 display_name: function_layout.display_name.clone(),
                 class_method_owner: mir
                     .functions

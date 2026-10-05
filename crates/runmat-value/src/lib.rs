@@ -23,7 +23,10 @@ pub use array::{
     HostLogicalBuffer, HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseTensor,
     StringArray, SymbolicArray, Tensor,
 };
-pub use callable::Closure;
+pub use callable::{
+    BoundFunctionAuthority, BoundFunctionBinding, Closure, FunctionDefinitionLease,
+    FunctionDefinitionOwner, LocalExport,
+};
 pub use display::{format_number, get_display_format, set_display_format, FormatMode};
 pub use exception::MException;
 pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
