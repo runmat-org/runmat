@@ -15,6 +15,8 @@ use std::sync::Arc;
 
 struct MemoryDirectLease;
 static MEMORY_DIRECT_LEASE: MemoryDirectLease = MemoryDirectLease;
+struct MemoryProviderLease;
+static MEMORY_PROVIDER_LEASE: MemoryProviderLease = MemoryProviderLease;
 
 fn revision() -> FsResourceRevision {
     FsResourceRevision::for_provider(
@@ -32,11 +34,7 @@ pub(super) fn managed_read_contract() -> FsManagedReadContract {
 }
 
 pub(super) fn resource_lease_handle() -> FsResourceLeaseHandle {
-    FsResourceLeaseHandle::Static(&MEMORY_DIRECT_LEASE)
-}
-
-pub(super) fn resource_lease_owned() -> Arc<dyn FsResourceLease> {
-    Arc::new(MemoryDirectLease)
+    FsResourceLeaseHandle::Static(&MEMORY_PROVIDER_LEASE)
 }
 
 impl FsResourceLease for MemoryDirectLease {
@@ -50,6 +48,28 @@ impl FsResourceLease for MemoryDirectLease {
 
     fn is_valid(&self) -> bool {
         true // Snapshot bytes are immutable even if the tree is replaced.
+    }
+
+    fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
+        Some(FsManagedOpenedInputCost {
+            requested_heap_bytes: managed_read_contract().opened_requested_heap_bytes,
+        })
+    }
+}
+
+impl FsResourceLease for MemoryProviderLease {
+    fn contract(&self) -> FsResourceContract {
+        FsResourceContract {
+            revision: revision(),
+            // Ordinary MemoryFS open clones the file Vec. Only the separate
+            // bounded-input handle has the direct-read payload contract.
+            opened_input_handle: None,
+            opened_output_handle: None,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        true
     }
 
     fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
@@ -99,7 +119,7 @@ pub(super) fn open(provider: &MemoryFsProvider, path: &Path) -> io::Result<FsBou
             readonly,
         }),
         metadata,
-        resource_lease_handle(),
+        FsResourceLeaseHandle::Static(&MEMORY_DIRECT_LEASE),
     )
 }
 
@@ -174,6 +194,10 @@ mod tests {
                 .unwrap()
                 .unwrap();
         assert_eq!(opened.opened_extent(), 4);
+        assert_eq!(
+            opened.resource_revision(),
+            resource_lease_handle().lease().contract().revision
+        );
         provider
             .write_project_path("/source.csv", b"new-and-larger")
             .unwrap();

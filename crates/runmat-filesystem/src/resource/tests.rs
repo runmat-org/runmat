@@ -149,6 +149,7 @@ fn provider_revisions_are_domain_separated_and_extensible() {
 #[test]
 fn memory_provider_has_its_own_immutable_snapshot_contract() {
     let provider: Arc<dyn FsProvider> = Arc::new(MemoryFsProvider::new());
+    assert!(provider.resource_lease().is_none());
     let contract = provider
         .managed_read_contract()
         .expect("memory direct snapshot");
@@ -158,6 +159,7 @@ fn memory_provider_has_its_own_immutable_snapshot_contract() {
         .expect("capture")
         .expect("memory snapshot lease");
     assert_eq!(lease.contract().revision, contract.revision);
+    assert_eq!(lease.contract().opened_input_handle, None);
     assert_eq!(
         lease
             .managed_opened_input_cost()

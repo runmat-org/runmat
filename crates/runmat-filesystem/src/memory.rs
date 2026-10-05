@@ -261,7 +261,7 @@ impl FsProvider for MemoryFsProvider {
     }
 
     fn resource_lease(&self) -> Option<Arc<dyn crate::FsResourceLease>> {
-        Some(bounded::resource_lease_owned())
+        None
     }
 
     fn resource_lease_handle(&self) -> Option<crate::FsResourceLeaseHandle> {
