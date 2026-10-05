@@ -1,6 +1,10 @@
 use super::super::scan;
 use super::*;
+use runmat_value::ExactHostAllocationPermit;
 use std::io::{Seek, SeekFrom};
+
+mod storage;
+use storage::FillStorage;
 
 fn selected_geometry(
     geometry: &BoundedScanGeometry,
@@ -42,6 +46,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     options: &ReadMatrixOptions,
     staged_line: Option<ExactHostEffectBytes>,
     mut staged_field: Option<ExactHostEffectBytes>,
+    output_permit: Option<&dyn ExactHostAllocationPermit>,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
     let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
@@ -60,10 +65,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
         )
     })?;
     let integer_dtype = integer_output_dtype(&options.output_template);
-    let mut integer = integer_dtype.map(|dtype| NumericStorage::zeros(dtype, count));
-    let mut floating = integer_dtype
-        .is_none()
-        .then(|| vec![options.empty_value_f64(); count]);
+    let mut storage = FillStorage::new(rows, cols, count, integer_dtype, options, output_permit)?;
     let mut reader = RowReader::new(source, staged_line);
     let mut data_row = 0usize;
     let mut semantic_error = None;
@@ -78,8 +80,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
             rows,
             integer_dtype,
             options,
-            integer: &mut integer,
-            floating: &mut floating,
+            storage: &mut storage,
         };
         let field_count = scan::for_each_field_ref(
             reader.text(),
@@ -143,24 +144,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     if let Some(error) = semantic_error {
         return Err(error);
     }
-    if rows == 0 || cols == 0 {
-        return empty_tensor();
-    }
-    if let Some(storage) = integer {
-        Tensor::from_numeric_storage(storage, vec![rows, cols]).map_err(|source| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_TENSOR_BUILD,
-                format!("readmatrix: {source}"),
-            )
-        })
-    } else {
-        Tensor::new(floating.expect("floating storage"), vec![rows, cols]).map_err(|source| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_TENSOR_BUILD,
-                format!("readmatrix: {source}"),
-            )
-        })
-    }
+    storage.into_tensor(rows, cols)
 }
 
 fn changed_source() -> RuntimeError {
@@ -175,8 +159,7 @@ struct FillTarget<'a> {
     rows: usize,
     integer_dtype: Option<NumericDType>,
     options: &'a ReadMatrixOptions,
-    integer: &'a mut Option<NumericStorage>,
-    floating: &'a mut Option<Vec<f64>>,
+    storage: &'a mut FillStorage,
 }
 
 impl FillTarget<'_> {
@@ -189,7 +172,7 @@ impl FillTarget<'_> {
     ) -> BuiltinResult<()> {
         let output_col = source_col - self.first_col;
         let index = output_col * self.rows + output_row;
-        if let (Some(dtype), Some(storage)) = (self.integer_dtype, self.integer.as_mut()) {
+        if let Some(dtype) = self.integer_dtype {
             let value = parse_integer_numeric_token(
                 token,
                 self.options,
@@ -197,14 +180,10 @@ impl FillTarget<'_> {
                 line_number,
                 source_col + 1,
             )?;
-            storage.set_value(index, value).map_err(|source| {
-                readmatrix_error_with(
-                    &READMATRIX_ERROR_TENSOR_BUILD,
-                    format!("readmatrix: {source}"),
-                )
-            })?;
-        } else if let Some(storage) = self.floating.as_mut() {
-            storage[index] = parse_numeric_token(token, self.options, line_number, source_col + 1)?;
+            self.storage.set(index, value)?;
+        } else {
+            let value = parse_numeric_token(token, self.options, line_number, source_col + 1)?;
+            self.storage.set(index, NumericScalar::F64(value))?;
         }
         Ok(())
     }

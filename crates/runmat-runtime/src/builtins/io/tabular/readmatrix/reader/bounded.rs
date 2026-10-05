@@ -60,15 +60,6 @@ impl SampleRows {
     }
 }
 
-fn empty_tensor() -> BuiltinResult<Tensor> {
-    Tensor::new(Vec::new(), vec![0, 0]).map_err(|source| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_TENSOR_BUILD,
-            format!("readmatrix: {source}"),
-        )
-    })
-}
-
 pub(super) async fn scan_utf8(
     source: &mut FsBoundedInput,
     cooperation: &mut TabularCooperation<'_>,

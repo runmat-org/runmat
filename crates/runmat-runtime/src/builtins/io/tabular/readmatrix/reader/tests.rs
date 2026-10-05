@@ -7,12 +7,16 @@ use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_filesystem::MemoryFsProvider;
 use runmat_value::IntegerStorage;
+use runmat_value::{
+    ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
+};
 use std::cell::Cell;
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -33,6 +37,86 @@ fn selected_path(bytes: &[u8]) -> (runmat_filesystem::ProviderGuard, TabularFsPa
         .path(path)
         .expect("selected path");
     (restore, selected)
+}
+
+#[derive(Debug)]
+struct ExactOutputTestPermit(Arc<AtomicUsize>);
+
+#[derive(Debug)]
+struct ExactOutputTestReservation {
+    live: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for ExactOutputTestReservation {
+    fn drop(&mut self) {
+        self.live.fetch_sub(self.bytes, Ordering::SeqCst);
+    }
+}
+
+impl ExactHostAllocationReservation for ExactOutputTestReservation {}
+
+impl ExactHostAllocationPermit for ExactOutputTestPermit {
+    fn reserve_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
+        self.0.fetch_add(bytes, Ordering::SeqCst);
+        Ok(Arc::new(ExactOutputTestReservation {
+            live: self.0.clone(),
+            bytes,
+        }))
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn retained_utf8_replay_writes_exact_wide_integer_output_without_mirror() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let (_restore, selected) = selected_path(b"9007199254740993,18446744073709551615\n");
+    let mut source = block_on(selected.open_bounded_input())
+        .expect("bounded opened source")
+        .expect("direct memory snapshot");
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let options = ReadMatrixOptions {
+        delimiter: Some(Delimiter::Char(',')),
+        output_template: OutputTemplate::Numeric(NumericDType::U64),
+        ..ReadMatrixOptions::default()
+    };
+    let geometry = block_on(bounded::scan_utf8(
+        &mut source,
+        &mut cooperation,
+        &selected,
+        &options,
+        None,
+        None,
+        None,
+    ))
+    .expect("first pass");
+    let live = Arc::new(AtomicUsize::new(0));
+    let permit = ExactOutputTestPermit(live.clone());
+    let tensor = block_on(bounded::fill_utf8(
+        &mut source,
+        &geometry,
+        &mut cooperation,
+        &selected,
+        &options,
+        None,
+        None,
+        Some(&permit),
+    ))
+    .expect("exact replay");
+    assert_eq!(tensor.shape.as_slice(), [1, 2]);
+    assert_eq!(
+        tensor.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+    );
+    assert_eq!(
+        live.load(Ordering::SeqCst),
+        16 + 2 * std::mem::size_of::<usize>()
+    );
+    drop(tensor);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -305,6 +389,8 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &selected,
         &options,
         None,
+        None,
+        None,
     ))
     .expect_err("second pass cannot publish unvalidated new bytes");
     assert!(error
@@ -331,6 +417,8 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
+        None,
         None,
     ))
     .expect_err("changed-source error precedes replay token error");
@@ -360,6 +448,8 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
+        None,
+        None,
         None,
     ))
     .expect_err("empty range still checks retained source before publication");

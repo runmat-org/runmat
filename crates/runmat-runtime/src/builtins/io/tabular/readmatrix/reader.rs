@@ -58,6 +58,7 @@ pub(super) async fn read_numeric_matrix(
                 options,
                 None,
                 None,
+                None,
             )
             .await
         }
