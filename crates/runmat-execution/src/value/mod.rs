@@ -243,7 +243,7 @@ pub struct ExceptionValue {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CallableValue {
-    pub owner_identity: String,
+    pub owner: CallableOwner,
     pub qualified_name: String,
     pub callable_digest: Digest,
     /// Required callable identity fields. Historical payloads cannot be
@@ -254,6 +254,17 @@ pub struct CallableValue {
     #[serde(deserialize_with = "deserialize_required_source_file")]
     pub source_file: Option<String>,
     pub captures: Vec<ValuePayload>,
+}
+
+/// Portable callable resolution never interprets a destination-local number
+/// or display spelling as a semantic function identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "binding")]
+pub enum CallableOwner {
+    Workspace,
+    External,
+    Method,
+    Bound(crate::FunctionBindingOrigin),
 }
 
 // Custom field deserialization makes a missing Option field an error while
@@ -273,14 +284,23 @@ pub enum CallableForm {
 
 impl CallableValue {
     pub fn identity_digest(
-        owner_identity: &str,
+        owner: CallableOwner,
         qualified_name: &str,
         form: CallableForm,
         source_role: runmat_types::FunctionSourceRole,
         source_file: Option<&str>,
     ) -> Digest {
-        let mut identity = b"runmat-callable-v3\0".to_vec();
-        identity.extend_from_slice(owner_identity.as_bytes());
+        let mut identity = b"runmat-callable-v4\0".to_vec();
+        match owner {
+            CallableOwner::Workspace => identity.push(0),
+            CallableOwner::External => identity.push(1),
+            CallableOwner::Method => identity.push(2),
+            CallableOwner::Bound(origin) => {
+                identity.push(3);
+                identity.extend_from_slice(origin.program.bytes());
+                identity.extend_from_slice(&origin.function.0.to_be_bytes());
+            }
+        }
         identity.push(0);
         identity.extend_from_slice(qualified_name.as_bytes());
         identity.push(0);
@@ -309,7 +329,7 @@ impl CallableValue {
         }
         if self.callable_digest
             != Self::identity_digest(
-                &self.owner_identity,
+                self.owner,
                 &self.qualified_name,
                 self.form,
                 self.source_role,

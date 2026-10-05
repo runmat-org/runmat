@@ -202,8 +202,16 @@ impl ValidationBudget<'_> {
             }
             InlineValue::Exception(value) => self.exception(value, depth)?,
             InlineValue::Callable(value) => {
-                self.text(&value.owner_identity)?;
+                self.bytes(match value.owner {
+                    super::CallableOwner::Bound(_) => 1 + 32 + 4,
+                    super::CallableOwner::Workspace
+                    | super::CallableOwner::External
+                    | super::CallableOwner::Method => 1,
+                })?;
                 self.text(&value.qualified_name)?;
+                if let Some(path) = &value.source_file {
+                    self.text(path)?;
+                }
                 value.validate_identity()?;
                 for capture in &value.captures {
                     self.payload(capture, depth + 1)?;

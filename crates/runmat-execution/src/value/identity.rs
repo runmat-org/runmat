@@ -197,10 +197,30 @@ fn encode_inline(
         InlineValue::Exception(value) => encode_exception(encoder, value),
         InlineValue::Callable(value) => {
             encoder
-                .array(7)
+                .array(8)
                 .and_then(|encoder| encoder.u8(22))
-                .and_then(|encoder| encoder.str(&value.owner_identity))
-                .and_then(|encoder| encoder.str(&value.qualified_name))
+                .map_err(encoding)?;
+            match value.owner {
+                super::CallableOwner::Workspace => {
+                    encoder.array(1).and_then(|e| e.u8(0)).map_err(encoding)?;
+                }
+                super::CallableOwner::External => {
+                    encoder.array(1).and_then(|e| e.u8(1)).map_err(encoding)?;
+                }
+                super::CallableOwner::Method => {
+                    encoder.array(1).and_then(|e| e.u8(2)).map_err(encoding)?;
+                }
+                super::CallableOwner::Bound(origin) => {
+                    encoder
+                        .array(3)
+                        .and_then(|e| e.u8(3))
+                        .and_then(|e| e.bytes(origin.program.bytes()))
+                        .and_then(|e| e.u32(origin.function.0))
+                        .map_err(encoding)?;
+                }
+            }
+            encoder
+                .str(&value.qualified_name)
                 .and_then(|encoder| encoder.bytes(value.callable_digest.bytes()))
                 .and_then(|encoder| {
                     encoder.u8(match value.form {
@@ -210,6 +230,10 @@ fn encode_inline(
                 })
                 .and_then(|encoder| encoder.u8(value.source_role as u8))
                 .map_err(encoding)?;
+            match &value.source_file {
+                Some(path) => encoder.str(path).map_err(encoding)?,
+                None => encoder.null().map_err(encoding)?,
+            };
             encode_payloads(encoder, &value.captures)
         }
         InlineValue::ImmutableValueClass(value) => encode_registered(encoder, 23, value),

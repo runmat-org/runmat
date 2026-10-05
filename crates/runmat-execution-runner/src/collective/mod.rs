@@ -725,10 +725,10 @@ mod tests {
     }
 
     fn callable(name: &str) -> ValuePayload {
-        let owner = "builtin";
+        let owner = runmat_execution::value::CallableOwner::Workspace;
         ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Callable(
             runmat_execution::value::CallableValue {
-                owner_identity: owner.into(),
+                owner,
                 qualified_name: name.into(),
                 callable_digest: runmat_execution::value::CallableValue::identity_digest(
                     owner,
