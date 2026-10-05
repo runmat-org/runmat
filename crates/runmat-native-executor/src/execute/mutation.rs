@@ -29,6 +29,22 @@ pub(super) struct PreparedSequenceDestination {
     field: String,
 }
 
+pub(super) struct PreparedSequenceRvalue {
+    pub(super) destination: PreparedSequenceDestination,
+    pub(super) count: usize,
+}
+
+impl PreparedSequenceRvalue {
+    pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
+        self.destination
+            .writeback
+            .parents
+            .iter()
+            .map(|(value, _)| *value)
+            .chain(std::iter::once(self.destination.base))
+    }
+}
+
 pub(super) struct PreparedSequenceAssignment {
     destination: PreparedSequenceDestination,
     values: Vec<NativeValueRef>,
@@ -120,12 +136,19 @@ pub(super) fn execute(
                 .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
             {
                 state.pending_plain_multi = None;
-                let prepared = state.prepared_multi_assignment.take().ok_or_else(|| {
+                let mut prepared = state.prepared_multi_assignment.take().ok_or_else(|| {
                     NativeExecutorError::Host(
                         "native sequence-target multi-assignment has no prepared values".into(),
                     )
                 })?;
-                prepared.commit(state)?;
+                match prepared.commit(state) {
+                    Ok(()) => {}
+                    Err(NativeExecutorError::CallSuspended) => {
+                        state.prepared_multi_assignment = Some(prepared);
+                        return Err(NativeExecutorError::CallSuspended);
+                    }
+                    Err(error) => return Err(error),
+                }
                 let places = targets
                     .targets
                     .iter()

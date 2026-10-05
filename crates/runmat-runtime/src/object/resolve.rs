@@ -696,10 +696,29 @@ async fn store_member_sequence_traced_with_context(
             let shape = array.shape().to_vec();
             let mut updated = Vec::with_capacity(values.len());
             for (element, value) in array.into_data().into_iter().zip(values) {
-                updated.push(
-                    store_member_traced(element, field.clone(), value, false, caller_function_name)
-                        .await?,
-                );
+                updated.push(match runtime {
+                    Some(runtime) => {
+                        store_member_traced_in_context(
+                            runtime,
+                            element,
+                            field.clone(),
+                            value,
+                            false,
+                            caller_function_name,
+                        )
+                        .await?
+                    }
+                    None => {
+                        store_member_traced(
+                            element,
+                            field.clone(),
+                            value,
+                            false,
+                            caller_function_name,
+                        )
+                        .await?
+                    }
+                });
             }
             runmat_value::ObjectArray::new(class_name, updated, shape)
                 .map(Value::ObjectArray)
@@ -707,7 +726,20 @@ async fn store_member_sequence_traced_with_context(
         }
         base if values.len() == 1 => {
             let value = values.into_iter().next().expect("validated singleton");
-            store_member_traced(base, field, value, false, caller_function_name).await
+            match runtime {
+                Some(runtime) => {
+                    store_member_traced_in_context(
+                        runtime,
+                        base,
+                        field,
+                        value,
+                        false,
+                        caller_function_name,
+                    )
+                    .await
+                }
+                None => store_member_traced(base, field, value, false, caller_function_name).await,
+            }
         }
         _ => Err(mex(
             "RunMat:CommaSeparatedListAssignmentArity",

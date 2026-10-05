@@ -5,18 +5,18 @@ use runmat_runtime::native::NativeValueRef;
 use runmat_runtime::sequence::{
     DestinationCardinality, DestinationLayout, PreparedSequenceDestination,
 };
-use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::assign_place_to_root;
+use super::{continuation, root_local_value};
 use crate::execute::state::HostState;
 
 mod roots;
 mod target;
-use roots::{local_value, root_for_update};
+use roots::local_value;
 use target::prepare_sequence_target;
 
+#[derive(Clone)]
 pub(super) enum PreparedTarget {
     Place(MirPlace),
     Sequence {
@@ -30,6 +30,9 @@ pub(in crate::execute) struct PreparedMultiAssignment {
     targets: Vec<PreparedTarget>,
     layout: DestinationLayout,
     values: Vec<Vec<NativeValueRef>>,
+    retained: Vec<NativeValueRef>,
+    next_target: usize,
+    roots: BTreeMap<runmat_mir::MirLocalId, NativeValueRef>,
 }
 
 impl PreparedMultiAssignment {
@@ -39,6 +42,7 @@ impl PreparedMultiAssignment {
     ) -> NativeExecutorResult<Self> {
         let mut prepared = Vec::with_capacity(targets.targets.len());
         let mut cardinalities = Vec::with_capacity(targets.targets.len());
+        let mut retained = Vec::new();
         for target in &targets.targets {
             match target {
                 MirOutputTarget::Place(place) => {
@@ -51,6 +55,9 @@ impl PreparedMultiAssignment {
                 }
                 MirOutputTarget::Sequence(target) => {
                     let (root, destination) = prepare_sequence_target(state, target)?;
+                    destination.visit_retained_values(&mut |value| {
+                        retained.push(state.arena.insert(value.clone()));
+                    });
                     cardinalities.push(DestinationCardinality::Sequence(destination.cardinality()));
                     prepared.push(PreparedTarget::Sequence { root, destination });
                 }
@@ -60,6 +67,9 @@ impl PreparedMultiAssignment {
             targets: prepared,
             layout: DestinationLayout::new(cardinalities)?,
             values: Vec::new(),
+            retained,
+            next_target: 0,
+            roots: BTreeMap::new(),
         })
     }
 
@@ -94,12 +104,28 @@ impl PreparedMultiAssignment {
     pub(in crate::execute) fn root_references(
         &self,
     ) -> impl Iterator<Item = (u32, NativeValueRef)> + '_ {
-        (0_u32..).zip(self.values.iter().flatten().copied())
+        (0_u32..).zip(
+            self.values
+                .iter()
+                .flatten()
+                .copied()
+                .chain(self.retained.iter().copied())
+                .chain(self.roots.values().copied()),
+        )
     }
 
-    pub(in crate::execute) fn commit(self, state: &mut HostState) -> NativeExecutorResult<()> {
-        let mut roots = BTreeMap::<runmat_mir::MirLocalId, Value>::new();
-        for (target, values) in self.targets.into_iter().zip(self.values) {
+    pub(in crate::execute) fn commit(&mut self, state: &mut HostState) -> NativeExecutorResult<()> {
+        for index in 0..self.targets.len() {
+            let target = self.targets[index].clone();
+            if index < self.next_target {
+                match &target {
+                    PreparedTarget::Place(place) => continuation::skip_completed(state, place)?,
+                    PreparedTarget::Sequence { .. } => continuation::skip_completed_region(state)?,
+                    PreparedTarget::Discard => {}
+                }
+                continue;
+            }
+            let values = self.values[index].clone();
             let values = values
                 .into_iter()
                 .map(|value| state.arena.get(value).cloned())
@@ -112,28 +138,32 @@ impl PreparedMultiAssignment {
                             "prepared fixed output target has no assigned value".into(),
                         )
                     })?;
-                    let root = root_for_update(state, &mut roots, &place)?;
+                    let local = target::root_local(&place)?;
+                    let root = match self.roots.get(&local) {
+                        Some(reference) => state.arena.get(*reference)?.clone(),
+                        None => root_local_value(state, &place)?,
+                    };
                     let (local, updated) =
-                        assign_place_to_root(state, &place, root, rhs, false, true)?;
-                    roots.insert(local, updated);
+                        continuation::assign_to_root(state, &place, root, rhs, false, true)?;
+                    self.roots.insert(local, state.arena.insert(updated));
                 }
                 PreparedTarget::Sequence { root, destination } => {
-                    let current = match roots.remove(&root) {
-                        Some(value) => value,
+                    let current = match self.roots.get(&root) {
+                        Some(reference) => state.arena.get(*reference)?.clone(),
                         None => local_value(state, root)?,
                     };
-                    let updated = super::super::sync::complete(
-                        &state.runtime,
-                        destination.assign(current, values, Some(&state.function.name)),
-                        "prepared native output assignment",
-                    )
-                    .finish(state)?;
-                    roots.insert(root, updated);
+                    let updated = continuation::assign_prepared_sequence(
+                        state,
+                        destination,
+                        current,
+                        values,
+                    )?;
+                    self.roots.insert(root, state.arena.insert(updated));
                 }
             }
+            self.next_target = index + 1;
         }
-        for (local, value) in roots {
-            let reference = state.arena.insert(value);
+        for (local, reference) in std::mem::take(&mut self.roots) {
             state.set_local(local.0, reference)?;
         }
         Ok(())

@@ -118,7 +118,7 @@ impl SequenceDestinationBuilder {
             return Ok(());
         }
         let step = prepare_step(&self.current, step).await?;
-        self.current = read_step(self.current.clone(), &step, caller_function_name).await?;
+        self.current = read_step(None, self.current.clone(), &step, caller_function_name).await?;
         self.steps.push(step);
         Ok(())
     }

@@ -53,6 +53,28 @@ impl PreparedSequenceEndpoint {
         values: Vec<Value>,
         caller_function_name: Option<&str>,
     ) -> Result<Value, RuntimeError> {
+        self.assign_with_context(None, base, values, caller_function_name)
+            .await
+    }
+
+    pub async fn assign_in_context(
+        self,
+        context: &crate::context::RuntimeContext,
+        base: Value,
+        values: Vec<Value>,
+        caller_function_name: Option<&str>,
+    ) -> Result<Value, RuntimeError> {
+        self.assign_with_context(Some(context), base, values, caller_function_name)
+            .await
+    }
+
+    async fn assign_with_context(
+        self,
+        context: Option<&crate::context::RuntimeContext>,
+        base: Value,
+        values: Vec<Value>,
+        caller_function_name: Option<&str>,
+    ) -> Result<Value, RuntimeError> {
         if values.len() != self.cardinality {
             return Err(semantic_error(
                 "RunMat:CommaSeparatedListAssignmentArity",
@@ -64,17 +86,29 @@ impl PreparedSequenceEndpoint {
             ));
         }
         match self.spec {
-            SequenceEndpointSpec::Member(field) => {
-                crate::object::resolve::store_member_sequence_traced(
-                    base,
-                    field.0,
-                    values,
-                    caller_function_name,
-                )
-                .await
-            }
+            SequenceEndpointSpec::Member(field) => match context {
+                Some(context) => {
+                    crate::object::resolve::store_member_sequence_traced_in_context(
+                        context,
+                        base,
+                        field.0,
+                        values,
+                        caller_function_name,
+                    )
+                    .await
+                }
+                None => {
+                    crate::object::resolve::store_member_sequence_traced(
+                        base,
+                        field.0,
+                        values,
+                        caller_function_name,
+                    )
+                    .await
+                }
+            },
             SequenceEndpointSpec::CellContents(indices) => {
-                assign_cell_contents(base, indices, values).await
+                assign_cell_contents_with_context(context, base, indices, values).await
             }
         }
     }
@@ -95,7 +129,8 @@ impl SequenceEndpointSpec {
     }
 }
 
-pub(crate) async fn assign_cell_contents(
+pub(crate) async fn assign_cell_contents_with_context(
+    context: Option<&crate::context::RuntimeContext>,
     base: Value,
     indices: Vec<ObjectIndexComponent>,
     values: Vec<Value>,
@@ -132,17 +167,25 @@ pub(crate) async fn assign_cell_contents(
                     "brace assignment object does not define subsasgn",
                 ));
             };
-            crate::object::protocol::invoke_resolved_object_assignment(
-                &method,
-                base,
-                ObjectSubscriptPath::single(ObjectSubscript::braces(
-                    ObjectIndexSelector::IndexValues {
-                        components: indices,
-                    },
-                )),
-                values,
-            )
-            .await
+            let path = ObjectSubscriptPath::single(ObjectSubscript::braces(
+                ObjectIndexSelector::IndexValues {
+                    components: indices,
+                },
+            ));
+            match context {
+                Some(context) => {
+                    crate::object::protocol::invoke_resolved_object_assignment_in_context(
+                        context, &method, base, path, values,
+                    )
+                    .await
+                }
+                None => {
+                    crate::object::protocol::invoke_resolved_object_assignment(
+                        &method, base, path, values,
+                    )
+                    .await
+                }
+            }
         }
         _ => Err(semantic_error(
             "CellAssignmentOnNonCell",

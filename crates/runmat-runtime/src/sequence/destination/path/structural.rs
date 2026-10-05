@@ -65,6 +65,7 @@ pub(super) fn selector_extent(
 }
 
 pub(super) fn assign_path<'a>(
+    context: Option<&'a crate::context::RuntimeContext>,
     current: Value,
     mut steps: VecDeque<PreparedAssignmentStep>,
     endpoint: PreparedSequenceEndpoint,
@@ -73,28 +74,43 @@ pub(super) fn assign_path<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
         if steps.is_empty() {
-            return endpoint.assign(current, values, caller).await;
+            return match context {
+                Some(context) => {
+                    endpoint
+                        .assign_in_context(context, current, values, caller)
+                        .await
+                }
+                None => endpoint.assign(current, values, caller).await,
+            };
         }
         let step = steps.pop_front().expect("nonempty path checked above");
-        let child = read_step(current.clone(), &step, caller).await?;
-        let updated = assign_path(child, steps, endpoint, values, caller).await?;
-        write_step(current, step, updated, caller).await
+        let child = read_step(context, current.clone(), &step, caller).await?;
+        let updated = assign_path(context, child, steps, endpoint, values, caller).await?;
+        write_step(context, current, step, updated, caller).await
     })
 }
 
 pub(super) async fn read_step(
+    context: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: &PreparedAssignmentStep,
     caller: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     match step {
         PreparedAssignmentStep::Member(member) => {
-            crate::object::resolve::load_member(base, member.0.clone(), false, caller).await
+            crate::object::resolve::load_member_with_context(
+                context,
+                base,
+                member.0.clone(),
+                false,
+                caller,
+            )
+            .await
         }
         PreparedAssignmentStep::Parentheses {
             plan,
             selector_values,
-        } => read_parentheses(base, plan, selector_values).await,
+        } => read_parentheses(context, base, plan, selector_values).await,
         PreparedAssignmentStep::Braces(indices) => {
             let values = crate::call::arguments::expand_brace_values(
                 base,
@@ -117,27 +133,43 @@ pub(super) async fn read_step(
 }
 
 pub(super) async fn write_step(
+    context: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: PreparedAssignmentStep,
     rhs: Value,
     caller: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     match step {
-        PreparedAssignmentStep::Member(member) => {
-            crate::object::resolve::store_member_traced(base, member.0, rhs, false, caller).await
-        }
+        PreparedAssignmentStep::Member(member) => match context {
+            Some(context) => {
+                crate::object::resolve::store_member_traced_in_context(
+                    context, base, member.0, rhs, false, caller,
+                )
+                .await
+            }
+            None => {
+                crate::object::resolve::store_member_traced(base, member.0, rhs, false, caller)
+                    .await
+            }
+        },
         PreparedAssignmentStep::Parentheses {
             plan,
             selector_values,
-        } => write_parentheses(base, &plan, selector_values, rhs).await,
+        } => write_parentheses(context, base, &plan, selector_values, rhs).await,
         PreparedAssignmentStep::Braces(indices) => {
-            crate::sequence::destination::endpoint::assign_cell_contents(base, indices, vec![rhs])
-                .await
+            crate::sequence::destination::endpoint::assign_cell_contents_with_context(
+                context,
+                base,
+                indices,
+                vec![rhs],
+            )
+            .await
         }
     }
 }
 
 async fn read_parentheses(
+    context: Option<&crate::context::RuntimeContext>,
     base: Value,
     plan: &IndexPlan,
     selector_values: &[crate::object::indexing::ObjectIndexComponent],
@@ -147,17 +179,24 @@ async fn read_parentheses(
         resolution,
         crate::object::protocol::ProtocolResolution::Method(_)
     ) {
-        let sequence = invoke_resolved_object_index_path_method(
-            &resolution,
-            base,
-            ObjectSubscriptPath::single(ObjectSubscript::parentheses(
-                ObjectIndexSelector::IndexValues {
-                    components: selector_values.to_vec(),
-                },
-            )),
-            1,
-        )
-        .await?;
+        let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
+            ObjectIndexSelector::IndexValues {
+                components: selector_values.to_vec(),
+            },
+        ));
+        let sequence = match context {
+            Some(context) => {
+                crate::object::dispatch::invoke_resolved_object_index_path_method_in_context(
+                    context,
+                    &resolution,
+                    base,
+                    path,
+                    1,
+                )
+                .await?
+            }
+            None => invoke_resolved_object_index_path_method(&resolution, base, path, 1).await?,
+        };
         let mut values = sequence.resolve(
             runmat_types::SequenceUse::RequireSingle,
             crate::sequence::SequenceResolutionContext::default(),
@@ -168,6 +207,7 @@ async fn read_parentheses(
 }
 
 async fn write_parentheses(
+    context: Option<&crate::context::RuntimeContext>,
     base: Value,
     plan: &IndexPlan,
     selector_values: Vec<crate::object::indexing::ObjectIndexComponent>,
@@ -175,17 +215,32 @@ async fn write_parentheses(
 ) -> Result<Value, RuntimeError> {
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
     if let crate::object::protocol::ProtocolResolution::Method(method) = resolution {
-        return crate::object::protocol::invoke_resolved_object_assignment(
-            &method,
-            base,
-            ObjectSubscriptPath::single(ObjectSubscript::parentheses(
-                ObjectIndexSelector::IndexValues {
-                    components: selector_values,
-                },
-            )),
-            vec![rhs],
-        )
-        .await;
+        let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
+            ObjectIndexSelector::IndexValues {
+                components: selector_values,
+            },
+        ));
+        return match context {
+            Some(context) => {
+                crate::object::protocol::invoke_resolved_object_assignment_in_context(
+                    context,
+                    &method,
+                    base,
+                    path,
+                    vec![rhs],
+                )
+                .await
+            }
+            None => {
+                crate::object::protocol::invoke_resolved_object_assignment(
+                    &method,
+                    base,
+                    path,
+                    vec![rhs],
+                )
+                .await
+            }
+        };
     }
     crate::indexing::value::assign_with_plan(base, plan, rhs).await
 }

@@ -31,9 +31,38 @@ impl PreparedSequenceDestination {
         values: Vec<Value>,
         caller: Option<&str>,
     ) -> Result<Value, RuntimeError> {
+        self.assign_with_context(None, root, values, caller).await
+    }
+
+    pub async fn assign_in_context(
+        self,
+        context: &crate::context::RuntimeContext,
+        root: Value,
+        values: Vec<Value>,
+        caller: Option<&str>,
+    ) -> Result<Value, RuntimeError> {
+        self.assign_with_context(Some(context), root, values, caller)
+            .await
+    }
+
+    async fn assign_with_context(
+        self,
+        context: Option<&crate::context::RuntimeContext>,
+        root: Value,
+        values: Vec<Value>,
+        caller: Option<&str>,
+    ) -> Result<Value, RuntimeError> {
         match self.kind {
             PreparedDestinationKind::Structural { steps, endpoint } => {
-                super::structural::assign_path(root, steps.into(), endpoint, values, caller).await
+                super::structural::assign_path(
+                    context,
+                    root,
+                    steps.into(),
+                    endpoint,
+                    values,
+                    caller,
+                )
+                .await
             }
             PreparedDestinationKind::ObjectProtocol(destination) => {
                 let super::PreparedObjectProtocolDestination {
@@ -63,6 +92,7 @@ impl PreparedSequenceDestination {
                     ));
                 }
                 super::object_assignment::assign_object_path(
+                    context,
                     root,
                     prefix.into(),
                     expected_class,

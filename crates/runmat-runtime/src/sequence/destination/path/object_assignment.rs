@@ -13,6 +13,7 @@ use crate::sequence::destination::{PreparedSequenceEndpoint, SequenceEndpointSpe
 use crate::RuntimeError;
 
 pub(super) fn assign_object_path<'a>(
+    context: Option<&'a crate::context::RuntimeContext>,
     current: Value,
     mut prefix: VecDeque<PreparedAssignmentStep>,
     expected_class: runmat_types::ClassIdentity,
@@ -38,21 +39,37 @@ pub(super) fn assign_object_path<'a>(
                 ));
             }
             return match resolve_object_index_protocol(&current, ObjectIndexOp::Subsasgn, caller)? {
-                ProtocolResolution::Method(method) => {
-                    crate::object::protocol::invoke_resolved_object_assignment(
-                        &method, current, path, values,
+                ProtocolResolution::Method(method) => match context {
+                    Some(context) => {
+                        crate::object::protocol::invoke_resolved_object_assignment_in_context(
+                            context, &method, current, path, values,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::object::protocol::invoke_resolved_object_assignment(
+                            &method, current, path, values,
+                        )
+                        .await
+                    }
+                },
+                ProtocolResolution::DefaultIndexing => {
+                    assign_unprepared_path(
+                        context,
+                        current,
+                        suffix_steps.into(),
+                        endpoint,
+                        values,
+                        caller,
                     )
                     .await
-                }
-                ProtocolResolution::DefaultIndexing => {
-                    assign_unprepared_path(current, suffix_steps.into(), endpoint, values, caller)
-                        .await
                 }
             };
         }
         let step = prefix.pop_front().expect("nonempty prefix checked above");
-        let child = super::structural::read_step(current.clone(), &step, caller).await?;
+        let child = super::structural::read_step(context, current.clone(), &step, caller).await?;
         let updated = assign_object_path(
+            context,
             child,
             prefix,
             expected_class,
@@ -63,11 +80,12 @@ pub(super) fn assign_object_path<'a>(
             caller,
         )
         .await?;
-        super::structural::write_step(current, step, updated, caller).await
+        super::structural::write_step(context, current, step, updated, caller).await
     })
 }
 
 fn assign_unprepared_path<'a>(
+    context: Option<&'a crate::context::RuntimeContext>,
     current: Value,
     mut steps: VecDeque<AssignmentStepSpec>,
     endpoint: SequenceEndpointSpec,
@@ -76,14 +94,20 @@ fn assign_unprepared_path<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
         let Some(spec) = steps.pop_front() else {
-            return PreparedSequenceEndpoint::prepare(&current, endpoint)
-                .await?
-                .assign(current, values, caller)
-                .await;
+            let prepared = PreparedSequenceEndpoint::prepare(&current, endpoint).await?;
+            return match context {
+                Some(context) => {
+                    prepared
+                        .assign_in_context(context, current, values, caller)
+                        .await
+                }
+                None => prepared.assign(current, values, caller).await,
+            };
         };
         let step = super::structural::prepare_step(&current, spec).await?;
-        let child = super::structural::read_step(current.clone(), &step, caller).await?;
-        let updated = assign_unprepared_path(child, steps, endpoint, values, caller).await?;
-        super::structural::write_step(current, step, updated, caller).await
+        let child = super::structural::read_step(context, current.clone(), &step, caller).await?;
+        let updated =
+            assign_unprepared_path(context, child, steps, endpoint, values, caller).await?;
+        super::structural::write_step(context, current, step, updated, caller).await
     })
 }

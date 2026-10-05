@@ -1,5 +1,6 @@
 use runmat_mir::{MirLocalId, MirPlace, MirSequenceTarget};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
+use runmat_runtime::sequence::PreparedSequenceDestination;
 use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -174,6 +175,10 @@ pub(super) fn skip_completed(state: &mut HostState, place: &MirPlace) -> NativeE
     if matches!(place, MirPlace::Local(_)) {
         return Ok(());
     }
+    skip_completed_region(state)
+}
+
+pub(super) fn skip_completed_region(state: &mut HostState) -> NativeExecutorResult<()> {
     let (_, _, completed) = state.enter_contextual_region();
     if completed.is_none() {
         return Err(NativeExecutorError::Host(
@@ -181,6 +186,39 @@ pub(super) fn skip_completed(state: &mut HostState, place: &MirPlace) -> NativeE
         ));
     }
     Ok(())
+}
+
+pub(super) fn assign_prepared_sequence(
+    state: &mut HostState,
+    destination: PreparedSequenceDestination,
+    root: Value,
+    values: Vec<Value>,
+) -> NativeExecutorResult<Value> {
+    let (region, next_step, _) = state.enter_contextual_region();
+    if next_step != 0 {
+        return Err(NativeExecutorError::Host(
+            "pending prepared sequence target has invalid phase".into(),
+        ));
+    }
+    state.enter_contextual_step(region, 0);
+    let runtime = state.runtime.clone();
+    let caller = state.function.name.clone();
+    let result = member_call(
+        state,
+        Box::pin(async move {
+            let value = runtime
+                .scope(destination.assign_in_context(&runtime, root, values, Some(&caller)))
+                .await?;
+            Ok(vec![value])
+        }),
+    );
+    let next_step = usize::from(result.is_ok());
+    state.finish_contextual_step(region, 0, next_step)?;
+    if let Ok(value) = &result {
+        let reference = state.arena.insert(value.clone());
+        state.finish_contextual_region(region, vec![reference]);
+    }
+    result
 }
 
 impl PendingAssign {

@@ -165,7 +165,8 @@ async fn write_default_step(
             crate::indexing::value::assign_with_plan(base, &plan, rhs.clone()).await
         }
         ObjectIndexKind::Brace => {
-            crate::sequence::destination::endpoint::assign_cell_contents(
+            crate::sequence::destination::endpoint::assign_cell_contents_with_context(
+                runtime,
                 base,
                 index_values(&step)?.to_vec(),
                 values,
