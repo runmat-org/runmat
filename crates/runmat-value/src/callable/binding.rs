@@ -1,4 +1,5 @@
 use runmat_execution::FunctionBindingOrigin;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 
@@ -68,6 +69,7 @@ pub enum BoundFunctionAuthority {
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
         dependencies: Arc<[FunctionDefinitionLease]>,
+        indices: Arc<HashMap<usize, usize>>,
         export: LocalExport,
     },
     Portable {
@@ -143,10 +145,16 @@ impl BoundFunctionAuthority {
         dependencies: Vec<FunctionDefinitionLease>,
         export: LocalExport,
     ) -> Self {
+        let indices = std::iter::once(&definition)
+            .chain(dependencies.iter())
+            .enumerate()
+            .map(|(index, lease)| (lease.function(), index))
+            .collect();
         Self::Local {
             issuer,
             definition,
             dependencies: dependencies.into(),
+            indices: Arc::new(indices),
             export,
         }
     }
@@ -178,6 +186,24 @@ impl BoundFunctionAuthority {
         }
     }
 
+    /// Exact graph node, selected by the bound function ID. This index is
+    /// constructed once when the value is issued, not on every static call.
+    pub fn local_lease(&self, function: usize) -> Option<&FunctionDefinitionLease> {
+        let Self::Local {
+            definition,
+            dependencies,
+            indices,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        match *indices.get(&function)? {
+            0 => Some(definition),
+            index => dependencies.get(index - 1),
+        }
+    }
+
     pub fn export_origin(&self, current: &Weak<()>) -> Option<FunctionBindingOrigin> {
         match self {
             Self::Local {
@@ -199,12 +225,14 @@ impl PartialEq for BoundFunctionAuthority {
                     definition: left_definition,
                     dependencies: left_dependencies,
                     export: left_export,
+                    ..
                 },
                 Self::Local {
                     issuer: right,
                     definition: right_definition,
                     dependencies: right_dependencies,
                     export: right_export,
+                    ..
                 },
             ) => {
                 Weak::ptr_eq(left, right)
@@ -242,5 +270,36 @@ mod tests {
         assert!(definition.has_handles());
         drop(local);
         assert!(!definition.has_handles());
+    }
+
+    #[test]
+    fn local_dependency_graph_index_is_shared_by_derived_static_bindings() {
+        let issuer = Arc::new(());
+        let root = Arc::new(FunctionDefinitionOwner::default());
+        let helper = Arc::new(FunctionDefinitionOwner::default());
+        let binding = BoundFunctionBinding::local(
+            11,
+            Arc::downgrade(&issuer),
+            FunctionDefinitionOwner::issue(&root, 11),
+            vec![FunctionDefinitionOwner::issue(&helper, 12)],
+            LocalExport::Ephemeral,
+        );
+        let derived = BoundFunctionBinding {
+            function: 12,
+            authority: binding.authority.clone(),
+        };
+        assert!(derived
+            .authority
+            .local_lease(12)
+            .is_some_and(|lease| lease.matches(&helper)));
+        assert!(derived.authority.local_lease(13).is_none());
+        let (
+            BoundFunctionAuthority::Local { indices: left, .. },
+            BoundFunctionAuthority::Local { indices: right, .. },
+        ) = (&binding.authority, &derived.authority)
+        else {
+            panic!("local graph");
+        };
+        assert!(Arc::ptr_eq(left, right));
     }
 }

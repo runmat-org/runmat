@@ -258,7 +258,6 @@ pub struct FunctionRegistry {
 #[derive(Debug, Clone)]
 struct StaticDefinitionOverlay {
     authority: runmat_value::BoundFunctionAuthority,
-    lease_indices: HashMap<FunctionId, usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -345,20 +344,7 @@ impl FunctionRegistry {
 
     pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
         if let Some(overlay) = &self.static_overlay {
-            if let Some(index) = overlay.lease_indices.get(&function) {
-                let runmat_value::BoundFunctionAuthority::Local {
-                    definition,
-                    dependencies,
-                    ..
-                } = &overlay.authority
-                else {
-                    return None;
-                };
-                let lease = if *index == 0 {
-                    definition
-                } else {
-                    dependencies.get(*index - 1)?
-                };
+            if let Some(lease) = overlay.authority.local_lease(function.0) {
                 return self.get_owned(function, lease);
             }
         }
@@ -386,7 +372,7 @@ impl FunctionRegistry {
         function: FunctionId,
     ) -> Option<runmat_value::BoundFunctionBinding> {
         let overlay = self.static_overlay.as_ref()?;
-        if !overlay.lease_indices.contains_key(&function) {
+        if overlay.authority.local_lease(function.0).is_none() {
             // A stale or malformed static edge in an old body must not fall
             // through to the new numeric body at that same ID.
             return Some(runmat_value::BoundFunctionBinding::unavailable(function.0));
@@ -437,23 +423,17 @@ impl FunctionRegistry {
         else {
             return None;
         };
-        let mut lease_indices = HashMap::with_capacity(dependencies.len() + 1);
-        for (index, lease) in std::iter::once(definition)
-            .chain(dependencies.iter())
-            .enumerate()
-        {
+        for lease in std::iter::once(definition).chain(dependencies.iter()) {
             let id = FunctionId(lease.function());
             self.get_owned(id, lease)?;
-            lease_indices.insert(id, index);
         }
-        if !lease_indices.contains_key(&function) {
+        if authority.local_lease(function.0).is_none() {
             return None;
         }
         Some(Self {
             data: std::sync::Arc::clone(&self.data),
             static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
                 authority: authority.clone(),
-                lease_indices,
             })),
         })
     }
