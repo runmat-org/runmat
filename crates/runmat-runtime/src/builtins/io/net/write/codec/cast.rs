@@ -1,6 +1,6 @@
-use super::*;
+use super::{ByteOrder, WriteElement};
 
-pub(super) fn integer_raw(value: &WriteElement) -> Option<i128> {
+pub(in super::super) fn integer_raw(value: &WriteElement) -> Option<i128> {
     match value {
         WriteElement::Integer(IntValue::I8(v)) => Some(*v as i128),
         WriteElement::Integer(IntValue::I16(v)) => Some(*v as i128),
@@ -14,15 +14,15 @@ pub(super) fn integer_raw(value: &WriteElement) -> Option<i128> {
     }
 }
 
-pub(super) fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
+pub(in super::super) fn integer_unsigned(value: &WriteElement, max: u64) -> Option<u64> {
     integer_raw(value).map(|raw| raw.clamp(0, max as i128) as u64)
 }
 
-pub(super) fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
+pub(in super::super) fn integer_signed(value: &WriteElement, min: i64, max: i64) -> Option<i64> {
     integer_raw(value).map(|raw| raw.clamp(min as i128, max as i128) as i64)
 }
 
-pub(super) fn cast_to_u8(value: f64) -> u8 {
+pub(in super::super) fn cast_to_u8(value: f64) -> u8 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -40,7 +40,7 @@ pub(super) fn cast_to_u8(value: f64) -> u8 {
     }
 }
 
-pub(super) fn cast_to_i8(value: f64) -> i8 {
+pub(in super::super) fn cast_to_i8(value: f64) -> i8 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -58,7 +58,7 @@ pub(super) fn cast_to_i8(value: f64) -> i8 {
     }
 }
 
-pub(super) fn cast_to_u16(value: f64) -> u16 {
+pub(in super::super) fn cast_to_u16(value: f64) -> u16 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -76,7 +76,7 @@ pub(super) fn cast_to_u16(value: f64) -> u16 {
     }
 }
 
-pub(super) fn cast_to_i16(value: f64) -> i16 {
+pub(in super::super) fn cast_to_i16(value: f64) -> i16 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -94,7 +94,7 @@ pub(super) fn cast_to_i16(value: f64) -> i16 {
     }
 }
 
-pub(super) fn cast_to_u32(value: f64) -> u32 {
+pub(in super::super) fn cast_to_u32(value: f64) -> u32 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -112,7 +112,7 @@ pub(super) fn cast_to_u32(value: f64) -> u32 {
     }
 }
 
-pub(super) fn cast_to_i32(value: f64) -> i32 {
+pub(in super::super) fn cast_to_i32(value: f64) -> i32 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -130,7 +130,7 @@ pub(super) fn cast_to_i32(value: f64) -> i32 {
     }
 }
 
-pub(super) fn cast_to_u64(value: f64) -> u64 {
+pub(in super::super) fn cast_to_u64(value: f64) -> u64 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -148,7 +148,7 @@ pub(super) fn cast_to_u64(value: f64) -> u64 {
     }
 }
 
-pub(super) fn cast_to_i64(value: f64) -> i64 {
+pub(in super::super) fn cast_to_i64(value: f64) -> i64 {
     let rounded = rounded_scalar(value);
     if !rounded.is_finite() {
         return if rounded.is_sign_negative() {
@@ -166,11 +166,11 @@ pub(super) fn cast_to_i64(value: f64) -> i64 {
     }
 }
 
-pub(super) fn cast_to_f32(value: f64) -> f32 {
+pub(in super::super) fn cast_to_f32(value: f64) -> f32 {
     value as f32
 }
 
-pub(super) fn rounded_scalar(value: f64) -> f64 {
+pub(in super::super) fn rounded_scalar(value: f64) -> f64 {
     if value.is_nan() {
         0.0
     } else {
@@ -178,56 +178,56 @@ pub(super) fn rounded_scalar(value: f64) -> f64 {
     }
 }
 
-pub(super) fn extend_u16(buffer: &mut Vec<u8>, value: u16, order: ByteOrder) {
+pub(in super::super) fn extend_u16(buffer: &mut Vec<u8>, value: u16, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_i16(buffer: &mut Vec<u8>, value: i16, order: ByteOrder) {
+pub(in super::super) fn extend_i16(buffer: &mut Vec<u8>, value: i16, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_u32(buffer: &mut Vec<u8>, value: u32, order: ByteOrder) {
+pub(in super::super) fn extend_u32(buffer: &mut Vec<u8>, value: u32, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_i32(buffer: &mut Vec<u8>, value: i32, order: ByteOrder) {
+pub(in super::super) fn extend_i32(buffer: &mut Vec<u8>, value: i32, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_u64(buffer: &mut Vec<u8>, value: u64, order: ByteOrder) {
+pub(in super::super) fn extend_u64(buffer: &mut Vec<u8>, value: u64, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_i64(buffer: &mut Vec<u8>, value: i64, order: ByteOrder) {
+pub(in super::super) fn extend_i64(buffer: &mut Vec<u8>, value: i64, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_f32(buffer: &mut Vec<u8>, value: f32, order: ByteOrder) {
+pub(in super::super) fn extend_f32(buffer: &mut Vec<u8>, value: f32, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),
     }
 }
 
-pub(super) fn extend_f64(buffer: &mut Vec<u8>, value: f64, order: ByteOrder) {
+pub(in super::super) fn extend_f64(buffer: &mut Vec<u8>, value: f64, order: ByteOrder) {
     match order {
         ByteOrder::Little => buffer.extend_from_slice(&value.to_le_bytes()),
         ByteOrder::Big => buffer.extend_from_slice(&value.to_be_bytes()),

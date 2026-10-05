@@ -13,7 +13,7 @@ pub(super) struct Payload {
 }
 
 #[derive(Clone, Debug)]
-enum WriteElement {
+pub(super) enum WriteElement {
     Floating(f64),
     Integer(IntValue),
 }
