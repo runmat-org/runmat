@@ -1,39 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamDescriptor, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS;
 use runmat_value::{CellArray, Value};
-
-const LOCALFUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "handles",
-    ty: runmat_builtins::BuiltinParamType::Any,
-    arity: runmat_builtins::BuiltinParamArity::Required,
-    default: None,
-    description: "Cell array of visible local function handles.",
-}];
-
-const LOCALFUNCTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "handles = localfunctions()",
-    inputs: &[],
-    outputs: &LOCALFUNCTIONS_OUTPUT,
-}];
-
-pub const LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOCALFUNCTIONS.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:TooManyInputs"),
-    when: "Any input argument is provided.",
-    message: "localfunctions: too many input arguments",
-};
-
-pub const LOCALFUNCTIONS_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS];
-
-pub const LOCALFUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOCALFUNCTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOCALFUNCTIONS_ERRORS,
-};
 
 fn is_supported_local_function_name(name: &str) -> bool {
     let trimmed = name.trim();
@@ -81,9 +47,7 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
 
 #[runmat_macros::runtime_builtin(
     name = "localfunctions",
-    category = "introspection",
-    summary = "Return handles for named local functions visible in the current source.",
-    descriptor(self::LOCALFUNCTIONS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::localfunctions"
 )]
 pub fn localfunctions_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -95,6 +59,18 @@ mod tests {
     use super::*;
     use runmat_types::SourceId;
     use std::sync::Arc;
+
+    #[test]
+    fn localfunctions_without_source_is_exact_empty_cell_row() {
+        let _current_guard = crate::source_context::replace_current_source_id(None);
+        let value = dispatch_localfunctions(Vec::new()).expect("empty source result");
+        let Value::Cell(cell) = value else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cell.rows, 1);
+        assert_eq!(cell.cols, 0);
+        assert!(cell.data.is_empty());
+    }
 
     #[test]
     fn localfunctions_returns_current_source_bound_handles() {

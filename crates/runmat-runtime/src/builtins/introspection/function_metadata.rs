@@ -1,54 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::FUNCTIONS_ERROR_HANDLE_UNSUPPORTED;
 use runmat_value::{StructValue, Value};
-
-const FUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "info",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle metadata struct.",
-}];
-
-const FUNCTIONS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle.",
-}];
-
-const FUNCTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "info = functions(fh)",
-    inputs: &FUNCTIONS_INPUTS,
-    outputs: &FUNCTIONS_OUTPUT,
-}];
-
-pub const FUNCTIONS_ERROR_HANDLE_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FUNCTIONS.HANDLE_UNSUPPORTED",
-    identifier: Some("RunMat:FunctionsHandleUnsupported"),
-    when: "The input is not a supported function handle value.",
-    message: "functions: expected a function handle",
-};
-
-pub const FUNCTIONS_ERRORS: [BuiltinErrorDescriptor; 1] = [FUNCTIONS_ERROR_HANDLE_UNSUPPORTED];
-
-pub const FUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FUNCTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FUNCTIONS_ERRORS,
-};
-
-pub const FUNCTIONS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "functions accepts only function-handle values and returns a metadata struct; integer, numeric, and provider-resident values reject before provider access. Captured values in future workspace metadata are opaque closure state rather than integer signature positions and must remain exact.",
-    };
 
 #[derive(Debug, Clone, Copy)]
 enum FunctionHandleKind {
@@ -108,10 +59,7 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "functions",
-    category = "introspection",
-    summary = "Return deterministic metadata for a function handle.",
-    descriptor(self::FUNCTIONS_DESCRIPTOR),
-    integer_audit(self::FUNCTIONS_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::function_metadata"
 )]
 pub fn functions_builtin_registered(handle: Value) -> crate::BuiltinResult<Value> {
@@ -121,6 +69,7 @@ pub fn functions_builtin_registered(handle: Value) -> crate::BuiltinResult<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{BuiltinIntegerAuditKind, FUNCTIONS_INTEGER_AUDIT};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
