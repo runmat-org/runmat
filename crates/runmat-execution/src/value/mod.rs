@@ -6,6 +6,8 @@ use crate::ContractError;
 mod identity;
 mod validation;
 mod durable_aggregate;
+#[cfg(test)]
+mod callable_tests;
 pub use durable_aggregate::{
     DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
     DurableStructArrayField,
