@@ -701,7 +701,7 @@ mod user_path;
 #[path = "compat/system.rs"]
 mod system;
 use captured_fs_path::CapturedFsPath;
-mod memmapfile;
+pub(crate) mod memmapfile;
 #[cfg(test)]
 use memmapfile::MemmapFormatPresentation;
 use memmapfile::{numeric_usize, MemmapFormat, MemmapOption};

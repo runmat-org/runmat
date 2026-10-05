@@ -12,7 +12,7 @@ use runmat_value::{
 
 mod authority;
 mod encode;
-pub(in crate::builtins::io::repl_fs::compat) mod live;
+pub(crate) mod live;
 pub(super) use authority::issue as issue_authority;
 pub(super) use live::ensure_class_registered;
 
