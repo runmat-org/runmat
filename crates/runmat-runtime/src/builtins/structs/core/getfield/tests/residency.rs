@@ -90,7 +90,8 @@ async fn getfield_gpu_tensor_indexing_case() {
     st.fields
         .insert("values".to_string(), Value::GpuTensor(handle.clone()));
 
-    let direct = run_getfield(Value::Struct(st.clone()), vec![Value::from("values")])
+    let direct = getfield_builtin(None, Value::Struct(st.clone()), vec![Value::from("values")])
+        .await
         .expect("direct gpu field");
     match direct {
         Value::GpuTensor(out) => assert!(out.shares_allocation_with(&handle)),
@@ -98,10 +99,12 @@ async fn getfield_gpu_tensor_indexing_case() {
     }
 
     let idx_cell = CellArray::new(vec![Value::CharArray(CharArray::new_row("end"))], 1, 1).unwrap();
-    let indexed = run_getfield(
+    let indexed = getfield_builtin(
+        None,
         Value::Struct(st),
         vec![Value::from("values"), Value::Cell(idx_cell)],
     )
+    .await
     .expect("gpu indexed field");
     let Value::Tensor(indexed) = indexed else {
         panic!("expected class-preserving scalar tensor");

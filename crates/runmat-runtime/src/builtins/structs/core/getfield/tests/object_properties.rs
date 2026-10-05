@@ -167,7 +167,7 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let Poll::Ready(Err(error)) = cancelled_work.as_mut().poll(&mut context) else {
         panic!("selected cancelled getter must finish with a typed error")
     };
-    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
     drop(cancelled_work);
     assert_eq!(dropped.load(Ordering::SeqCst), 2);
     assert_eq!(crate::output_count::current_output_count(), Some(2));
