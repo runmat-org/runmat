@@ -167,9 +167,11 @@ mod tests {
         );
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error =
-                futures::executor::block_on(close_if_network_targets(None, &[trailing.clone()]))
-                    .expect_err("selector extension is rejected before target service");
+            let error = futures::executor::block_on(close_if_network_targets(
+                None,
+                std::slice::from_ref(&trailing),
+            ))
+            .expect_err("selector extension is rejected before target service");
             assert_eq!(
                 error.identifier(),
                 CLOSE_NETWORK_SELECTOR_EXTENSION.error_identifier
@@ -274,7 +276,7 @@ mod tests {
         assert!(driver
             .block_on(close_if_network_targets(
                 Some(&other_session),
-                &[client.clone()]
+                std::slice::from_ref(&client)
             ))
             .is_err());
         let foreign = driver
@@ -301,7 +303,10 @@ mod tests {
         assert!(error.message().contains("TCP close failed"));
         assert_eq!(
             driver
-                .block_on(close_if_network_targets(Some(&runtime), &[client.clone()]))
+                .block_on(close_if_network_targets(
+                    Some(&runtime),
+                    std::slice::from_ref(&client)
+                ))
                 .unwrap(),
             Some(0.0),
         );

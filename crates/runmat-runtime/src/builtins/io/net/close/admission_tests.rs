@@ -128,7 +128,7 @@ fn paged_selector_rejects_without_tcp_effect_but_trailing_singleton_admits() {
     let paged = char_selector(vec![1, 1, 7]);
     assert!(futures::executor::block_on(close_if_network_targets(
         Some(&runtime),
-        &[paged.clone()]
+        std::slice::from_ref(&paged)
     ))
     .expect("paged text is not a TCP selector")
     .is_none());

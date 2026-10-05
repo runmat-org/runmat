@@ -162,8 +162,10 @@ fn cancelling_pending_single_wide_row_scan_releases_work_without_output() {
         },
     );
     let mut cooperation = TabularCooperation::with_test_budget(&runtime, BUILTIN_NAME, budget);
-    let mut options = ReadMatrixOptions::default();
-    options.delimiter = Some(Delimiter::Char(','));
+    let options = ReadMatrixOptions {
+        delimiter: Some(Delimiter::Char(',')),
+        ..ReadMatrixOptions::default()
+    };
     let mut call = Box::pin(read_numeric_matrix(
         Some(&runtime),
         &mut cooperation,
