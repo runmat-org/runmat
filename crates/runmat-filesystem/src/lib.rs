@@ -385,7 +385,9 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
-    /// Path syntax owned by this provider, independent of the host platform.
+    /// Path syntax owned by this provider. The default preserves native OS
+    /// qualification for existing native embedders; a provider exposing a
+    /// virtual rooted namespace must opt in even when hosted on Windows.
     fn path_namespace(&self) -> FsPathNamespace {
         #[cfg(target_arch = "wasm32")]
         {

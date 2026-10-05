@@ -163,6 +163,14 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_paths_require_drive_or_network_qualification() {
+        assert_eq!(
+            MemoryFsProvider::new().path_namespace(),
+            FsPathNamespace::VirtualRooted
+        );
+        assert_eq!(
+            crate::NativeFsProvider.path_namespace(),
+            FsPathNamespace::NativeOs
+        );
         assert!(!FsPathNamespace::NativeOs.is_absolute(Path::new(r"\folder\data.bin")));
         assert!(FsPathNamespace::VirtualRooted.is_absolute(Path::new(r"\folder\data.bin")));
         assert!(FsPathNamespace::NativeOs.is_absolute(Path::new(r"C:\folder\data.bin")));
