@@ -224,6 +224,15 @@ fn select_host_effect_inner(
         ),
         revision,
     };
+    // A staged scratch reservation remains charged while the returned value
+    // is allocated. The final measured scratch bound may be lower than that
+    // still-live precharge; placement must account for the larger amount.
+    let placement_scratch = match (stage.as_ref(), evidence.scratch_bytes) {
+        (Some(stage), ResourceByteBound::Known(final_bytes)) => {
+            ResourceByteBound::Known(final_bytes.max(stage.reservation.reserved_bytes()))
+        }
+        (_, bound) => bound,
+    };
     let candidate = WholeWorkCandidate {
         kind: ExecutionCandidateKind::SharedRuntime,
         execution_location: CandidateExecutionLocation::Host,
@@ -238,7 +247,7 @@ fn select_host_effect_inner(
         resources: CandidateResourceDemand {
             cpu_millicores: 1_000,
             retained_bytes,
-            scratch_bytes: evidence.scratch_bytes,
+            scratch_bytes: placement_scratch,
             provider_host_workspace: None,
             provider_input_stages: None,
             queue_slots: 0,

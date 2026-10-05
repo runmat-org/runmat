@@ -70,6 +70,74 @@ fn managed_runtime(
     (runtime, placement)
 }
 
+struct OverreservedResources(ManagedHostEffectLedger);
+
+impl RuntimeHostEffectResourceService for OverreservedResources {
+    fn admission(
+        &self,
+        _: &HostEffectRequest<'_>,
+        _: &RuntimeContext,
+    ) -> Option<HostEffectResourceAdmission> {
+        None
+    }
+
+    fn stage_admission(
+        &self,
+        _: &HostEffectRequest<'_>,
+        _: &RuntimeContext,
+    ) -> Option<HostEffectStageAdmission> {
+        Some(HostEffectStageAdmission {
+            evidence: HostEffectStageEvidence {
+                authority_revision: Digest::sha256(b"overreserved-stage"),
+                scratch_bytes: ResourceByteBound::Known(8),
+            },
+            reservation: self.0.reserve_stage(8).ok()?,
+        })
+    }
+
+    fn final_admission_after_stage(
+        &self,
+        _: &HostEffectRequest<'_>,
+        _: HostEffectFinalFacts<'_>,
+        _: &RuntimeContext,
+    ) -> Option<HostEffectResourceAdmission> {
+        Some(test_admission(HostEffectResourceEvidence {
+            authority_revision: Digest::sha256(b"overreserved-stage"),
+            scratch_bytes: ResourceByteBound::Known(4),
+            returned_value_bytes: ResourceByteBound::Known(6),
+        }))
+    }
+}
+
+#[test]
+fn placement_counts_live_precharge_when_final_scratch_bound_shrinks() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let placement = Rc::new(Placement::default());
+    placement.revision_available.set(true);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(placement.clone())
+                .with_parallel(Rc::new(ManagedParallel(ledger.clone())))
+                .with_host_effect_resources(Rc::new(OverreservedResources(ledger.clone()))),
+        );
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("stage precharges eight bytes before effects");
+    assert_eq!(ledger.snapshot().free_bytes(), 4);
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .err()
+    .expect("eight live scratch plus six output exceeds twelve");
+    assert_eq!(error.identifier(), Some("RunMat:Placement:ResourceLimit"));
+    assert_eq!(placement.selections.get(), 0);
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
 fn selected_receipt(runtime: &RuntimeContext) -> HostEffectReceipt {
     let stage = admit_host_effect_stage(runtime, request(HostEffectOutput::ReturnedValue))
         .expect("precharged stage");
