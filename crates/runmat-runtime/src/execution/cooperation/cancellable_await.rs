@@ -14,9 +14,12 @@ pub(super) async fn run<F: Future>(
         return Err(ExecutionServiceError::Cancelled);
     }
     let work = std::pin::pin!(future);
-    let result = match select(work, cancellation.cancelled()).await {
-        Either::Left((result, _listener)) => result,
-        Either::Right((_reason, _work)) => return Err(ExecutionServiceError::Cancelled),
+    // Poll the listener first on every wake. A provider may wake its own
+    // pending open; if cancellation arrives before that wake is serviced,
+    // polling the open first could perform the effect before we notice it.
+    let result = match select(cancellation.cancelled(), work).await {
+        Either::Left((_reason, _work)) => return Err(ExecutionServiceError::Cancelled),
+        Either::Right((result, _listener)) => result,
     };
     if cancellation.is_cancelled() {
         return Err(ExecutionServiceError::Cancelled);
@@ -66,6 +69,61 @@ mod tests {
                 .poll(&mut Context::from_waker(noop_waker_ref())),
             Poll::Ready(Err(ExecutionServiceError::Cancelled))
         ));
+        assert!(dropped.get());
+    }
+
+    #[test]
+    fn cancelled_self_waking_work_is_not_polled_again() {
+        struct SelfWakingOpen {
+            polls: Rc<Cell<usize>>,
+            dropped: Rc<Cell<bool>>,
+        }
+        impl Future for SelfWakingOpen {
+            type Output = ();
+            fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+                let polls = self.polls.get() + 1;
+                self.polls.set(polls);
+                if polls == 1 {
+                    context.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            }
+        }
+        impl Drop for SelfWakingOpen {
+            fn drop(&mut self) {
+                self.dropped.set(true);
+            }
+        }
+        let source = CancellationSource::new();
+        let polls = Rc::new(Cell::new(0));
+        let dropped = Rc::new(Cell::new(false));
+        let token = source.token();
+        let mut call = Box::pin(run(
+            &token,
+            SelfWakingOpen {
+                polls: polls.clone(),
+                dropped: dropped.clone(),
+            },
+        ));
+        assert!(matches!(
+            call.as_mut()
+                .poll(&mut Context::from_waker(noop_waker_ref())),
+            Poll::Pending
+        ));
+        assert_eq!(polls.get(), 1);
+        source.cancel(CancellationReason::User);
+        assert!(matches!(
+            call.as_mut()
+                .poll(&mut Context::from_waker(noop_waker_ref())),
+            Poll::Ready(Err(ExecutionServiceError::Cancelled))
+        ));
+        assert_eq!(
+            polls.get(),
+            1,
+            "cancel must win before a ready provider effect"
+        );
         assert!(dropped.get());
     }
 

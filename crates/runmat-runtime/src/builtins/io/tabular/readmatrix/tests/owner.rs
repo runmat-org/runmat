@@ -207,6 +207,9 @@ fn explicit_double_output_type_and_like_conflict_before_file_open() {
     let selected = selected();
     let _restore = runmat_filesystem::replace_provider(selected.clone());
     runmat_filesystem::set_current_dir(selected_dir()).expect("selected cwd");
+    // Like is a RunMat-only form; exercise its admitted controls rather than
+    // the earlier compatibility gate for the default MATLAB profile.
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let error = block_on(readmatrix_builtin(
         None,
         Value::from("input.csv"),

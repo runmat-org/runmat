@@ -686,22 +686,22 @@ use reader::validate_encoding_label;
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_path(&text)
+        Value::CharArray(_) => {
+            match crate::builtins::common::validation::value_text_scalar_string(value) {
+                Some(text) => normalize_path(&text),
+                None => Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_FILENAME,
+                    "readmatrix: expected a 1-by-N character vector for the file name",
+                )),
+            }
         }
-        Value::CharArray(_) => Err(readmatrix_error_with(
-            &READMATRIX_ERROR_FILENAME,
-            "readmatrix: expected a 1-by-N character vector for the file name",
-        )),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                normalize_path(&sa.data[0])
-            } else {
-                Err(readmatrix_error_with(
+        Value::StringArray(_) => {
+            match crate::builtins::common::validation::value_text_scalar_string(value) {
+                Some(text) => normalize_path(&text),
+                None => Err(readmatrix_error_with(
                     &READMATRIX_ERROR_FILENAME,
                     "readmatrix: string array inputs must be scalar",
-                ))
+                )),
             }
         }
         other => Err(readmatrix_error_with(

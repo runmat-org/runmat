@@ -281,7 +281,9 @@ mod owner;
 
 #[test]
 fn xlsread_registers_public_descriptor() {
-    assert!(runmat_builtins::builtin_function_by_name("xlsread").is_some());
+    let entry = runmat_builtins::builtin_catalog_entry_by_name("xlsread")
+        .expect("xlsread canonical catalog entry");
+    assert_eq!(entry.identity.name, "xlsread");
     let labels = XLSREAD_DESCRIPTOR
         .signatures
         .iter()
