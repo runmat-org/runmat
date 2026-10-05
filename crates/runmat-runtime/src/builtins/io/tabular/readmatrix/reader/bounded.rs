@@ -7,7 +7,10 @@
 use super::*;
 use runmat_filesystem::FsBoundedInput;
 use sha2::{Digest as _, Sha256};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
+
+mod fill;
+pub(super) use fill::fill_utf8;
 
 pub(super) struct BoundedScanGeometry {
     pub(super) rows: usize,
@@ -317,190 +320,20 @@ async fn validate_row(
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,
 ) -> BuiltinResult<usize> {
-    let fields = split_fields(text, delimiter, cooperation, path).await?;
-    for (index, field) in fields.iter().enumerate() {
+    scan::for_each_field(text, delimiter, cooperation, path, |index, field| {
         if let Some(dtype) = integer_dtype {
-            parse_integer_numeric_token(field, options, dtype, line_number, index + 1)?;
+            parse_integer_numeric_token(&field, options, dtype, line_number, index + 1)?;
         } else {
-            validate_numeric_token(field, options, line_number, index + 1)?;
+            validate_numeric_token(&field, options, line_number, index + 1)?;
         }
-        if (index + 1) % ROW_WORK_CHUNK == 0 {
-            checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
-        }
-    }
-    if !fields.len().is_multiple_of(ROW_WORK_CHUNK) {
-        checked_row_work(cooperation, path, fields.len() % ROW_WORK_CHUNK).await?;
-    }
-    Ok(fields.len())
+        Ok(())
+    })
+    .await
 }
 
 fn matrix_overflow() -> RuntimeError {
     readmatrix_error_with(
         &READMATRIX_ERROR_TENSOR_BUILD,
         "readmatrix: matrix dimensions exceed addressable storage",
-    )
-}
-
-fn selected_geometry(
-    geometry: &BoundedScanGeometry,
-    range: Option<&RangeSpec>,
-) -> BuiltinResult<(usize, usize, usize, usize)> {
-    if geometry.rows == 0 || geometry.columns == 0 {
-        return Ok((0, 0, 0, 0));
-    }
-    let Some(range) = range else {
-        return Ok((0, 0, geometry.rows, geometry.columns));
-    };
-    if range.start_row >= geometry.rows || range.start_col >= geometry.columns {
-        return Ok((0, 0, 0, 0));
-    }
-    let last_row = range
-        .end_row
-        .unwrap_or(geometry.rows - 1)
-        .min(geometry.rows - 1);
-    let last_col = range
-        .end_col
-        .unwrap_or(geometry.columns - 1)
-        .min(geometry.columns - 1);
-    if last_row < range.start_row || last_col < range.start_col {
-        return Ok((0, 0, 0, 0));
-    }
-    Ok((
-        range.start_row,
-        range.start_col,
-        last_row - range.start_row + 1,
-        last_col - range.start_col + 1,
-    ))
-}
-
-pub(super) async fn fill_utf8(
-    source: &mut FsBoundedInput,
-    geometry: &BoundedScanGeometry,
-    cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
-    options: &ReadMatrixOptions,
-) -> BuiltinResult<Tensor> {
-    let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
-    let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
-    source.seek(SeekFrom::Start(0)).map_err(|source| {
-        readmatrix_error_with_source(
-            &READMATRIX_ERROR_IO_READ,
-            "readmatrix: unable to replay the retained input source",
-            source,
-        )
-    })?;
-    path.check().map_err(|source| {
-        readmatrix_error_with_source(
-            &READMATRIX_ERROR_IO_READ,
-            "readmatrix: captured filesystem authority was revoked",
-            source,
-        )
-    })?;
-    let integer_dtype = integer_output_dtype(&options.output_template);
-    let mut integer = integer_dtype.map(|dtype| NumericStorage::zeros(dtype, count));
-    let mut floating = integer_dtype
-        .is_none()
-        .then(|| vec![options.empty_value_f64(); count]);
-    let mut reader = RowReader::new(source);
-    let mut data_row = 0usize;
-    let mut semantic_error = None;
-    while let Some(line_number) = reader
-        .next(cooperation, path, options.num_header_lines)
-        .await?
-    {
-        let text = reader.text();
-        let fields = split_fields(text, &geometry.delimiter, cooperation, path).await?;
-        if fields.is_empty() {
-            continue;
-        }
-        if fields.len() > geometry.columns || data_row >= geometry.rows {
-            return Err(changed_source());
-        }
-        if semantic_error.is_none() && data_row >= first_row && data_row - first_row < rows {
-            let output_row = data_row - first_row;
-            for output_col in 0..cols {
-                let token = fields
-                    .get(first_col + output_col)
-                    .map(|field| field.as_ref())
-                    .unwrap_or("");
-                let index = output_col * rows + output_row;
-                if let (Some(dtype), Some(storage)) = (integer_dtype, integer.as_mut()) {
-                    let value = match parse_integer_numeric_token(
-                        token,
-                        options,
-                        dtype,
-                        line_number,
-                        first_col + output_col + 1,
-                    ) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            semantic_error = Some(error);
-                            break;
-                        }
-                    };
-                    storage.set_value(index, value).map_err(|source| {
-                        readmatrix_error_with(
-                            &READMATRIX_ERROR_TENSOR_BUILD,
-                            format!("readmatrix: {source}"),
-                        )
-                    })?;
-                } else if let Some(storage) = floating.as_mut() {
-                    match parse_numeric_token(
-                        token,
-                        options,
-                        line_number,
-                        first_col + output_col + 1,
-                    ) {
-                        Ok(value) => storage[index] = value,
-                        Err(error) => {
-                            semantic_error = Some(error);
-                            break;
-                        }
-                    }
-                }
-                if (output_col + 1) % ROW_WORK_CHUNK == 0 {
-                    checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
-                }
-            }
-            if !cols.is_multiple_of(ROW_WORK_CHUNK) {
-                checked_row_work(cooperation, path, cols % ROW_WORK_CHUNK).await?;
-            }
-        }
-        data_row = data_row.checked_add(1).ok_or_else(matrix_overflow)?;
-    }
-    if data_row != geometry.rows {
-        return Err(changed_source());
-    }
-    let replay_digest: [u8; 32] = reader.digest.finalize().into();
-    if replay_digest != geometry.source_digest {
-        return Err(changed_source());
-    }
-    if let Some(error) = semantic_error {
-        return Err(error);
-    }
-    if rows == 0 || cols == 0 {
-        return empty_tensor();
-    }
-    if let Some(storage) = integer {
-        Tensor::from_numeric_storage(storage, vec![rows, cols]).map_err(|source| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_TENSOR_BUILD,
-                format!("readmatrix: {source}"),
-            )
-        })
-    } else {
-        Tensor::new(floating.expect("floating storage"), vec![rows, cols]).map_err(|source| {
-            readmatrix_error_with(
-                &READMATRIX_ERROR_TENSOR_BUILD,
-                format!("readmatrix: {source}"),
-            )
-        })
-    }
-}
-
-fn changed_source() -> RuntimeError {
-    readmatrix_error_with(
-        &READMATRIX_ERROR_IO_READ,
-        "readmatrix: opened source changed between validation and output",
     )
 }
