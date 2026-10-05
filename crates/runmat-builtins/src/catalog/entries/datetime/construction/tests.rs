@@ -174,6 +174,26 @@ fn datetime_infers_cellstr_shape_and_rejects_known_nontext_elements() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DATETIME-INPUT"));
+
+    for dims in [vec![0, 2], vec![2, 0], vec![2, 0, 3]] {
+        let exact = ShapeFact::Shaped {
+            dims: dims.iter().copied().map(DimensionFact::Known).collect(),
+        };
+        let input = ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(ValueFact::unknown(
+                    runmat_types::DynamicReason::RuntimeValue,
+                )),
+                elements: Vec::new(),
+                elements_complete: true,
+            }),
+            exact.clone(),
+            runmat_types::StorageFact::Dense,
+        );
+        let inferred = inference::infer(&request(vec![input], vec![], 1), &DATETIME_CATALOG_ENTRY);
+        assert_eq!(inferred.outputs[0].shape, exact);
+        assert!(inferred.diagnostics.is_empty());
+    }
 }
 
 #[test]

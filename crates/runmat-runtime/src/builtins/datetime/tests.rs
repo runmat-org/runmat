@@ -488,6 +488,20 @@ fn datetime_parses_cell_array_of_character_vectors_with_its_shape() {
 }
 
 #[test]
+fn datetime_preserves_empty_cellstr_geometry() {
+    for shape in [vec![0, 2], vec![2, 0], vec![2, 0, 3]] {
+        let input = Value::Cell(
+            runmat_value::CellArray::new_with_shape(Vec::new(), shape.clone())
+                .expect("empty cellstr"),
+        );
+        let result = futures::executor::block_on(datetime_builtin(vec![input]))
+            .expect("empty cellstr datetime");
+        let object = as_datetime(result);
+        assert_eq!(serial_tensor_for_object(&object).unwrap().shape, shape);
+    }
+}
+
+#[test]
 fn datetime_rejects_noncharacter_and_paged_cell_elements_before_resident_access() {
     let allocation = unregistered_resident(vec![1, 1]);
     let paged = CharArray::new_with_shape(vec!['x'; 20], vec![1, 10, 2]).expect("paged char");

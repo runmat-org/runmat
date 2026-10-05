@@ -12,7 +12,7 @@ pub(super) fn validate_cell_text_input(value: &Value) -> BuiltinResult<()> {
 fn validate_cell_text_elements(cells: &CellArray) -> BuiltinResult<()> {
     for (index, element) in cells.data.iter().enumerate() {
         if !matches!(element, Value::CharArray(_))
-            || crate::builtins::common::validation::value_text_scalar_string(element).is_none()
+            || !crate::builtins::common::validation::value_is_text_scalar(element)
         {
             return Err(datetime_argument_error(format!(
                 "datetime: cell element {} must be a character vector",
@@ -186,7 +186,9 @@ pub(super) fn parse_text_input(
                 serials.push(datenum_from_naive(naive));
                 has_time |= parsed_has_time;
             }
-            let shape = tensor::default_shape_for(&cells.shape, cells.data.len());
+            // A cell array carries its own exact geometry, including 0×N and
+            // empty N-D shapes; the generic empty-tensor default would erase it.
+            let shape = cells.shape.clone();
             Ok((
                 serials,
                 shape,
