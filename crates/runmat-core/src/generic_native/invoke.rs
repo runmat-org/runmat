@@ -417,14 +417,11 @@ s.first(C{:}).second(later());
     #[test]
     fn native_direct_and_caught_rethrow_preserve_source_less_origin() {
         runmat_gc::gc_test_context(|| {
-            let direct = forced_native_failure(
-                "native-direct-error@1",
-                "function native_exception()\nerror('RunMat:NativeOrigin', 'boom');\nend\n",
-            );
-            let reraised = forced_native_failure(
-                "native-rethrow-error@1",
-                "function native_exception()\ntry\n error('RunMat:NativeOrigin', 'boom');\ncatch e\n rethrow(e);\nend\nend\n",
-            );
+            const DIRECT: &str =
+                "function native_exception()\nerror('RunMat:NativeOrigin', 'boom');\nend\n";
+            const CAUGHT: &str = "function native_exception()\ntry\n error('RunMat:NativeOrigin', 'boom');\ncatch e\n rethrow(e);\nend\nend\n";
+            let direct = forced_native_failure("native-direct-error@1", DIRECT);
+            let reraised = forced_native_failure("native-rethrow-error@1", CAUGHT);
             for error in [&direct, &reraised] {
                 assert_eq!(error.identifier(), Some("RunMat:NativeOrigin"));
                 assert_eq!(error.message(), "boom");
@@ -441,6 +438,23 @@ s.first(C{:}).second(later());
                     .expect("native frame span");
                 assert!(frame_span.1 >= frame_span.0);
             }
+            let origin_call = CAUGHT.find("error(").expect("origin call text");
+            let rethrow_call = CAUGHT.find("rethrow(").expect("rethrow call text");
+            let origin_span = reraised.span.as_ref().expect("retained origin span");
+            let origin_end = origin_span.offset() + origin_span.len();
+            assert!(origin_span.offset() <= origin_call && origin_call < origin_end);
+            assert!(
+                origin_end <= rethrow_call,
+                "rethrow must not replace the original span"
+            );
+            let frame_span = reraised.context.call_frames[0]
+                .span
+                .expect("origin frame span");
+            assert!(frame_span.0 <= origin_call && origin_call < frame_span.1);
+            assert!(
+                frame_span.1 <= rethrow_call,
+                "rethrow must not replace the origin frame"
+            );
             let mut direct_original = &direct;
             while let Some(shared) = direct_original.source().and_then(|source| {
                 source.downcast_ref::<runmat_runtime::runtime_error::SharedRuntimeErrorSource>()
@@ -468,13 +482,16 @@ s.first(C{:}).second(later());
     #[test]
     fn native_caught_rethrow_keeps_downcastable_format_failure_cause() {
         runmat_gc::gc_test_context(|| {
-            let reraised = forced_native_failure(
-                "native-rethrow-cause@1",
-                "function native_exception()\ntry\n error('bad %q', 1);\ncatch e\n rethrow(e);\nend\nend\n",
-            );
+            const WITH_CAUSE: &str = "function native_exception()\ntry\n error('bad %q', 1);\ncatch e\n rethrow(e);\nend\nend\n";
+            let reraised = forced_native_failure("native-rethrow-cause@1", WITH_CAUSE);
             assert_eq!(reraised.identifier(), Some("RunMat:error"));
             assert_eq!(reraised.context.call_frames.len(), 1);
             assert_eq!(reraised.context.call_frames[0].function, "native_exception");
+            let origin_call = WITH_CAUSE.find("error(").expect("origin call text");
+            let rethrow_call = WITH_CAUSE.find("rethrow(").expect("rethrow call text");
+            let span = reraised.span.as_ref().expect("retained cause span");
+            assert!(span.offset() <= origin_call && origin_call < span.offset() + span.len());
+            assert!(span.offset() + span.len() <= rethrow_call);
             let mut original = &reraised;
             while let Some(shared) = original.source().and_then(|source| {
                 source.downcast_ref::<runmat_runtime::runtime_error::SharedRuntimeErrorSource>()
