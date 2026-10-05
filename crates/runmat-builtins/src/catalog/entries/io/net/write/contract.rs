@@ -106,8 +106,9 @@ pub const WRITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     when: "Internal socket/control-flow conversion fails.",
     message: "write: internal socket error",
 };
-const WRITE_ERRORS: [BuiltinErrorDescriptor; 9] = [
+const WRITE_ERRORS: [BuiltinErrorDescriptor; 10] = [
     super::super::NET_ERROR_UNSUPPORTED_TARGET,
+    super::super::capability::NET_ERROR_CANCELLED,
     WRITE_ERROR_INVALID_CLIENT,
     WRITE_ERROR_INVALID_INPUT,
     WRITE_ERROR_INVALID_DATA,

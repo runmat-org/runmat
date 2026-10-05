@@ -44,8 +44,9 @@ pub const READLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "Internal socket or control-flow conversion fails.",
     message: "readline: internal socket error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 5] = [
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
     super::super::NET_ERROR_UNSUPPORTED_TARGET,
+    super::super::capability::NET_ERROR_CANCELLED,
     READLINE_ERROR_INVALID_CLIENT,
     READLINE_ERROR_NOT_CONNECTED,
     READLINE_ERROR_INVALID_ARGUMENTS,
