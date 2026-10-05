@@ -79,22 +79,25 @@ pub(super) async fn read_builtin(
             })?)
         }
     };
-    let read_result = service
-        .read(
+    let read_result = super::transport::await_service(
+        runtime.as_ref(),
+        service.read(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             authority,
             mode,
-        )
-        .await
-        .map_err(|err| {
-            let error = match err.kind() {
-                TcpTransportErrorKind::InvalidAuthority => &READ_ERROR_INVALID_CLIENT,
-                TcpTransportErrorKind::Closed => &READ_ERROR_NOT_CONNECTED,
-                TcpTransportErrorKind::Timeout => &READ_ERROR_TIMEOUT,
-                _ => &READ_ERROR_INTERNAL,
-            };
-            super::error::with_source(BUILTIN_NAME, error, format!("read: {err}"), err)
-        })?;
+        ),
+    )
+    .await
+    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+    .map_err(|err| {
+        let error = match err.kind() {
+            TcpTransportErrorKind::InvalidAuthority => &READ_ERROR_INVALID_CLIENT,
+            TcpTransportErrorKind::Closed => &READ_ERROR_NOT_CONNECTED,
+            TcpTransportErrorKind::Timeout => &READ_ERROR_TIMEOUT,
+            _ => &READ_ERROR_INTERNAL,
+        };
+        super::error::with_source(BUILTIN_NAME, error, format!("read: {err}"), err)
+    })?;
 
     if let ReadMode::Count(count) = options.mode {
         if read_result.bytes().is_empty() && count > 0 {

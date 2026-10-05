@@ -42,8 +42,9 @@ pub(crate) async fn accept_builtin(
     if let Some(timeout) = options.timeout {
         validate_timeout(timeout)?;
     }
-    let endpoint = service
-        .accept(
+    let endpoint = super::transport::await_service(
+        runtime.as_ref(),
+        service.accept(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             server_authority,
             options.timeout.and_then(|seconds| {
@@ -51,25 +52,27 @@ pub(crate) async fn accept_builtin(
                     .is_finite()
                     .then(|| Duration::from_secs_f64(seconds))
             }),
-        )
-        .await
-        .map_err(|err| {
-            if err.kind() == TcpTransportErrorKind::Timeout {
-                super::error::with_source_message(
-                    BUILTIN_NAME,
-                    &ACCEPT_ERROR_TIMEOUT,
-                    "accept: timed out waiting for a client connection",
-                    err,
-                )
-            } else {
-                super::error::with_source(
-                    BUILTIN_NAME,
-                    &ACCEPT_ERROR_ACCEPT_FAILED,
-                    format!("accept: {err}"),
-                    err,
-                )
-            }
-        })?;
+        ),
+    )
+    .await
+    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+    .map_err(|err| {
+        if err.kind() == TcpTransportErrorKind::Timeout {
+            super::error::with_source_message(
+                BUILTIN_NAME,
+                &ACCEPT_ERROR_TIMEOUT,
+                "accept: timed out waiting for a client connection",
+                err,
+            )
+        } else {
+            super::error::with_source(
+                BUILTIN_NAME,
+                &ACCEPT_ERROR_ACCEPT_FAILED,
+                format!("accept: {err}"),
+                err,
+            )
+        }
+    })?;
     if let Some(runtime) = &runtime {
         runtime.cpu_cooperation().completed(0).await?;
     }

@@ -123,8 +123,9 @@ pub(crate) async fn tcpserver_builtin(
 
     let options = parse_name_value_pairs(rest, prepared_options).await?;
 
-    let endpoint = service
-        .bind(
+    let endpoint = super::transport::await_service(
+        runtime.as_ref(),
+        service.bind(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             RuntimeTcpBind {
                 address: host.clone(),
@@ -137,16 +138,18 @@ pub(crate) async fn tcpserver_builtin(
                     RuntimeTcpByteOrder::Little
                 },
             },
+        ),
+    )
+    .await
+    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+    .map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPSERVER_ERROR_BIND_FAILED,
+            format!("tcpserver: unable to bind {host}:{port} ({err})"),
+            err,
         )
-        .await
-        .map_err(|err| {
-            super::error::with_source(
-                BUILTIN_NAME,
-                &TCPSERVER_ERROR_BIND_FAILED,
-                format!("tcpserver: unable to bind {host}:{port} ({err})"),
-                err,
-            )
-        })?;
+    })?;
     if let Some(runtime) = &runtime {
         runtime.cpu_cooperation().completed(0).await?;
     }

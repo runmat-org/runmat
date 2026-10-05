@@ -1,7 +1,7 @@
 //! MATLAB-compatible `write` builtin for TCP/IP clients in RunMat.
 
 use crate::context::RuntimeTcpIssuer;
-use crate::tcp::TcpTransportErrorKind;
+use crate::tcp::{TcpTransportError, TcpTransportErrorKind, TcpWriteProgress};
 use runmat_builtins::{
     BuiltinErrorDescriptor, NetDataType as DataType, WRITE_ERROR_CONNECTION_CLOSED,
     WRITE_ERROR_INTERNAL, WRITE_ERROR_INVALID_CLIENT, WRITE_ERROR_INVALID_DATA,
@@ -54,6 +54,30 @@ fn map_write_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> 
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+fn map_write_await_failure(failure: super::transport::TcpAwaitFailure) -> RuntimeError {
+    if failure.cause != crate::execution::ExecutionServiceError::Cancelled {
+        return failure.into_runtime_error(BUILTIN_NAME);
+    }
+    let (message, progress) = if failure.launched {
+        (
+            "write: cancelled while sending; delivery may be partial",
+            TcpWriteProgress::Indeterminate,
+        )
+    } else {
+        (
+            "write: cancelled before sending",
+            TcpWriteProgress::NoBytesSent,
+        )
+    };
+    let source = TcpTransportError::with_source(TcpTransportErrorKind::Io, message, failure.cause)
+        .with_write_progress(progress);
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier("RunMat:Cancelled")
+        .with_source(source)
+        .build()
 }
 
 #[runtime_builtin(
@@ -110,17 +134,20 @@ pub(super) async fn write_builtin(
     };
 
     let issuer = RuntimeTcpIssuer::from_context(runtime.as_ref());
-    let status = service
-        .describe_client(issuer.clone(), authority.clone())
-        .await
-        .map_err(|err| {
-            let descriptor = if err.kind() == TcpTransportErrorKind::InvalidAuthority {
-                &WRITE_ERROR_INVALID_CLIENT
-            } else {
-                &WRITE_ERROR_INTERNAL
-            };
-            super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
-        })?;
+    let status = super::transport::await_service(
+        runtime.as_ref(),
+        service.describe_client(issuer.clone(), authority.clone()),
+    )
+    .await
+    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+    .map_err(|err| {
+        let descriptor = if err.kind() == TcpTransportErrorKind::InvalidAuthority {
+            &WRITE_ERROR_INVALID_CLIENT
+        } else {
+            &WRITE_ERROR_INTERNAL
+        };
+        super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
+    })?;
     if !status.connected {
         return Err(write_error(&WRITE_ERROR_NOT_CONNECTED));
     }
@@ -143,18 +170,42 @@ pub(super) async fn write_builtin(
     if let Some(runtime) = &runtime {
         runtime.cpu_cooperation().completed(0).await?;
     }
-    service
-        .write(issuer, authority, payload.bytes)
-        .await
-        .map_err(|err| {
-            let descriptor = match err.kind() {
-                TcpTransportErrorKind::InvalidAuthority => &WRITE_ERROR_INVALID_CLIENT,
-                TcpTransportErrorKind::Closed => &WRITE_ERROR_CONNECTION_CLOSED,
-                TcpTransportErrorKind::Timeout => &WRITE_ERROR_TIMEOUT,
-                _ => &WRITE_ERROR_INTERNAL,
-            };
-            super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
-        })?;
+    let expected_bytes = payload.bytes.len();
+    let accepted_bytes = super::transport::await_service(
+        runtime.as_ref(),
+        service.write(issuer, authority, payload.bytes),
+    )
+    .await
+    .map_err(map_write_await_failure)?
+    .map_err(|err| {
+        let descriptor = match err.kind() {
+            TcpTransportErrorKind::InvalidAuthority => &WRITE_ERROR_INVALID_CLIENT,
+            TcpTransportErrorKind::Closed => &WRITE_ERROR_CONNECTION_CLOSED,
+            TcpTransportErrorKind::Timeout => &WRITE_ERROR_TIMEOUT,
+            _ => &WRITE_ERROR_INTERNAL,
+        };
+        super::error::with_source(BUILTIN_NAME, descriptor, format!("write: {err}"), err)
+    })?;
+    if accepted_bytes != expected_bytes {
+        let progress = if accepted_bytes <= expected_bytes {
+            TcpWriteProgress::PrefixSent(accepted_bytes)
+        } else {
+            TcpWriteProgress::Indeterminate
+        };
+        let cause = TcpTransportError::new(
+            TcpTransportErrorKind::Io,
+            format!(
+                "TCP service reported {accepted_bytes} accepted bytes for a {expected_bytes}-byte write"
+            ),
+        )
+        .with_write_progress(progress);
+        return Err(super::error::with_source(
+            BUILTIN_NAME,
+            &WRITE_ERROR_INTERNAL,
+            format!("write: {cause}"),
+            cause,
+        ));
+    }
     Ok(Value::Num(payload.elements as f64))
 }
 
@@ -210,3 +261,7 @@ use codec::{
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "write/tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "write/count_tests.rs"]
+mod count_tests;

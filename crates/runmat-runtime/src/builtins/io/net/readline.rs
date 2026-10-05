@@ -63,13 +63,16 @@ pub(super) async fn readline_builtin(
             )
         })?;
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
-    let outcome = service
-        .read(
+    let outcome = super::transport::await_service(
+        runtime.as_ref(),
+        service.read(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             authority,
             RuntimeTcpReadMode::Line,
-        )
-        .await;
+        ),
+    )
+    .await
+    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?;
     let receipt = match outcome {
         Ok(receipt) => receipt,
         Err(err) if err.kind() == TcpTransportErrorKind::Timeout => {

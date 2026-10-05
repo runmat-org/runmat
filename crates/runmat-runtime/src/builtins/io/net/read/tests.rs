@@ -338,3 +338,66 @@ fn read_respects_timeout() {
 
     host.close(&client);
 }
+
+#[test]
+fn cancelled_pending_read_wakes_without_peer_and_sibling_call_keeps_socket() {
+    use futures::task::{waker_ref, ArcWake};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
+    use std::task::{Context, Poll};
+
+    struct Wakes(AtomicUsize);
+    impl ArcWake for Wakes {
+        fn wake_by_ref(waker: &Arc<Self>) {
+            waker.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let host = TcpTestHost::new();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    let port = listener.local_addr().unwrap().port();
+    let (send, receive) = mpsc::channel::<()>();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        receive.recv().expect("permit sibling payload");
+        stream.write_all(&[42]).expect("one sibling byte");
+    });
+    let client = host.connect(port, 2.0, RuntimeTcpByteOrder::Little);
+    let cancellation = CancellationSource::new();
+    let runtime = host
+        .runtime
+        .clone()
+        .with_cancellation_token(cancellation.token());
+    let mut call = Box::pin(read_builtin(
+        Some(runtime),
+        client.clone(),
+        vec![Value::Num(1.0)],
+    ));
+    let wakes = Arc::new(Wakes(AtomicUsize::new(0)));
+    let waker = waker_ref(&wakes);
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    cancellation.cancel(CancellationReason::User);
+    assert!(wakes.0.load(Ordering::SeqCst) > 0);
+    let Poll::Ready(Err(error)) = call.as_mut().poll(&mut Context::from_waker(&waker)) else {
+        panic!("cancelled TCP read must settle without a peer event");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    drop(call);
+
+    send.send(()).expect("release peer payload");
+    host.wait_available(&client, 1);
+    let Value::Tensor(value) = run_read(&host, client.clone(), vec![Value::Num(1.0)])
+        .expect("sibling read after cancellation")
+    else {
+        panic!("expected byte tensor");
+    };
+    assert_eq!(value.integer_storage(), Some(&IntegerStorage::U8(vec![42])));
+    server.join().expect("peer");
+    host.close(&client);
+}

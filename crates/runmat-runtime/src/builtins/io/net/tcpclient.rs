@@ -122,8 +122,9 @@ pub(crate) async fn tcpclient_builtin(
 
     let options = parse_name_value_pairs(rest, prepared_options).await?;
 
-    let endpoint = service
-        .connect(
+    let endpoint = super::transport::await_service(
+        runtime.as_ref(),
+        service.connect(
             RuntimeTcpIssuer::from_context(runtime.as_ref()),
             RuntimeTcpConnect {
                 host: host_text.clone(),
@@ -139,16 +140,18 @@ pub(crate) async fn tcpclient_builtin(
                     RuntimeTcpByteOrder::Little
                 },
             },
+        ),
+    )
+    .await
+    .map_err(|failure| failure.into_runtime_error(BUILTIN_NAME))?
+    .map_err(|err| {
+        super::error::with_source(
+            BUILTIN_NAME,
+            &TCPCLIENT_ERROR_CONNECT_FAILED,
+            format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
+            err,
         )
-        .await
-        .map_err(|err| {
-            super::error::with_source(
-                BUILTIN_NAME,
-                &TCPCLIENT_ERROR_CONNECT_FAILED,
-                format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
-                err,
-            )
-        })?;
+    })?;
     if let Some(runtime) = &runtime {
         runtime.cpu_cooperation().completed(0).await?;
     }
