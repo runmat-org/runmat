@@ -117,7 +117,7 @@ fn revoked_lease_error_keeps_retained_workbook_valid() {
     let mut workbook = XlsWorkbook::new();
     futures::executor::block_on(seed_workbook(&mut workbook, &selected))
         .expect("initial valid sheet");
-    let incoming = futures::executor::block_on(table("new"));
+    let incoming = futures::executor::block_on(table("new", &selected));
     valid.store(false, Ordering::Release);
     let request = XlsWriteRequest {
         sheet: SheetSelector::Default,

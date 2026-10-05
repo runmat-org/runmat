@@ -3,6 +3,9 @@ use super::*;
 #[path = "workbook/xml.rs"]
 mod xml;
 use xml::build_sheet_xml_cooperative;
+#[path = "workbook/validation.rs"]
+mod validation;
+use validation::{ensure_runmat_xlswrite_workbook, preflight_existing_workbook};
 
 #[derive(Debug, Clone)]
 pub(super) struct XlsWorkbook {
@@ -272,14 +275,20 @@ fn workbook_relationships_xml(sheet_count: usize) -> String {
     xml
 }
 
-pub(super) async fn load_workbook_or_new(selected: &TabularFsPath) -> BuiltinResult<XlsWorkbook> {
-    match read_existing_workbook_bytes(selected).await? {
-        Some(bytes) => workbook_from_bytes(selected.path(), bytes),
+pub(super) async fn load_workbook_or_new(
+    selected: &TabularFsPath,
+    cooperation: &mut TabularCooperation<'_>,
+) -> BuiltinResult<XlsWorkbook> {
+    match read_existing_workbook_bytes(selected, cooperation).await? {
+        Some(bytes) => workbook_from_bytes(selected, bytes, cooperation).await,
         None => Ok(XlsWorkbook::new()),
     }
 }
 
-async fn read_existing_workbook_bytes(selected: &TabularFsPath) -> BuiltinResult<Option<Vec<u8>>> {
+async fn read_existing_workbook_bytes(
+    selected: &TabularFsPath,
+    cooperation: &mut TabularCooperation<'_>,
+) -> BuiltinResult<Option<Vec<u8>>> {
     let path = selected.path();
     let file = match selected.open_read().await {
         Ok(file) => file,
@@ -295,18 +304,41 @@ async fn read_existing_workbook_bytes(selected: &TabularFsPath) -> BuiltinResult
             ))
         }
     };
+    checkpoint_existing(cooperation, selected, 0).await?;
     let mut limited = file.take(MAX_XLSWRITE_WORKBOOK_BYTES + 1);
     let mut bytes = Vec::new();
-    limited.read_to_end(&mut bytes).map_err(|err| {
-        xlswrite_error_with_source(
-            &XLSWRITE_ERROR_IO,
-            format!(
-                "xlswrite: unable to read existing '{}': {err}",
-                path.display()
-            ),
-            err,
-        )
-    })?;
+    let mut chunk = [0u8; 8192];
+    loop {
+        selected.check().map_err(|source| {
+            xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                "xlswrite: captured filesystem authority was revoked",
+                source,
+            )
+        })?;
+        let read = limited.read(&mut chunk).map_err(|err| {
+            xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                format!(
+                    "xlswrite: unable to read existing '{}': {err}",
+                    path.display()
+                ),
+                err,
+            )
+        })?;
+        if read == 0 {
+            break;
+        }
+        bytes.try_reserve(read).map_err(|source| {
+            xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                "xlswrite: existing workbook read allocation failed",
+                source,
+            )
+        })?;
+        bytes.extend_from_slice(&chunk[..read]);
+        checkpoint_existing(cooperation, selected, read).await?;
+    }
     selected.check().map_err(|source| {
         xlswrite_error_with_source(
             &XLSWRITE_ERROR_IO,
@@ -325,9 +357,15 @@ async fn read_existing_workbook_bytes(selected: &TabularFsPath) -> BuiltinResult
     Ok(Some(bytes))
 }
 
-fn workbook_from_bytes(path: &Path, bytes: Vec<u8>) -> BuiltinResult<XlsWorkbook> {
-    preflight_existing_workbook(&bytes)?;
-    ensure_runmat_xlswrite_workbook(path, &bytes)?;
+async fn workbook_from_bytes(
+    selected: &TabularFsPath,
+    bytes: Vec<u8>,
+    cooperation: &mut TabularCooperation<'_>,
+) -> BuiltinResult<XlsWorkbook> {
+    let path = selected.path();
+    preflight_existing_workbook(&bytes, cooperation, selected).await?;
+    ensure_runmat_xlswrite_workbook(path, &bytes, cooperation, selected).await?;
+    checkpoint_existing(cooperation, selected, 0).await?;
     let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|err| {
         xlswrite_error_with(
             &XLSWRITE_ERROR_IO,
@@ -337,6 +375,7 @@ fn workbook_from_bytes(path: &Path, bytes: Vec<u8>) -> BuiltinResult<XlsWorkbook
             ),
         )
     })?;
+    checkpoint_existing(cooperation, selected, 0).await?;
     let names = workbook.sheet_names().to_vec();
     let mut sheets = Vec::with_capacity(names.len());
     for name in names {
@@ -347,109 +386,28 @@ fn workbook_from_bytes(path: &Path, bytes: Vec<u8>) -> BuiltinResult<XlsWorkbook
                 format!("xlswrite: unable to read existing sheet '{name}': {err:?}"),
             )
         })?;
+        checkpoint_existing(cooperation, selected, 0).await?;
         sheets.push(XlsSheet {
             name,
-            table: XlsTable::from_calamine_range(&range)?,
+            table: XlsTable::from_calamine_range_cooperative(&range, cooperation, selected).await?,
         });
     }
     Ok(XlsWorkbook { sheets })
 }
 
-fn preflight_existing_workbook(bytes: &[u8]) -> BuiltinResult<()> {
-    if !looks_like_zip(bytes) {
-        return Err(xlswrite_error_with(
-            &XLSWRITE_ERROR_IO,
-            "xlswrite: updating existing legacy BIFF .xls workbooks is not supported",
-        ));
-    }
-    let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|err| {
-        xlswrite_error_with(
-            &XLSWRITE_ERROR_IO,
-            format!("xlswrite: invalid ZIP workbook: {err}"),
-        )
-    })?;
-    if archive.len() > MAX_XLSWRITE_ZIP_ENTRIES {
-        return Err(xlswrite_error_with(
-            &XLSWRITE_ERROR_IO,
-            format!("xlswrite: ZIP workbook contains more than {MAX_XLSWRITE_ZIP_ENTRIES} entries"),
-        ));
-    }
-    let mut total = 0u64;
-    for idx in 0..archive.len() {
-        let entry = archive.by_index(idx).map_err(|err| {
-            xlswrite_error_with(
-                &XLSWRITE_ERROR_IO,
-                format!("xlswrite: unable to inspect ZIP workbook entry {idx}: {err}"),
-            )
-        })?;
-        if entry.size() > MAX_XLSWRITE_ZIP_ENTRY_UNCOMPRESSED_BYTES {
-            return Err(xlswrite_error_with(
-                &XLSWRITE_ERROR_IO,
-                format!(
-                    "xlswrite: ZIP workbook entry exceeds maximum expanded size of {MAX_XLSWRITE_ZIP_ENTRY_UNCOMPRESSED_BYTES} bytes"
-                ),
-            ));
-        }
-        total = total.checked_add(entry.size()).ok_or_else(|| {
-            xlswrite_error_with(
-                &XLSWRITE_ERROR_IO,
-                "xlswrite: ZIP workbook expanded size overflows supported bounds",
-            )
-        })?;
-        if total > MAX_XLSWRITE_ZIP_TOTAL_UNCOMPRESSED_BYTES {
-            return Err(xlswrite_error_with(
-                &XLSWRITE_ERROR_IO,
-                format!(
-                    "xlswrite: ZIP workbook expanded size exceeds maximum of {MAX_XLSWRITE_ZIP_TOTAL_UNCOMPRESSED_BYTES} bytes"
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn ensure_runmat_xlswrite_workbook(path: &Path, bytes: &[u8]) -> BuiltinResult<()> {
-    let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|err| {
-        xlswrite_error_with(
-            &XLSWRITE_ERROR_IO,
-            format!("xlswrite: invalid ZIP workbook: {err}"),
-        )
-    })?;
-    let mut marker = archive.by_name(XLSWRITE_MARKER_PART).map_err(|_| {
-        xlswrite_error_with(
-            &XLSWRITE_ERROR_IO,
-            format!(
-                "xlswrite: refusing to update existing workbook '{}' because it was not created by RunMat xlswrite",
-                path.display()
-            ),
-        )
-    })?;
-    let mut contents = String::new();
-    marker.read_to_string(&mut contents).map_err(|err| {
+async fn checkpoint_existing(
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+    work: usize,
+) -> BuiltinResult<()> {
+    cooperation.completed(work).await?;
+    selected.check().map_err(|source| {
         xlswrite_error_with_source(
             &XLSWRITE_ERROR_IO,
-            format!("xlswrite: unable to read RunMat workbook marker: {err}"),
-            err,
+            "xlswrite: captured filesystem authority was revoked",
+            source,
         )
-    })?;
-    if !contents.contains(XLSWRITE_MARKER_TEXT) {
-        return Err(xlswrite_error_with(
-            &XLSWRITE_ERROR_IO,
-            format!(
-                "xlswrite: refusing to update existing workbook '{}' because its RunMat marker is invalid",
-                path.display()
-            ),
-        ));
-    }
-    Ok(())
-}
-
-fn looks_like_zip(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"PK\x03\x04")
-        || bytes.starts_with(b"PK\x05\x06")
-        || bytes.starts_with(b"PK\x07\x08")
+    })
 }
 
 #[cfg(test)]

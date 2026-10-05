@@ -18,6 +18,16 @@ async fn xlswrite_call(filename: Value, data: Value, rest: Vec<Value>) -> Builti
     xlswrite_builtin(None, filename, data, rest).await
 }
 
+async fn table_from_value(value: Value) -> BuiltinResult<XlsTable> {
+    let path = temp_path("xlsx");
+    let selected = TabularFsOwner::capture(Some(&path))
+        .expect("captured test owner")
+        .path(path)
+        .expect("selected test path");
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    XlsTable::from_value_cooperative(value, None, &mut cooperation, &selected).await
+}
+
 #[test]
 fn cancellation_is_not_converted_to_spreadsheet_status() {
     let cancelled = build_runtime_error("xlswrite: cancelled")
@@ -185,12 +195,12 @@ fn xlswrite_preserves_integer_cell_xml_exactly() {
         Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).expect("wide tensor");
 
     let scalar =
-        block_on(XlsTable::from_value(Value::Int(IntValue::U64(u64::MAX)))).expect("scalar table");
+        block_on(table_from_value(Value::Int(IntValue::U64(u64::MAX)))).expect("scalar table");
     let scalar_xml =
         writecell::build_sheet_xml(&scalar.into_cell_table().unwrap(), RangeStart::default());
     assert!(scalar_xml.contains("<v>18446744073709551615</v>"));
 
-    let tensor = block_on(XlsTable::from_value(Value::Tensor(typed))).expect("tensor table");
+    let tensor = block_on(table_from_value(Value::Tensor(typed))).expect("tensor table");
     let tensor_xml =
         writecell::build_sheet_xml(&tensor.into_cell_table().unwrap(), RangeStart::default());
     assert!(tensor_xml.contains("<v>9007199254740993</v>"));
@@ -228,7 +238,7 @@ fn xlswrite_preserves_sparse_integer_cells_exactly() {
         IntegerStorage::U64(vec![u64::MAX, (1_u64 << 53) + 1]),
     )
     .expect("integer sparse");
-    let table = block_on(XlsTable::from_value(Value::SparseTensor(sparse))).expect("table");
+    let table = block_on(table_from_value(Value::SparseTensor(sparse))).expect("table");
     let xml = writecell::build_sheet_xml(&table.into_cell_table().unwrap(), RangeStart::default());
 
     assert!(xml.contains("<v>18446744073709551615</v>"));

@@ -44,8 +44,9 @@ fn pending_budget(source: &CancellationSource, dropped: Rc<Cell<bool>>) -> CpuCo
     )
 }
 
-async fn table(text: &str) -> XlsTable {
-    XlsTable::from_value(Value::from(text))
+async fn table(text: &str, selected: &TabularFsPath) -> XlsTable {
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    XlsTable::from_value_cooperative(Value::from(text), None, &mut cooperation, selected)
         .await
         .expect("table")
 }
@@ -55,7 +56,7 @@ async fn seed_workbook(workbook: &mut XlsWorkbook, selected: &TabularFsPath) -> 
     workbook
         .overlay(
             &XlsWriteRequest::default(),
-            table("old").await,
+            table("old", selected).await,
             &mut cooperation,
             selected,
         )
@@ -70,7 +71,7 @@ async fn recovered_workbook(
     workbook
         .overlay(
             &XlsWriteRequest::default(),
-            table("recovered").await,
+            table("recovered", selected).await,
             &mut cooperation,
             selected,
         )
@@ -105,7 +106,7 @@ fn dropped_pending_resize_keeps_retained_workbook_valid() {
         sheet: SheetSelector::Default,
         range: RangeStart { row: 1, col: 1 },
     };
-    let incoming = futures::executor::block_on(table("new"));
+    let incoming = futures::executor::block_on(table("new", &selected));
     let mut call = Box::pin(workbook.overlay(&request, incoming, &mut cooperation, &selected));
     assert!(matches!(
         call.as_mut()
@@ -141,7 +142,7 @@ fn cancelled_resize_keeps_retained_workbook_valid() {
         sheet: SheetSelector::Default,
         range: RangeStart { row: 1, col: 1 },
     };
-    let incoming = futures::executor::block_on(table("new"));
+    let incoming = futures::executor::block_on(table("new", &selected));
     let mut call = Box::pin(workbook.overlay(&request, incoming, &mut cooperation, &selected));
     assert!(matches!(
         call.as_mut()

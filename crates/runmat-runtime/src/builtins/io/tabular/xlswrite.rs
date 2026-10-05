@@ -140,12 +140,24 @@ async fn write_spreadsheet(
             source,
         )
     })?;
-    let data_value = await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&data))
-        .await?
-        .map_err(map_control_flow)?;
+    let data_value = if matches!(&data, Value::GpuTensor(_)) {
+        selected.check().map_err(|source| {
+            xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                "xlswrite: captured filesystem authority was revoked",
+                source,
+            )
+        })?;
+        await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&data))
+            .await?
+            .map_err(map_control_flow)?
+    } else {
+        data
+    };
     let args = gather_arguments(runtime, &mut cooperation, &rest).await?;
     let request = XlsWriteRequest::parse(&args)?;
-    let table = await_io(runtime, BUILTIN_NAME, XlsTable::from_value(data_value)).await??;
+    let table =
+        XlsTable::from_value_cooperative(data_value, runtime, &mut cooperation, &selected).await?;
     let lock = await_io(
         runtime,
         BUILTIN_NAME,
@@ -160,7 +172,12 @@ async fn write_spreadsheet(
         )
     })?;
     let _guard = await_io(runtime, BUILTIN_NAME, lock.lock()).await?;
-    let mut workbook = await_io(runtime, BUILTIN_NAME, load_workbook_or_new(&selected)).await??;
+    let mut workbook = await_io(
+        runtime,
+        BUILTIN_NAME,
+        load_workbook_or_new(&selected, &mut cooperation),
+    )
+    .await??;
     cooperation.completed(0).await?;
     selected.check().map_err(|source| {
         xlswrite_error_with_source(
