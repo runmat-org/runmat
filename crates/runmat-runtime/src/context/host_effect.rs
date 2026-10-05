@@ -387,7 +387,7 @@ fn select_host_effect_inner(
     }
     let valid_selection = match &selected {
         SelectedHostEffect::Portable(selected) => {
-            selected.decision.signature == *portable_signature.as_ref().expect("portable signature")
+            &selected.decision.signature == portable_signature.as_ref().expect("portable signature")
                 && selected.decision.selected.node == request.operation
                 && selected.decision.selected.kind == expected_candidate_kind
                 && Digest::parse_canonical(&selected.decision.selected.candidate)
