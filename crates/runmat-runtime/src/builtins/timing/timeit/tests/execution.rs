@@ -15,7 +15,7 @@ fn timeit_external_function_handle_surfaces_undefined_function() {
 #[test]
 fn timeit_measures_time() {
     let runtime = runtime();
-    let (_resolver, _invoker) = install_test_callbacks(&runtime);
+    let _callbacks = install_test_callbacks(&runtime);
     COUNTER_DEFAULT.store(0, Ordering::SeqCst);
     let result =
         block_on(timeit_builtin(Some(runtime), default_handle(), Vec::new())).expect("timeit");
@@ -35,7 +35,7 @@ fn timeit_measures_time() {
 fn timeit_accepts_num_outputs_argument() {
     let runtime = runtime();
     runtime.set_runmat_extensions_enabled(true);
-    let (_resolver, _invoker) = install_test_callbacks(&runtime);
+    let _callbacks = install_test_callbacks(&runtime);
     COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
     let args = vec![Value::Int(IntValue::I32(3))];
     let _ =
@@ -52,7 +52,7 @@ fn timeit_accepts_num_outputs_argument() {
 fn timeit_supports_zero_outputs() {
     let runtime = runtime();
     runtime.set_runmat_extensions_enabled(true);
-    let (_resolver, _invoker) = install_test_callbacks(&runtime);
+    let _callbacks = install_test_callbacks(&runtime);
     COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
     let args = vec![Value::Int(IntValue::I32(0))];
     let _ = block_on(timeit_builtin(Some(runtime), zero_outputs_handle(), args))
@@ -69,7 +69,7 @@ fn timeit_supports_zero_outputs() {
 #[cfg(feature = "wgpu")]
 fn timeit_runs_with_wgpu_provider_registered() {
     let runtime = runtime();
-    let (_resolver, _invoker) = install_test_callbacks(&runtime);
+    let _callbacks = install_test_callbacks(&runtime);
     let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
     );
@@ -93,7 +93,7 @@ fn timeit_rejects_non_function_input() {
 #[test]
 fn timeit_rejects_invalid_num_outputs() {
     let runtime = runtime();
-    let (_resolver, _invoker) = install_test_callbacks(&runtime);
+    let _callbacks = install_test_callbacks(&runtime);
     COUNTER_INVALID.store(0, Ordering::SeqCst);
     let err = block_on(timeit_builtin(
         Some(runtime),
@@ -110,7 +110,7 @@ fn timeit_rejects_invalid_num_outputs() {
 fn timeit_gates_typed_integer_output_counts_before_invoking_the_callback() {
     let runtime = runtime();
     runtime.set_runmat_extensions_enabled(false);
-    let (_resolver, _invoker) = install_test_callbacks(&runtime);
+    let _callbacks = install_test_callbacks(&runtime);
     COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
     let err = block_on(timeit_builtin(
         Some(runtime),

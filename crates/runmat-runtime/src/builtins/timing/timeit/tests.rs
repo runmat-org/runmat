@@ -6,6 +6,16 @@ fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
 }
 
+fn inert_handle(name: &str, function: usize) -> Value {
+    Value::BoundFunctionHandle {
+        name: name.into(),
+        function,
+        authority: runmat_value::BoundFunctionAuthority::unavailable(function),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
+    }
+}
+
 #[test]
 fn output_count_preserves_representable_uint64() {
     assert_eq!(
@@ -115,6 +125,8 @@ fn timeit_uses_injected_monotonic_service_for_every_batch() {
             .with_timing(std::rc::Rc::new(TestMonotonicClock(ticks.clone()))),
     );
     let _scope = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 991);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let callback_ticks = ticks.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |function, args, requested_outputs| {
@@ -127,10 +139,7 @@ fn timeit_uses_injected_monotonic_service_for_every_batch() {
     )));
     let result = block_on(timeit_builtin(
         Some(runtime),
-        Value::BoundFunctionHandle {
-            name: "test.monotonic.callback".into(),
-            function: 991,
-        },
+        crate::user_functions::test_support::exact_local_value("test.monotonic.callback", binding),
         Vec::new(),
     ))
     .unwrap();
@@ -170,6 +179,8 @@ fn cancelled_pending_callback_is_dropped_without_replay() {
         source.token(),
     );
     let _scope = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 992);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let calls = Arc::new(AtomicUsize::new(0));
     let drops = Arc::new(AtomicUsize::new(0));
     let callback_calls = calls.clone();
@@ -185,20 +196,17 @@ fn cancelled_pending_callback_is_dropped_without_replay() {
     )));
     let unpolled = timeit_builtin(
         Some(runtime.clone()),
-        Value::BoundFunctionHandle {
-            name: "test.pending.callback".into(),
-            function: 992,
-        },
+        crate::user_functions::test_support::exact_local_value(
+            "test.pending.callback",
+            binding.clone(),
+        ),
         Vec::new(),
     );
     drop(unpolled);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let mut call = Box::pin(timeit_builtin(
         Some(runtime),
-        Value::BoundFunctionHandle {
-            name: "test.pending.callback".into(),
-            function: 992,
-        },
+        crate::user_functions::test_support::exact_local_value("test.pending.callback", binding),
         Vec::new(),
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -223,8 +231,49 @@ fn install_test_callbacks(
 ) -> (
     crate::user_functions::FunctionResolverGuard,
     crate::user_functions::FunctionInvokerGuard,
+    crate::user_functions::SourceFunctionCatalogGuard,
+    crate::user_functions::BoundFunctionInvokerGuard,
 ) {
     let _scope = runtime.enter();
+    let owners = [1001, 1002, 1003, 1004]
+        .into_iter()
+        .map(|function| {
+            (
+                function,
+                Arc::new(runmat_value::FunctionDefinitionOwner::default()),
+            )
+        })
+        .collect::<Vec<_>>();
+    let catalog = crate::user_functions::install_source_function_catalog(Some(Arc::new(
+        owners
+            .iter()
+            .map(
+                |(function, owner)| crate::user_functions::SourceFunctionInfo {
+                    source_id: runmat_types::SourceId(*function),
+                    name: format!("timeit_fixture_{function}"),
+                    function: *function,
+                    role: runmat_types::FunctionSourceRole::Unknown,
+                    binding_origin: None,
+                    source_file: None,
+                    definition_owners: Some(Arc::new(vec![(*function, Arc::clone(owner))])),
+                },
+            )
+            .collect(),
+    )));
+    let bound = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+        move |binding, arguments, outputs| {
+            let lease = binding
+                .authority
+                .local_definition()
+                .expect("timeit fixture exact local lease");
+            assert!(owners.iter().any(|(function, owner)| {
+                *function == binding.function && lease.matches(owner)
+            }));
+            let invoker = crate::user_functions::current_semantic_function_invoker()
+                .expect("timeit fixture numeric callback");
+            invoker(binding.function, arguments, outputs)
+        },
+    ));
     let resolver = crate::user_functions::install_semantic_function_resolver(Some(Arc::new(
         |name| match name {
             "__timeit_helper_counter_default" => Some(1001),
@@ -267,7 +316,7 @@ fn install_test_callbacks(
             Box::pin(async move { result })
         },
     )));
-    (resolver, invoker)
+    (resolver, invoker, catalog, bound)
 }
 
 fn default_handle() -> Value {
@@ -362,15 +411,16 @@ fn timeit_trims_function_handle_name_for_semantic_resolution() {
     .expect("timeit should normalize function-handle payload name");
     assert_eq!(
         callable.handle,
-        Value::BoundFunctionHandle {
-            name: "__timeit_helper_counter_default".into(),
-            function: 188,
-        }
+        inert_handle("__timeit_helper_counter_default", 188)
     );
 }
 
 #[test]
 fn timeit_callable_invoke_honors_multi_requested_outputs() {
+    let runtime = runtime();
+    let _scope = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 612);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 612);
@@ -388,16 +438,13 @@ fn timeit_callable_invoke_honors_multi_requested_outputs() {
     )));
 
     let callable = prepare_callable(
-        Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 612,
-        },
+        crate::user_functions::test_support::exact_local_value("function_target", binding),
         Some(3),
     )
     .expect("timeit should accept semantic callback handles");
 
     let invoked =
-        block_on(callable.invoke(&runtime())).expect("timeit callable invoke should succeed");
+        block_on(callable.invoke(&runtime)).expect("timeit callable invoke should succeed");
     assert_eq!(invoked, Value::Num(0.0));
 }
 
@@ -414,10 +461,7 @@ fn timeit_string_handle_prefers_semantic_resolver_identity() {
     .expect("timeit should accept string function handle");
     assert_eq!(
         callable.handle,
-        Value::BoundFunctionHandle {
-            name: "__timeit_helper_counter_default".into(),
-            function: 87,
-        }
+        inert_handle("__timeit_helper_counter_default", 87)
     );
 }
 
@@ -436,10 +480,7 @@ fn timeit_char_handle_prefers_semantic_resolver_identity() {
     .expect("timeit should accept char function handle");
     assert_eq!(
         callable.handle,
-        Value::BoundFunctionHandle {
-            name: "__timeit_helper_counter_default".into(),
-            function: 88,
-        }
+        inert_handle("__timeit_helper_counter_default", 88)
     );
 }
 
@@ -454,33 +495,15 @@ fn timeit_external_function_handle_prefers_semantic_resolver_identity() {
         Some(2),
     )
     .expect("timeit should accept external function handle");
-    assert_eq!(
-        callable.handle,
-        Value::BoundFunctionHandle {
-            name: "pkg.callback".into(),
-            function: 86,
-        }
-    );
+    assert_eq!(callable.handle, inert_handle("pkg.callback", 86));
     assert_eq!(callable.num_outputs, Some(2));
 }
 
 #[test]
 fn timeit_accepts_semantic_function_handle() {
-    let callable = prepare_callable(
-        Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 41,
-        },
-        Some(1),
-    )
-    .expect("timeit should accept semantic function handle");
-    assert_eq!(
-        callable.handle,
-        Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 41,
-        }
-    );
+    let callable = prepare_callable(inert_handle("function_target", 41), Some(1))
+        .expect("timeit should accept semantic function handle");
+    assert_eq!(callable.handle, inert_handle("function_target", 41));
     assert_eq!(callable.num_outputs, Some(1));
 }
 
@@ -493,7 +516,9 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
     let callable = prepare_callable(
         Value::Closure(Closure {
             function_name: "__timeit_helper_counter_default".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         }),
         None,
@@ -503,7 +528,9 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
         callable.handle,
         Value::Closure(Closure {
             function_name: "__timeit_helper_counter_default".into(),
-            bound_function: Some(89),
+            binding: Some(runmat_value::BoundFunctionBinding::unavailable(89)),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         })
     );
@@ -514,7 +541,9 @@ fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
     let callable = prepare_callable(
         Value::Closure(Closure {
             function_name: "__timeit_helper_counter_default".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         }),
         None,
@@ -524,7 +553,9 @@ fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
         callable.handle,
         Value::Closure(Closure {
             function_name: "__timeit_helper_counter_default".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         })
     );

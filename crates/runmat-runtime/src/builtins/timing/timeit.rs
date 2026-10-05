@@ -267,23 +267,33 @@ fn prepare_callable(
                 num_outputs,
             })
         }
-        Value::BoundFunctionHandle { name, function } => {
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            authority,
+            source_role,
+            source_file,
+        } => {
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
                 handle: Value::BoundFunctionHandle {
                     name: normalized,
                     function,
+                    authority,
+                    source_role,
+                    source_file,
                 },
                 num_outputs,
             })
         }
         Value::Closure(mut closure) => Ok(TimeitCallable {
             handle: {
-                if closure.bound_function.is_none() {
+                if closure.binding.is_none() {
                     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(
                         &closure.function_name,
                     ) {
-                        closure.bound_function = Some(function);
+                        closure.binding =
+                            Some(crate::user_functions::bound_function_binding_for(function));
                     }
                 }
                 Value::Closure(closure)
@@ -299,10 +309,10 @@ fn prepare_callable(
 
 fn handle_for_name(name: &str) -> Option<Value> {
     let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
-    Some(Value::BoundFunctionHandle {
-        name: name.into(),
+    Some(crate::user_functions::bound_function_handle(
+        name.into(),
         function,
-    })
+    ))
 }
 
 fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
