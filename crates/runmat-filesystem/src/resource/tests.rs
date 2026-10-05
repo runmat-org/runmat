@@ -1,4 +1,23 @@
 use super::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_direct_source_excludes_os_backing_but_memory_retains_managed_backing() {
+    let native = crate::NativeFsProvider
+        .managed_read_contract()
+        .expect("native direct contract");
+    assert_eq!(
+        native.backing,
+        FsManagedReadBacking::ExternalToRustManagedHeap
+    );
+    let memory = crate::MemoryFsProvider::new()
+        .managed_read_contract()
+        .expect("MemoryFS direct contract");
+    assert_eq!(
+        memory.backing,
+        FsManagedReadBacking::RetainedManagedPayloadUnaccounted
+    );
+}
 #[cfg(not(target_arch = "wasm32"))]
 use crate::NativeFsProvider;
 use crate::{FsMetadata, MemoryFsProvider};

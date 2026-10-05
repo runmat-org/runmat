@@ -5,8 +5,8 @@
 use super::{MemoryEntry, MemoryFsProvider};
 use crate::{
     FileHandle, FsBoundedInput, FsFilePayloadContract, FsFileType, FsManagedOpenedInputCost,
-    FsManagedReadContract, FsMetadata, FsResourceContract, FsResourceLease, FsResourceLeaseHandle,
-    FsResourceRevision,
+    FsManagedReadBacking, FsManagedReadContract, FsMetadata, FsResourceContract, FsResourceLease,
+    FsResourceLeaseHandle, FsResourceRevision,
 };
 use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -28,6 +28,7 @@ fn revision() -> FsResourceRevision {
 pub(super) fn managed_read_contract() -> FsManagedReadContract {
     FsManagedReadContract {
         revision: revision(),
+        backing: FsManagedReadBacking::RetainedManagedPayloadUnaccounted,
         capture_requested_heap_bytes: 0,
         opened_requested_heap_bytes: std::mem::size_of::<MemoryReadHandle>() as u64,
     }
@@ -207,6 +208,10 @@ mod tests {
         assert!(opened.is_valid());
         assert_eq!(opened.seek(SeekFrom::End(0)).unwrap(), 4);
         assert_eq!(managed_read_contract().capture_requested_heap_bytes, 0);
+        assert_eq!(
+            managed_read_contract().backing,
+            FsManagedReadBacking::RetainedManagedPayloadUnaccounted
+        );
         assert_eq!(
             managed_read_contract().opened_requested_heap_bytes,
             std::mem::size_of::<MemoryReadHandle>() as u64

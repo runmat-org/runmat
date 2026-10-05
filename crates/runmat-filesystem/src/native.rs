@@ -3,8 +3,8 @@ use crate::data_contract::{
 };
 use crate::{
     DirEntry, FileHandle, FsBoundedInput, FsFilePayloadContract, FsFileType,
-    FsManagedOpenedInputCost, FsManagedReadContract, FsMetadata, FsProvider, FsResourceContract,
-    FsResourceLease, FsResourceLeaseHandle, FsResourceRevision, OpenFlags,
+    FsManagedOpenedInputCost, FsManagedReadBacking, FsManagedReadContract, FsMetadata, FsProvider,
+    FsResourceContract, FsResourceLease, FsResourceLeaseHandle, FsResourceRevision, OpenFlags,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -97,6 +97,7 @@ impl FsProvider for NativeFsProvider {
     fn managed_read_contract(&self) -> Option<FsManagedReadContract> {
         Some(FsManagedReadContract {
             revision: native_direct_revision(),
+            backing: FsManagedReadBacking::ExternalToRustManagedHeap,
             capture_requested_heap_bytes: 0,
             opened_requested_heap_bytes: std::mem::size_of::<fs::File>() as u64,
         })

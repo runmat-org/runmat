@@ -27,8 +27,22 @@ pub struct FsManagedOpenedInputCost {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct FsManagedReadContract {
     pub revision: FsResourceRevision,
+    /// Ownership of source bytes that remain live behind the direct handle.
+    /// This is distinct from the per-open handle's requested allocation.
+    pub backing: FsManagedReadBacking,
     pub capture_requested_heap_bytes: u64,
     pub opened_requested_heap_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum FsManagedReadBacking {
+    /// File contents live outside the process's Rust-managed heap. This does
+    /// not make OS caches, allocator overhead, or total RSS finite evidence.
+    ExternalToRustManagedHeap,
+    /// A provider-owned managed backing survives the opened handle. Callers
+    /// need a same-ledger retention and mutation-copy certificate before a
+    /// complete managed-byte admission; handle size alone is insufficient.
+    RetainedManagedPayloadUnaccounted,
 }
 
 /// Revision of the implementation and resource behavior being certified.

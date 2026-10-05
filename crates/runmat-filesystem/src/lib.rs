@@ -46,8 +46,9 @@ use provider_path::{capture_provider_many, capture_provider_pair};
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
     capture_resource_lease, capture_resource_lease_for_effect, CapturedFsResourceLease,
-    FsBoundedInput, FsFilePayloadContract, FsManagedOpenedInputCost, FsManagedReadContract,
-    FsResourceContract, FsResourceLease, FsResourceLeaseHandle, FsResourceRevision,
+    FsBoundedInput, FsFilePayloadContract, FsManagedOpenedInputCost, FsManagedReadBacking,
+    FsManagedReadContract, FsResourceContract, FsResourceLease, FsResourceLeaseHandle,
+    FsResourceRevision,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox::SandboxFsProvider;
