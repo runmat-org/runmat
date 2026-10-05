@@ -310,12 +310,13 @@ fn accept_internal_source(err: RuntimeError) -> RuntimeError {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
+    use super::super::control::TimeoutParseError;
     use super::super::tcpserver::tcpserver_builtin;
     use super::*;
     use crate::builtins::io::net::test_support::CountingDownloadProvider;
     use crate::context::{RuntimeContext, RuntimeServicePorts};
     use crate::tcp::NativeTcpService;
-    use runmat_builtins::ACCEPT_DESCRIPTOR;
+    use runmat_builtins::{ACCEPT_DESCRIPTOR, ACCEPT_INTEGER_CAPABILITIES};
     use runmat_value::{IntegerStorage, ObjectInstance, Tensor, Value};
     use std::net::TcpStream;
     use std::rc::Rc;

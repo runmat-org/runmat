@@ -1,13 +1,13 @@
 //! MATLAB-compatible `dlmwrite` builtin for delimiter-separated exports.
 
+#[cfg(test)]
+use runmat_builtins::DLMWRITE_DESCRIPTOR;
 use runmat_builtins::{
     BuiltinErrorDescriptor, DLMWRITE_BYTE_COUNT_OUTPUT_EXTENSION, DLMWRITE_ERROR_ARG_CONFIG,
     DLMWRITE_ERROR_DATA, DLMWRITE_ERROR_DATA_SHAPE, DLMWRITE_ERROR_FILENAME, DLMWRITE_ERROR_FORMAT,
     DLMWRITE_ERROR_IO, DLMWRITE_ERROR_OPTION, DLMWRITE_ERROR_SIZE,
     DLMWRITE_RESIDENT_INPUT_EXTENSION,
 };
-#[cfg(test)]
-use runmat_builtins::{DLMWRITE_DESCRIPTOR, DLMWRITE_EXTENSIONS, DLMWRITE_INTEGER_CAPABILITIES};
 use runmat_filesystem::{File, OpenOptions};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};

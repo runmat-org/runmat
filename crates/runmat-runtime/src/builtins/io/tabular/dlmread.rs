@@ -10,6 +10,8 @@ use std::char;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use runmat_builtins::DLMREAD_DESCRIPTOR;
 use runmat_builtins::{
     BuiltinErrorDescriptor, DLMREAD_COLON_RANGE_EXTENSION, DLMREAD_COMPOSED_RANGE_EXTENSION,
     DLMREAD_ERROR_ARG_CONFIG, DLMREAD_ERROR_DELIMITER, DLMREAD_ERROR_FILENAME,
@@ -18,8 +20,6 @@ use runmat_builtins::{
     DLMREAD_ERROR_TENSOR_BUILD, DLMREAD_NUMERIC_DELIMITER_EXTENSION,
     DLMREAD_RESIDENT_ARGUMENT_EXTENSION,
 };
-#[cfg(test)]
-use runmat_builtins::{DLMREAD_DESCRIPTOR, DLMREAD_EXTENSIONS, DLMREAD_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar, Tensor, Value};
 

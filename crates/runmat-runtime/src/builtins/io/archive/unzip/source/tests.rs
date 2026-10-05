@@ -42,7 +42,7 @@ fn captured_relative_input_and_default_output_survive_provider_and_cwd_swap() {
     let archive = resolve_archive_path("archive.zip", &mut captured).expect("relative input path");
     assert_eq!(output, Path::new("/selected-cwd"));
     assert_eq!(archive, Path::new("/selected-cwd/archive.zip"));
-    let selected_provider = captured.expect("selected owner and CWD captured").0;
+    let selected_provider = captured.expect("selected owner and CWD captured").provider;
     let (resume, suspended) = futures::channel::oneshot::channel::<()>();
     let mut invocation = Box::pin(async move {
         suspended.await.expect("resume selected invocation");

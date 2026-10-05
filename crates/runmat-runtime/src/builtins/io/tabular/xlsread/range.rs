@@ -339,7 +339,7 @@ fn parse_one_based_r1c1_index(text: &str, label: &str, token: &str) -> BuiltinRe
     })
 }
 
-fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
+pub(super) fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
     let mut value: usize = 0;
     for ch in letters.chars() {
         if !ch.is_ascii_uppercase() {

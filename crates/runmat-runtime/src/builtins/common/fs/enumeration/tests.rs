@@ -5,16 +5,24 @@ use tempfile::tempdir;
 #[path = "permission_tests.rs"]
 mod permission_tests;
 
-#[cfg(not(windows))]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn rooted_provider_entry_is_not_rebased_under_cwd() {
+    let provider = MemoryFsProvider::with_current_dir("/working");
     assert_eq!(
-        resolve(Path::new("/working"), Path::new("/project/file.m")),
+        resolve(
+            &provider,
+            Path::new("/working"),
+            Path::new("/project/file.m")
+        ),
         Path::new("/project/file.m")
     );
     assert_eq!(
-        resolve(Path::new("/working"), Path::new("relative/file.m")),
+        resolve(
+            &provider,
+            Path::new("/working"),
+            Path::new("relative/file.m")
+        ),
         Path::new("/working/relative/file.m")
     );
 }

@@ -2,7 +2,8 @@
 
 use super::*;
 use async_trait::async_trait;
-use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::CancellationReason;
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, FsPublicationDisposition, FsPublicationFailure,
     FsStagedOutput, MemoryFsProvider, OpenFlags,

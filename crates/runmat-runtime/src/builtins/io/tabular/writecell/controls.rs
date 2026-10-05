@@ -173,7 +173,7 @@ fn parse_file_type(value: &Value) -> BuiltinResult<OutputFileType> {
     }
 }
 
-fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
+pub(super) fn parse_sheet(value: &Value) -> BuiltinResult<SheetSelector> {
     match value {
         Value::Num(n)
             if n.is_finite() && *n >= 1.0 && n.fract() == 0.0 && *n < usize::MAX as f64 =>

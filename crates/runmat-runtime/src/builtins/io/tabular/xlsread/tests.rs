@@ -1,3 +1,5 @@
+use super::range::column_index_from_letters;
+use super::workbook::{checked_zip_slice, find_zip_eocd};
 use super::*;
 use runmat_value::IntegerStorage;
 
@@ -181,7 +183,7 @@ fn in_memory_xlsx(sheet_name: &str) -> Vec<u8> {
 
 fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_name: &str) {
     write_zip_file(
-        &mut zip,
+        zip,
         "[Content_Types].xml",
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -193,7 +195,7 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
 </Types>"#,
     );
     write_zip_file(
-        &mut zip,
+        zip,
         "_rels/.rels",
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -201,7 +203,7 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
 </Relationships>"#,
     );
     write_zip_file(
-        &mut zip,
+        zip,
         "xl/workbook.xml",
         &format!(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -213,7 +215,7 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
         ),
     );
     write_zip_file(
-        &mut zip,
+        zip,
         "xl/_rels/workbook.xml.rels",
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -222,7 +224,7 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
 </Relationships>"#,
     );
     write_zip_file(
-        &mut zip,
+        zip,
         "xl/styles.xml",
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -234,7 +236,7 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
 </styleSheet>"#,
     );
     write_zip_file(
-        &mut zip,
+        zip,
         "xl/worksheets/sheet1.xml",
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">

@@ -226,7 +226,7 @@ fn validate_zip64_entry_count_from_raw(bytes: &[u8], eocd_offset: usize) -> Buil
     validate_zip_entry_count(total_entries)
 }
 
-fn find_zip_eocd(bytes: &[u8]) -> Option<usize> {
+pub(super) fn find_zip_eocd(bytes: &[u8]) -> Option<usize> {
     const EOCD_LEN: usize = 22;
     const MAX_COMMENT_LEN: usize = u16::MAX as usize;
     if bytes.len() < EOCD_LEN {
@@ -243,7 +243,7 @@ fn find_zip_eocd(bytes: &[u8]) -> Option<usize> {
     })
 }
 
-fn checked_zip_slice(bytes: &[u8], offset: usize, len: usize) -> BuiltinResult<&[u8]> {
+pub(super) fn checked_zip_slice(bytes: &[u8], offset: usize, len: usize) -> BuiltinResult<&[u8]> {
     let end = offset.checked_add(len).ok_or_else(|| {
         xlsread_error_with(
             &XLSREAD_ERROR_IO,

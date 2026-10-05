@@ -1,3 +1,4 @@
+use super::controls::parse_sheet;
 use super::*;
 
 async fn writecell_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
