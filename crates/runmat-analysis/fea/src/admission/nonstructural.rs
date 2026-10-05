@@ -38,6 +38,12 @@ pub(crate) fn admit_nonstructural_with_temporal(
     requirement: FormulationRequirement,
     temporal: Option<TemporalImplementation>,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
+    if family == PhysicsFamily::Fluid {
+        return Err(FeaRunError::InvalidModel(
+            "canonical fluid admission requires its explicit steady or transient operator entry"
+                .into(),
+        ));
+    }
     if family == PhysicsFamily::Electromagnetic && procedure == AnalysisProcedure::Static {
         return Err(FeaRunError::InvalidModel(
             "canonical static electrical admission requires an explicit equation; use admit_canonical_electrical_static".into(),

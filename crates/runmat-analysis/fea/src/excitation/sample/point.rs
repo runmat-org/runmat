@@ -1,6 +1,7 @@
 use crate::excitation::ProjectionSample;
 
 use super::ExcitationSamplePoint;
+use runmat_analysis_core::SignalSampleApproach;
 
 impl From<ExcitationSamplePoint<'_>> for ProjectionSample {
     fn from(sample: ExcitationSamplePoint<'_>) -> Self {
@@ -62,5 +63,52 @@ impl<'a> TryFrom<&'a ProjectionSample> for ExcitationSamplePoint<'a> {
             }
             _ => return Err(invalid()),
         })
+    }
+}
+
+/// Resolve an authored initial signal sample without inventing a separate domain law.
+pub(crate) fn initial_signal_sample_point<Q>(
+    representation: &runmat_analysis_core::SignalRepresentation<Q>,
+    abscissa: f64,
+    approach: SignalSampleApproach,
+) -> Result<ExcitationSamplePoint<'_>, super::super::RealizationError> {
+    use runmat_analysis_core::{SignalRepresentation, TabulatedSignalDomain};
+    if !abscissa.is_finite() {
+        return Err(super::super::RealizationError::new(
+            "invalid initial sample coordinate",
+        ));
+    }
+    match representation {
+        SignalRepresentation::Tabulated(table) => match &table.domain {
+            TabulatedSignalDomain::StudyParameter { parameter_id }
+                if !parameter_id.trim().is_empty() =>
+            {
+                Ok(ExcitationSamplePoint::StudyParameter {
+                    parameter_id,
+                    canonical_value: abscissa,
+                    approach,
+                })
+            }
+            TabulatedSignalDomain::TimeSeconds
+                if !(abscissa == 0. && abscissa.is_sign_negative()) =>
+            {
+                Ok(ExcitationSamplePoint::TimeSeconds {
+                    value: abscissa,
+                    approach,
+                })
+            }
+            _ => Err(super::super::RealizationError::new(
+                "incompatible initial signal domain",
+            )),
+        },
+        _ if !(abscissa == 0. && abscissa.is_sign_negative()) => {
+            Ok(ExcitationSamplePoint::TimeSeconds {
+                value: abscissa,
+                approach,
+            })
+        }
+        _ => Err(super::super::RealizationError::new(
+            "invalid initial time coordinate",
+        )),
     }
 }

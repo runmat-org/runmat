@@ -1,18 +1,14 @@
 use super::{invalid, AnalysisExecutionResult, FluidSteadySolverResult, LIMITS, WORKLOAD_PREFIX};
 use crate::{
     execution::{AnalysisWorkloadIdentity, SequenceIdentity, StepIdentity},
-    physics::cfd::canonical::{
-        CanonicalFluidInput, CanonicalFluidPolicy, CanonicalFluidProblem, CanonicalFluidReservation,
-    },
-    properties::{CompiledPropertyMapIdentity, PreparedProperties},
-    topology::{AnalysisProjection, FiniteVolumeProjectionPolicy, FiniteVolumeTopology},
+    physics::cfd::canonical::CanonicalFluidPolicy,
+    topology::FiniteVolumeProjectionPolicy,
 };
 use runmat_analysis_core::{
-    validate_model, AnalysisConstraint, AnalysisModel, AnalysisProcedure, CfdDomain,
-    CoordinateFrame, ExcitationAction, ExcitationCaseActivation, ExcitationCaseSelection,
-    FluidConstraint, FormulationRequirement, IndependentDomain, PhysicalSignal, PhysicsFamily,
-    ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
-    StatePersistence,
+    validate_model, AnalysisConstraint, AnalysisModel, AnalysisProcedure, CoordinateFrame,
+    ExcitationAction, ExcitationCaseActivation, ExcitationCaseSelection, FormulationRequirement,
+    IndependentDomain, PhysicalSignal, PhysicsFamily, ProcedureSettings, ProcedureStepId,
+    RestartPolicy, SolutionSpace, StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{
     decode_contract, encode_contract, serialized_materialization_resident_bytes_estimate,
@@ -31,15 +27,7 @@ pub struct FluidSteadyWorkload {
     pub geometry_policy: FiniteVolumeProjectionPolicy,
 }
 
-pub(crate) struct PreparedFluidSource {
-    pub source: AnalysisProjection,
-    pub topology: FiniteVolumeTopology,
-    pub material: CfdDomain,
-    pub property_identity: CompiledPropertyMapIdentity,
-    pub property_audit_digest: Digest,
-    pub constraints: Vec<FluidConstraint>,
-    pub preparation_resident_bytes: u64,
-}
+pub(crate) use super::source::PreparedFluidSource;
 
 impl FluidSteadyWorkload {
     pub fn formulation(
@@ -69,10 +57,7 @@ impl FluidSteadyWorkload {
         let [step] = self.model.sequence.steps.as_slice() else {
             return Err(invalid("steady fluid requires exactly one authored step"));
         };
-        let p = self.policy;
-        if let Some(policy) = p.fixed_point_acceleration {
-            policy.validate().map_err(invalid)?;
-        }
+        self.policy.validate().map_err(invalid)?;
         crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
         let definitions = super::fields::fluid_native_field_definition_inventory()?;
         if step
@@ -151,24 +136,6 @@ impl FluidSteadyWorkload {
                         | PhysicalSignal::BodyForceDensity(_)
                 )
             })
-            || p.maximum_outer_iterations == 0
-            || p.maximum_nonorthogonal_iterations == 0
-            || p.maximum_linear_iterations == 0
-            || p.gmres_restart == 0
-            || p.maximum_resident_bytes == 0
-            || p.maximum_operator_work == 0
-            || !p.linear_relative_tolerance.is_finite()
-            || !(0.0..1.0).contains(&p.linear_relative_tolerance)
-            || p.linear_relative_tolerance == 0.0
-            || !p.physical_relative_tolerance.is_finite()
-            || !(0.0..1.0).contains(&p.physical_relative_tolerance)
-            || p.physical_relative_tolerance == 0.0
-            || !p.momentum_relaxation.is_finite()
-            || !(0.0..=1.0).contains(&p.momentum_relaxation)
-            || p.momentum_relaxation == 0.0
-            || !p.pressure_relaxation.is_finite()
-            || !(0.0..=1.0).contains(&p.pressure_relaxation)
-            || p.pressure_relaxation == 0.0
         {
             return Err(invalid(
                 "unsupported standalone experimental CPU steady fluid authority",
@@ -222,119 +189,18 @@ impl FluidSteadyWorkload {
         &self,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<PreparedFluidSource> {
-        // Count/profile only over borrowed inputs before validation/projection/compiler expansion.
-        // These are requested-heap estimates, not allocator/RSS or scheduler accounting.
         let ceiling = self.resident_ceiling()?;
-        if mesh
-            .topology
-            .volume_elements
-            .iter()
-            .any(|e| e.order != runmat_meshing_core::ElementOrder::Tet4)
-        {
-            return Err(invalid("portable steady fluid currently admits Tet4 only"));
-        }
-        let geometry =
-            FiniteVolumeTopology::reserve_mesh(mesh, self.geometry_policy).map_err(invalid)?;
-        let numerical = CanonicalFluidReservation::for_counts(
-            &geometry,
-            geometry.face_incidence_count,
-            self.policy,
-        )
-        .map_err(invalid)?;
-        let projection =
-            AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;
-        // Two whole authored metadata profiles conservatively cover cloned constraints/material,
-        // shared identity serialization and validation scratch coexisting with derived records.
         let metadata =
             serialized_materialization_resident_bytes_estimate(self, LIMITS).map_err(invalid)?;
-        let base = add_bytes(
-            add_bytes(projection, geometry.scratch_bytes as u64)?,
-            add_bytes(metadata, metadata)?,
-        )?;
-        let preliminary = add_bytes(base, numerical.resident_bytes_upper_bound)?;
-        require_bytes(preliminary, ceiling)?;
-        let prepared = PreparedProperties::prepare(&self.model, Some(mesh), ceiling - preliminary)
-            .map_err(invalid)?;
-        // Material source authentication independently recompiles: both maps can coexist.
-        let preparation_resident_bytes = add_bytes(
-            base,
-            add_bytes(
-                prepared.estimated_resident_bytes,
-                prepared.estimated_resident_bytes,
-            )?,
-        )?;
-        require_bytes(
-            add_bytes(
-                preparation_resident_bytes,
-                numerical.resident_bytes_upper_bound,
-            )?,
-            ceiling,
-        )?;
+        super::source::require_bytes(metadata, ceiling)?;
         self.validate()?;
-        let source = AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let topology =
-            FiniteVolumeTopology::derive(&source, self.geometry_policy).map_err(invalid)?;
-        let properties = prepared.materialize().map_err(invalid)?;
-        let material =
-            crate::study::derive_canonical_fluid_material(&self.model, mesh, &properties)
-                .map_err(invalid)?;
-        let constraints = self
-            .model
-            .constraints
-            .iter()
-            .map(|c| match c {
-                AnalysisConstraint::Fluid(c) => Ok(c.clone()),
-                _ => Err(invalid("nonfluid constraint")),
-            })
-            .collect::<AnalysisExecutionResult<Vec<_>>>()?;
-        Ok(PreparedFluidSource {
-            source,
-            topology,
-            material,
-            property_identity: properties.identity,
-            property_audit_digest: properties.audit_digest,
-            constraints,
-            preparation_resident_bytes,
-        })
+        PreparedFluidSource::prepare(
+            self,
+            &self.model,
+            mesh,
+            self.geometry_policy,
+            self.policy,
+            ceiling,
+        )
     }
-}
-
-impl PreparedFluidSource {
-    pub fn problem<'a>(
-        &'a self,
-        workload: &'a FluidSteadyWorkload,
-    ) -> AnalysisExecutionResult<CanonicalFluidProblem<'a>> {
-        let problem = CanonicalFluidProblem::prepare(CanonicalFluidInput {
-            source: &self.source,
-            topology: &self.topology,
-            material: &self.material,
-            constraints: &self.constraints,
-            boundary_operators: &workload.model.boundaries,
-            signals: &workload.model.signals,
-            excitations: &workload.model.excitations,
-            policy: workload.policy,
-        })
-        .map_err(invalid)?;
-        require_bytes(
-            add_bytes(
-                self.preparation_resident_bytes,
-                problem.reservation().resident_bytes_upper_bound,
-            )?,
-            workload.resident_ceiling()?,
-        )?;
-        Ok(problem)
-    }
-}
-
-fn add_bytes(a: u64, b: u64) -> AnalysisExecutionResult<u64> {
-    a.checked_add(b)
-        .ok_or_else(|| invalid("steady fluid preparation byte estimate overflow"))
-}
-fn require_bytes(required: u64, maximum: u64) -> AnalysisExecutionResult<()> {
-    if required > maximum || required > isize::MAX as u64 {
-        return Err(invalid(format!(
-            "steady fluid preparation requested heap {required} exceeds ceiling {maximum}"
-        )));
-    }
-    Ok(())
 }

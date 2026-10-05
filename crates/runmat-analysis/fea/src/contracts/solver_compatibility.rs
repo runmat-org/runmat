@@ -198,7 +198,8 @@ const fn method_is_compatible(
         TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve => {
             matches!(method, SolverMethod::GeneralGmres)
         }
-        TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection => {
+        TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection
+        | TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure => {
             matches!(method, SolverMethod::GeneralGmres)
         }
     }

@@ -1,7 +1,4 @@
-use runmat_analysis_core::{
-    AnalysisModel, EntityDimension, ExpectedTopology, InitialCondition, InitialConditionTarget,
-    InitialValue, PhysicalSignal, SignalRepresentation, TabulatedSignalDomain,
-};
+use runmat_analysis_core::{AnalysisModel, InitialCondition, InitialValue, PhysicalSignal};
 use runmat_canonical_codec::{CanonicalCodecError, SerializedCanonicalProfile};
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 use thiserror::Error;
@@ -10,7 +7,7 @@ pub(crate) mod fields;
 
 use crate::{
     contracts::ThermalInitialStateEvidence,
-    excitation::{expect_scalar, sample_signal, ExcitationSamplePoint},
+    excitation::{expect_scalar, sample_signal},
     topology::AnalysisProjection,
 };
 
@@ -228,13 +225,16 @@ fn realize_value(
             abscissa,
             approach,
         } => {
-            let signal = model
+            let mut matching = model
                 .signals
                 .iter()
-                .find(|signal| signal.signal_id() == signal_id)
+                .filter(|signal| signal.signal_id() == signal_id);
+            let signal = matching
+                .next()
+                .filter(|_| matching.next().is_none())
                 .ok_or_else(|| ThermalInitialStateError::SignalSample {
                     initial_condition_id: condition.initial_condition_id.clone(),
-                    detail: "signal does not exist".into(),
+                    detail: "signal is missing or duplicated".into(),
                 })?;
             let PhysicalSignal::Temperature(signal) = signal else {
                 return Err(ThermalInitialStateError::SignalSample {
@@ -242,31 +242,15 @@ fn realize_value(
                     detail: "signal is not a temperature".into(),
                 });
             };
-            let sample = match &signal.representation {
-                SignalRepresentation::Tabulated(table) => match &table.domain {
-                    TabulatedSignalDomain::TimeSeconds => ExcitationSamplePoint::TimeSeconds {
-                        value: *abscissa,
-                        approach: *approach,
-                    },
-                    TabulatedSignalDomain::StudyParameter { parameter_id } => {
-                        ExcitationSamplePoint::StudyParameter {
-                            parameter_id,
-                            canonical_value: *abscissa,
-                            approach: *approach,
-                        }
-                    }
-                    TabulatedSignalDomain::FrequencyHertz => {
-                        return Err(ThermalInitialStateError::SignalSample {
-                            initial_condition_id: condition.initial_condition_id.clone(),
-                            detail: "frequency signals cannot define an initial state".into(),
-                        });
-                    }
-                },
-                _ => ExcitationSamplePoint::TimeSeconds {
-                    value: *abscissa,
-                    approach: *approach,
-                },
-            };
+            let sample = crate::excitation::initial_signal_sample_point(
+                &signal.representation,
+                *abscissa,
+                *approach,
+            )
+            .map_err(|error| ThermalInitialStateError::SignalSample {
+                initial_condition_id: condition.initial_condition_id.clone(),
+                detail: error.to_string(),
+            })?;
             let value = sample_signal(signal, sample, |value| value.kelvin)
                 .and_then(expect_scalar)
                 .map_err(|error| ThermalInitialStateError::SignalSample {
@@ -294,46 +278,33 @@ fn target_nodes(
     projection: &AnalysisProjection,
     condition: &runmat_analysis_core::InitialConditionValue<runmat_analysis_core::Temperature>,
 ) -> Result<Vec<usize>, ThermalInitialStateError> {
-    match &condition.target {
-        InitialConditionTarget::WholeModel => Ok((0..projection.nodes.len()).collect()),
-        InitialConditionTarget::Region(target) => {
-            if target.entity_dimension != EntityDimension::Volume
-                || target.expected_topology != ExpectedTopology::MeshElement
-            {
-                return Err(ThermalInitialStateError::InvalidTarget {
+    crate::excitation::initial_target_nodes(projection, &condition.target).map_err(|error| {
+        match error {
+            crate::excitation::InitialTargetError::InvalidTarget => {
+                ThermalInitialStateError::InvalidTarget {
                     initial_condition_id: condition.initial_condition_id.clone(),
-                });
-            }
-            let mut selected = vec![false; projection.nodes.len()];
-            let mut matched = false;
-            for element in &projection.elements {
-                if target.matches_persistent_entity(&element.region_id) {
-                    matched = true;
-                    for &node in &element.node_indices {
-                        selected[node] = true;
-                    }
                 }
             }
-            if !matched {
-                return Err(ThermalInitialStateError::UnmappedRegion {
+            crate::excitation::InitialTargetError::UnmappedRegion => {
+                ThermalInitialStateError::UnmappedRegion {
                     initial_condition_id: condition.initial_condition_id.clone(),
-                });
+                }
             }
-            Ok(selected
-                .iter()
-                .enumerate()
-                .filter_map(|(node, selected)| selected.then_some(node))
-                .collect())
+            crate::excitation::InitialTargetError::InvalidSource => {
+                ThermalInitialStateError::FieldAdmission {
+                    detail: "invalid initial target source node".into(),
+                }
+            }
         }
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     mod profile;
     use runmat_analysis_core::{
-        AnalysisSequence, CoordinateFrame, InitialConditionValue, InitialFieldArtifactRef,
-        ProcedureStep, RegionTarget, Temperature, ThermalDomain,
+        AnalysisSequence, CoordinateFrame, InitialConditionTarget, InitialConditionValue,
+        InitialFieldArtifactRef, ProcedureStep, RegionTarget, Temperature, ThermalDomain,
     };
     use runmat_meshing_core::ElementOrder;
 

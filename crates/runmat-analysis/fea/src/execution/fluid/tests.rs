@@ -573,7 +573,7 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
         .unwrap()
         .to_string();
     assert!(
-        error.contains("steady fluid preparation requested heap"),
+        error.contains("canonical fluid preparation requested heap"),
         "{error}"
     );
     let mut wrong = workload.clone();
@@ -612,3 +612,5 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
 }
 
 mod closed_reference;
+
+mod transient_workload;

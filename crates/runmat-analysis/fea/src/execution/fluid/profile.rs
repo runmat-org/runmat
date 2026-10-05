@@ -120,12 +120,12 @@ fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalPr
     }
 }
 
-pub(super) fn original_block_encoding_profile<'a>(
+pub(super) fn original_block_profile<'a>(
     cells: usize,
     faces: usize,
     authorities: impl Iterator<Item = &'a str> + Clone,
     count: usize,
-) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
+) -> impl Serialize {
     #[derive(Serialize)]
     #[serde(bound(serialize = "BoundaryProfiles<I>: Serialize"))]
     struct Block<I> {
@@ -134,7 +134,7 @@ pub(super) fn original_block_encoding_profile<'a>(
         end_ordinal: usize,
         original: Repeated<OriginalProfile<I>>,
     }
-    let profile = Block {
+    Block {
         identity: Digest::from_bytes([0; 32]),
         start_ordinal: 0,
         end_ordinal: 0,
@@ -142,8 +142,19 @@ pub(super) fn original_block_encoding_profile<'a>(
             sample: original_profile(cells, faces, authorities),
             count,
         },
-    };
-    Ok(profile_serialized(&profile, LIMITS)?)
+    }
+}
+
+pub(super) fn original_block_encoding_profile<'a>(
+    cells: usize,
+    faces: usize,
+    authorities: impl Iterator<Item = &'a str> + Clone,
+    count: usize,
+) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
+    Ok(profile_serialized(
+        &original_block_profile(cells, faces, authorities, count),
+        LIMITS,
+    )?)
 }
 
 impl FluidSteadyWorkload {

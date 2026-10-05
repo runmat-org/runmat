@@ -14,6 +14,31 @@ pub fn admit_canonical_fluid_steady(
     mesh: &SolverMeshArtifact,
     requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
+    admit_canonical_fluid(
+        mesh,
+        requirement,
+        AnalysisProcedure::Static,
+        canonical_fluid_steady_realization(),
+    )
+}
+
+pub fn admit_canonical_fluid_transient(
+    mesh: &SolverMeshArtifact,
+    requirement: FormulationRequirement,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
+    admit_canonical_fluid(
+        mesh,
+        requirement,
+        AnalysisProcedure::TransientResponse,
+        canonical_fluid_transient_realization(),
+    )
+}
+fn admit_canonical_fluid(
+    mesh: &SolverMeshArtifact,
+    requirement: FormulationRequirement,
+    procedure: AnalysisProcedure,
+    realization: ExactFormulationRealization,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
     if mesh.resolved_request.element_order != ElementOrder::Tet4
         || mesh
             .topology
@@ -22,15 +47,15 @@ pub fn admit_canonical_fluid_steady(
             .any(|element| element.order != ElementOrder::Tet4)
     {
         return Err(FeaRunError::InvalidModel(
-            "canonical steady fluid admits only Tet4 cell geometry".into(),
+            "canonical fluid admits only Tet4 cell geometry".into(),
         ));
     }
     admit_formulation(FormulationAdmissionRequest {
         family: PhysicsFamily::Fluid,
-        procedure: AnalysisProcedure::Static,
+        procedure,
         solution_space: SolutionSpace::Direct,
         requirement,
-        realization: canonical_fluid_steady_realization(),
+        realization,
     })
     .map(|receipt| receipt.into_identity())
     .map_err(Into::into)
@@ -56,6 +81,13 @@ pub fn canonical_fluid_steady_realization() -> ExactFormulationRealization {
         coupling: CouplingImplementation::Uncoupled,
         boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
     }
+}
+
+pub fn canonical_fluid_transient_realization() -> ExactFormulationRealization {
+    let mut realization = canonical_fluid_steady_realization();
+    realization.temporals =
+        vec![TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure];
+    realization
 }
 
 #[cfg(test)]

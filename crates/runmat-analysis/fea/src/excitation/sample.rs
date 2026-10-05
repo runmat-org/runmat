@@ -10,6 +10,7 @@ use super::{
 };
 
 mod point;
+pub(crate) use point::initial_signal_sample_point;
 mod prescribed;
 pub(crate) use prescribed::{
     sample_prescribed_heat_flux, sample_prescribed_potential, sample_prescribed_pressure,

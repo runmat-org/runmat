@@ -11,9 +11,12 @@ mod continuity;
 mod flux_evidence;
 mod forcing;
 mod geometry_ops;
+mod initial;
 mod iterate;
+pub use initial::CanonicalFluidInitialState;
 mod linear;
 mod momentum;
+mod policy;
 mod pressure;
 mod pressure_gradient;
 mod pressure_reference;
@@ -136,6 +139,7 @@ pub enum CanonicalFluidError {
 
 /// Prepared inputs are immutable after source/authority validation.
 pub struct CanonicalFluidProblem<'a> {
+    source: &'a AnalysisProjection,
     topology: &'a FiniteVolumeTopology,
     density: f64,
     viscosity: f64,
@@ -175,6 +179,7 @@ impl<'a> CanonicalFluidProblem<'a> {
         input: CanonicalFluidInput<'a>,
         sample: crate::excitation::ProjectionSample,
     ) -> Result<Self, CanonicalFluidError> {
+        input.policy.validate()?;
         let sample_point = crate::excitation::ExcitationSamplePoint::try_from(&sample)
             .map_err(|e| CanonicalFluidError::InputRealization(e.to_string()))?;
         if !matches!(
@@ -327,6 +332,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             ),
         )?;
         Ok(Self {
+            source,
             topology,
             density,
             viscosity,

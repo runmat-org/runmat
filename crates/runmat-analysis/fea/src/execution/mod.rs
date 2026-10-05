@@ -48,7 +48,8 @@ pub use fluid::{
     fluid_native_field_definition_inventory, fluid_receipt_encoding_profile, FluidNumericalReceipt,
     FluidNumericalReceiptArtifact, FluidSolverProvenance, FluidSteadySolverResult,
     FluidSteadyWorkload, FluidTransientBlock, FluidTransientBlockReservation,
-    FluidTransientBlockResult, FluidTransientSchedule, FLUID_RECEIPT_MAX_ENCODED_BYTES,
+    FluidTransientBlockResult, FluidTransientSchedule, FluidTransientSolverResult,
+    FluidTransientWorkload, PreparedFluidTransient, FLUID_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod frequency_assembly;
 mod frequency_balance;

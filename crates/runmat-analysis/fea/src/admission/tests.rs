@@ -237,38 +237,44 @@ fn availability_gate_rejects_production_for_every_registered_procedure() {
 }
 
 #[test]
-fn unimplemented_transient_fluid_cannot_borrow_the_steady_realization() {
+fn transient_fluid_requires_its_distinct_experimental_realization() {
     let family = PhysicsFamily::Fluid;
     let procedure = AnalysisProcedure::TransientResponse;
-    assert!(registered_formulations(family, procedure).is_empty());
-    let steady = registered_formulations(family, AnalysisProcedure::Static)
-        .remove(0)
-        .realization()
-        .clone();
-    for requirement in [
-        FormulationRequirement::Experimental,
-        FormulationRequirement::Production,
-    ] {
-        let availability =
-            require_qualified_formulation(family, procedure, SolutionSpace::Direct, requirement)
-                .expect_err("transient CFD is unimplemented, not an implicit channel fallback");
-        assert_eq!(
-            availability.reason,
-            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
-        );
-        let exact = admit_formulation(FormulationAdmissionRequest {
+    let registered = registered_formulations(family, procedure);
+    assert_eq!(registered.len(), 1);
+    let transient = registered[0].realization().clone();
+    let steady = canonical_fluid_steady_realization();
+    assert_ne!(transient, steady);
+    admit_formulation(FormulationAdmissionRequest {
+        family,
+        procedure,
+        solution_space: SolutionSpace::Direct,
+        requirement: FormulationRequirement::Experimental,
+        realization: transient,
+    })
+    .expect("canonical transient realization is available experimentally");
+    assert!(
+        admit_formulation(FormulationAdmissionRequest {
             family,
             procedure,
             solution_space: SolutionSpace::Direct,
-            requirement,
-            realization: steady.clone(),
+            requirement: FormulationRequirement::Experimental,
+            realization: steady,
         })
-        .expect_err("the actual steady realization must not be relabeled transient");
-        assert_eq!(
-            exact.reason,
-            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
-        );
-    }
+        .is_err(),
+        "steady realization cannot be relabeled transient"
+    );
+    let rejection = require_qualified_formulation(
+        family,
+        procedure,
+        SolutionSpace::Direct,
+        FormulationRequirement::Production,
+    )
+    .expect_err("transient fluid has not completed production qualification");
+    assert_eq!(
+        rejection.reason,
+        FormulationAdmissionRejectionReason::ProductionQualificationMissing
+    );
 }
 
 #[test]

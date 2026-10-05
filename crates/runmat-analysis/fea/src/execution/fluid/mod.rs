@@ -10,15 +10,20 @@ pub use receipt::{
 mod profile;
 mod result;
 pub use fields::fluid_native_field_definition_inventory;
+mod source;
 #[cfg(test)]
 pub(crate) mod tests;
 mod time_block;
 mod time_schedule;
+mod transient_workload;
 mod workload;
 pub use time_block::{
     FluidTransientBlock, FluidTransientBlockReservation, FluidTransientBlockResult,
 };
 pub use time_schedule::FluidTransientSchedule;
+pub use transient_workload::{
+    FluidTransientSolverResult, FluidTransientWorkload, PreparedFluidTransient,
+};
 
 pub use result::FluidSteadySolverResult;
 pub use workload::FluidSteadyWorkload;

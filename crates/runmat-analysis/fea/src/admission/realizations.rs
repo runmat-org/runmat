@@ -182,6 +182,9 @@ fn acoustic_realizations() -> Vec<ExactFormulationRealization> {
 fn fluid_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
     match procedure {
         AnalysisProcedure::Static => vec![super::fluid::canonical_fluid_steady_realization()],
+        AnalysisProcedure::TransientResponse => {
+            vec![super::fluid::canonical_fluid_transient_realization()]
+        }
         _ => Vec::new(),
     }
 }

@@ -65,6 +65,7 @@ pub enum TemporalImplementation {
     AcousticDomainGraphHarmonicSolve,
     AcousticCanonicalHarmonicSolve,
     FluidSteadyNonorthogonalPressureCorrection,
+    FluidBackwardEulerConservativeMomentumPressure,
     CoupledSinglePassProfileTransfer,
     CoupledFixedPointRelaxation,
     CoupledScalarResidualIteration,
