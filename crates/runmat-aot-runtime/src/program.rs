@@ -52,6 +52,7 @@ struct ProgramInvocationGuards {
     _lexical: runmat_runtime::user_functions::LexicalFunctionInvokerGuard,
     _resolver: runmat_runtime::user_functions::FunctionResolverGuard,
     _catalog: runmat_runtime::user_functions::SourceFunctionCatalogGuard,
+    _execution_source: runmat_runtime::user_functions::ExecutionSourceResolverGuard,
 }
 
 impl ProgramInvocationGuards {
@@ -181,6 +182,7 @@ impl ProgramInvocationGuards {
                         function.function,
                     )
                     .ok(),
+                    definition_owners: None,
                 },
             )
             .collect::<Vec<_>>();
@@ -188,11 +190,14 @@ impl ProgramInvocationGuards {
         let catalog = runmat_runtime::user_functions::install_source_function_catalog(Some(
             Arc::new(functions),
         ));
+        let execution_source =
+            runmat_runtime::user_functions::install_execution_source_resolver(None);
         Self {
             _semantic: semantic,
             _lexical: lexical,
             _resolver: resolver,
             _catalog: catalog,
+            _execution_source: execution_source,
         }
     }
 }

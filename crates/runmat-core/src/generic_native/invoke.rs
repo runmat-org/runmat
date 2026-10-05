@@ -158,6 +158,85 @@ pub(crate) async fn invoke(
             },
         ));
 
+    let previous_bound_invoker = user_functions::current_bound_function_invoker();
+    let direct_invoker = user_functions::current_semantic_function_invoker();
+    let bound_registry = Arc::clone(&registry);
+    let bound_runtime = runtime.clone();
+    let bound_invoker = user_functions::install_local_bound_function_invoker(Rc::new(
+        move |binding, arguments, requested_outputs| {
+            let arguments = arguments.to_vec();
+            let previous = previous_bound_invoker.clone();
+            let direct = direct_invoker.clone();
+            let registry = Arc::clone(&bound_registry);
+            let runtime = bound_runtime.clone();
+            Box::pin(async move {
+                let function = runmat_hir::FunctionId(binding.function);
+                let (view, current_definition) = match &binding.authority {
+                    runmat_value::BoundFunctionAuthority::Local {
+                        definition,
+                        dependencies,
+                        ..
+                    } => {
+                        let current =
+                            std::iter::once(definition)
+                                .chain(dependencies.iter())
+                                .all(|lease| {
+                                    registry
+                                        .get(runmat_hir::FunctionId(lease.function()))
+                                        .is_some_and(|body| lease.matches(&body.definition_owner))
+                                });
+                        (
+                            (!current)
+                                .then(|| registry.owned_view(function, &binding.authority))
+                                .flatten(),
+                            current,
+                        )
+                    }
+                    runmat_value::BoundFunctionAuthority::Portable { origin } => (
+                        None,
+                        registry
+                            .get(function)
+                            .is_some_and(|body| body.binding_origin == Some(*origin)),
+                    ),
+                };
+                if current_definition {
+                    let runtime = isolated_procedure_runtime(runtime);
+                    if let Some(direct) = direct {
+                        return runtime
+                            .scope(direct(binding.function, &arguments, requested_outputs))
+                            .await;
+                    }
+                    return runmat_vm::invoke_semantic_function_value_in_context(
+                        binding.function,
+                        &arguments,
+                        requested_outputs,
+                        &registry,
+                        runtime,
+                    )
+                    .await;
+                }
+                if let Some(view) = view {
+                    let runtime = isolated_procedure_runtime(runtime);
+                    return runmat_vm::invoke_semantic_function_value_in_context(
+                        binding.function,
+                        &arguments,
+                        requested_outputs,
+                        &view,
+                        runtime,
+                    )
+                    .await;
+                }
+                if let Some(previous) = previous {
+                    return previous(binding, &arguments, requested_outputs).await;
+                }
+                Err(super::error::stage(
+                    "UnavailableBoundFunction",
+                    "bound function definition is unavailable in this execution owner",
+                ))
+            })
+        },
+    ));
+
     let previous_external_invoker = user_functions::current_external_function_invoker();
     let external_registry = Arc::clone(&registry);
     let external_runtime = runtime.clone();
@@ -251,6 +330,27 @@ pub(crate) async fn invoke(
                         .and_then(|resolver| resolver(name))
                 })
         })));
+    let execution_registry = Arc::clone(&registry);
+    let execution_source =
+        user_functions::install_execution_source_resolver(Some(Rc::new(move |function| {
+            let body = execution_registry.get(runmat_hir::FunctionId(function))?;
+            let source_id = body.source_id?;
+            Some(user_functions::SourceFunctionInfo {
+                source_id,
+                name: body.display_name.clone(),
+                function,
+                role: body.source_role,
+                binding_origin: body.binding_origin,
+                definition_owners: execution_registry
+                    .definition_dependency_owners(body.function)
+                    .map(|owners| {
+                        owners
+                            .into_iter()
+                            .map(|(id, owner)| (id.0, owner))
+                            .collect()
+                    }),
+            })
+        })));
     let mut source_functions = registry
         .functions
         .values()
@@ -263,6 +363,7 @@ pub(crate) async fn invoke(
                     function: function.function.0,
                     role: function.source_role,
                     binding_origin: function.binding_origin,
+                    definition_owners: None,
                 })
         })
         .collect::<Vec<_>>();
@@ -290,11 +391,13 @@ pub(crate) async fn invoke(
     )
     .await;
     drop(active);
+    drop(execution_source);
     drop(catalog);
     drop(resolver);
     drop(lexical_invoker);
     drop(external_invoker);
     drop(invoker);
+    drop(bound_invoker);
     let execution = execution?;
     Ok(NativeExecution {
         outputs: normalize_outputs(execution.outputs, requested_outputs)?,

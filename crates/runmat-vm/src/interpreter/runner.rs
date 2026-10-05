@@ -606,7 +606,10 @@ async fn run_interpreter_inner(
     let function_registry = Arc::new(bytecode.function_registry());
     let nested_runtime = context.runtime.clone();
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
-    let registry_for_function_invoker = Arc::clone(&function_registry);
+    // Numeric/name calls select the currently published registry. An old
+    // bound body's static edges are routed through the distinct typed bound
+    // invoker below; an overlay must never shadow a dynamic name lookup.
+    let registry_for_function_invoker = Arc::new(function_registry.current_view());
     let _semantic_function_guard =
         user_functions::install_local_semantic_function_invoker(std::rc::Rc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
@@ -635,13 +638,65 @@ async fn run_interpreter_inner(
                 })
             },
         ));
+    let previous_bound_invoker = user_functions::current_bound_function_invoker();
+    let registry_for_bound_invoker = Arc::clone(&function_registry);
+    let bound_runtime = context.runtime.clone();
+    let _bound_function_guard = user_functions::install_local_bound_function_invoker(
+        std::rc::Rc::new(move |binding, args, requested_outputs| {
+            let args = args.to_vec();
+            let previous = previous_bound_invoker.clone();
+            let registry = Arc::clone(&registry_for_bound_invoker);
+            let runtime = bound_runtime.clone();
+            Box::pin(async move {
+                let function = runmat_hir::FunctionId(binding.function);
+                if let runmat_value::BoundFunctionAuthority::Portable { origin } =
+                    &binding.authority
+                {
+                    if registry
+                        .get_current(function)
+                        .is_some_and(|body| body.binding_origin == Some(*origin))
+                    {
+                        return invoke_semantic_function_value_with_capture_updates(
+                            binding.function,
+                            &args,
+                            requested_outputs,
+                            &registry,
+                            runtime,
+                        )
+                        .await
+                        .map(|(value, _)| value);
+                    }
+                }
+                let view = registry.owned_view(function, &binding.authority);
+                if let Some(view) = view {
+                    return invoke_semantic_function_value_with_capture_updates(
+                        binding.function,
+                        &args,
+                        requested_outputs,
+                        &view,
+                        runtime,
+                    )
+                    .await
+                    .map(|(value, _)| value);
+                }
+                if let Some(previous) = previous {
+                    return previous(binding, &args, requested_outputs).await;
+                }
+                Err(mex(
+                    "UnavailableBoundFunction",
+                    "bound function definition is unavailable in this execution owner",
+                ))
+            })
+        }),
+    );
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
-    let registry_for_function_resolver = Arc::clone(&function_registry);
+    let registry_for_function_resolver = Arc::new(function_registry.current_view());
+    let active_definition_registry = Arc::clone(&function_registry);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
             if let Some(active_function) = user_functions::current_active_semantic_function() {
                 if let Some(function) =
-                    registry_for_function_resolver.get(runmat_hir::FunctionId(active_function))
+                    active_definition_registry.get(runmat_hir::FunctionId(active_function))
                 {
                     if let Some(scoped_function) = registry_for_function_resolver
                         .resolve_name_in_private_scope(&function.private_owner_scope, name)
@@ -657,6 +712,28 @@ async fn run_interpreter_inner(
                 .as_ref()
                 .and_then(|resolver| resolver(name))
         })));
+    let registry_for_execution_source = Arc::clone(&function_registry);
+    let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
+        std::rc::Rc::new(move |function| {
+            let body = registry_for_execution_source.get(runmat_hir::FunctionId(function))?;
+            let source_id = body.source_id?;
+            Some(runmat_runtime::user_functions::SourceFunctionInfo {
+                source_id,
+                name: body.display_name.clone(),
+                function,
+                role: body.source_role,
+                binding_origin: body.binding_origin,
+                definition_owners: registry_for_execution_source
+                    .definition_dependency_owners(body.function)
+                    .map(|owners| {
+                        owners
+                            .into_iter()
+                            .map(|(id, owner)| (id.0, owner))
+                            .collect()
+                    }),
+            })
+        }),
+    ));
     let mut source_function_catalog = function_registry
         .functions
         .values()
@@ -668,6 +745,7 @@ async fn run_interpreter_inner(
                     function: function.function.0,
                     role: function.source_role,
                     binding_origin: function.binding_origin,
+                    definition_owners: None,
                 },
             )
         })
