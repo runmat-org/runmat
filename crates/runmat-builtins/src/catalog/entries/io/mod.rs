@@ -2,21 +2,22 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod archive;
-mod console;
-mod filetext;
-mod http;
-mod inference;
-mod repl_fs;
-mod text_admission;
 mod audio;
-mod json;
-mod data_path;
-mod data_handle;
+mod console;
 mod data_family;
+mod data_handle;
+mod data_path;
+mod filetext;
 mod hdf5;
-mod mat;
-mod structured_data;
+mod http;
 mod import;
+mod inference;
+mod json;
+mod mat;
+mod repl_fs;
+mod structured_data;
+mod tabular;
+mod text_admission;
 
 pub use self::archive::*;
 pub use self::audio::*;
@@ -33,6 +34,7 @@ pub use self::json::*;
 pub use self::mat::*;
 pub use self::repl_fs::*;
 pub use self::structured_data::*;
+pub use self::tabular::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     archive::extend_entries(values);
@@ -48,4 +50,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(mat::ENTRIES.iter().copied());
     values.extend(structured_data::ENTRIES.iter().copied());
     values.extend(import::ENTRIES.iter().copied());
+    values.extend(tabular::ENTRIES.iter().copied());
 }
