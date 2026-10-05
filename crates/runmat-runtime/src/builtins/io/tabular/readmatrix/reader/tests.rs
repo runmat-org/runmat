@@ -379,6 +379,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &options,
         None,
         None,
+        None,
     ))
     .expect("first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length in-place mutation");
@@ -406,6 +407,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
         None,
         None,
     ))
@@ -437,6 +439,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
+        None,
         None,
         None,
     ))
