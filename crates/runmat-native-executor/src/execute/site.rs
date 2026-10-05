@@ -308,11 +308,27 @@ fn execute_instruction(
                     "native sequence register was overwritten before consumption".into(),
                 ));
             }
-            let (destination, count) = super::mutation::prepare_sequence_assignment(state, target)?;
-            let results = evaluate_rvalue(state, value, count, None)?;
-            state.sequence_assignment_register = Some(
-                super::mutation::PreparedSequenceAssignment::with_values(destination, results)?,
-            );
+            let prepared = match state.pending_sequence_rvalue.take() {
+                Some(prepared) => prepared,
+                None => {
+                    let (destination, count) =
+                        super::mutation::prepare_sequence_assignment(state, target)?;
+                    super::mutation::PreparedSequenceRvalue { destination, count }
+                }
+            };
+            let results = match evaluate_rvalue(state, value, prepared.count, None) {
+                Ok(results) => results,
+                Err(NativeExecutorError::CallSuspended) => {
+                    state.pending_sequence_rvalue = Some(prepared);
+                    return Err(NativeExecutorError::CallSuspended);
+                }
+                Err(error) => return Err(error),
+            };
+            state.sequence_assignment_register =
+                Some(super::mutation::PreparedSequenceAssignment::with_values(
+                    prepared.destination,
+                    results,
+                )?);
         }
         NativeOperation::Rvalue { value, .. } => {
             let output_local = (instruction.outputs.len() == 1)

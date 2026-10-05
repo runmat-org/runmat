@@ -61,6 +61,7 @@ pub(super) struct HostState {
     /// Typed one-producer/one-consumer channel between a sequence-assignment
     /// rvalue site and its immediately following statement site.
     pub sequence_assignment_register: Option<super::mutation::PreparedSequenceAssignment>,
+    pub pending_sequence_rvalue: Option<super::mutation::PreparedSequenceRvalue>,
     pub pending_sequence_assign: Option<super::mutation::PendingSequenceAssign>,
     pub prepared_multi_assignment: Option<super::mutation::PreparedMultiAssignment>,
     /// First-class comma-separated sequences captured in source evaluation
@@ -283,6 +284,7 @@ impl HostState {
             pending_call: None,
             completed_call: None,
             sequence_assignment_register: None,
+            pending_sequence_rvalue: None,
             pending_sequence_assign: None,
             prepared_multi_assignment: None,
             captured_sequences: BTreeMap::new(),
