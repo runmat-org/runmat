@@ -53,6 +53,10 @@ impl HostEffectOutputHeadroom for TestOutputHeadroom {
             bytes,
         }))
     }
+
+    fn retire_invocation(&self) {
+        self.managed.retire_invocation();
+    }
 }
 
 struct TestStageReservation {
@@ -223,11 +227,20 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
                 ..
             }
         );
+        let exact_output_bytes = runmat_value::ExactHostNumericAllocation::requested_bytes(
+            geometry.output_dtype,
+            geometry.sample_count,
+        )
+        .expect("fixture output owner layout") as u64;
         Some(HostEffectResourceAdmission {
             evidence: HostEffectResourceEvidence {
                 authority_revision: Digest::sha256(b"test-staged-native-wave"),
                 scratch_bytes: ResourceByteBound::Known(128 * 1024),
-                returned_value_bytes: ResourceByteBound::Known(if effect_only { 0 } else { 16 }),
+                returned_value_bytes: ResourceByteBound::Known(if effect_only {
+                    0
+                } else {
+                    exact_output_bytes
+                }),
             },
             liveness_lease: Arc::new(TestCurrent(self.current.clone())),
             output_allocation_permit: None,
@@ -272,6 +285,11 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
         range: None,
         datatype: AudioReadDataType::Double,
     };
+    let exact_output_bytes = runmat_value::ExactHostNumericAllocation::requested_bytes(
+        runmat_value::NumericDType::F64,
+        2,
+    )
+    .expect("fixture output owner layout");
     let stage = admit_decode_stage(&runtime, &input, options, None)
         .expect("stage admission")
         .expect("offered stage");
@@ -325,9 +343,15 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     assert_eq!(resources.direct_calls.get(), 0);
     assert_eq!(placement.selections.get(), 1);
     assert_eq!(placement.observations.borrow().len(), 1);
-    assert_eq!(resources.live_output.load(Ordering::SeqCst), 16);
+    assert_eq!(
+        resources.live_output.load(Ordering::SeqCst),
+        exact_output_bytes
+    );
     assert_eq!(resources.live_stage.load(Ordering::SeqCst), 0);
-    assert_eq!(resources.live_total.load(Ordering::SeqCst), 16);
+    assert_eq!(
+        resources.live_total.load(Ordering::SeqCst),
+        exact_output_bytes
+    );
     let Value::Tensor(samples) = &value else {
         panic!("single-output decode must return tensor");
     };
