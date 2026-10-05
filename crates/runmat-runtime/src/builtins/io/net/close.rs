@@ -94,43 +94,30 @@ pub(crate) async fn close_if_network_targets(
     }
     let service = super::transport::service(runtime, "close")?;
     let issuer = RuntimeTcpIssuer::from_context(runtime);
+    let mut work = super::transport::NetCooperation::new(runtime, "close");
     let mut any_closed = false;
     for target in targets {
-        if let Some(runtime) = runtime {
-            runtime.cpu_cooperation().completed(0).await?;
-        }
+        work.completed(0).await?;
         let result = match target {
             Target::Endpoint(endpoint) => {
                 let future = service.close(issuer.clone(), endpoint);
-                let outcome = if let Some(runtime) = runtime {
-                    runtime
-                        .cpu_cooperation()
-                        .await_cancellable(future)
-                        .await
-                        .map_err(|source| source.into_runtime_error())?
-                } else {
-                    future.await
-                };
+                let outcome = work
+                    .await_service(future)
+                    .await
+                    .map_err(|failure| failure.into_runtime_error("close"))?;
                 outcome.map_err(transport_error)?
             }
             Target::Scope(scope) => {
                 let future = service.close_scope(issuer.clone(), scope);
-                let outcome = if let Some(runtime) = runtime {
-                    runtime
-                        .cpu_cooperation()
-                        .await_cancellable(future)
-                        .await
-                        .map_err(|source| source.into_runtime_error())?
-                } else {
-                    future.await
-                };
+                let outcome = work
+                    .await_service(future)
+                    .await
+                    .map_err(|failure| failure.into_runtime_error("close"))?;
                 outcome.map_err(transport_error)? != 0
             }
         };
         any_closed |= result;
-        if let Some(runtime) = runtime {
-            runtime.cpu_cooperation().completed(0).await?;
-        }
+        work.completed(1).await?;
     }
     Ok(Some(if any_closed { 1.0 } else { 0.0 }))
 }
