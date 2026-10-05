@@ -115,12 +115,50 @@ fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt()
     assert_eq!(ledger.snapshot().live_claimed_bytes, 12);
     assert_eq!(ledger.snapshot().peak_claimed_bytes, 12);
     receipt.finish(WholeWorkObservationOutcome::Success);
-    drop(permit);
+    assert!(matches!(
+        permit.reserve_exact(1),
+        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+    ));
     assert_eq!(placement.observations.borrow().len(), 1);
     drop(scan);
     drop(parsed);
+    // A retained permission view must not pin the obsolete scan precharge.
     assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
     drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    drop(permit);
+}
+
+#[test]
+fn abandoned_receipt_invalidates_retained_permit_and_stage_view() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("precharged stage");
+    let stage_view = stage.reservation();
+    let receipt = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .expect("one selected call");
+    let permit = receipt.output_allocation_permit().expect("output permit");
+    let retained = permit.reserve_exact(4).expect("retained output charge");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 12);
+    drop(receipt);
+    assert!(!stage_view.is_current());
+    assert!(matches!(
+        stage_view.reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 1),
+        Err(HostEffectAllocationError::InvalidInvocation)
+    ));
+    assert!(matches!(
+        permit.reserve_exact(1),
+        Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    assert!(placement.observations.borrow().is_empty());
+    drop(retained);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 

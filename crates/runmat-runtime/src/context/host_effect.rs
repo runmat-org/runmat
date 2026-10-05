@@ -12,11 +12,15 @@ use runmat_execution::{
     WholeWorkConstraint, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
 };
 use runmat_time::{duration_ns_saturating, Instant};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 mod workload;
 mod stage;
 mod managed_ledger;
+mod output_permit;
 mod final_facts;
 pub use final_facts::HostEffectFinalFacts;
 pub use managed_ledger::{
@@ -286,6 +290,7 @@ fn select_host_effect_inner(
             .map_or_else(Instant::now, |stage| stage.started),
         resource_liveness_lease: admission.liveness_lease,
         output_allocation_permit,
+        active_epoch: Arc::new(AtomicBool::new(true)),
         _stage: stage,
     }))
 }
@@ -312,6 +317,7 @@ pub struct HostEffectReceipt {
     started: Instant,
     resource_liveness_lease: Arc<dyn HostEffectResourceLivenessLease>,
     output_allocation_permit: Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>,
+    active_epoch: Arc<AtomicBool>,
     _stage: Option<HostEffectStagePermit>,
 }
 
@@ -336,7 +342,12 @@ impl HostEffectReceipt {
     pub fn output_allocation_permit(
         &self,
     ) -> Option<Arc<dyn runmat_value::ExactHostAllocationPermit>> {
-        self.output_allocation_permit.clone()
+        self.output_allocation_permit.as_ref().map(|permit| {
+            Arc::new(output_permit::ReceiptOutputPermit::new(
+                Arc::downgrade(permit),
+                self.active_epoch.clone(),
+            )) as Arc<dyn runmat_value::ExactHostAllocationPermit>
+        })
     }
     pub fn resource_liveness_lease(&self) -> Arc<dyn HostEffectResourceLivenessLease> {
         self.resource_liveness_lease.clone()
@@ -380,6 +391,12 @@ impl HostEffectReceipt {
                 outcome,
             );
         }
+    }
+}
+
+impl Drop for HostEffectReceipt {
+    fn drop(&mut self) {
+        self.active_epoch.store(false, Ordering::Release);
     }
 }
 

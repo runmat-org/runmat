@@ -4,7 +4,11 @@
 
 use super::*;
 use runmat_execution::{PlacementRevision, ResourceByteBound};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Weak;
+
+mod view;
+use view::StageReservationView;
 
 /// A closed classification of stage-owned temporary buffers. The kind does
 /// not change quota policy; every live claim competes for one scan envelope.
@@ -80,7 +84,8 @@ pub trait HostEffectStageReservation: Send + Sync {
 }
 
 struct StagedOutputPermit {
-    reservation: Arc<dyn HostEffectStageReservation>,
+    reservation: Weak<dyn HostEffectStageReservation>,
+    active_epoch: Arc<AtomicBool>,
     max_output_bytes: u64,
     live_output_bytes: Arc<AtomicU64>,
 }
@@ -117,9 +122,16 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
         Arc<dyn runmat_value::ExactHostAllocationReservation>,
         runmat_value::ExactHostNumericAllocationError,
     > {
+        if !self.active_epoch.load(Ordering::Acquire) {
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let reservation = self
+            .reservation
+            .upgrade()
+            .ok_or(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
         let requested = u64::try_from(bytes)
             .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
-        if !self.reservation.is_current() {
+        if !reservation.is_current() {
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
         }
         self.live_output_bytes
@@ -128,7 +140,7 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
                     .filter(|total| *total <= self.max_output_bytes)
             })
             .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
-        let authority_reservation = match self.reservation.reserve_output_exact(bytes) {
+        let authority_reservation = match reservation.reserve_output_exact(bytes) {
             Ok(reservation) => reservation,
             Err(error) => {
                 self.live_output_bytes
@@ -136,7 +148,7 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
                 return Err(error);
             }
         };
-        if !self.reservation.is_current() {
+        if !self.active_epoch.load(Ordering::Acquire) || !reservation.is_current() {
             self.live_output_bytes
                 .fetch_sub(requested, Ordering::SeqCst);
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
@@ -164,6 +176,7 @@ pub struct HostEffectStagePermit {
     authority_revision: Digest,
     revision: PlacementRevision,
     reservation: Arc<dyn HostEffectStageReservation>,
+    active_epoch: Arc<AtomicBool>,
     pub(super) started: Instant,
 }
 
@@ -173,7 +186,10 @@ impl HostEffectStagePermit {
     }
 
     pub fn reservation(&self) -> Arc<dyn HostEffectStageReservation> {
-        self.reservation.clone()
+        Arc::new(StageReservationView::new(
+            Arc::downgrade(&self.reservation),
+            self.active_epoch.clone(),
+        ))
     }
 
     pub fn reserve_live_exact(
@@ -181,6 +197,9 @@ impl HostEffectStagePermit {
         kind: HostEffectLiveAllocationKind,
         bytes: usize,
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
+        if !self.active_epoch.load(Ordering::Acquire) {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
         if !self
             .cancellation
             .same_generation(&self.runtime.cancellation())
@@ -200,6 +219,9 @@ impl HostEffectStagePermit {
         if !self.reservation.is_current() {
             return Err(HostEffectAllocationError::Revoked);
         }
+        if !self.active_epoch.load(Ordering::Acquire) {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
         Ok(claim)
     }
 
@@ -208,7 +230,8 @@ impl HostEffectStagePermit {
         max_output_bytes: u64,
     ) -> Arc<dyn runmat_value::ExactHostAllocationPermit> {
         Arc::new(StagedOutputPermit {
-            reservation: self.reservation.clone(),
+            reservation: Arc::downgrade(&self.reservation),
+            active_epoch: self.active_epoch.clone(),
             max_output_bytes,
             live_output_bytes: Arc::new(AtomicU64::new(0)),
         })
@@ -286,6 +309,12 @@ impl HostEffectStagePermit {
             ));
         }
         Ok(())
+    }
+}
+
+impl Drop for HostEffectStagePermit {
+    fn drop(&mut self) {
+        self.active_epoch.store(false, Ordering::Release);
     }
 }
 
@@ -368,6 +397,7 @@ pub fn try_admit_host_effect_stage(
         authority_revision: admission.evidence.authority_revision,
         revision,
         reservation: admission.reservation,
+        active_epoch: Arc::new(AtomicBool::new(true)),
         started: Instant::now(),
     }))
 }
