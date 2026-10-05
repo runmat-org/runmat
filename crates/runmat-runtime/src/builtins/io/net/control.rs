@@ -1,10 +1,10 @@
 //! Shared typed network controls and stream configuration.
 
 use runmat_value::{Tensor, Value};
-use std::io;
-use std::net::TcpStream;
 use std::time::Duration;
 use thiserror::Error;
+
+pub(crate) const DEFAULT_TIMEOUT_SECONDS: f64 = 10.0;
 
 #[derive(Debug, Error)]
 pub(crate) enum TimeoutParseError {
@@ -44,17 +44,6 @@ pub(crate) fn parse_timeout_value(value: &Value) -> Result<f64, TimeoutParseErro
         return Err(TimeoutParseError::OutOfRange);
     }
     Ok(timeout)
-}
-
-pub(crate) fn configure_stream(stream: &TcpStream, timeout: f64) -> io::Result<()> {
-    let opt = if timeout.is_infinite() || timeout == 0.0 {
-        None
-    } else {
-        Some(Duration::from_secs_f64(timeout))
-    };
-    stream.set_read_timeout(opt)?;
-    stream.set_write_timeout(opt)?;
-    Ok(())
 }
 
 #[derive(Debug, Error)]

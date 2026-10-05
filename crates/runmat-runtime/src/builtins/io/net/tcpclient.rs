@@ -16,8 +16,8 @@ use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Value};
 
 use super::control::{
     canonicalize_byte_order, default_user_data, parse_port, parse_timeout_value, string_scalar,
+    DEFAULT_TIMEOUT_SECONDS,
 };
-use super::server_state::DEFAULT_TIMEOUT_SECONDS;
 use crate::context::{RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpIssuer};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -739,7 +739,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::client_state::test_guard()
+        crate::builtins::io::net::test_support::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

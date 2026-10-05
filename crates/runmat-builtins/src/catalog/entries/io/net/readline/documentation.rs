@@ -68,7 +68,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime socket line reader", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/readline.rs") }, BuiltinDocumentationLink { label: "Shared live TCP client state", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/client_state.rs") }],
+        implementation: &[BuiltinDocumentationLink { label: "Runtime socket line reader", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/readline.rs") }, BuiltinDocumentationLink { label: "Session-owned socket operation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/tcp/native/operation.rs") }],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Socket line unit tests", location: "builtins::io::net::readline::tests" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Buffered partial line across timeout", location: "builtins::io::net::readline::tests::readline_buffers_partial_data_across_timeouts" },

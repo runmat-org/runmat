@@ -1,7 +1,8 @@
 //! MATLAB-compatible `tcpserver` builtin for RunMat.
 
-use super::control::{canonicalize_byte_order, default_user_data, parse_port, string_scalar};
-use super::server_state::DEFAULT_TIMEOUT_SECONDS;
+use super::control::{
+    canonicalize_byte_order, default_user_data, parse_port, string_scalar, DEFAULT_TIMEOUT_SECONDS,
+};
 use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpIssuer};
 use runmat_builtins::{
     BuiltinErrorDescriptor, NetConstructorOption, TCPSERVER_ERROR_BIND_FAILED,
@@ -674,7 +675,7 @@ pub(crate) mod tests {
     }
 
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
-        crate::builtins::io::net::client_state::test_guard()
+        crate::builtins::io::net::test_support::test_guard()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

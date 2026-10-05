@@ -65,7 +65,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP server constructor", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/tcpserver.rs") }, BuiltinDocumentationLink { label: "Shared server socket registry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/server_state.rs") }],
+        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP server constructor", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/tcpserver.rs") }, BuiltinDocumentationLink { label: "Session-owned socket authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/tcp/native/registry.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Loopback TCP server tests", location: "builtins::io::net::tcpserver::tests" }],
         notes: &[],
     },

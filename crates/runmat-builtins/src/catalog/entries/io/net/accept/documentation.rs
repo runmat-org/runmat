@@ -23,7 +23,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Overriding one accept timeout\nsrv = tcpserver(\"0.0.0.0\", 0, \"Timeout\", 10);\ntry\n    client = accept(srv, \"Timeout\", 0.25);\ncatch err\n    disp(err.identifier)\nend\nExpected identifier without a connecting peer: RunMat:accept:Timeout",
             "Inspecting connection metadata\nsrv = tcpserver(\"::1\", 45000);\ntcpclient(\"::1\", 45000);\nclient = accept(srv);\nfprintf(\"Remote peer %s:%d\\n\", client.Address, client.Port);\nfprintf(\"Byte order: %s\\n\", client.ByteOrder)\nIllustrative display: Remote peer ::1:51432\nByte order: little-endian (peer port varies)",
             "Handling multiple queued clients sequentially\nsrv = tcpserver(\"127.0.0.1\", 47000);\ntcpclient(\"127.0.0.1\", 47000);\ntcpclient(\"127.0.0.1\", 47000);\nclient1 = accept(srv);\nclient2 = accept(srv);\nfprintf(\"First connection from %s\\n\", client1.Address);\nfprintf(\"Second connection from %s\\n\", client2.Address)\nExpected display: First connection from 127.0.0.1\nSecond connection from 127.0.0.1",
-            "Inspecting the current internal identifier\nsrv = tcpserver(\"127.0.0.1\", 52000);\ntcpclient(\"127.0.0.1\", 52000);\nclient = accept(srv);\nclientId = client.__tcpclient_id;\nfprintf(\"Internal client identifier: %d\\n\", clientId)\nIllustrative display: Internal client identifier: 42 (value varies; do not use as authorization)",
+            "Inspecting accepted peer metadata\nsrv = tcpserver(\"127.0.0.1\", 52000);\ntcpclient(\"127.0.0.1\", 52000);\nclient = accept(srv);\nfprintf(\"Accepted peer %s:%d\\n\", client.Address, client.Port)\nIllustrative display: Accepted peer 127.0.0.1:51432 (peer port varies; socket authority is not a public property)",
         ] },
     ],
     examples: &[BuiltinExample {
@@ -43,7 +43,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "How do I change the timeout globally?", answer: "Set `Timeout` when constructing `tcpserver`; override one call with `accept(srv, \"Timeout\", value)`." },
         BuiltinDocumentationFaq { question: "Does RunMat support IPv6 clients?", answer: "Yes. IPv4 and IPv6 peer addresses are recorded as text in the returned client’s `Address` field." },
         BuiltinDocumentationFaq { question: "Is there a queue limit for pending connections?", answer: "The OS backlog applies; a full queue can refuse new connections before `accept` sees them." },
-        BuiltinDocumentationFaq { question: "Can I use `accept` in parallel workers?", answer: "Socket values are process-local registry references in the current implementation; do not transfer a server value to another worker as a portable ownership mechanism." },
+        BuiltinDocumentationFaq { question: "Can I use `accept` in parallel workers?", answer: "Socket authority belongs to the creating session and is not portable to another worker. Create the listener in the worker that will accept its clients." },
         BuiltinDocumentationFaq { question: "How do I close the accepted client?", answer: "Call `close(client)` for deterministic release. The final owner or session teardown also retires its socket authority." },
         BuiltinDocumentationFaq { question: "What does `NumBytesAvailable` represent?", answer: "It is initially zero in the returned snapshot. The current value is not a live view of changing socket buffer state." },
         BuiltinDocumentationFaq { question: "Does the builtin support TLS?", answer: "No. This route supports plain TCP only." },
@@ -58,7 +58,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP acceptor", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/accept.rs") }, BuiltinDocumentationLink { label: "Shared server socket registry", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/server_state.rs") }],
+        implementation: &[BuiltinDocumentationLink { label: "Runtime TCP acceptor", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/net/accept.rs") }, BuiltinDocumentationLink { label: "Session-owned socket authority", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/tcp/native/registry.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Loopback accept tests", location: "builtins::io::net::accept::tests" }],
         notes: &[],
     },

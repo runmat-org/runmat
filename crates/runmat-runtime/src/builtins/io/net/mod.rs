@@ -1,14 +1,12 @@
 //! Networking builtins.
 
 pub mod accept;
-pub(crate) mod client_state;
 pub(crate) mod control;
 mod error;
 mod receiver;
 pub mod close;
 pub mod read;
 pub mod readline;
-pub(crate) mod server_state;
 pub mod tcpclient;
 pub mod tcpserver;
 mod transport;

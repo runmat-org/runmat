@@ -6,6 +6,7 @@ use runmat_accelerate_api::{
 };
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::context::{
     RuntimeContext, RuntimeServicePorts, RuntimeTcpByteOrder, RuntimeTcpConnect, RuntimeTcpIssuer,
@@ -17,6 +18,15 @@ use std::time::Duration;
 
 #[path = "test_support/cpu_turn.rs"]
 pub(crate) mod cpu_turn;
+
+static TCP_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    TCP_TEST_GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
 
 /// Test-owned host and session: no process-global socket ID or implicit port.
 pub(crate) struct TcpTestHost {
