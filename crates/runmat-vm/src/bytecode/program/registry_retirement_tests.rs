@@ -198,6 +198,13 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
     assert!(old.get(FunctionId(2)).is_some());
     assert!(old.static_binding(FunctionId(2)).is_some());
     let helper_binding = old.static_binding(FunctionId(2)).unwrap();
+    let nested = old
+        .owned_view(FunctionId(2), &helper_binding.authority)
+        .expect("shared retained graph selects helper");
+    assert!(std::sync::Arc::ptr_eq(
+        old.static_overlay.as_ref().unwrap(),
+        nested.static_overlay.as_ref().unwrap()
+    ));
     assert!(matches!(
         &helper_binding.authority,
         runmat_value::BoundFunctionAuthority::Local { dependencies, .. }
