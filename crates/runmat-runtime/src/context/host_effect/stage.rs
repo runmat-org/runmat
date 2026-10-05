@@ -219,6 +219,10 @@ pub struct HostEffectStagePermit {
 }
 
 impl HostEffectStagePermit {
+    pub(super) fn active_epoch(&self) -> Arc<AtomicBool> {
+        self.active_epoch.clone()
+    }
+
     /// Already-precharged scan envelope, without allocating a reservation view.
     pub fn reserved_bytes(&self) -> u64 {
         self.reservation.reserved_bytes()

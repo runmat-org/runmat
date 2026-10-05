@@ -379,7 +379,10 @@ fn select_host_effect_inner(
             .map_or_else(Instant::now, |stage| stage.started),
         resource_liveness_lease: admission.liveness_lease,
         output_allocation_permit,
-        active_epoch: Arc::new(AtomicBool::new(true)),
+        active_epoch: stage.as_ref().map_or_else(
+            || Arc::new(AtomicBool::new(true)),
+            HostEffectStagePermit::active_epoch,
+        ),
         _stage: stage,
     }))
 }

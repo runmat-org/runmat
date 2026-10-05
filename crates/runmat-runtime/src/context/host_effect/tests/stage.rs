@@ -200,6 +200,7 @@ fn stage_reserves_before_effect_and_final_selection_owns_one_probe_and_observati
     assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     stage.checkpoint().unwrap();
+    let stage_epoch = stage.active_epoch();
     let receipt = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),
@@ -207,6 +208,7 @@ fn stage_reserves_before_effect_and_final_selection_owns_one_probe_and_observati
         stage,
     )
     .unwrap();
+    assert!(Arc::ptr_eq(&stage_epoch, &receipt.active_epoch));
     assert_eq!(placement.selections.get(), 1);
     assert_eq!(placement.probes.load(Ordering::SeqCst), 1);
     receipt.finish(WholeWorkObservationOutcome::Success);
