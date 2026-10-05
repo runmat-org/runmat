@@ -75,6 +75,30 @@ impl Digest {
     pub const fn bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// Recognize the exact canonical presentation without allocating an
+    /// error. Non-digest candidate names remain text identities.
+    pub fn parse_canonical(value: &str) -> Option<Self> {
+        let encoded = value.strip_prefix("sha256:")?.as_bytes();
+        if encoded.len() != 64 {
+            return None;
+        }
+        let mut bytes = [0_u8; 32];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            let high = lowercase_hex(encoded[index * 2])?;
+            let low = lowercase_hex(encoded[index * 2 + 1])?;
+            *byte = (high << 4) | low;
+        }
+        Some(Self(bytes))
+    }
+}
+
+fn lowercase_hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
 }
 
 impl Display for Digest {
@@ -104,12 +128,8 @@ impl FromStr for Digest {
                 "expected 64 lowercase hexadecimal digits",
             ));
         }
-        let mut bytes = [0_u8; 32];
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&encoded[index * 2..index * 2 + 2], 16)
-                .map_err(|_| ContractError::invalid("digest", "invalid hexadecimal"))?;
-        }
-        Ok(Self(bytes))
+        Self::parse_canonical(value)
+            .ok_or_else(|| ContractError::invalid("digest", "invalid hexadecimal"))
     }
 }
 
@@ -174,5 +194,19 @@ mod tests {
             }
         }
         assert!(Digest::sha256_serialized(&Fails).is_err());
+    }
+
+    #[test]
+    fn optional_canonical_decoder_agrees_with_strict_parser() {
+        let canonical = Digest::sha256(b"candidate").to_string();
+        for value in [
+            canonical.as_str(),
+            "candidate",
+            "sha256:ABCDEF",
+            "sha256:é",
+            "sha256:000000000000000000000000000000000000000000000000000000000000000g",
+        ] {
+            assert_eq!(Digest::parse_canonical(value), value.parse::<Digest>().ok());
+        }
     }
 }
