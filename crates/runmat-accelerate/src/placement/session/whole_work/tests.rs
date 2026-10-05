@@ -128,6 +128,49 @@ fn managed_completion_uses_preallocated_series_and_preserves_portable_profile() 
 }
 
 #[test]
+fn managed_selection_seeds_from_explicit_profile_import_without_duplicate_export() {
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+
+    let route = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
+    let source = PlacementSession::default();
+    source
+        .observe(runmat_execution::PlacementFeedback {
+            signature: route.signature.clone(),
+            candidate: route.candidates[0].identity_digest().to_string(),
+            kind: route.candidates[0].kind,
+            total_elapsed_ns: 23,
+            succeeded: true,
+        })
+        .expect("portable source profile");
+    let imported = source.profile_snapshot();
+    let managed = PlacementSession::new_with_managed_observations(
+        PlacementSessionConfig::default(),
+        &ManagedHostEffectLedger::new(16 * 1024),
+        super::super::ManagedPlacementCapacity {
+            in_flight_slots: 1,
+            feedback_series: 1,
+            signature_bytes_per_series: 1024,
+        },
+    )
+    .expect("precharged backing");
+    managed.restore_profile(imported).expect("explicit import");
+    let selected = managed
+        .select_whole_work_borrowed_managed(route.as_ref())
+        .expect("matching finite selection");
+    assert_eq!(selected.kind, WholeWorkDecisionKind::Uncompared);
+    RuntimePlacementService::observe_managed_whole_work(
+        &managed,
+        &selected,
+        29,
+        WholeWorkObservationOutcome::Success,
+    )
+    .expect("managed completion");
+    let exported = managed.profile_snapshot();
+    assert_eq!(exported.feedback.len(), 1);
+    assert_eq!(exported.feedback[0].samples, 2);
+}
+
+#[test]
 fn compact_selection_retains_unicode_operation_and_portable_identity() {
     let route = candidate(ExecutionCandidateKind::SharedRuntime);
     let operation = "foreign.λ";
