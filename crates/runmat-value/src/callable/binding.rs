@@ -92,6 +92,14 @@ pub struct BoundFunctionBinding {
 }
 
 impl BoundFunctionBinding {
+    /// An inspectable legacy/unregistered binding, never execution authority.
+    pub fn unavailable(function: usize) -> Self {
+        Self {
+            function,
+            authority: BoundFunctionAuthority::unavailable(function),
+        }
+    }
+
     pub fn local(
         function: usize,
         issuer: Weak<()>,
@@ -114,6 +122,21 @@ impl BoundFunctionBinding {
 }
 
 impl BoundFunctionAuthority {
+    /// Represents an unregistered bound ID without granting execution or
+    /// transport authority. This preserves value inspection without turning a
+    /// numeric ID into an executable capability.
+    pub fn unavailable(function: usize) -> Self {
+        static INERT: std::sync::OnceLock<Arc<FunctionDefinitionOwner>> =
+            std::sync::OnceLock::new();
+        let owner = INERT.get_or_init(|| Arc::new(FunctionDefinitionOwner::default()));
+        Self::local(
+            Weak::new(),
+            FunctionDefinitionOwner::issue(owner, function),
+            Vec::new(),
+            LocalExport::Ephemeral,
+        )
+    }
+
     pub fn local(
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,

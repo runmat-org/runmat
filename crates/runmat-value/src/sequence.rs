@@ -201,7 +201,7 @@ mod tests {
 
         let closure = Value::Closure(Closure {
             function_name: "sequence_test".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![transient()],
