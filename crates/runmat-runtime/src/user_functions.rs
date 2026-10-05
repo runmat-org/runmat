@@ -79,6 +79,8 @@ pub struct SourceFunctionInfo {
     pub name: String,
     pub function: usize,
     pub role: runmat_types::FunctionSourceRole,
+    /// Immutable source-program binding, not the session-local numeric ID.
+    pub binding_origin: Option<runmat_execution::FunctionBindingOrigin>,
 }
 
 pub fn source_function_for(function: usize) -> Option<SourceFunctionInfo> {
@@ -99,6 +101,26 @@ pub fn source_function_for(function: usize) -> Option<SourceFunctionInfo> {
             .find(|info| info.function == function)
             .cloned()
     })
+}
+
+/// Resolve only an exact immutable program/function binding. A reused numeric
+/// session ID or matching display name is never sufficient authority.
+pub fn resolve_binding_origin(origin: runmat_execution::FunctionBindingOrigin) -> Option<usize> {
+    fn unique(
+        catalog: &[SourceFunctionInfo],
+        origin: runmat_execution::FunctionBindingOrigin,
+    ) -> Option<usize> {
+        let mut matches = catalog
+            .iter()
+            .filter(|info| info.binding_origin == Some(origin))
+            .map(|info| info.function);
+        let function = matches.next()?;
+        matches.next().is_none().then_some(function)
+    }
+    if let Some(state) = active_state() {
+        return unique(state.call.borrow().source_functions.as_deref()?, origin);
+    }
+    SOURCE_FUNCTION_CATALOG.with(|slot| unique(slot.borrow().as_deref()?, origin))
 }
 
 /// Bind a semantic function while preserving its source role at the value
@@ -738,6 +760,10 @@ pub async fn try_call_semantic_descriptor(
 #[cfg(test)]
 #[path = "user_functions/input_callsite_tests.rs"]
 mod input_callsite_tests;
+
+#[cfg(test)]
+#[path = "user_functions/binding_origin_tests.rs"]
+mod binding_origin_tests;
 
 #[cfg(test)]
 mod lexical_tests {

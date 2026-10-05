@@ -176,6 +176,11 @@ impl ProgramInvocationGuards {
                     name: function.name.clone(),
                     function: function.function.0 as usize,
                     role: function.role,
+                    binding_origin: runmat_execution::FunctionBindingOrigin::from_revision(
+                        &program.executable.program,
+                        function.function,
+                    )
+                    .ok(),
                 },
             )
             .collect::<Vec<_>>();

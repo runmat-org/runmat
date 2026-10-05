@@ -81,24 +81,28 @@ mod tests {
                     name: "main".into(),
                     function: 9,
                     role: runmat_types::FunctionSourceRole::Primary,
+                    binding_origin: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(3),
                     name: "first".into(),
                     function: 10,
                     role: runmat_types::FunctionSourceRole::Local,
+                    binding_origin: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(3),
                     name: "@anon0".into(),
                     function: 11,
                     role: runmat_types::FunctionSourceRole::Anonymous,
+                    binding_origin: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(4),
                     name: "other".into(),
                     function: 12,
                     role: runmat_types::FunctionSourceRole::Local,
+                    binding_origin: None,
                 },
             ])));
 

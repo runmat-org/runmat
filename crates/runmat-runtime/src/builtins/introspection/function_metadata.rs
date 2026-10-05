@@ -166,6 +166,7 @@ mod tests {
                 name: "@anon0".into(),
                 function: 1,
                 role: runmat_types::FunctionSourceRole::Anonymous,
+                binding_origin: None,
             }]),
         ));
         let value = dispatch_functions(Value::Closure(runmat_value::Closure {
@@ -202,18 +203,21 @@ mod tests {
                     name: "metadata_file".into(),
                     function: 1,
                     role: runmat_types::FunctionSourceRole::Primary,
+                    binding_origin: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id,
                     name: "child_local".into(),
                     function: 2,
                     role: runmat_types::FunctionSourceRole::Local,
+                    binding_origin: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id,
                     name: "legacy_role_missing".into(),
                     function: 3,
                     role: runmat_types::FunctionSourceRole::Unknown,
+                    binding_origin: None,
                 },
             ]),
         ));
@@ -303,6 +307,7 @@ mod tests {
                     name: "origin".into(),
                     function: 9,
                     role: runmat_types::FunctionSourceRole::Primary,
+                    binding_origin: None,
                 }]),
             ));
             crate::user_functions::bound_function_handle("origin".into(), 9)
@@ -320,6 +325,7 @@ mod tests {
                 name: "unrelated".into(),
                 function: 9,
                 role: runmat_types::FunctionSourceRole::Local,
+                binding_origin: None,
             }]),
         ));
         let info = dispatch_functions(handle).expect("metadata reads original binding");

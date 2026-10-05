@@ -262,6 +262,7 @@ pub(crate) async fn invoke(
                     name: function.display_name.clone(),
                     function: function.function.0,
                     role: function.source_role,
+                    binding_origin: function.binding_origin,
                 })
         })
         .collect::<Vec<_>>();
