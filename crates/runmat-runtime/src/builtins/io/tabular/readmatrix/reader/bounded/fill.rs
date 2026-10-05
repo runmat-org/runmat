@@ -134,7 +134,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     if data_row != geometry.rows {
         return Err(changed_source());
     }
-    let replay_digest: [u8; 32] = reader.digest.finalize().into();
+    let replay_digest = reader.finish_digest();
     if replay_digest != geometry.source_digest {
         return Err(changed_source());
     }

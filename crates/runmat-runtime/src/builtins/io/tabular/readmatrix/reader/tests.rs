@@ -139,6 +139,51 @@ fn retained_seekable_utf8_scan_auto_detects_delimiter_without_reopening() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn retained_utf8_row_trims_long_cr_and_bom_runs_with_cooperation() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let directory = tempfile::tempdir().expect("isolated numeric-text source");
+    let file = directory.path().join("long-row.csv");
+    let mut input = "\u{FEFF}".repeat(4_096).into_bytes();
+    input.extend_from_slice(b"1,2");
+    input.extend(vec![b'\r'; 16_384]);
+    input.push(b'\n');
+    std::fs::write(&file, input).expect("long UTF-8 fixture");
+    let _restore =
+        runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::NativeFsProvider));
+    let selected = TabularFsOwner::capture(Some(&file))
+        .expect("captured provider")
+        .path(file)
+        .expect("selected native source");
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let turns = Rc::new(Cell::new(0usize));
+    let counted = turns.clone();
+    let budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(4_096).expect("nonzero")),
+        runtime.cancellation(),
+        move || -> crate::context::RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+            counted.set(counted.get() + 1);
+            Box::pin(async { Ok(()) })
+        },
+    );
+    let mut cooperation = TabularCooperation::with_test_budget(&runtime, BUILTIN_NAME, budget);
+    let options = ReadMatrixOptions {
+        delimiter: Some(Delimiter::Char(',')),
+        ..ReadMatrixOptions::default()
+    };
+    let tensor = block_on(read_numeric_matrix(
+        Some(&runtime),
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect("long CR/BOM row");
+    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.as_f64_slice(), Some(&[1.0, 2.0][..]));
+    assert!(turns.get() >= 4, "long row reached execution-service turns");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn retained_seekable_utf8_scan_decodes_multibyte_header_across_chunk() {
     let _lock = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().expect("isolated numeric-text source");

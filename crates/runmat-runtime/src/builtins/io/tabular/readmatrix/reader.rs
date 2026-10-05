@@ -48,7 +48,7 @@ pub(super) async fn read_numeric_matrix(
                 ));
             }
             let geometry =
-                bounded::scan_utf8(&mut source, cooperation, path, options, None).await?;
+                bounded::scan_utf8(&mut source, cooperation, path, options, None, None).await?;
             bounded::fill_utf8(&mut source, &geometry, cooperation, path, options, None).await
         }
         other => read_numeric_matrix_from_bytes(cooperation, path, options, other).await,
