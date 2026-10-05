@@ -1,9 +1,10 @@
+use crate::placement::PlacementSessionConfig;
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, PlacementFeedback, PlacementResourceSnapshot, PlacementRevision,
     PlacementSignature, ProviderInputStageDemand, ProviderInputStageDemands,
     ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
-    WholeWorkObservation, WholeWorkObservationOutcome,
+    SelectedExecutionCandidate, WholeWorkObservation, WholeWorkObservationOutcome,
 };
 use runmat_runtime::context::RuntimePlacementFeedbackSource;
 use runmat_runtime::context::RuntimePlacementService;
