@@ -98,6 +98,7 @@ fn pagefun_mtimes_semantic_function_handle() {
         Value::BoundFunctionHandle {
             name: "mtimes".into(),
             function: 17,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(17),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },

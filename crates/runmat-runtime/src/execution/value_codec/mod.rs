@@ -430,6 +430,7 @@ mod tests {
                         function,
                         role: runmat_types::FunctionSourceRole::Unknown,
                         binding_origin: Some(origin(function)),
+                        source_file: None,
                         definition_owners: None,
                     })
                     .collect(),

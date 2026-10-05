@@ -303,6 +303,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             function,
             source_role,
             source_file,
+            ..
         } => json!({
             "kind": "function",
             "name": name,

@@ -1128,6 +1128,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "wide_xdata".into(),
                 function: 901,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(901),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1164,6 +1165,7 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "zero_model".into(),
                     function: 904,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(904),
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                 },
@@ -1230,6 +1232,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1281,6 +1284,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "exp_decay".into(),
                 function: 2,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(2),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1323,6 +1327,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bounded_line".into(),
                 function: 3,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(3),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1364,6 +1369,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line_multi".into(),
                 function: 4,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(4),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1427,6 +1433,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line_algorithm".into(),
                 function: 45,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(45),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1471,6 +1478,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "underdetermined".into(),
                 function: 5,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(5),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1501,6 +1509,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bad_shape".into(),
                 function: 6,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(6),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

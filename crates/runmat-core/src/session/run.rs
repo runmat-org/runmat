@@ -738,8 +738,9 @@ impl RunMatSession {
             self.runtime_context.program_revision().cloned(),
             crate::program_environment(self.compat_mode),
         );
+        let source_map = self.executable_source_map(&source);
         prepared
-            .attach_function_origins(&revision.program_revision)
+            .attach_function_origins(&revision.program_revision, &source_map)
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)
@@ -762,7 +763,7 @@ impl RunMatSession {
             crate::ExecutableUnit::new(
                 source.clone(),
                 revision,
-                self.executable_source_map(&source),
+                source_map,
                 mir,
                 analysis,
                 bytecode,

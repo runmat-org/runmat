@@ -301,6 +301,7 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "constant_rhs".into(),
                     function: 905,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(905),
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                 },

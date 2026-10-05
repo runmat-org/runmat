@@ -61,6 +61,7 @@ fn excessive_requested_outputs_fail_before_callback_evaluation() {
         Value::BoundFunctionHandle {
             name: "unobserved".into(),
             function: 7_710,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7_710),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },

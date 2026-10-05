@@ -708,6 +708,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "no_real_root".into(),
                 function: 44,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(44),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -868,6 +869,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "system_function".into(),
                 function: 43,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(43),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

@@ -128,7 +128,7 @@ pub(crate) mod tests {
         let object = Value::Object(ObjectInstance::new("ExampleClass".to_string()));
         let closure = Value::Closure(Closure {
             function_name: "some_func".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: Vec::new(),

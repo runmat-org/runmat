@@ -67,6 +67,7 @@ fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
         Value::BoundFunctionHandle {
             name: "pending_callback".into(),
             function: 7_711,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7_711),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -163,6 +164,7 @@ fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
         Value::BoundFunctionHandle {
             name: "single_root".into(),
             function: 7_709,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7_709),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -203,6 +205,7 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
         &Value::BoundFunctionHandle {
             name: "single_result".into(),
             function: 7_710,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7_710),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -329,6 +332,7 @@ fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
     let function = Value::BoundFunctionHandle {
         name: "constant_positive".into(),
         function: 42,
+        authority: runmat_value::BoundFunctionAuthority::unavailable(42),
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
     };
@@ -382,6 +386,7 @@ fn fzero_accepts_semantic_function_handle_callback() {
         Value::BoundFunctionHandle {
             name: "root_function".into(),
             function: 42,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(42),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },

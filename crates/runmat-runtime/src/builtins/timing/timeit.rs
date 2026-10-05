@@ -506,6 +506,7 @@ fn prepare_callable(
         Value::BoundFunctionHandle {
             name,
             function,
+            authority,
             source_role,
             source_file,
         } => {
@@ -514,6 +515,7 @@ fn prepare_callable(
                 handle: Value::BoundFunctionHandle {
                     name: normalized,
                     function,
+                    authority,
                     source_role,
                     source_file,
                 },
@@ -522,11 +524,12 @@ fn prepare_callable(
         }
         Value::Closure(mut closure) => Ok(TimeitCallable {
             handle: {
-                if closure.bound_function.is_none() {
+                if closure.binding.is_none() {
                     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(
                         &closure.function_name,
                     ) {
-                        closure.bound_function = Some(function);
+                        closure.binding =
+                            Some(crate::user_functions::bound_function_binding_for(function));
                         closure.source_file = crate::user_functions::source_file_for(function);
                         if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
                             closure.source_role =
@@ -782,6 +785,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".into(),
                 function: 188,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(188),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -810,6 +814,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "function_target".into(),
                 function: 612,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(612),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -837,6 +842,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".into(),
                 function: 87,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(87),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -861,6 +867,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".into(),
                 function: 88,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(88),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -883,6 +890,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.callback".into(),
                 function: 86,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(86),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -896,6 +904,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "function_target".into(),
                 function: 41,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(41),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -907,6 +916,7 @@ pub(crate) mod tests {
             Value::BoundFunctionHandle {
                 name: "function_target".into(),
                 function: 41,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(41),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -923,7 +933,7 @@ pub(crate) mod tests {
         let callable = prepare_callable(
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: vec![Value::Num(9.0)],
@@ -935,7 +945,7 @@ pub(crate) mod tests {
             callable.handle,
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
-                bound_function: Some(89),
+                binding: Some(runmat_value::BoundFunctionBinding::unavailable(89)),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: vec![Value::Num(9.0)],
@@ -948,7 +958,7 @@ pub(crate) mod tests {
         let callable = prepare_callable(
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: vec![Value::Num(9.0)],
@@ -960,7 +970,7 @@ pub(crate) mod tests {
             callable.handle,
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".into(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: vec![Value::Num(9.0)],

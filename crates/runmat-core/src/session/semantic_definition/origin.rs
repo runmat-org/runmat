@@ -9,6 +9,7 @@ impl PreparedExecution {
     pub(crate) fn attach_function_origins(
         &mut self,
         revision: &ProgramRevision,
+        source_map: &crate::ExecutableSourceMap,
     ) -> Result<(), ContractError> {
         for id in &self.current_function_ids {
             let Some(function) = self.bytecode.function_registry.functions.get_mut(id) else {
@@ -19,8 +20,17 @@ impl PreparedExecution {
                 None => FunctionBindingOrigin::from_revision(revision, function.portable_function)?,
             };
             function.binding_origin = Some(origin);
+            function.source_file = function.source_id.and_then(|source_id| {
+                source_map
+                    .entries()
+                    .binary_search_by_key(&source_id.0, |entry| entry.source_id)
+                    .ok()
+                    .and_then(|index| source_map.entries().get(index))
+                    .and_then(|entry| entry.full_path.clone())
+            });
             if let Some(published) = self.function_registry_after_success.functions.get_mut(id) {
                 published.binding_origin = Some(origin);
+                published.source_file = function.source_file.clone();
             }
         }
         self.bytecode.bound_functions = self.bytecode.function_registry.functions.clone();

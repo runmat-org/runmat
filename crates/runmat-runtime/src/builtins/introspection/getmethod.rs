@@ -140,7 +140,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 );
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
-                    bound_function,
+                    binding: bound_function.map(crate::user_functions::bound_function_binding_for),
                     source_role: runmat_types::FunctionSourceRole::Method,
                     source_file: bound_function.and_then(crate::user_functions::source_file_for),
                     captures: vec![Value::Object(o)],
@@ -148,7 +148,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
             }
             Ok(Value::Closure(runmat_value::Closure {
                 function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Method,
                 source_file: None,
                 captures: vec![
@@ -169,7 +169,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 );
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
-                    bound_function,
+                    binding: bound_function.map(crate::user_functions::bound_function_binding_for),
                     source_role: runmat_types::FunctionSourceRole::Method,
                     source_file: bound_function.and_then(crate::user_functions::source_file_for),
                     captures: vec![Value::HandleObject(h)],
@@ -177,7 +177,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
             }
             Ok(Value::Closure(runmat_value::Closure {
                 function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Method,
                 source_file: None,
                 captures: vec![

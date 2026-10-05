@@ -713,26 +713,22 @@ async fn run_interpreter_inner(
                 .and_then(|resolver| resolver(name))
         })));
     let registry_for_execution_source = Arc::clone(&function_registry);
+    let registry_for_execution_group = Arc::clone(&function_registry);
+    let registry_for_execution_owners = Arc::clone(&function_registry);
     let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
-        std::rc::Rc::new(move |function| {
-            let body = registry_for_execution_source.get(runmat_hir::FunctionId(function))?;
-            let source_id = body.source_id?;
-            Some(runmat_runtime::user_functions::SourceFunctionInfo {
-                source_id,
-                name: body.display_name.clone(),
-                function,
-                role: body.source_role,
-                binding_origin: body.binding_origin,
-                definition_owners: registry_for_execution_source
-                    .definition_dependency_owners(body.function)
-                    .map(|owners| {
-                        owners
-                            .into_iter()
-                            .map(|(id, owner)| (id.0, owner))
-                            .collect()
-                    }),
-            })
-        }),
+        std::rc::Rc::new(user_functions::ExecutionSourceFacts::new(
+            std::rc::Rc::new(move |function| {
+                registry_for_execution_source
+                    .execution_source_fact(runmat_hir::FunctionId(function))
+            }),
+            std::rc::Rc::new(move |source| {
+                registry_for_execution_group.execution_source_group_facts(source)
+            }),
+            std::rc::Rc::new(move |function| {
+                registry_for_execution_owners
+                    .execution_definition_owners(runmat_hir::FunctionId(function))
+            }),
+        )),
     ));
     let mut source_function_catalog = function_registry
         .functions
@@ -745,6 +741,7 @@ async fn run_interpreter_inner(
                     function: function.function.0,
                     role: function.source_role,
                     binding_origin: function.binding_origin,
+                    source_file: function.source_file.clone(),
                     definition_owners: None,
                 },
             )

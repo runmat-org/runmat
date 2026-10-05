@@ -245,7 +245,7 @@ mod tests {
         object.properties.insert("Payload".into(), transient());
         let closure = Closure {
             function_name: "f".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![transient()],

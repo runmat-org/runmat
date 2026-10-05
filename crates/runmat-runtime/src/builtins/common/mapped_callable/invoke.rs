@@ -117,9 +117,10 @@ async fn invoke_closure(
 ) -> Result<Value, CallableCallError> {
     let mut merged = closure.captures.clone();
     merged.extend_from_slice(arguments);
-    if let Some(function) = closure.bound_function {
+    if let Some(binding) = closure.binding.clone() {
+        let function = binding.function;
         let request =
-            user_functions::CallableRequest::semantic(function, merged.clone(), requested_outputs);
+            user_functions::CallableRequest::bound(binding, merged.clone(), requested_outputs);
         if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
             return result
                 .map(crate::call::arguments::project_legacy_builtin_value_abi)

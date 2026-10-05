@@ -18,11 +18,15 @@ impl MappedCallable {
             Value::BoundFunctionHandle {
                 name,
                 function,
+                authority,
                 source_role,
                 source_file,
             } => Ok(Self::Closure(Closure {
                 function_name: name,
-                bound_function: Some(function),
+                binding: Some(runmat_value::BoundFunctionBinding {
+                    function,
+                    authority,
+                }),
                 source_role,
                 source_file,
                 captures: Vec::new(),
@@ -50,7 +54,7 @@ impl MappedCallable {
         if let Some(function) = user_functions::resolve_semantic_function_by_name(&name) {
             return Self::Closure(Closure {
                 function_name: name,
-                bound_function: Some(function),
+                binding: Some(user_functions::bound_function_binding_for(function)),
                 source_role: user_functions::source_function_for(function)
                     .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
                 source_file: user_functions::source_file_for(function),
@@ -68,18 +72,19 @@ impl MappedCallable {
     }
 
     fn bind_closure(mut closure: Closure) -> Self {
-        if closure.bound_function.is_none() {
-            closure.bound_function =
-                user_functions::resolve_semantic_function_by_name(&closure.function_name);
+        if closure.binding.is_none() {
+            closure.binding =
+                user_functions::resolve_semantic_function_by_name(&closure.function_name)
+                    .map(user_functions::bound_function_binding_for);
             if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
                 closure.source_role = closure
-                    .bound_function
+                    .bound_function()
                     .and_then(user_functions::source_function_for)
                     .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
             }
             if closure.source_file.is_none() {
                 closure.source_file = closure
-                    .bound_function
+                    .bound_function()
                     .and_then(user_functions::source_file_for);
             }
         }

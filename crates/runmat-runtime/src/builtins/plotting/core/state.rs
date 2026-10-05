@@ -5,7 +5,7 @@ use runmat_plot::plots::{
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::Tensor;
+use runmat_value::{Tensor, Value};
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -696,18 +696,9 @@ pub enum FunctionSurfaceFunctionRef {
     FunctionHandle(String),
     ExternalFunctionHandle(String),
     MethodFunctionHandle(String),
-    BoundFunctionHandle {
-        name: String,
-        function: usize,
-        source_role: runmat_types::FunctionSourceRole,
-        source_file: Option<String>,
-    },
-    ClosureSummary {
-        function_name: String,
-        bound_function: Option<usize>,
-        source_role: runmat_types::FunctionSourceRole,
-        source_file: Option<String>,
-    },
+    /// Retain the actual callable, including its exact definition owner and
+    /// captured environment, rather than reconstructing it from display data.
+    OwnedCallable(Value),
 }
 
 #[derive(Clone, Debug)]

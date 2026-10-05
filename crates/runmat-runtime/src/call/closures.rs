@@ -7,7 +7,7 @@ use runmat_value::{Closure, Value};
 pub fn closure_value(function_name: String, captures: Vec<Value>) -> Value {
     Value::Closure(Closure {
         function_name,
-        bound_function: None,
+        binding: None,
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
         captures,
@@ -22,7 +22,9 @@ pub fn semantic_closure_value(
 ) -> Value {
     Value::Closure(Closure {
         function_name: display_name,
-        bound_function: Some(function.0),
+        binding: Some(crate::user_functions::bound_function_binding_for(
+            function.0,
+        )),
         source_role,
         source_file: crate::user_functions::source_file_for(function.0),
         captures,
@@ -101,7 +103,7 @@ pub fn load_method_closure(
                 crate::user_functions::resolve_semantic_function_by_name(&function_name);
             Ok(Value::Closure(Closure {
                 source_role: runmat_types::FunctionSourceRole::Method,
-                bound_function,
+                binding: bound_function.map(crate::user_functions::bound_function_binding_for),
                 source_file: bound_function.and_then(crate::user_functions::source_file_for),
                 function_name,
                 captures: vec![Value::Object(object)],
@@ -128,7 +130,7 @@ pub fn load_method_closure(
                     resolve_method_semantic_function_id(&owner, &name, &method.function_name);
                 return Ok(Value::Closure(Closure {
                     source_role: runmat_types::FunctionSourceRole::Method,
-                    bound_function,
+                    binding: bound_function.map(crate::user_functions::bound_function_binding_for),
                     source_file: bound_function.and_then(crate::user_functions::source_file_for),
                     function_name: method.function_name,
                     captures: vec![],
@@ -140,7 +142,7 @@ pub fn load_method_closure(
                     crate::user_functions::resolve_semantic_function_by_name(&qualified_name);
                 Ok(Value::Closure(Closure {
                     source_role: runmat_types::FunctionSourceRole::Method,
-                    bound_function,
+                    binding: bound_function.map(crate::user_functions::bound_function_binding_for),
                     source_file: bound_function.and_then(crate::user_functions::source_file_for),
                     function_name: qualified_name,
                     captures: vec![],

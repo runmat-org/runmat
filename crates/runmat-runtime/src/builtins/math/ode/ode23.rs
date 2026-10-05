@@ -202,6 +202,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "ode_decay".into(),
                 function: 55,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(55),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

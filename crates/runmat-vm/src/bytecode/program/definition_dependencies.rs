@@ -15,7 +15,14 @@ pub(super) fn owners(
 ) -> Option<Vec<(FunctionId, Arc<FunctionDefinitionOwner>)>> {
     let mut visited = HashSet::new();
     let mut owners = Vec::new();
-    let mut pending = vec![function];
+    let mut pending = Vec::new();
+    // A handle to a function file also owns its local definitions. Calls to
+    // localfunctions() can issue those handles after the file is retired,
+    // even when no static call edge references a particular local.
+    if let Some(source) = registry.get(function)?.source_id {
+        pending.extend(registry.functions_for_source(source).iter().copied());
+    }
+    pending.push(function);
     while let Some(function) = pending.pop() {
         if !visited.insert(function) {
             continue;

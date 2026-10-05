@@ -253,6 +253,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "ode_stiff_decay".into(),
                 function: 57,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(57),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

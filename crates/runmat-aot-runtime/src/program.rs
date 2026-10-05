@@ -177,6 +177,9 @@ impl ProgramInvocationGuards {
                     name: function.name.clone(),
                     function: function.function.0 as usize,
                     role: function.role,
+                    // AOT callable inventory has a source ordinal but no
+                    // file path. Never invent a path from that ordinal.
+                    source_file: None,
                     binding_origin: runmat_execution::FunctionBindingOrigin::from_revision(
                         &program.executable.program,
                         function.function,

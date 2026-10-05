@@ -27,6 +27,7 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
                 Value::BoundFunctionHandle {
                     name: "position".into(),
                     function: 821,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(821),
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                 },
@@ -103,6 +104,7 @@ fn handler_context_refers_to_the_original_column_major_element() {
                 Value::BoundFunctionHandle {
                     name: "position_handler".into(),
                     function: 822,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(822),
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                 },

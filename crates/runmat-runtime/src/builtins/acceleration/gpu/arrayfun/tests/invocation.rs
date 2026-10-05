@@ -112,7 +112,7 @@ fn arrayfun_error_handler_recovers() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let handler = Value::Closure(Closure {
         function_name: "arrayfun_error_handler_fixture".into(),
-        bound_function: Some(991),
+        binding: Some(runmat_value::BoundFunctionBinding::unavailable(991)),
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
         captures: vec![Value::Num(42.0)],

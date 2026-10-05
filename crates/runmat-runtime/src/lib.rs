@@ -729,11 +729,12 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
             }
         }
         Value::Closure(mut closure) => {
-            if closure.bound_function.is_none() {
+            if closure.binding.is_none() {
                 if let Some(function) =
                     crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
                 {
-                    closure.bound_function = Some(function);
+                    closure.binding =
+                        Some(crate::user_functions::bound_function_binding_for(function));
                     closure.source_file = crate::user_functions::source_file_for(function);
                     if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
                         closure.source_role = crate::user_functions::source_function_for(function)
@@ -1609,9 +1610,17 @@ async fn feval_builtin_in_runtime(
             )
             .await
         }
-        Value::BoundFunctionHandle { name, function, .. } => {
-            let request = crate::user_functions::CallableRequest::semantic(
-                function,
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            authority,
+            ..
+        } => {
+            let request = crate::user_functions::CallableRequest::bound(
+                runmat_value::BoundFunctionBinding {
+                    function,
+                    authority,
+                },
                 rest.clone(),
                 requested_outputs,
             )
@@ -1627,11 +1636,12 @@ async fn feval_builtin_in_runtime(
             ))
         }
         Value::Closure(c) => {
-            if let Some(function) = c.bound_function {
+            if let Some(binding) = c.binding {
+                let function = binding.function;
                 let mut args = c.captures.clone();
                 args.extend(rest);
-                let request = crate::user_functions::CallableRequest::semantic(
-                    function,
+                let request = crate::user_functions::CallableRequest::bound(
+                    binding,
                     args.clone(),
                     requested_outputs,
                 )
@@ -1860,6 +1870,10 @@ mod tests {
 
     #[test]
     fn feval_closure_uses_semantic_function_identity() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 42);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 42);
@@ -1870,7 +1884,7 @@ mod tests {
         )));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".into(),
-            bound_function: Some(42),
+            binding: Some(binding),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: Vec::new(),
@@ -1883,6 +1897,10 @@ mod tests {
 
     #[test]
     fn feval_semantic_function_handle_uses_semantic_identity() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 43);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 43);
@@ -1891,12 +1909,8 @@ mod tests {
                 Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
             },
         )));
-        let handle = Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 43,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        };
+        let handle =
+            crate::user_functions::test_support::exact_local_value("function_target", binding);
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
             .expect("semantic function handle feval succeeds");
@@ -1909,6 +1923,7 @@ mod tests {
         let handle = Value::BoundFunctionHandle {
             name: "function_target".into(),
             function: 9043,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(9043),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         };
@@ -1998,7 +2013,7 @@ mod tests {
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "resolved_target".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(9.0)],
@@ -2019,7 +2034,7 @@ mod tests {
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "sin".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: Vec::new(),
@@ -2214,6 +2229,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "resolved_target".into(),
                 function: 145,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(145),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -2334,6 +2350,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "resolved_target".into(),
                 function: 445,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(445),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -2403,6 +2420,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.resolved_target".into(),
                 function: 446,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(446),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             }
@@ -2636,6 +2654,7 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "local_fn".into(),
                     function: 44,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(44),
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                 }
@@ -2647,7 +2666,7 @@ mod tests {
             crate::builtins::introspection::function_handle_text::dispatch_func2str(
                 Value::Closure(runmat_value::Closure {
                     function_name: "captured_fn".into(),
-                    bound_function: None,
+                    binding: None,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                     captures: Vec::new(),
@@ -3037,7 +3056,7 @@ mod tests {
         ));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![
@@ -3071,7 +3090,7 @@ mod tests {
         ));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![
@@ -3101,7 +3120,7 @@ mod tests {
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![
@@ -3635,7 +3654,7 @@ mod tests {
                 .expect("handle target");
             let callback = Value::Closure(runmat_value::Closure {
                 function_name: "event_callback".into(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: vec![Value::Num(9.0)],
@@ -3650,7 +3669,7 @@ mod tests {
                 &callback,
                 Value::Closure(runmat_value::Closure {
                     function_name,
-                    bound_function: Some(65),
+                    binding: Some(runmat_value::BoundFunctionBinding::unavailable(65)),
                     source_role: _,
                     captures,
                     ..
@@ -3662,6 +3681,11 @@ mod tests {
     #[test]
     fn notify_semantic_function_handle_uses_semantic_identity() {
         listener_gc_test(|| {
+            let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+            let _entry = runtime.enter();
+            let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 44);
+            let _bound =
+                crate::user_functions::test_support::install_bound_forwarder(binding.clone());
             let calls = Arc::new(AtomicUsize::new(0));
             let seen_calls = Arc::clone(&calls);
             let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -3676,12 +3700,8 @@ mod tests {
             )));
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
-            let callback = Value::BoundFunctionHandle {
-                name: "event_callback".into(),
-                function: 44,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            };
+            let callback =
+                crate::user_functions::test_support::exact_local_value("event_callback", binding);
 
             block_on(addlistener_builtin(
                 target.clone(),
@@ -3740,6 +3760,10 @@ mod tests {
 
     #[test]
     fn feval_semantic_handle_honors_zero_requested_outputs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 46);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 46);
@@ -3749,12 +3773,8 @@ mod tests {
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(0));
-        let handle = Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 46,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        };
+        let handle =
+            crate::user_functions::test_support::exact_local_value("function_target", binding);
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(5.0)]))
             .expect("semantic function handle feval succeeds");
@@ -3763,6 +3783,10 @@ mod tests {
 
     #[test]
     fn feval_semantic_handle_honors_multi_requested_outputs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 47);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 47);
@@ -3778,12 +3802,8 @@ mod tests {
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(2));
-        let handle = Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 47,
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        };
+        let handle =
+            crate::user_functions::test_support::exact_local_value("function_target", binding);
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(6.0)]))
             .expect("semantic function handle feval succeeds");
@@ -3798,7 +3818,7 @@ mod tests {
         let _guard = crate::user_functions::clear_semantic_function_invoker();
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".into(),
-            bound_function: Some(9044),
+            binding: Some(runmat_value::BoundFunctionBinding::unavailable(9044)),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::Num(1.0)],

@@ -20,6 +20,61 @@ fn registry() -> FunctionRegistry {
 }
 
 #[test]
+fn retained_source_group_keeps_original_path_and_locals_after_id_reuse() {
+    let mut registry = registry();
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .source_role = runmat_types::FunctionSourceRole::Primary;
+    registry
+        .functions
+        .get_mut(&FunctionId(2))
+        .unwrap()
+        .source_role = runmat_types::FunctionSourceRole::Local;
+    for id in [FunctionId(1), FunctionId(2)] {
+        registry.functions.get_mut(&id).unwrap().source_file = Some("/old/first.m".into());
+    }
+    let owners = registry
+        .definition_dependency_owners(FunctionId(1))
+        .expect("same-source local owner graph");
+    let (root_id, root_owner) = &owners[0];
+    let root = runmat_value::FunctionDefinitionOwner::issue(root_owner, root_id.0);
+    let dependencies = owners
+        .iter()
+        .skip(1)
+        .map(|(id, owner)| runmat_value::FunctionDefinitionOwner::issue(owner, id.0))
+        .collect();
+    let authority = runmat_value::BoundFunctionAuthority::local(
+        std::sync::Weak::new(),
+        root,
+        dependencies,
+        runmat_value::LocalExport::Ephemeral,
+    );
+    registry.remove_source(SourceId(5));
+    registry.insert_replacing_name(function(1, "replacement", 7));
+    let old = registry
+        .owned_view(FunctionId(1), &authority)
+        .expect("retained old source view");
+    let group = old.execution_source_group_facts(SourceId(5));
+    assert_eq!(group.len(), 2);
+    assert_eq!(group[0].role, runmat_types::FunctionSourceRole::Primary);
+    assert_eq!(group[1].role, runmat_types::FunctionSourceRole::Local);
+    assert!(std::sync::Arc::ptr_eq(
+        group[0].definition_owners.as_ref().unwrap(),
+        group[1].definition_owners.as_ref().unwrap()
+    ));
+    assert!(group
+        .iter()
+        .all(|info| info.source_file.as_deref() == Some("/old/first.m")));
+    assert!(old.execution_source_fact(FunctionId(1)).is_some());
+    assert!(registry
+        .execution_source_group_facts(SourceId(5))
+        .is_empty());
+    assert_eq!(registry.resolve_name("replacement"), Some(FunctionId(1)));
+}
+
+#[test]
 fn execution_snapshot_clone_is_shared_until_publication_mutates() {
     let original = registry();
     let mut publication = original.clone();

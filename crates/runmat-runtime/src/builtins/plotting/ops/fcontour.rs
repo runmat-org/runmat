@@ -1151,6 +1151,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1207,6 +1208,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1236,6 +1238,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1266,6 +1269,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1360,6 +1364,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

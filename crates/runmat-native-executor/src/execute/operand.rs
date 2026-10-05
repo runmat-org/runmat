@@ -391,6 +391,9 @@ pub(super) fn evaluate_operand(
                         Value::BoundFunctionHandle {
                             name,
                             function: function.0 as usize,
+                            authority: runmat_runtime::user_functions::bound_function_authority_for(
+                                function.0 as usize,
+                            ),
                             source_role: target.source_role,
                             source_file: runmat_runtime::user_functions::source_file_for(
                                 function.0 as usize,

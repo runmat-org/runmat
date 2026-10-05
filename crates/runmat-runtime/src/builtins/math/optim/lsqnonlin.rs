@@ -980,6 +980,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "residual".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1014,6 +1015,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bounded".into(),
                 function: 2,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(2),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1051,6 +1053,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "empty_options".into(),
                 function: 22,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(22),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1081,6 +1084,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "partial_bounds".into(),
                 function: 23,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(23),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1117,6 +1121,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "multi".into(),
                 function: 3,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(3),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1176,6 +1181,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "problem".into(),
                 function: 4,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(4),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

@@ -278,6 +278,7 @@ fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 1,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(1),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -336,6 +337,7 @@ fn bayesopt_honors_x_constraint_function() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 1,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(1),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -347,6 +349,7 @@ fn bayesopt_honors_x_constraint_function() {
             Value::BoundFunctionHandle {
                 name: "constraint".into(),
                 function: 2,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(2),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -381,6 +384,7 @@ fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 3,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(3),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -432,6 +436,7 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 10,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(10),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
@@ -453,6 +458,7 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
             Value::BoundFunctionHandle {
                 name: "constraint".into(),
                 function: 11,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(11),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

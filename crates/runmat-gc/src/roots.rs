@@ -471,7 +471,7 @@ mod tests {
                 "closure".to_string(),
                 Value::Closure(Closure {
                     function_name: "f".into(),
-                    bound_function: None,
+                    binding: None,
                     source_role: Default::default(),
                     source_file: None,
                     captures: vec![listener],

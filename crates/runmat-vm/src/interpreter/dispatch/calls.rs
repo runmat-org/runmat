@@ -88,6 +88,7 @@ pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub identity: CallableIdentity,
+    pub bound: Option<runmat_value::BoundFunctionBinding>,
     pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
@@ -345,6 +346,7 @@ pub async fn handle_prepared_user_function_call(
         stack: _,
         runtime,
         identity,
+        bound,
         fallback_policy,
         out_count,
         source_id,
@@ -565,13 +567,17 @@ pub async fn handle_prepared_user_function_call(
         }
     }
 
-    let descriptor = CallableDescriptor::resolved(
-        identity,
-        args,
-        out_count,
-        fallback_policy,
-        CallableCallKind::Direct,
-    );
+    let descriptor = if let Some(binding) = bound {
+        CallableDescriptor::bound(binding, args, out_count, CallableCallKind::Direct)
+    } else {
+        CallableDescriptor::resolved(
+            identity,
+            args,
+            out_count,
+            fallback_policy,
+            CallableCallKind::Direct,
+        )
+    };
     let _access_guard = current_class_context
         .clone()
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
@@ -712,6 +718,7 @@ pub async fn handle_workspace_first_prepared_call(
             stack,
             runtime,
             identity,
+            bound: None,
             fallback_policy,
             out_count,
             source_id,

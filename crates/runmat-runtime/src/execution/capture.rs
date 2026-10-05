@@ -236,7 +236,7 @@ mod tests {
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "capture_target".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![Value::OutputList(Vec::new())],
@@ -262,7 +262,7 @@ mod tests {
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![gpu(&reject_provider().owner)],

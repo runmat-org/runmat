@@ -331,26 +331,20 @@ pub(crate) async fn invoke(
                 })
         })));
     let execution_registry = Arc::clone(&registry);
-    let execution_source =
-        user_functions::install_execution_source_resolver(Some(Rc::new(move |function| {
-            let body = execution_registry.get(runmat_hir::FunctionId(function))?;
-            let source_id = body.source_id?;
-            Some(user_functions::SourceFunctionInfo {
-                source_id,
-                name: body.display_name.clone(),
-                function,
-                role: body.source_role,
-                binding_origin: body.binding_origin,
-                definition_owners: execution_registry
-                    .definition_dependency_owners(body.function)
-                    .map(|owners| {
-                        owners
-                            .into_iter()
-                            .map(|(id, owner)| (id.0, owner))
-                            .collect()
-                    }),
-            })
-        })));
+    let execution_group_registry = Arc::clone(&registry);
+    let execution_owner_registry = Arc::clone(&registry);
+    let execution_source = user_functions::install_execution_source_resolver(Some(Rc::new(
+        user_functions::ExecutionSourceFacts::new(
+            Rc::new(move |function| {
+                execution_registry.execution_source_fact(runmat_hir::FunctionId(function))
+            }),
+            Rc::new(move |source| execution_group_registry.execution_source_group_facts(source)),
+            Rc::new(move |function| {
+                execution_owner_registry
+                    .execution_definition_owners(runmat_hir::FunctionId(function))
+            }),
+        ),
+    )));
     let mut source_functions = registry
         .functions
         .values()
@@ -363,6 +357,7 @@ pub(crate) async fn invoke(
                     function: function.function.0,
                     role: function.source_role,
                     binding_origin: function.binding_origin,
+                    source_file: function.source_file.clone(),
                     definition_owners: None,
                 })
         })

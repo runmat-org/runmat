@@ -23,6 +23,8 @@ use super::{
 
 #[path = "program/definition_dependencies.rs"]
 mod definition_dependencies;
+#[path = "program/source_facts.rs"]
+mod source_facts;
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -71,6 +73,10 @@ pub struct FunctionBytecode {
     pub private_owner_scope: String,
     #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
+    /// Original display file attached by the publishing source-map owner.
+    /// Retired callable values never reconstruct it from a reused SourceId.
+    #[serde(default)]
+    pub source_file: Option<String>,
     #[serde(default)]
     pub source_role: runmat_types::FunctionSourceRole,
     /// Compiler ordinal before Core assigns a session-local function ID.
@@ -130,6 +136,7 @@ impl Default for FunctionBytecode {
             class_method_owner: None,
             private_owner_scope: String::new(),
             source_id: None,
+            source_file: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             portable_function: runmat_types::ProgramFunctionId(0),
             binding_origin: None,
@@ -456,7 +463,60 @@ impl FunctionRegistry {
             std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
         )>,
     > {
+        if let Some(overlay) = &self.static_overlay {
+            let runmat_value::BoundFunctionAuthority::Local {
+                definition,
+                dependencies,
+                ..
+            } = &overlay.authority
+            else {
+                return None;
+            };
+            let selected = overlay.authority.local_lease(function.0)?;
+            let body = self.get_owned(function, selected)?;
+            let mut owners = vec![(function, std::sync::Arc::clone(&body.definition_owner))];
+            for lease in std::iter::once(definition).chain(dependencies.iter()) {
+                if lease.function() == function.0 {
+                    continue;
+                }
+                let id = FunctionId(lease.function());
+                let body = self.get_owned(id, lease)?;
+                owners.push((id, std::sync::Arc::clone(&body.definition_owner)));
+            }
+            return Some(owners);
+        }
         definition_dependencies::owners(self, function)
+    }
+
+    /// Enumerate only definitions selected by the current execution owner.
+    /// A retained overlay never falls back to later published source members.
+    pub fn execution_source_group(&self, source: runmat_hir::SourceId) -> Vec<&FunctionBytecode> {
+        let mut bodies = Vec::new();
+        if let Some(overlay) = &self.static_overlay {
+            if let runmat_value::BoundFunctionAuthority::Local {
+                definition,
+                dependencies,
+                ..
+            } = &overlay.authority
+            {
+                for lease in std::iter::once(definition).chain(dependencies.iter()) {
+                    if let Some(body) = self.get_owned(FunctionId(lease.function()), lease) {
+                        if body.source_id == Some(source) {
+                            bodies.push(body);
+                        }
+                    }
+                }
+            }
+        } else {
+            for id in self.functions_for_source(source) {
+                if let Some(body) = self.get_current(*id) {
+                    bodies.push(body);
+                }
+            }
+        }
+        bodies.sort_by_key(|body| body.function);
+        bodies.dedup_by_key(|body| body.function);
+        bodies
     }
 
     fn prune_retired(&mut self) {
@@ -1323,6 +1383,7 @@ mod function_registry_tests {
             class_method_owner: None,
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
+            source_file: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             portable_function: runmat_types::ProgramFunctionId(0),
             binding_origin: None,

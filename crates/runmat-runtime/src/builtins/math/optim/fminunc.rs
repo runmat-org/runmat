@@ -1361,6 +1361,7 @@ mod tests {
         Value::BoundFunctionHandle {
             name: format!("objective_{id}"),
             function: id,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(id),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }

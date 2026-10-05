@@ -167,7 +167,7 @@ mod tests {
             Value::FunctionHandle("sin".to_string()),
             Value::Closure(Closure {
                 function_name: "anon".into(),
-                bound_function: None,
+                binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
                 captures: Vec::new(),

@@ -1309,6 +1309,7 @@ pub async fn dispatch_instruction(
             stack.push(Value::BoundFunctionHandle {
                 name: name.clone(),
                 function: function.0,
+                authority: runmat_runtime::user_functions::bound_function_authority_for(function.0),
                 source_role: *source_role,
                 source_file: runmat_runtime::user_functions::source_file_for(function.0),
             });

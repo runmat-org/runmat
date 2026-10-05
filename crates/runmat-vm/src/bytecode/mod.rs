@@ -10,7 +10,7 @@ mod subscript;
 /// Portable schema for serialized [`Bytecode`] payloads.
 pub const BYTECODE_SCHEMA_VERSION: u16 = 12;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
-pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 7;
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 8;
 
 pub use artifact::{
     decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,

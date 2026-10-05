@@ -58,6 +58,7 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
             function: _,
             source_role,
             source_file,
+            ..
         } => {
             let kind = role_kind(source_role).unwrap_or(FunctionHandleKind::Unknown);
             let file = source_file.unwrap_or_default();
@@ -167,11 +168,13 @@ mod tests {
                 function: 1,
                 role: runmat_types::FunctionSourceRole::Anonymous,
                 binding_origin: None,
+                source_file: None,
+                definition_owners: None,
             }]),
         ));
         let value = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "@anon0".into(),
-            bound_function: Some(1),
+            binding: Some(runmat_value::BoundFunctionBinding::unavailable(1)),
             source_role: runmat_types::FunctionSourceRole::Anonymous,
             source_file: None,
             captures: Vec::new(),
@@ -204,6 +207,8 @@ mod tests {
                     function: 1,
                     role: runmat_types::FunctionSourceRole::Primary,
                     binding_origin: None,
+                    source_file: Some("/tmp/metadata_file.m".into()),
+                    definition_owners: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id,
@@ -211,6 +216,8 @@ mod tests {
                     function: 2,
                     role: runmat_types::FunctionSourceRole::Local,
                     binding_origin: None,
+                    source_file: Some("/tmp/metadata_file.m".into()),
+                    definition_owners: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id,
@@ -218,6 +225,8 @@ mod tests {
                     function: 3,
                     role: runmat_types::FunctionSourceRole::Unknown,
                     binding_origin: None,
+                    source_file: Some("/tmp/metadata_file.m".into()),
+                    definition_owners: None,
                 },
             ]),
         ));
@@ -243,6 +252,7 @@ mod tests {
             let value = dispatch_functions(Value::BoundFunctionHandle {
                 name: "legacy_role_missing".into(),
                 function: 3,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(3),
                 source_role: stored_role,
                 source_file: Some("/tmp/metadata_file.m".into()),
             })
@@ -259,7 +269,7 @@ mod tests {
     fn unbound_closure_uses_value_owned_role_without_name_heuristics() {
         let anonymous = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "plain_display_name".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Anonymous,
             source_file: None,
             captures: Vec::new(),
@@ -271,7 +281,7 @@ mod tests {
         );
         let unknown = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "@anon_display_is_not_authority".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: Vec::new(),
@@ -281,6 +291,7 @@ mod tests {
         let unknown_bound = dispatch_functions(Value::BoundFunctionHandle {
             name: "display_name".into(),
             function: usize::MAX,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(usize::MAX),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         })
@@ -308,6 +319,8 @@ mod tests {
                     function: 9,
                     role: runmat_types::FunctionSourceRole::Primary,
                     binding_origin: None,
+                    source_file: Some("/origin/origin.m".into()),
+                    definition_owners: None,
                 }]),
             ));
             crate::user_functions::bound_function_handle("origin".into(), 9)
@@ -326,6 +339,8 @@ mod tests {
                 function: 9,
                 role: runmat_types::FunctionSourceRole::Local,
                 binding_origin: None,
+                source_file: Some("/destination/unrelated.m".into()),
+                definition_owners: None,
             }]),
         ));
         let info = dispatch_functions(handle).expect("metadata reads original binding");

@@ -1028,23 +1028,9 @@ pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionR
         Value::MethodFunctionHandle(name) => {
             FunctionSurfaceFunctionRef::MethodFunctionHandle(name.clone())
         }
-        Value::BoundFunctionHandle {
-            name,
-            function,
-            source_role,
-            source_file,
-        } => FunctionSurfaceFunctionRef::BoundFunctionHandle {
-            name: name.clone(),
-            function: *function,
-            source_role: *source_role,
-            source_file: source_file.clone(),
-        },
-        Value::Closure(closure) => FunctionSurfaceFunctionRef::ClosureSummary {
-            function_name: closure.function_name.clone(),
-            bound_function: closure.bound_function,
-            source_role: closure.source_role,
-            source_file: closure.source_file.clone(),
-        },
+        Value::BoundFunctionHandle { .. } | Value::Closure(_) => {
+            FunctionSurfaceFunctionRef::OwnedCallable(function.clone())
+        }
         _ => FunctionSurfaceFunctionRef::FunctionHandle("<invalid>".into()),
     }
 }
@@ -1105,6 +1091,7 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "surface".into(),
             function: 1,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(1),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         };
@@ -1144,6 +1131,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1160,6 +1148,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1232,6 +1221,7 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "surface".into(),
             function: 1,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(1),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         };
@@ -1275,6 +1265,7 @@ mod tests {
             &Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1354,6 +1345,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1421,18 +1413,21 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "x".into(),
                 function: 11,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(11),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
             Value::BoundFunctionHandle {
                 name: "y".into(),
                 function: 12,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(12),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
             Value::BoundFunctionHandle {
                 name: "z".into(),
                 function: 13,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(13),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1475,6 +1470,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1504,6 +1500,7 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "surface".into(),
                 function: 1,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

@@ -1031,19 +1031,21 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
             Value::BoundFunctionHandle {
                 name: an,
                 function: af,
+                authority: aa,
                 source_role: ar,
                 source_file: ap,
             },
             Value::BoundFunctionHandle {
                 name: bn,
                 function: bf,
+                authority: ba,
                 source_role: br,
                 source_file: bp,
             },
-        ) => an == bn && af == bf && ar == br && ap == bp,
+        ) => an == bn && af == bf && aa == ba && ar == br && ap == bp,
         (Value::Closure(a), Value::Closure(b)) => {
             a.function_name == b.function_name
-                && a.bound_function == b.bound_function
+                && a.binding == b.binding
                 && a.source_role == b.source_role
                 && a.source_file == b.source_file
                 && values_equal_for_cache(&a.captures, &b.captures)
@@ -1180,7 +1182,7 @@ fn function_key(function: &Value) -> String {
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
-            closure.bound_function,
+            closure.bound_function(),
             values_fingerprint(&closure.captures)
         ),
         other => format!("other:{other:?}"),
@@ -1277,7 +1279,7 @@ fn value_fingerprint(value: &Value) -> String {
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
-            closure.bound_function,
+            closure.bound_function(),
             values_fingerprint(&closure.captures)
         ),
         other => format!("{other:?}"),
@@ -1384,6 +1386,7 @@ mod tests {
         block_on(memoize_builtin(Value::BoundFunctionHandle {
             name: "step".into(),
             function: 42,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(42),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -1424,6 +1427,7 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "step".into(),
             function: 42,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(42),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         };

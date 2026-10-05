@@ -63,6 +63,7 @@ impl CallableMetadata {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallableTarget {
+    Bound(runmat_value::BoundFunctionBinding),
     Resolved {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
@@ -79,6 +80,23 @@ pub struct CallableDescriptor {
 }
 
 impl CallableDescriptor {
+    pub fn bound(
+        binding: runmat_value::BoundFunctionBinding,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        call_kind: CallableCallKind,
+    ) -> Self {
+        Self {
+            target: CallableTarget::Bound(binding),
+            args,
+            requested_outputs,
+            metadata: CallableMetadata {
+                call_kind,
+                ..CallableMetadata::default()
+            },
+        }
+    }
+
     pub fn with_function_input_callsite(mut self, callsite: crate::callsite::CallsiteInfo) -> Self {
         self.metadata.function_input_callsite = Some(callsite);
         self
@@ -171,6 +189,20 @@ impl CallableDescriptor {
             requested_outputs,
             CallableMetadata::feval(Some(name)),
         )
+    }
+
+    fn feval_bound(
+        binding: runmat_value::BoundFunctionBinding,
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+    ) -> Self {
+        Self {
+            target: CallableTarget::Bound(binding),
+            args,
+            requested_outputs,
+            metadata: CallableMetadata::feval(Some(name)),
+        }
     }
 
     fn feval_resolved_name(
@@ -326,10 +358,17 @@ impl CallableDescriptor {
                 args,
                 requested_outputs,
             ),
-            Value::BoundFunctionHandle { name, function, .. } => Self::feval_semantic(
-                function,
+            Value::BoundFunctionHandle {
                 name,
-                CallableFallbackPolicy::None,
+                function,
+                authority,
+                ..
+            } => Self::feval_bound(
+                runmat_value::BoundFunctionBinding {
+                    function,
+                    authority,
+                },
+                name,
                 args,
                 requested_outputs,
             ),
@@ -346,14 +385,8 @@ impl CallableDescriptor {
         let name = closure.function_name;
         let mut call_args = closure.captures;
         call_args.extend(args);
-        if let Some(function) = closure.bound_function {
-            return Self::feval_semantic(
-                function,
-                name,
-                CallableFallbackPolicy::None,
-                call_args,
-                requested_outputs,
-            );
+        if let Some(binding) = closure.binding {
+            return Self::feval_bound(binding, name, call_args, requested_outputs);
         }
         if let Some(function) = function_resolver.resolve_function(&name) {
             return Self::feval_semantic(
@@ -714,6 +747,15 @@ async fn execute_callable_descriptor_with_runtime(
         metadata,
     } = descriptor;
     match target {
+        CallableTarget::Bound(binding) => {
+            let function = binding.function;
+            crate::callsite::with_function_input_callsite(
+                metadata.function_input_callsite.clone(),
+                crate::user_functions::try_call_bound_function(binding, &args, requested_outputs),
+            )
+            .await
+            .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
+        }
         CallableTarget::Resolved {
             identity,
             fallback_policy,
@@ -782,6 +824,16 @@ async fn try_execute_callable_descriptor_with_runtime(
         metadata,
     } = descriptor;
     match target {
+        CallableTarget::Bound(binding) => {
+            let function = binding.function;
+            crate::callsite::with_function_input_callsite(
+                metadata.function_input_callsite.clone(),
+                crate::user_functions::try_call_bound_function(binding, &args, requested_outputs),
+            )
+            .await
+            .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
+            .map(Some)
+        }
         CallableTarget::Resolved {
             identity,
             fallback_policy,

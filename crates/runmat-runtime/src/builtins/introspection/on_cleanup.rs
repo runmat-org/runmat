@@ -482,6 +482,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -504,6 +505,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -532,6 +534,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -569,6 +572,7 @@ mod tests {
         let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanup".into(),
             function: 7,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -591,6 +595,7 @@ mod tests {
         let cleanup_a = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanupA".into(),
             function: 7,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(7),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -598,6 +603,7 @@ mod tests {
         let cleanup_b = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanupB".into(),
             function: 8,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(8),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))
@@ -605,6 +611,7 @@ mod tests {
         let cleanup_c = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
             name: "cleanupC".into(),
             function: 9,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(9),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         }))

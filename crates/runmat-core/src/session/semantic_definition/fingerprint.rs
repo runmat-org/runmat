@@ -14,6 +14,9 @@ pub(crate) fn fingerprint(
         class_method_owner,
         private_owner_scope,
         source_id,
+        // Derived display provenance is assigned after unchanged-definition
+        // matching; source_id already carries the source-pool identity here.
+        source_file: _,
         source_role,
         portable_function: _,
         binding_origin: _,

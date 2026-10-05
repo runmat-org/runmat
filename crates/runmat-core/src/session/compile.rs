@@ -820,7 +820,7 @@ impl RunMatSession {
             crate::program_environment(self.compat_mode),
         );
         prepared
-            .attach_function_origins(&revision.program_revision)
+            .attach_function_origins(&revision.program_revision, &source_map)
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)

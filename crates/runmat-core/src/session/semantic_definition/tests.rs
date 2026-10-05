@@ -136,7 +136,7 @@ fn repeated_source_reuses_remapped_dotted_local_function_during_hot_native_execu
 #[test]
 fn unrelated_published_source_does_not_prevent_reuse() {
     let incoming = group(1);
-    let mut functions = group(100).functions;
+    let mut functions = group(100).into_functions();
     let mut unrelated = definition(200, "unrelated", 200);
     unrelated.source_id = Some(SourceId(6));
     functions.insert(FunctionId(200), unrelated);
@@ -169,6 +169,73 @@ fn source_identity_includes_text_name_and_path() {
         source,
         pool.intern_with_fullpath("unit", Some("/other/unit.m"), "f; g;")
     );
+}
+
+#[test]
+fn publishing_function_captures_original_fullpath_before_source_retirement() {
+    let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+    session.active_source_name = "old_file".into();
+    session.active_source_fullpath_name = Some("/old/old_file.m".into());
+    let text = "function y = old_file(x)\ny = x + 1;\nend";
+    let mut prepared = session
+        .compile_input(text)
+        .expect("compile original source");
+    let source = crate::ExecutableSource::new("test:old_file", "old_file", text);
+    let revision = crate::ExecutableRevision::derive(
+        &source,
+        None,
+        crate::program_environment(session.compat_mode),
+    );
+    let source_map = session.executable_source_map(&source);
+    prepared
+        .attach_function_origins(&revision.program_revision, &source_map)
+        .expect("publish source facts");
+    let id = *prepared
+        .current_function_ids
+        .iter()
+        .next()
+        .expect("function");
+    let published = prepared
+        .function_registry_after_success
+        .get(id)
+        .expect("published body");
+    assert_eq!(published.source_file.as_deref(), Some("/old/old_file.m"));
+    let lease = runmat_value::FunctionDefinitionOwner::issue(&published.definition_owner, id.0);
+    let source_id = published.source_id.expect("source");
+    let mut current = prepared.function_registry_after_success;
+    current.remove_source(source_id);
+    let retained = current
+        .get_owned(id, &lease)
+        .expect("retired body retained");
+    assert_eq!(retained.source_file.as_deref(), Some("/old/old_file.m"));
+}
+
+#[test]
+fn function_file_localfunctions_excludes_primary_at_public_call_boundary() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let source = "function handles = primary_file()\nhandles = localfunctions();\nend\nfunction y = child_local(x)\ny = x + 1;\nend";
+        let defined = crate::execute_text_request_for_testing(&mut session, source).unwrap();
+        assert!(defined.error.is_none(), "{:?}", defined.error);
+        let called = crate::execute_text_request_for_testing(
+            &mut session,
+            "selected_handles = primary_file();",
+        )
+        .unwrap();
+        assert!(called.error.is_none(), "{:?}", called.error);
+        let Some(runmat_value::Value::Cell(handles)) =
+            session.get_variables().get("selected_handles")
+        else {
+            panic!("localfunctions must return a cell");
+        };
+        assert_eq!(handles.data.len(), 1);
+        assert!(matches!(
+            &handles.data[0],
+            runmat_value::Value::BoundFunctionHandle { name, source_role, .. }
+                if name == "child_local"
+                    && *source_role == runmat_types::FunctionSourceRole::Local
+        ));
+    });
 }
 
 #[test]
@@ -209,5 +276,74 @@ fn repeated_captured_definition_survives_workspace_growth() {
             );
         }
         execute(&mut session, "assert(saved(2) == 3);");
+    });
+}
+
+#[test]
+fn retained_handle_keeps_old_definition_after_name_republication() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let execute = |session: &mut crate::RunMatSession, source: &str| {
+            let outcome = crate::execute_text_request_for_testing(session, source).unwrap();
+            assert!(outcome.error.is_none(), "{source}: {:?}", outcome.error);
+        };
+        execute(&mut session, "function y = retained_f(x)\ny = x + 1;\nend");
+        execute(&mut session, "old = @retained_f;");
+        execute(
+            &mut session,
+            "function y = retained_f(x)\ny = x + 100;\nend",
+        );
+        execute(&mut session, "new = @retained_f;");
+        execute(&mut session, "assert(old(2) == 3); assert(new(2) == 102);");
+    });
+}
+
+#[test]
+fn retained_static_helper_does_not_shadow_latest_dynamic_name() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let execute = |session: &mut crate::RunMatSession, source: &str| {
+            let outcome = crate::execute_text_request_for_testing(session, source).unwrap();
+            assert!(outcome.error.is_none(), "{source}: {:?}", outcome.error);
+        };
+        execute(
+            &mut session,
+            "function y = retained_mix(x)\ny = retained_helper(x) + feval('retained_helper', x);\nend\nfunction y = retained_helper(x)\ny = x + 1;\nend",
+        );
+        execute(&mut session, "old_mix = @retained_mix;");
+        execute(
+            &mut session,
+            "function y = retained_mix(x)\ny = retained_helper(x) + feval('retained_helper', x);\nend\nfunction y = retained_helper(x)\ny = x + 100;\nend",
+        );
+        execute(&mut session, "new_mix = @retained_mix;");
+        execute(
+            &mut session,
+            "assert(old_mix(2) == 105); assert(new_mix(2) == 204);",
+        );
+    });
+}
+
+#[test]
+fn retained_body_creates_handle_for_its_old_helper_after_republication() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let execute = |session: &mut crate::RunMatSession, source: &str| {
+            let outcome = crate::execute_text_request_for_testing(session, source).unwrap();
+            assert!(outcome.error.is_none(), "{source}: {:?}", outcome.error);
+        };
+        execute(
+            &mut session,
+            "function h = handle_factory()\nh = @retained_helper;\nend\nfunction y = retained_helper(x)\ny = x + 1;\nend",
+        );
+        execute(&mut session, "old_factory = @handle_factory;");
+        execute(
+            &mut session,
+            "function h = handle_factory()\nh = @retained_helper;\nend\nfunction y = retained_helper(x)\ny = x + 100;\nend",
+        );
+        execute(&mut session, "new_factory = @handle_factory;");
+        execute(
+            &mut session,
+            "old_helper = old_factory(); new_helper = new_factory(); assert(old_helper(2) == 3); assert(new_helper(2) == 102);",
+        );
     });
 }

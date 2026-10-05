@@ -28,7 +28,7 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
         ),
         Value::Closure(Closure {
             function_name: "captured".into(),
-            bound_function: None,
+            binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
             captures: vec![resident.clone()],

@@ -132,6 +132,7 @@ mod tests {
         .map(|(name, function)| Value::BoundFunctionHandle {
             name: name.into(),
             function,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(function),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         })
