@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -7,7 +8,10 @@ use std::sync::Arc;
 /// Metadata captured by the allocator that created an adoptable host block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostAllocationProvenance {
-    pub allocator: String,
+    /// Static allocator identities do not need a second heap allocation when
+    /// adopting a producer-owned block. Dynamic external identities remain
+    /// representable as owned text.
+    pub allocator: Cow<'static, str>,
     pub byte_length: usize,
     pub capacity_bytes: usize,
     pub alignment: usize,
@@ -272,6 +276,10 @@ mod tests {
                 }),
             )
         };
+        assert!(matches!(
+            &allocation.provenance().allocator,
+            Cow::Borrowed("test")
+        ));
         let data = HostData::<f64>::try_adopt(allocation, 2).unwrap();
         assert_eq!(data.as_ptr().cast::<u8>(), pointer.as_ptr());
         assert_eq!(data.as_slice(), &[3.0, 4.0]);
