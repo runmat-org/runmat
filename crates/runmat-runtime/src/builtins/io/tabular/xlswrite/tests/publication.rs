@@ -48,6 +48,10 @@ impl FsStagedOutput for PublicationStage {
 
 #[async_trait(?Send)]
 impl FsProvider for PublicationProvider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.memory.path_namespace()
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         self.memory.current_dir_override()
     }

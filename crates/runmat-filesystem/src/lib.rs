@@ -410,8 +410,9 @@ pub trait FsProvider: Send + Sync + 'static {
     }
 
     /// Acquire an exclusive provider-owned staging object for one already
-    /// resolved absolute destination. The returned owner must abort on Drop,
-    /// including when a write, flush, or publication future is abandoned.
+    /// resolved absolute destination. The returned owner must abort private
+    /// staging on Drop before commit dispatch. Dropping an in-flight remote
+    /// publication may leave its commit outcome indeterminate.
     /// `None` means this provider cannot supply that guarantee; callers must
     /// not reconstruct it from a public temporary path and `remove_file`.
     fn begin_staged_replace(
