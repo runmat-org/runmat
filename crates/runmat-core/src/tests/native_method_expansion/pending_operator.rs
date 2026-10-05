@@ -57,6 +57,10 @@ fn with_operator(test: impl FnOnce(&mut RunMatSession, &crate::ExecutableUnit, A
         let directory = tempfile::TempDir::new().expect("operator class directory");
         std::fs::write(directory.path().join("PendingOperator.m"), CLASS)
             .expect("write operator class");
+        // Companion class discovery is tied to a real primary source path.
+        // The compiled in-memory source must also exist beside its class file.
+        std::fs::write(directory.path().join("pendingOperator.m"), SOURCE)
+            .expect("write operator source");
         let _cwd = super::super::push_cwd(directory.path());
         let mut session = RunMatSession::with_options(false, false).expect("operator session");
         let unit = block_on(session.compile_executable_unit(
