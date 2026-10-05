@@ -27,7 +27,7 @@ impl LazyNativeTcpService {
     ) -> RuntimeServiceFuture<Result<T, TcpTransportError>> {
         let service = Rc::clone(&self.service);
         Box::pin(async move {
-            let native = service.get_or_try_init(|| {
+            if service.get().is_none() {
                 let driver = super::host_driver::host_driver().map_err(|source| {
                     TcpTransportError::with_source(
                         TcpTransportErrorKind::Unsupported,
@@ -35,8 +35,14 @@ impl LazyNativeTcpService {
                         source,
                     )
                 })?;
-                Ok::<_, TcpTransportError>(NativeTcpService::new(driver.handle().clone()))
-            })?;
+                // One local Rc owner; there is no await or callback between
+                // this check and publication. Failed driver construction is
+                // returned and remains retryable, never cached as a dummy.
+                let _ = service.set(NativeTcpService::new(driver.handle().clone()));
+            }
+            let native = service
+                .get()
+                .expect("TCP service initialized on this local owner");
             call(native).await
         })
     }
