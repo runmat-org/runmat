@@ -71,6 +71,8 @@ impl RunMatSession {
                 .with_user_path(settings)
         };
         #[cfg(not(target_arch = "wasm32"))]
+        let runtime_services = runtime_services.with_tcp(super::tcp_host::default_tcp_service());
+        #[cfg(not(target_arch = "wasm32"))]
         let (
             runtime_services,
             foreign_runtime,

@@ -59,6 +59,8 @@ mod host_driver;
 mod http_host;
 #[cfg(not(target_arch = "wasm32"))]
 mod process_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod tcp_host;
 mod init;
 mod project;
 mod run;
