@@ -41,8 +41,10 @@ fn pending_budget(source: &CancellationSource, dropped: Rc<Cell<bool>>) -> CpuCo
     )
 }
 
-fn table(text: &str) -> XlsTable {
-    futures::executor::block_on(XlsTable::from_value(Value::from(text))).expect("table")
+async fn table(text: &str) -> XlsTable {
+    XlsTable::from_value(Value::from(text))
+        .await
+        .expect("table")
 }
 
 async fn seed_workbook(workbook: &mut XlsWorkbook, selected: &TabularFsPath) -> BuiltinResult<()> {
@@ -50,7 +52,7 @@ async fn seed_workbook(workbook: &mut XlsWorkbook, selected: &TabularFsPath) -> 
     workbook
         .overlay(
             &XlsWriteRequest::default(),
-            table("old"),
+            table("old").await,
             &mut cooperation,
             selected,
         )
@@ -65,7 +67,7 @@ async fn recovered_workbook(
     workbook
         .overlay(
             &XlsWriteRequest::default(),
-            table("recovered"),
+            table("recovered").await,
             &mut cooperation,
             selected,
         )
@@ -100,7 +102,8 @@ fn dropped_pending_resize_keeps_retained_workbook_valid() {
         sheet: SheetSelector::Default,
         range: RangeStart { row: 1, col: 1 },
     };
-    let mut call = Box::pin(workbook.overlay(&request, table("new"), &mut cooperation, &selected));
+    let incoming = futures::executor::block_on(table("new"));
+    let mut call = Box::pin(workbook.overlay(&request, incoming, &mut cooperation, &selected));
     assert!(matches!(
         call.as_mut()
             .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
@@ -135,7 +138,8 @@ fn cancelled_resize_keeps_retained_workbook_valid() {
         sheet: SheetSelector::Default,
         range: RangeStart { row: 1, col: 1 },
     };
-    let mut call = Box::pin(workbook.overlay(&request, table("new"), &mut cooperation, &selected));
+    let incoming = futures::executor::block_on(table("new"));
+    let mut call = Box::pin(workbook.overlay(&request, incoming, &mut cooperation, &selected));
     assert!(matches!(
         call.as_mut()
             .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
@@ -175,9 +179,10 @@ fn revoked_lease_error_keeps_retained_workbook_valid() {
         range: RangeStart { row: 1, col: 1 },
     };
     let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let incoming = futures::executor::block_on(table("new"));
     let error = futures::executor::block_on(workbook.overlay(
         &request,
-        table("new"),
+        incoming,
         &mut cooperation,
         &selected,
     ))
