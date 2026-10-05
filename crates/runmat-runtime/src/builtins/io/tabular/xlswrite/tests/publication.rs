@@ -2,29 +2,75 @@
 
 use super::*;
 use async_trait::async_trait;
+use runmat_execution::cancellation::{CancellationReason, CancellationSource};
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, FsPublicationDisposition, FsPublicationFailure,
     FsStagedOutput, MemoryFsProvider, OpenFlags,
 };
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
+
+use crate::context::RuntimeContext;
+use crate::execution::RuntimeExecutionService;
+
+#[derive(Default)]
+struct LifecycleEvidence {
+    begins: AtomicUsize,
+    writes: AtomicUsize,
+    publish_polls: AtomicUsize,
+    retired_stages: AtomicUsize,
+}
+
+#[derive(Clone)]
+enum LifecycleBehavior {
+    Pending(Arc<LifecycleEvidence>),
+    ReadyCancel(CancellationSource, Arc<LifecycleEvidence>),
+}
+
+impl LifecycleBehavior {
+    fn evidence(&self) -> &Arc<LifecycleEvidence> {
+        match self {
+            Self::Pending(evidence) | Self::ReadyCancel(_, evidence) => evidence,
+        }
+    }
+}
 
 struct PublicationProvider {
     memory: MemoryFsProvider,
     disposition: FsPublicationDisposition,
+    lifecycle: Option<LifecycleBehavior>,
 }
 
 struct PublicationStage {
     memory: MemoryFsProvider,
     destination: PathBuf,
     disposition: FsPublicationDisposition,
+    lifecycle: Option<LifecycleBehavior>,
     bytes: Vec<u8>,
+}
+
+impl Drop for PublicationStage {
+    fn drop(&mut self) {
+        if let Some(lifecycle) = &self.lifecycle {
+            lifecycle
+                .evidence()
+                .retired_stages
+                .fetch_add(1, Ordering::SeqCst);
+        }
+    }
 }
 
 #[async_trait(?Send)]
 impl FsStagedOutput for PublicationStage {
     async fn write_chunk(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(lifecycle) = &self.lifecycle {
+            lifecycle.evidence().writes.fetch_add(1, Ordering::SeqCst);
+        }
         self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
     }
@@ -34,6 +80,25 @@ impl FsStagedOutput for PublicationStage {
     }
 
     async fn publish(self: Box<Self>) -> Result<(), FsPublicationFailure> {
+        if let Some(lifecycle) = &self.lifecycle {
+            lifecycle
+                .evidence()
+                .publish_polls
+                .fetch_add(1, Ordering::SeqCst);
+            match lifecycle {
+                LifecycleBehavior::Pending(_) => {
+                    futures::future::pending::<()>().await;
+                    unreachable!("pending publication fixture")
+                }
+                LifecycleBehavior::ReadyCancel(source, _) => {
+                    self.memory
+                        .write_project_path(&self.destination, &self.bytes)
+                        .map_err(FsPublicationFailure::not_published)?;
+                    source.cancel(CancellationReason::User);
+                    return Ok(());
+                }
+            }
+        }
         if self.disposition != FsPublicationDisposition::NotPublished {
             self.memory
                 .write_project_path(&self.destination, &self.bytes)
@@ -60,10 +125,14 @@ impl FsProvider for PublicationProvider {
         &self,
         destination: &Path,
     ) -> io::Result<Option<Box<dyn FsStagedOutput>>> {
+        if let Some(lifecycle) = &self.lifecycle {
+            lifecycle.evidence().begins.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(Some(Box::new(PublicationStage {
             memory: self.memory.clone(),
             destination: destination.to_path_buf(),
             disposition: self.disposition,
+            lifecycle: self.lifecycle.clone(),
             bytes: Vec::new(),
         })))
     }
@@ -125,6 +194,7 @@ fn public_call(
     let provider = Arc::new(PublicationProvider {
         memory: memory.clone(),
         disposition,
+        lifecycle: None,
     });
     let _restore = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir(fixture_root()).expect("fixture cwd");
@@ -135,6 +205,183 @@ fn public_call(
         Vec::new(),
     ));
     (result, memory)
+}
+
+fn with_lifecycle(
+    lifecycle: LifecycleBehavior,
+    output_count: usize,
+    test: impl FnOnce(MemoryFsProvider, Arc<LifecycleEvidence>),
+) {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let memory = MemoryFsProvider::with_current_dir(fixture_root());
+    block_on(memory.create_dir_all(Path::new(fixture_root()))).expect("fixture directory");
+    let evidence = lifecycle.evidence().clone();
+    let provider = Arc::new(PublicationProvider {
+        memory: memory.clone(),
+        disposition: FsPublicationDisposition::NotPublished,
+        lifecycle: Some(lifecycle),
+    });
+    let _restore = runmat_filesystem::replace_provider(provider);
+    runmat_filesystem::set_current_dir(fixture_root()).expect("fixture cwd");
+    let _outputs = crate::output_count::push_output_count(Some(output_count));
+    test(memory, evidence);
+}
+
+fn destination_exists(memory: &MemoryFsProvider) -> bool {
+    memory
+        .read_project_path(Path::new(fixture_root()).join("out.xlsx"))
+        .is_ok()
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn public_call_drop_during_pending_publish_retires_stage_without_replay() {
+    let evidence = Arc::new(LifecycleEvidence::default());
+    with_lifecycle(
+        LifecycleBehavior::Pending(evidence),
+        1,
+        |memory, evidence| {
+            let mut call = Box::pin(xlswrite_call(
+                Value::from("out.xlsx"),
+                Value::Num(7.0),
+                Vec::new(),
+            ));
+            let waker = futures::task::noop_waker();
+            for _ in 0..8 {
+                assert!(matches!(
+                    call.as_mut().poll(&mut Context::from_waker(&waker)),
+                    Poll::Pending
+                ));
+                if evidence.publish_polls.load(Ordering::SeqCst) == 1 {
+                    break;
+                }
+            }
+            assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
+            assert!(evidence.writes.load(Ordering::SeqCst) > 0);
+            assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
+            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 0);
+            drop(call);
+            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 1);
+            assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
+            assert!(!destination_exists(&memory));
+        },
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn public_call_cancel_during_pending_publish_is_indeterminate_not_false() {
+    let evidence = Arc::new(LifecycleEvidence::default());
+    let source = CancellationSource::new();
+    with_lifecycle(
+        LifecycleBehavior::Pending(evidence),
+        2,
+        |memory, evidence| {
+            let runtime = RuntimeContext::with_cancellation(
+                Rc::new(RuntimeExecutionService::new()),
+                source.token(),
+            );
+            let mut call = Box::pin(xlswrite_builtin(
+                Some(runtime),
+                Value::from("out.xlsx"),
+                Value::Num(7.0),
+                Vec::new(),
+            ));
+            let waker = futures::task::noop_waker();
+            for _ in 0..8 {
+                assert!(matches!(
+                    call.as_mut().poll(&mut Context::from_waker(&waker)),
+                    Poll::Pending
+                ));
+                if evidence.publish_polls.load(Ordering::SeqCst) == 1 {
+                    break;
+                }
+            }
+            assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
+            source.cancel(CancellationReason::User);
+            let result = (0..8)
+                .find_map(
+                    |_| match call.as_mut().poll(&mut Context::from_waker(&waker)) {
+                        Poll::Ready(result) => Some(result),
+                        Poll::Pending => None,
+                    },
+                )
+                .expect("cancellation must wake the pending public call");
+            let error = result.expect_err("uncertain publication cannot become false status");
+            assert_eq!(
+                write_owner::publication_error_disposition(&error),
+                Some(FsPublicationDisposition::Indeterminate)
+            );
+            assert!(is_cancelled(&error));
+            assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
+            assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
+            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 1);
+            assert!(!destination_exists(&memory));
+        },
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn public_call_ready_publish_then_cancel_keeps_published_disposition() {
+    let evidence = Arc::new(LifecycleEvidence::default());
+    let source = CancellationSource::new();
+    with_lifecycle(
+        LifecycleBehavior::ReadyCancel(source.clone(), evidence),
+        1,
+        |memory, evidence| {
+            let runtime = RuntimeContext::with_cancellation(
+                Rc::new(RuntimeExecutionService::new()),
+                source.token(),
+            );
+            let error = block_on(xlswrite_builtin(
+                Some(runtime),
+                Value::from("out.xlsx"),
+                Value::Num(7.0),
+                Vec::new(),
+            ))
+            .expect_err("completed publication with cancellation is not false status");
+            assert_eq!(
+                write_owner::publication_error_disposition(&error),
+                Some(FsPublicationDisposition::Published)
+            );
+            assert!(destination_exists(&memory));
+            assert_eq!(evidence.begins.load(Ordering::SeqCst), 1);
+            assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 1);
+            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 1);
+        },
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn public_call_precancelled_before_first_poll_has_no_provider_effect() {
+    let evidence = Arc::new(LifecycleEvidence::default());
+    let source = CancellationSource::new();
+    with_lifecycle(
+        LifecycleBehavior::Pending(evidence),
+        2,
+        |memory, evidence| {
+            let runtime = RuntimeContext::with_cancellation(
+                Rc::new(RuntimeExecutionService::new()),
+                source.token(),
+            );
+            let call = xlswrite_builtin(
+                Some(runtime),
+                Value::from("out.xlsx"),
+                Value::Num(7.0),
+                Vec::new(),
+            );
+            source.cancel(CancellationReason::User);
+            let error = block_on(call).expect_err("pre-cancelled public call must not publish");
+            assert!(is_cancelled(&error));
+            assert_eq!(evidence.begins.load(Ordering::SeqCst), 0);
+            assert_eq!(evidence.writes.load(Ordering::SeqCst), 0);
+            assert_eq!(evidence.publish_polls.load(Ordering::SeqCst), 0);
+            assert_eq!(evidence.retired_stages.load(Ordering::SeqCst), 0);
+            assert!(!destination_exists(&memory));
+        },
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
