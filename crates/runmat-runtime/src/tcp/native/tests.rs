@@ -173,7 +173,7 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     .expect("connect");
     let accepted = futures::executor::block_on(service.accept(
         RuntimeTcpIssuer::Process,
-        server.authority,
+        server.authority.clone(),
         Some(Duration::from_secs(2)),
     ))
     .expect("accept");
@@ -190,7 +190,7 @@ fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
     assert_eq!(
         futures::executor::block_on(service.write(
             RuntimeTcpIssuer::Process,
-            client.authority,
+            client.authority.clone(),
             payload.clone(),
         ))
         .expect("write"),
@@ -253,7 +253,7 @@ fn status_observes_peer_eof_without_consuming_socket_bytes() {
     .expect("connect");
     let accepted = futures::executor::block_on(service.accept(
         RuntimeTcpIssuer::Process,
-        server.authority,
+        server.authority.clone(),
         None,
     ))
     .expect("accept");
