@@ -34,7 +34,7 @@ fn selected_geometry(
     ))
 }
 
-pub(super) async fn fill_utf8(
+pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     source: &mut FsBoundedInput,
     geometry: &BoundedScanGeometry,
     cooperation: &mut TabularCooperation<'_>,
