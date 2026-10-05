@@ -42,7 +42,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     source: &mut FsBoundedInput,
     geometry: &BoundedScanGeometry,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     options: &ReadMatrixOptions,
     staged_line: Option<ExactHostEffectBytes>,
     mut staged_field: Option<ExactHostEffectBytes>,

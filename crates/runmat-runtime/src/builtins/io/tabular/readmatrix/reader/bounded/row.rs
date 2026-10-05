@@ -117,7 +117,7 @@ impl<'a> RowReader<'a> {
     pub(super) async fn next(
         &mut self,
         cooperation: &mut TabularCooperation<'_>,
-        path: &TabularFsPath,
+        path: &impl TabularReadPath,
         header_lines: usize,
     ) -> BuiltinResult<Option<usize>> {
         loop {

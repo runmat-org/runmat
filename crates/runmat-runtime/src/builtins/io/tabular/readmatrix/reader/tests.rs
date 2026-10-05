@@ -482,7 +482,7 @@ fn retained_seekable_utf8_scan_preserves_bom_range_and_exact_wide_integer() {
         .path(file.clone())
         .expect("selected native source");
     let mut options = ReadMatrixOptions {
-        encoding: "utf-8".to_string(),
+        encoding: "utf-8".into(),
         num_header_lines: 1,
         delimiter: Some(Delimiter::Char(',')),
         ..ReadMatrixOptions::default()

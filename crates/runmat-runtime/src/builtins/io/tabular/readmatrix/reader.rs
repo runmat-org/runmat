@@ -1,4 +1,14 @@
+#[cfg(test)]
+use super::super::path::TabularFsPath;
+use super::admission;
 use super::*;
+use crate::context::host_effect::{
+    select_host_effect_after_stage, HostEffectFinalFacts, HostEffectLiveAllocationKind,
+    HostEffectStagePermit,
+};
+use bounded::matrix_overflow;
+use runmat_builtins::{ReadMatrixResultClass, ReadMatrixTextResourceFacts};
+use runmat_execution::WholeWorkObservationOutcome;
 use std::borrow::Cow;
 
 mod scan;
@@ -9,10 +19,130 @@ use scan::{checked_row_work, collect_data_lines, detect_delimiter, split_fields}
 // the decision to yield and the cancellation policy.
 const ROW_WORK_CHUNK: usize = 4 * 1024;
 
+pub(super) async fn read_default_staged(
+    runtime: &crate::context::RuntimeContext,
+    cooperation: &mut TabularCooperation<'_>,
+    path: &impl TabularReadPath,
+    filesystem: &std::sync::Arc<dyn runmat_filesystem::FsProvider>,
+    stage: HostEffectStagePermit,
+) -> BuiltinResult<Value> {
+    let mut source = await_io(Some(runtime), BUILTIN_NAME, path.open_bounded_input())
+        .await?
+        .map_err(|source| {
+            readmatrix_error_with_source(
+                &READMATRIX_ERROR_IO_OPEN,
+                "readmatrix: unable to open admitted bounded source",
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_IO_OPEN,
+                "readmatrix: selected source has no bounded input contract",
+            )
+        })?;
+    cooperation.completed(0).await?;
+    stage.checkpoint()?;
+    let extent = source.opened_extent();
+    if extent > MAX_READMATRIX_TEXT_BYTES {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_IO_READ,
+            format!("readmatrix: file exceeds maximum supported text size of {MAX_READMATRIX_TEXT_BYTES} bytes"),
+        ));
+    }
+    // These three live owners can overlap during the scan: one complete
+    // source line, the first 32 sampled lines, and one quoted-field scratch.
+    // Each holds at most bytes from this opened extent. The sample owner is
+    // dropped before replay; replay needs only line and field scratch.
+    let scan_buffers = extent.checked_mul(3).ok_or_else(matrix_overflow)?;
+    let promoted = stage
+        .reserved_bytes()
+        .checked_add(scan_buffers)
+        .ok_or_else(matrix_overflow)?;
+    stage
+        .promote_scan_envelope(promoted)
+        .map_err(|source| admission::allocation_error(BUILTIN_NAME, source))?;
+    let capacity = usize::try_from(extent).map_err(|_| matrix_overflow())?;
+    let workspace = || {
+        stage
+            .allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, capacity)
+            .map_err(|source| admission::allocation_error(BUILTIN_NAME, source))
+    };
+    let options = ReadMatrixOptions::default();
+    let geometry = bounded::scan_utf8(
+        &mut source,
+        cooperation,
+        path,
+        &options,
+        Some(workspace()?),
+        Some(workspace()?),
+        Some(workspace()?),
+    )
+    .await?;
+    let fill_line = workspace()?;
+    let fill_field = workspace()?;
+    let facts = ReadMatrixTextResourceFacts {
+        opened_extent: extent,
+        source_resource_revision: *source.resource_revision().bytes(),
+        rows: u64::try_from(geometry.rows).map_err(|_| matrix_overflow())?,
+        columns: u64::try_from(geometry.columns).map_err(|_| matrix_overflow())?,
+        result_class: ReadMatrixResultClass::Numeric(runmat_types::NumericClass::Double),
+    };
+    let receipt = select_host_effect_after_stage(
+        runtime,
+        admission::request(
+            path.path(),
+            filesystem,
+            admission::controls_digest(&options).expect("default controls are complete"),
+            admission::digest_serializable(&facts),
+        ),
+        HostEffectFinalFacts::ReadMatrixText(&facts),
+        stage,
+    )?;
+    let result = async {
+        let output_permit = receipt.output_allocation_permit().ok_or_else(|| {
+            readmatrix_error_with(
+                &READMATRIX_ERROR_TENSOR_BUILD,
+                "readmatrix: selected output has no exact allocation authority",
+            )
+        })?;
+        let tensor = bounded::fill_utf8(
+            &mut source,
+            &geometry,
+            cooperation,
+            path,
+            &options,
+            Some(fill_line),
+            Some(fill_field),
+            Some(output_permit.as_ref()),
+        )
+        .await?;
+        cooperation.completed(0).await?;
+        path.check().map_err(|source| {
+            readmatrix_error_with_source(
+                &READMATRIX_ERROR_IO_READ,
+                "readmatrix: captured filesystem authority was revoked",
+                source,
+            )
+        })?;
+        receipt.checkpoint()?;
+        Ok(Value::Tensor(tensor))
+    }
+    .await;
+    receipt.finish(if runtime.is_cancelled() {
+        WholeWorkObservationOutcome::Cancelled
+    } else if result.is_ok() {
+        WholeWorkObservationOutcome::Success
+    } else {
+        WholeWorkObservationOutcome::OperationalFailure
+    });
+    result
+}
+
 pub(super) async fn read_numeric_matrix(
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     options: &ReadMatrixOptions,
 ) -> BuiltinResult<Tensor> {
     let file = await_io(runtime, BUILTIN_NAME, path.open_read_preferred())
@@ -68,7 +198,7 @@ pub(super) async fn read_numeric_matrix(
 
 async fn read_numeric_matrix_from_bytes(
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     options: &ReadMatrixOptions,
     file: TabularReadSource,
 ) -> BuiltinResult<Tensor> {
@@ -209,7 +339,7 @@ async fn read_numeric_matrix_from_bytes(
 
 async fn read_file_bytes(
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     file: TabularReadSource,
 ) -> BuiltinResult<Vec<u8>> {
     path.check().map_err(|source| {

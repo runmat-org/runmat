@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(super) struct RangeSpec {
     pub(super) start_row: usize,
     pub(super) start_col: usize,

@@ -34,9 +34,7 @@ impl HostEffectFinalFacts<'_> {
             Self::AudioDecode(facts) => {
                 Digest::sha256(serde_json::to_vec(facts).expect("typed WAVE facts serialize"))
             }
-            Self::ReadMatrixText(facts) => Digest::sha256(
-                serde_json::to_vec(facts).expect("typed numeric-text facts serialize"),
-            ),
+            Self::ReadMatrixText(facts) => super::hash_serializable(facts),
             #[cfg(test)]
             Self::TestOnly(digest) => digest,
         }

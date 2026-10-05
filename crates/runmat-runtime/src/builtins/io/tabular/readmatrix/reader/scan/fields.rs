@@ -33,7 +33,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn split_fields<'
     line: &'a str,
     delimiter: &Delimiter,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
 ) -> BuiltinResult<Vec<Cow<'a, str>>> {
     let mut fields = Vec::new();
     for_each_field(line, delimiter, cooperation, path, |_, field| {
@@ -48,7 +48,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn for_each_field
     line: &'a str,
     delimiter: &Delimiter,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     mut visit: impl FnMut(usize, Cow<'a, str>) -> BuiltinResult<()>,
 ) -> BuiltinResult<usize> {
     for_each_field_ref(line, delimiter, cooperation, path, None, |index, field| {
@@ -61,7 +61,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn for_each_field
     line: &'a str,
     delimiter: &Delimiter,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     mut staged_scratch: Option<&mut ExactHostEffectBytes>,
     mut visit: impl for<'field> FnMut(usize, FieldView<'a, 'field>) -> BuiltinResult<()>,
 ) -> BuiltinResult<usize> {
@@ -84,7 +84,7 @@ async fn append_segment(
     owned: &mut Option<String>,
     text: &str,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
 ) -> BuiltinResult<()> {
     let mut start = 0;
     while start < text.len() {
@@ -145,7 +145,7 @@ async fn emit_field<'a>(
     staged: &mut Option<&mut ExactHostEffectBytes>,
     owned: &mut Option<String>,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     index: usize,
     visit: &mut impl for<'field> FnMut(usize, FieldView<'a, 'field>) -> BuiltinResult<()>,
 ) -> BuiltinResult<()> {
@@ -167,7 +167,7 @@ async fn visit_char_fields<'a>(
     line: &'a str,
     delimiter: char,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     mut staged: Option<&mut ExactHostEffectBytes>,
     visit: &mut impl for<'field> FnMut(usize, FieldView<'a, 'field>) -> BuiltinResult<()>,
 ) -> BuiltinResult<usize> {
@@ -248,7 +248,7 @@ async fn visit_string_fields<'a>(
     line: &'a str,
     pattern: &str,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     visit: &mut impl for<'field> FnMut(usize, FieldView<'a, 'field>) -> BuiltinResult<()>,
 ) -> BuiltinResult<usize> {
     let mut count = 0usize;
@@ -285,7 +285,7 @@ async fn visit_string_fields<'a>(
 async fn visit_whitespace_fields<'a>(
     line: &'a str,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     visit: &mut impl for<'field> FnMut(usize, FieldView<'a, 'field>) -> BuiltinResult<()>,
 ) -> BuiltinResult<usize> {
     let mut count = 0usize;

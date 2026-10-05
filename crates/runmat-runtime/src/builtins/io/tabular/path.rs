@@ -15,6 +15,123 @@ pub(super) struct TabularFsPath {
     lease: Option<CapturedFsResourceLease>,
 }
 
+/// Read-side authority used by tabular parsers. A finite absolute-path call
+/// may borrow the caller's host String until its stage owns every allocation.
+pub(super) trait TabularReadPath {
+    fn path(&self) -> &Path;
+    fn check(&self) -> io::Result<()>;
+    async fn open_bounded_input(&self) -> io::Result<Option<fs::FsBoundedInput>>;
+    async fn open_read_preferred(&self) -> io::Result<TabularReadSource>;
+}
+
+pub(super) struct BorrowedTabularReadPath<'a> {
+    provider: Arc<dyn FsProvider>,
+    path: &'a Path,
+    lease: Option<CapturedFsResourceLease>,
+}
+
+impl<'a> BorrowedTabularReadPath<'a> {
+    pub(super) fn capture_absolute_on(
+        provider: Arc<dyn FsProvider>,
+        path: &'a Path,
+    ) -> io::Result<Self> {
+        if !provider.path_namespace().is_absolute(path) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "borrowed tabular source must be absolute in its provider namespace",
+            ));
+        }
+        let lease = fs::capture_resource_lease_for_effect(provider.clone())?;
+        let captured = Self {
+            provider,
+            path,
+            lease,
+        };
+        captured.check()?;
+        Ok(captured)
+    }
+
+    pub(super) fn provider(&self) -> &Arc<dyn FsProvider> {
+        &self.provider
+    }
+}
+
+impl TabularReadPath for BorrowedTabularReadPath<'_> {
+    fn path(&self) -> &Path {
+        self.path
+    }
+
+    fn check(&self) -> io::Result<()> {
+        check_resource_lease(self.lease.as_ref())
+    }
+
+    async fn open_bounded_input(&self) -> io::Result<Option<fs::FsBoundedInput>> {
+        open_bounded_input_on(&self.provider, self.path, self.lease.as_ref()).await
+    }
+
+    async fn open_read_preferred(&self) -> io::Result<TabularReadSource> {
+        self.open_bounded_input()
+            .await?
+            .map(TabularReadSource::Bounded)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "selected source has no bounded read authority",
+                )
+            })
+    }
+}
+
+impl TabularReadPath for TabularFsPath {
+    fn path(&self) -> &Path {
+        TabularFsPath::path(self)
+    }
+    fn check(&self) -> io::Result<()> {
+        TabularFsPath::check(self)
+    }
+    async fn open_bounded_input(&self) -> io::Result<Option<fs::FsBoundedInput>> {
+        TabularFsPath::open_bounded_input(self).await
+    }
+    async fn open_read_preferred(&self) -> io::Result<TabularReadSource> {
+        TabularFsPath::open_read_preferred(self).await
+    }
+}
+
+fn check_resource_lease(lease: Option<&CapturedFsResourceLease>) -> io::Result<()> {
+    if lease.is_some_and(|lease| !lease.is_valid()) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "tabular filesystem authority was invalidated",
+        ));
+    }
+    Ok(())
+}
+
+async fn open_bounded_input_on(
+    provider: &Arc<dyn FsProvider>,
+    path: &Path,
+    lease: Option<&CapturedFsResourceLease>,
+) -> io::Result<Option<fs::FsBoundedInput>> {
+    check_resource_lease(lease)?;
+    let opened = provider.open_bounded_input(path).await?;
+    check_resource_lease(lease)?;
+    if let Some(source) = opened.as_ref() {
+        let captured = lease.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "opened tabular source has no captured resource authority",
+            )
+        })?;
+        if !source.is_valid() || source.resource_revision() != captured.contract().revision {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "opened tabular source changed resource authority",
+            ));
+        }
+    }
+    Ok(opened)
+}
+
 pub(super) enum TabularReadSource {
     Bounded(fs::FsBoundedInput),
     Ordinary(fs::File),
@@ -98,24 +215,7 @@ impl TabularFsPath {
     /// requires the opened handle's resource revision to match the captured
     /// pre-open lease; ordinary file opening is not a finite substitute.
     pub(super) async fn open_bounded_input(&self) -> io::Result<Option<fs::FsBoundedInput>> {
-        self.check()?;
-        let opened = self.provider.open_bounded_input(&self.path).await?;
-        self.check()?;
-        if let Some(source) = opened.as_ref() {
-            let captured = self.lease.as_ref().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "opened tabular source has no captured resource authority",
-                )
-            })?;
-            if !source.is_valid() || source.resource_revision() != captured.contract().revision {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "opened tabular source changed resource authority",
-                ));
-            }
-        }
-        Ok(opened)
+        open_bounded_input_on(&self.provider, &self.path, self.lease.as_ref()).await
     }
 
     pub(super) fn begin_staged_replace(&self) -> io::Result<Option<Box<dyn FsStagedOutput>>> {
@@ -134,13 +234,7 @@ impl TabularFsPath {
     }
 
     pub(super) fn check(&self) -> io::Result<()> {
-        if self.lease.as_ref().is_some_and(|lease| !lease.is_valid()) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "tabular filesystem authority was invalidated",
-            ));
-        }
-        Ok(())
+        check_resource_lease(self.lease.as_ref())
     }
 
     pub(super) async fn open_read(&self) -> io::Result<fs::File> {
@@ -186,6 +280,31 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use std::io::Read;
+
+    #[test]
+    fn borrowed_absolute_source_keeps_exact_provider_without_cwd_lookup() {
+        let original = Arc::new(fs::MemoryFsProvider::with_current_dir("/unrelated"));
+        original
+            .write_project_path("/selected/numbers.csv", b"1,2\n")
+            .expect("original source");
+        let provider: Arc<dyn FsProvider> = original;
+        let path = Path::new("/selected/numbers.csv");
+        let selected = BorrowedTabularReadPath::capture_absolute_on(provider, path)
+            .expect("absolute path does not consult virtual CWD");
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/other"));
+        replacement
+            .write_project_path(path, b"9,9\n")
+            .expect("replacement source");
+        let _lock = fs::provider_override_lock();
+        let _restore = fs::replace_provider(replacement);
+        let mut source = block_on(selected.open_bounded_input())
+            .expect("original owner read")
+            .expect("bounded source");
+        let mut bytes = Vec::new();
+        source.read_to_end(&mut bytes).expect("direct read");
+        assert_eq!(bytes, b"1,2\n");
+        assert_eq!(selected.path(), path);
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]

@@ -23,6 +23,8 @@ mod managed_ledger;
 mod output_permit;
 mod final_facts;
 mod exact_bytes;
+mod digest;
+pub(crate) use digest::hash_serializable;
 pub use exact_bytes::ExactHostEffectBytes;
 pub use final_facts::HostEffectFinalFacts;
 pub use managed_ledger::{
@@ -211,10 +213,19 @@ fn select_host_effect_inner(
     {
         return Err(insufficient("complete-call peak memory is unavailable"));
     }
-    let signature = PlacementSignature {
-        region: None,
-        operation: request.operation.into(),
-        runtime_facts: Digest::sha256(
+    let runtime_facts = match request.workload {
+        HostEffectWorkload::ReadMatrixText {
+            source,
+            controls,
+            output,
+        } => hash_serializable(&(
+            source.as_os_str().as_encoded_bytes(),
+            controls,
+            output,
+            request.domain_facts,
+            evidence,
+        )),
+        _ => Digest::sha256(
             serde_json::to_vec(&(
                 request.workload.identity_bytes(),
                 request.domain_facts,
@@ -222,6 +233,11 @@ fn select_host_effect_inner(
             ))
             .expect("typed host effect facts serialize"),
         ),
+    };
+    let signature = PlacementSignature {
+        region: None,
+        operation: request.operation.into(),
+        runtime_facts,
         revision,
     };
     // A staged scratch reservation remains charged while the returned value
@@ -233,16 +249,29 @@ fn select_host_effect_inner(
         }
         (_, bound) => bound,
     };
+    let route_facts = match request.workload {
+        HostEffectWorkload::ReadMatrixText {
+            source,
+            controls,
+            output,
+        } => hash_serializable(&(
+            source.as_os_str().as_encoded_bytes(),
+            controls,
+            output,
+            evidence,
+        )),
+        _ => Digest::sha256(
+            serde_json::to_vec(&(request.workload.identity_bytes(), evidence))
+                .expect("typed host effect route serializes"),
+        ),
+    };
     let candidate = WholeWorkCandidate {
         kind: ExecutionCandidateKind::SharedRuntime,
         execution_location: CandidateExecutionLocation::Host,
         preparation: CandidatePreparationState::Ready,
         output_residency: CandidateOutputResidency::Host,
         presentation: CandidateOutputPresentation::Direct,
-        route_facts: Digest::sha256(
-            serde_json::to_vec(&(request.workload.identity_bytes(), evidence))
-                .expect("typed host effect route serializes"),
-        ),
+        route_facts,
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
         resources: CandidateResourceDemand {
             cpu_millicores: 1_000,

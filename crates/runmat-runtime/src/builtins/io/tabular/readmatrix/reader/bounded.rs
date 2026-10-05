@@ -63,7 +63,7 @@ impl SampleRows {
 pub(super) async fn scan_utf8(
     source: &mut FsBoundedInput,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     options: &ReadMatrixOptions,
     staged_line: Option<ExactHostEffectBytes>,
     staged_samples: Option<ExactHostEffectBytes>,
@@ -172,7 +172,7 @@ async fn validate_row(
     integer_dtype: Option<NumericDType>,
     options: &ReadMatrixOptions,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     staged_field: Option<&mut ExactHostEffectBytes>,
 ) -> BuiltinResult<usize> {
     scan::for_each_field_ref(
@@ -199,7 +199,7 @@ async fn validate_row(
     .await
 }
 
-fn matrix_overflow() -> RuntimeError {
+pub(super) fn matrix_overflow() -> RuntimeError {
     readmatrix_error_with(
         &READMATRIX_ERROR_TENSOR_BUILD,
         "readmatrix: matrix dimensions exceed addressable storage",

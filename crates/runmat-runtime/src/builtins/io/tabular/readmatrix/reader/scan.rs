@@ -2,7 +2,7 @@
 
 use super::{
     readmatrix_error_with, readmatrix_error_with_source, Delimiter, TabularCooperation,
-    TabularFsPath, READMATRIX_ERROR_IO_READ, READMATRIX_ERROR_TENSOR_BUILD, ROW_WORK_CHUNK,
+    TabularReadPath, READMATRIX_ERROR_IO_READ, READMATRIX_ERROR_TENSOR_BUILD, ROW_WORK_CHUNK,
 };
 use crate::{BuiltinResult, RuntimeError};
 
@@ -18,7 +18,7 @@ fn field_overflow() -> RuntimeError {
 
 pub(super) async fn checked_row_work(
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
     work: usize,
 ) -> BuiltinResult<()> {
     cooperation.completed(work).await?;
@@ -35,7 +35,7 @@ pub(super) async fn collect_data_lines<'a>(
     text: &'a str,
     header_lines: usize,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
 ) -> BuiltinResult<Vec<(usize, &'a str)>> {
     let mut lines = Vec::new();
     let mut line_start = 0;
@@ -71,7 +71,7 @@ pub(super) async fn collect_data_lines<'a>(
 pub(super) async fn has_nonwhitespace(
     line: &str,
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
 ) -> BuiltinResult<bool> {
     let mut work = 0;
     for ch in line.chars() {
@@ -93,7 +93,7 @@ pub(super) async fn has_nonwhitespace(
 pub(super) async fn detect_delimiter(
     lines: &[(usize, &str)],
     cooperation: &mut TabularCooperation<'_>,
-    path: &TabularFsPath,
+    path: &impl TabularReadPath,
 ) -> BuiltinResult<Option<Delimiter>> {
     if lines.is_empty() {
         return Ok(None);

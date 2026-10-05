@@ -1,7 +1,8 @@
 //! MATLAB-compatible `readmatrix` builtin for RunMat.
 
 use runmat_value::NumericScalar;
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use super::cooperation::{await_io, TabularCooperation};
-use super::path::{TabularFsOwner, TabularFsPath, TabularReadSource};
+use super::path::{BorrowedTabularReadPath, TabularFsOwner, TabularReadPath, TabularReadSource};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::helpers::decode_bytes;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -98,6 +99,43 @@ pub(crate) async fn readmatrix_builtin(
         )?;
     }
     preflight_host_options(&rest)?;
+    if admission::finite_budget(runtime.as_ref()) {
+        if matches!(&path, Value::String(raw) if raw.is_empty()) {
+            return Err(readmatrix_error(&READMATRIX_ERROR_FILENAME_EMPTY));
+        }
+        if let (Some(runtime), Value::String(raw)) = (runtime.as_ref(), &path) {
+            let provider = runmat_filesystem::current_provider();
+            let borrowed = Path::new(raw);
+            if rest.is_empty()
+                && provider.path_namespace().is_absolute(borrowed)
+                && crate::output_count::current_output_count().is_none_or(|count| count == 1)
+            {
+                let stage = admission::admit_default_absolute(runtime, borrowed, &provider)?;
+                let selected = BorrowedTabularReadPath::capture_absolute_on(provider, borrowed)
+                    .map_err(|source| {
+                        readmatrix_error_with_source(
+                            &READMATRIX_ERROR_IO_OPEN,
+                            "readmatrix: unable to capture admitted filesystem source",
+                            source,
+                        )
+                    })?;
+                return reader::read_default_staged(
+                    runtime,
+                    &mut cooperation,
+                    &selected,
+                    selected.provider(),
+                    stage,
+                )
+                .await;
+            }
+        }
+        return Err(build_runtime_error(
+            "readmatrix: finite admission for these path, control, or output forms is unavailable",
+        )
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .build());
+    }
     let known_path = if matches!(path, Value::GpuTensor(_)) {
         None
     } else {
@@ -263,7 +301,7 @@ fn apply_decoded_control(
         ReadMatrixControl::Encoding => {
             let encoding = value_to_string_scalar(&value, "Encoding")?;
             validate_encoding_label(&encoding)?;
-            options.encoding = encoding;
+            options.encoding = Cow::Owned(encoding);
         }
         ReadMatrixControl::Like => options.set_like(value)?,
         ReadMatrixControl::TreatAsMissing | ReadMatrixControl::Unknown => {}
@@ -535,12 +573,12 @@ struct ReadMatrixOptions {
     num_header_lines: usize,
     decimal_separator: char,
     thousands_separator: Option<char>,
-    treat_as_missing: HashSet<String>,
+    treat_as_missing: BTreeSet<String>,
     empty_value: Option<NumericScalar>,
     range: Option<RangeSpec>,
     output_template: OutputTemplate,
     output_type_seen: bool,
-    encoding: String,
+    encoding: Cow<'static, str>,
 }
 
 impl Default for ReadMatrixOptions {
@@ -550,12 +588,12 @@ impl Default for ReadMatrixOptions {
             num_header_lines: 0,
             decimal_separator: '.',
             thousands_separator: None,
-            treat_as_missing: HashSet::new(),
+            treat_as_missing: BTreeSet::new(),
             empty_value: None,
             range: None,
             output_template: OutputTemplate::Numeric(NumericDType::F64),
             output_type_seen: false,
-            encoding: "utf-8".to_string(),
+            encoding: Cow::Borrowed("utf-8"),
         }
     }
 }
@@ -652,7 +690,7 @@ impl ReadMatrixOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 enum Delimiter {
     Char(char),
     String(String),
@@ -667,6 +705,7 @@ enum OutputTemplate {
 }
 
 mod range;
+mod admission;
 #[cfg(test)]
 use range::parse_range_numeric;
 use range::{apply_range, parse_range, RangeSpec};

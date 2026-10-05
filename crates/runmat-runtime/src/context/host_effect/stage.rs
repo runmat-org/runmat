@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Weak;
 
 mod view;
+mod identity;
+use identity::request_identity;
 use view::StageReservationView;
 
 /// A closed classification of stage-owned temporary buffers. The kind does
@@ -217,6 +219,10 @@ pub struct HostEffectStagePermit {
 }
 
 impl HostEffectStagePermit {
+    /// Already-precharged scan envelope, without allocating a reservation view.
+    pub fn reserved_bytes(&self) -> u64 {
+        self.reservation.reserved_bytes()
+    }
     /// Allocate an exact-capacity temporary buffer from this invocation's
     /// precharged scan envelope. The returned owner retains its live claim.
     pub fn allocate_exact_bytes(
@@ -240,10 +246,6 @@ impl HostEffectStagePermit {
             self.session_generation_owner.clone(),
             self.session_generation,
         ))
-    }
-
-    pub(super) fn reserved_bytes(&self) -> u64 {
-        self.reservation.reserved_bytes()
     }
 
     pub(super) fn managed_ledger(&self) -> Option<super::ManagedHostEffectLedger> {
@@ -591,16 +593,6 @@ pub fn select_host_effect_after_stage(
         .expect("selected staged receipt")
         .checkpoint()?;
     Ok(receipt)
-}
-
-fn request_identity(request: &HostEffectRequest<'_>) -> Digest {
-    // The complete call's public operation, source, options, and output mode
-    // are fixed before scan. `domain_facts` is deliberately excluded because
-    // it becomes the checked post-header geometry digest at final selection.
-    Digest::sha256(
-        serde_json::to_vec(&(request.operation, request.workload.identity_bytes()))
-            .expect("typed stage request serializes"),
-    )
 }
 
 pub(super) fn invalid_stage(detail: &str) -> crate::RuntimeError {
