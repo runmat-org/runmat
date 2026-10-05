@@ -280,9 +280,20 @@ impl HostEffectStageReservation for ManagedHostEffectStageReservation {
         _kind: HostEffectLiveAllocationKind,
         bytes: usize,
     ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
-        Ok(HostEffectLiveAllocationClaim::Owned(Box::new(
-            self.claim_temporary(bytes, std::mem::size_of::<TemporaryClaim>())?,
-        )))
+        let claim = self.claim_temporary(bytes, std::mem::size_of::<TemporaryClaim>())?;
+        let layout = std::alloc::Layout::new::<TemporaryClaim>();
+        // SAFETY: the allocation has the exact nonzero claim layout. On
+        // failure `claim` drops and refunds the temporary ledger charge.
+        let pointer = unsafe { std::alloc::alloc(layout) }.cast::<TemporaryClaim>();
+        if pointer.is_null() {
+            return Err(HostEffectAllocationError::AllocationFailed);
+        }
+        // SAFETY: this fresh allocation is initialized exactly once and
+        // handed to the sole Box owner without an intervening fallible step.
+        unsafe {
+            pointer.write(claim);
+            Ok(HostEffectLiveAllocationClaim::Owned(Box::from_raw(pointer)))
+        }
     }
 
     fn live_claim_metadata_bytes(&self) -> usize {

@@ -4,6 +4,8 @@
 
 use super::*;
 use std::sync::atomic::AtomicBool;
+mod output;
+use output::PooledOutputPermit;
 
 pub struct ManagedHostEffectStagePool {
     slots: Vec<Arc<PooledStageSlot>>,
@@ -35,6 +37,7 @@ impl Drop for ManagedHostEffectStageSlot {
 
 struct PooledStageSlot {
     reservation: ManagedHostEffectStageReservation,
+    output: Arc<PooledOutputPermit>,
     mutation: Mutex<()>,
     live_reservation: AtomicBool,
     active_epoch: Arc<AtomicBool>,
@@ -43,6 +46,10 @@ struct PooledStageSlot {
 }
 
 impl ManagedHostEffectStagePool {
+    pub const fn owned_output_claim_metadata_bytes() -> usize {
+        PooledOutputPermit::claim_metadata_bytes()
+    }
+
     pub fn new(
         ledger: &ManagedHostEffectLedger,
         capacity: usize,
@@ -53,12 +60,14 @@ impl ManagedHostEffectStagePool {
             .map_err(|_| HostEffectAllocationError::AllocationFailed)?;
         for _ in 0..capacity {
             let reservation = ledger.reserve_stage(0)?;
+            let active_epoch = Arc::new(AtomicBool::new(false));
             slots.push(Arc::new(PooledStageSlot {
                 reservation: Arc::try_unwrap(reservation)
                     .unwrap_or_else(|_| unreachable!("new zero-byte reservation has one owner")),
+                output: PooledOutputPermit::new(ledger, active_epoch.clone()),
                 mutation: Mutex::new(()),
                 live_reservation: AtomicBool::new(false),
-                active_epoch: Arc::new(AtomicBool::new(false)),
+                active_epoch,
                 generation: AtomicU64::new(0),
                 retired: AtomicBool::new(false),
             }));
@@ -80,7 +89,8 @@ impl ManagedHostEffectStagePool {
                 || slot.retired.load(Ordering::Acquire)
                 || Arc::strong_count(slot) != 1
                 || Arc::weak_count(slot) != 0
-                || Arc::strong_count(&slot.active_epoch) != 1
+                || Arc::strong_count(&slot.active_epoch) != 2
+                || Arc::strong_count(&slot.output) != 1
                 || slot.reservation.reserved_bytes() != 0
             {
                 continue;
@@ -159,15 +169,37 @@ impl HostEffectStageReservation for PooledStageSlot {
 
     fn reserve_output_headroom(
         &self,
-        bytes: u64,
+        _bytes: u64,
     ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
+        // A dynamic headroom Arc would bypass the setup-owned exact slot.
+        Err(HostEffectAllocationError::Unavailable)
+    }
+
+    fn reserve_preallocated_output_permit(
+        &self,
+        bytes: u64,
+        cancellation: runmat_execution::cancellation::CancellationToken,
+        session_generation_owner: Arc<AtomicU64>,
+        session_generation: u64,
+    ) -> Result<Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>, HostEffectAllocationError>
+    {
         let _mutation = self.mutation.lock().expect("managed stage slot lock");
         if !self.live_reservation.load(Ordering::Acquire)
             || !self.active_epoch.load(Ordering::Acquire)
         {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
-        self.reservation.reserve_output_headroom(bytes)
+        self.output.prepare(
+            bytes,
+            cancellation,
+            session_generation_owner,
+            session_generation,
+        )?;
+        Ok(Some(self.output.clone()))
+    }
+
+    fn owned_output_claim_metadata_bytes(&self) -> usize {
+        PooledOutputPermit::claim_metadata_bytes()
     }
 
     fn is_current(&self) -> bool {
@@ -188,6 +220,7 @@ impl HostEffectStageReservation for PooledStageSlot {
         let _mutation = self.mutation.lock().expect("managed stage slot lock");
         self.active_epoch.store(false, Ordering::Release);
         if self.live_reservation.swap(false, Ordering::AcqRel) {
+            self.output.retire();
             self.reservation.retire_pooled_invocation();
         }
     }

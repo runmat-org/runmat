@@ -57,6 +57,11 @@ impl HostEffectStageReservation for StageReservationView {
             .map_or(0, |owner| owner.live_claim_metadata_bytes())
     }
 
+    fn owned_output_claim_metadata_bytes(&self) -> usize {
+        self.current_reservation()
+            .map_or(0, |owner| owner.owned_output_claim_metadata_bytes())
+    }
+
     fn reserve_live_exact(
         &self,
         kind: HostEffectLiveAllocationKind,

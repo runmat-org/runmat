@@ -122,6 +122,21 @@ pub trait HostEffectStageReservation: Send + Sync {
     ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
         Err(HostEffectAllocationError::Unavailable)
     }
+    /// Setup-owned exact output permit for a finite staged invocation. The
+    /// dynamic headroom route above remains available to external services.
+    fn reserve_preallocated_output_permit(
+        &self,
+        _bytes: u64,
+        _cancellation: runmat_execution::cancellation::CancellationToken,
+        _session_generation_owner: Arc<AtomicU64>,
+        _session_generation: u64,
+    ) -> Result<Option<Arc<dyn runmat_value::ExactHostAllocationPermit>>, HostEffectAllocationError>
+    {
+        Ok(None)
+    }
+    fn owned_output_claim_metadata_bytes(&self) -> usize {
+        0
+    }
     fn is_current(&self) -> bool;
 
     fn slot_generation(&self) -> Option<u64> {
@@ -294,6 +309,10 @@ impl HostEffectStagePermit {
         self.reservation.live_claim_metadata_bytes()
     }
 
+    pub fn owned_output_claim_metadata_bytes(&self) -> usize {
+        self.reservation.owned_output_claim_metadata_bytes()
+    }
+
     pub fn filesystem(&self) -> &Arc<dyn runmat_filesystem::FsProvider> {
         &self.filesystem
     }
@@ -432,6 +451,22 @@ impl HostEffectStagePermit {
     ) -> Result<Arc<dyn runmat_value::ExactHostAllocationPermit>, HostEffectAllocationError> {
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(HostEffectAllocationError::Revoked);
+        }
+        if let Some(permit) = self.reservation.reserve_preallocated_output_permit(
+            max_output_bytes,
+            self.cancellation.clone(),
+            self.session_generation_owner.clone(),
+            self.session_generation,
+        )? {
+            if self.cancellation.is_cancelled() {
+                return Err(HostEffectAllocationError::Cancelled);
+            }
+            if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation
+                || !self.reservation.is_current()
+            {
+                return Err(HostEffectAllocationError::Revoked);
+            }
+            return Ok(permit);
         }
         let headroom = self.reservation.reserve_output_headroom(max_output_bytes)?;
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
