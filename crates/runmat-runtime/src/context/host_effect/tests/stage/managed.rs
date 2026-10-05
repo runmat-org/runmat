@@ -290,6 +290,63 @@ fn shared_ledger_rebind_invalidates_only_issuing_session() {
 }
 
 #[test]
+fn selected_headroom_capacity_failure_preserves_typed_resource_cause() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let competing = Rc::new(RefCell::new(None));
+    let retained = competing.clone();
+    let concurrent_ledger = ledger.clone();
+    *placement.on_select.borrow_mut() = Some(Box::new(move || {
+        *retained.borrow_mut() = Some(
+            concurrent_ledger
+                .reserve_stage(4)
+                .expect("other invocation claims free capacity during selection"),
+        );
+    }));
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("initial eight-byte stage");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .err()
+    .expect("selected output headroom cannot race with other reservations");
+    assert_eq!(error.identifier(), Some("RunMat:Placement:ResourceLimit"));
+    assert!(error.source().is_some());
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    drop(competing.borrow_mut().take());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
+fn revoked_selected_headroom_reports_stale_authority_with_cause() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    let concurrent_ledger = ledger.clone();
+    *placement.on_select.borrow_mut() = Some(Box::new(move || concurrent_ledger.revoke()));
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("initial stage");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .err()
+    .expect("revoked owner cannot reserve output");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert!(error.source().is_some());
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt() {
     let ledger = ManagedHostEffectLedger::new(12);
     let (runtime, placement) = managed_runtime(&ledger, 12);

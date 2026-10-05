@@ -318,11 +318,9 @@ fn select_host_effect_inner(
     }
     let output_allocation_permit = match stage.as_ref() {
         Some(stage) => match retained_bytes {
-            ResourceByteBound::Known(bytes) => Some(
-                stage
-                    .output_permit(bytes)
-                    .map_err(|_| insufficient("selected output headroom is unavailable"))?,
-            ),
+            ResourceByteBound::Known(bytes) => {
+                Some(stage.output_permit(bytes).map_err(selected_output_error)?)
+            }
             ResourceByteBound::Unavailable(_) => None,
         },
         None => admission.output_allocation_permit,
@@ -352,6 +350,24 @@ fn insufficient(detail: &str) -> crate::RuntimeError {
     ))
     .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
     .build()
+}
+
+fn selected_output_error(source: HostEffectAllocationError) -> crate::RuntimeError {
+    let identifier = match source {
+        HostEffectAllocationError::Revoked | HostEffectAllocationError::InvalidInvocation => {
+            "RunMat:Placement:StaleResourceAuthority"
+        }
+        HostEffectAllocationError::Cancelled => "RunMat:Cancelled",
+        HostEffectAllocationError::ExceedsCapacity
+        | HostEffectAllocationError::ExceedsStageEnvelope
+        | HostEffectAllocationError::Overflow
+        | HostEffectAllocationError::AllocationFailed => "RunMat:Placement:ResourceLimit",
+        HostEffectAllocationError::Unavailable => "RunMat:Placement:InsufficientResourceEvidence",
+    };
+    build_runtime_error("selected output headroom could not be reserved")
+        .with_identifier(identifier)
+        .with_source(source)
+        .build()
 }
 
 /// Owns the exploratory probe until all effects and output publication have

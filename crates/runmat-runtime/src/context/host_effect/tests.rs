@@ -61,6 +61,7 @@ struct Placement {
     observations: RefCell<Vec<WholeWorkObservation>>,
     probes: Arc<AtomicUsize>,
     revision_available: Cell<bool>,
+    on_select: RefCell<Option<Box<dyn Fn()>>>,
     on_observe: RefCell<Option<Box<dyn Fn()>>>,
 }
 struct Probe(Arc<AtomicUsize>);
@@ -111,6 +112,9 @@ impl RuntimePlacementService for Placement {
                     .with_identifier("RunMat:Placement:ResourceLimit")
                     .build());
             }
+        }
+        if let Some(callback) = self.on_select.borrow().as_ref() {
+            callback();
         }
         self.selections.set(self.selections.get() + 1);
         self.probes.fetch_add(1, Ordering::SeqCst);
