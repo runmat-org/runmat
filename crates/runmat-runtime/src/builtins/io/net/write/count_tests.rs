@@ -220,3 +220,50 @@ fn pending_write_cancellation_wakes_and_preserves_indeterminate_progress() {
     assert!(service.pending_dropped.get());
     assert_eq!(service.calls.get(), 1, "cancelled write is never replayed");
 }
+
+#[test]
+fn cancelling_during_full_call_encoding_starts_no_socket_write() {
+    use crate::builtins::io::net::test_support::cpu_turn::CodecTurnService;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::future::Future;
+    use std::task::{Context, Poll};
+
+    let service = Rc::new(CountedWriteService {
+        accepted: Some(2048),
+        calls: Rc::new(Cell::new(0)),
+        pending_dropped: Rc::new(Cell::new(false)),
+    });
+    let turns = Rc::new(Cell::new(0));
+    let dropped = Rc::new(Cell::new(false));
+    let cancellation = CancellationSource::new();
+    let runtime = RuntimeContext::new(Rc::new(CodecTurnService {
+        turns: turns.clone(),
+        dropped: dropped.clone(),
+        pending_on: 1,
+    }))
+    .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()))
+    .with_cancellation_token(cancellation.token());
+    let data = Value::Tensor(
+        runmat_value::Tensor::new(vec![1.0; 2048], vec![1, 2048]).expect("fixture payload"),
+    );
+    let mut call = Box::pin(write_builtin(Some(runtime), receiver(), data, vec![]));
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert_eq!(turns.get(), 1, "the first CPU turn is in encoding");
+    assert_eq!(
+        service.calls.get(),
+        0,
+        "no socket effect before encoded payload is complete"
+    );
+    cancellation.cancel(CancellationReason::User);
+    let Poll::Ready(Err(error)) = call.as_mut().poll(&mut Context::from_waker(&waker)) else {
+        panic!("codec turn did not settle on cancellation");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(dropped.get(), "the pending turn owner was dropped");
+    assert_eq!(service.calls.get(), 0);
+}

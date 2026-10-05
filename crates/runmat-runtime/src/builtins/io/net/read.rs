@@ -134,6 +134,10 @@ struct ReadOptions {
 mod decode;
 use decode::{bytes_to_value, ByteOrder};
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "read/codec_tests.rs"]
+mod codec_tests;
+
 async fn parse_arguments(rest: Vec<Value>, known: KnownReadControls) -> BuiltinResult<ReadOptions> {
     match rest.len() {
         0 => Ok(ReadOptions {

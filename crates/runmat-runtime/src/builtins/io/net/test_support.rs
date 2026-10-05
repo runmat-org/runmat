@@ -15,6 +15,9 @@ use crate::tcp::NativeTcpService;
 use runmat_value::{ObjectInstance, Value};
 use std::time::Duration;
 
+#[path = "test_support/cpu_turn.rs"]
+pub(crate) mod cpu_turn;
+
 /// Test-owned host and session: no process-global socket ID or implicit port.
 pub(crate) struct TcpTestHost {
     _driver: tokio::runtime::Runtime,
