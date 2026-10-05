@@ -78,15 +78,22 @@ fn with_operator(test: impl FnOnce(&mut RunMatSession, &crate::ExecutableUnit, A
         ))
         .expect("compile operator functions");
         assert!(
-            unit.bytecode()
-                .instructions
-                .iter()
-                .any(|instruction| matches!(
-                    instruction,
-                    runmat_vm::Instr::RegisterClass { name, .. }
-                        if name.display_name() == "PendingOperator"
-                )),
-            "compiled native unit must retain the companion class registration"
+            unit.bytecode().instructions.is_empty(),
+            "a function-only executable must not gain a script entrypoint"
+        );
+        let function = unit
+            .functions()
+            .names
+            .get("pendingOperator")
+            .and_then(|identity| unit.functions().functions.get(identity))
+            .expect("compiled primary function");
+        assert!(
+            function.instructions.iter().any(|instruction| matches!(
+                instruction,
+                runmat_vm::Instr::RegisterClass { name, .. }
+                    if name.display_name() == "PendingOperator"
+            )),
+            "compiled function must retain the companion class declaration"
         );
         let calls = Arc::new(AtomicUsize::new(0));
         test(&mut session, &unit, calls);

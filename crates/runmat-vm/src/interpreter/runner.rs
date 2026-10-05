@@ -422,7 +422,28 @@ fn with_default_acceleration_service(
 /// ordinary MIR sites. Core calls this before entering a native unit so class
 /// definitions have the same runtime visibility as interpreter execution.
 pub fn prepare_native_execution_metadata(bytecode: &Bytecode) -> VmResult<()> {
-    register_class_metadata(bytecode.instructions.iter())
+    register_class_metadata(bytecode.instructions.iter())?;
+    // A function-only source has no synthetic script entrypoint. The frontend
+    // keeps its top-level instruction stream empty, while the canonical VM
+    // compiler emits the same HIR class declarations into each bound function.
+    // Native execution does not visit those function prologues as interpreter
+    // instructions, so publish their declarations once before entering native
+    // code without turning the source into a script.
+    if !bytecode
+        .instructions
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::RegisterClass { .. }))
+    {
+        if let Some((_, function)) = bytecode
+            .function_registry
+            .functions
+            .iter()
+            .min_by_key(|(function, _)| function.0)
+        {
+            register_class_metadata(function.instructions.iter())?;
+        }
+    }
+    Ok(())
 }
 
 fn register_class_metadata<'a>(instructions: impl IntoIterator<Item = &'a Instr>) -> VmResult<()> {
