@@ -34,6 +34,7 @@ pub struct CallableMetadata {
     pub display_name: Option<String>,
     pub source_id: Option<runmat_types::SourceId>,
     pub span: Option<runmat_types::Span>,
+    pub function_input_callsite: Option<crate::callsite::CallsiteInfo>,
 }
 
 impl Default for CallableMetadata {
@@ -43,6 +44,7 @@ impl Default for CallableMetadata {
             display_name: None,
             source_id: None,
             span: None,
+            function_input_callsite: None,
         }
     }
 }
@@ -54,6 +56,7 @@ impl CallableMetadata {
             display_name,
             source_id: None,
             span: None,
+            function_input_callsite: None,
         }
     }
 }
@@ -76,6 +79,10 @@ pub struct CallableDescriptor {
 }
 
 impl CallableDescriptor {
+    pub fn with_function_input_callsite(mut self, callsite: crate::callsite::CallsiteInfo) -> Self {
+        self.metadata.function_input_callsite = Some(callsite);
+        self
+    }
     fn parse_handle_name(text: &str) -> Option<String> {
         let handle = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
         if handle.is_empty() {
@@ -478,10 +485,13 @@ async fn execute_resolved_callable(
             Ok(value)
         }
         CallableIdentity::BoundFunction(function) => {
-            if let Some(result) = crate::user_functions::try_call_semantic_function(
-                function.0,
-                &args,
-                requested_outputs,
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                metadata.function_input_callsite.clone(),
+                crate::user_functions::try_call_semantic_function(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                ),
             )
             .await
             {
@@ -493,22 +503,28 @@ async fn execute_resolved_callable(
             function,
             display_name,
         } => {
-            if let Some(result) = crate::user_functions::try_call_external_function(
-                crate::user_functions::ExternalFunctionCall {
-                    function: function.0,
-                    display_name,
-                    arguments: args.clone(),
-                    requested_outputs,
-                },
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                metadata.function_input_callsite.clone(),
+                crate::user_functions::try_call_external_function(
+                    crate::user_functions::ExternalFunctionCall {
+                        function: function.0,
+                        display_name,
+                        arguments: args.clone(),
+                        requested_outputs,
+                    },
+                ),
             )
             .await
             {
                 return result;
             }
-            if let Some(result) = crate::user_functions::try_call_semantic_function(
-                function.0,
-                &args,
-                requested_outputs,
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                metadata.function_input_callsite.clone(),
+                crate::user_functions::try_call_semantic_function(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                ),
             )
             .await
             {
@@ -522,7 +538,8 @@ async fn execute_resolved_callable(
                 fallback_policy,
                 args.clone(),
                 requested_outputs,
-            );
+            )
+            .with_function_input_callsite(metadata.function_input_callsite.clone());
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result;
@@ -541,6 +558,7 @@ async fn try_execute_resolved_callable(
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
     match identity {
         CallableIdentity::Builtin(id) => {
@@ -550,10 +568,13 @@ async fn try_execute_resolved_callable(
             Ok(Some(value))
         }
         CallableIdentity::BoundFunction(function) => {
-            if let Some(result) = crate::user_functions::try_call_semantic_function(
-                function.0,
-                &args,
-                requested_outputs,
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                input_callsite,
+                crate::user_functions::try_call_semantic_function(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                ),
             )
             .await
             {
@@ -565,22 +586,28 @@ async fn try_execute_resolved_callable(
             function,
             display_name,
         } => {
-            if let Some(result) = crate::user_functions::try_call_external_function(
-                crate::user_functions::ExternalFunctionCall {
-                    function: function.0,
-                    display_name,
-                    arguments: args.clone(),
-                    requested_outputs,
-                },
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                input_callsite.clone(),
+                crate::user_functions::try_call_external_function(
+                    crate::user_functions::ExternalFunctionCall {
+                        function: function.0,
+                        display_name,
+                        arguments: args.clone(),
+                        requested_outputs,
+                    },
+                ),
             )
             .await
             {
                 return result.map(Some);
             }
-            if let Some(result) = crate::user_functions::try_call_semantic_function(
-                function.0,
-                &args,
-                requested_outputs,
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                input_callsite,
+                crate::user_functions::try_call_semantic_function(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                ),
             )
             .await
             {
@@ -594,7 +621,8 @@ async fn try_execute_resolved_callable(
                 fallback_policy,
                 args.clone(),
                 requested_outputs,
-            );
+            )
+            .with_function_input_callsite(input_callsite);
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result.map(Some);
@@ -710,7 +738,7 @@ async fn try_execute_callable_descriptor_with_runtime(
         target,
         args,
         requested_outputs,
-        metadata: _,
+        metadata,
     } = descriptor;
     match target {
         CallableTarget::Resolved {
@@ -723,6 +751,7 @@ async fn try_execute_callable_descriptor_with_runtime(
                 args,
                 requested_outputs,
                 fallback_policy,
+                metadata.function_input_callsite,
             )
             .await
         }

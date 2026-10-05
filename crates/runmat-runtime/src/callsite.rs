@@ -4,7 +4,7 @@ use runmat_types::{SourceId, Span};
 use std::cell::RefCell;
 use std::future::Future;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallsiteInfo {
     pub source_id: Option<SourceId>,
     pub arg_spans: Vec<Span>,

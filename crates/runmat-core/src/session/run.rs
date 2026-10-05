@@ -54,6 +54,7 @@ async fn load_dynamic_function(
     args: Vec<Value>,
     requested_outputs: usize,
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
+    input_callsite: Option<runmat_runtime::callsite::CallsiteInfo>,
     environment: DynamicFunctionEnvironment,
 ) -> Option<Result<runmat_value::ValueSequence, RuntimeError>> {
     #[cfg(target_arch = "wasm32")]
@@ -284,11 +285,14 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionNameMismatch")
                     .build()
                 })?;
-            runmat_vm::invoke_semantic_function_value(
-                function.0,
-                &args,
-                requested_outputs,
-                registry.as_ref(),
+            runmat_runtime::callsite::with_function_input_callsite(
+                input_callsite,
+                runmat_vm::invoke_semantic_function_value(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                    registry.as_ref(),
+                ),
             )
             .await
         }
@@ -324,17 +328,20 @@ impl RunMatSession {
             mex_runtime: std::rc::Rc::clone(&self.mex_runtime),
         };
         let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
-            std::rc::Rc::new(move |runtime, name, args, requested_outputs, phase| {
-                let environment = dynamic_environment.clone();
-                Box::pin(load_dynamic_function(
-                    runtime,
-                    name,
-                    args,
-                    requested_outputs,
-                    phase,
-                    environment,
-                ))
-            });
+            std::rc::Rc::new(
+                move |runtime, name, args, requested_outputs, phase, input_callsite| {
+                    let environment = dynamic_environment.clone();
+                    Box::pin(load_dynamic_function(
+                        runtime,
+                        name,
+                        args,
+                        requested_outputs,
+                        phase,
+                        input_callsite,
+                        environment,
+                    ))
+                },
+            );
         self.runtime_context
             .set_dynamic_function_loader(Some(loader));
 

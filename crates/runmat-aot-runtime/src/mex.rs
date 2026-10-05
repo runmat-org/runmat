@@ -39,8 +39,8 @@ pub fn install(
 ) -> MexRuntimeGuard {
     let load_runtime = Rc::clone(&mex_runtime);
     let guard_runtime = Rc::clone(&mex_runtime);
-    let loader: Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
-        Rc::new(move |runtime, name, arguments, requested_outputs, phase| {
+    let loader: Rc<runmat_runtime::user_functions::DynamicFunctionLoader> = Rc::new(
+        move |runtime, name, arguments, requested_outputs, phase, _input_callsite| {
             let mex_runtime = Rc::clone(&load_runtime);
             Box::pin(async move {
                 if phase != DynamicFunctionLoadPhase::BeforeSemantic {
@@ -50,7 +50,8 @@ pub fn install(
                     .load_and_call(&name, arguments, requested_outputs, runtime)
                     .await
             })
-        });
+        },
+    );
     runtime.set_dynamic_function_loader(Some(loader));
 
     let clearer: Rc<runmat_runtime::user_functions::DynamicFunctionClearer> =

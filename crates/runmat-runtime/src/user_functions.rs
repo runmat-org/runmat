@@ -44,6 +44,7 @@ pub type DynamicFunctionLoader = dyn Fn(
     Vec<Value>,
     usize,
     DynamicFunctionLoadPhase,
+    Option<crate::callsite::CallsiteInfo>,
 ) -> DynamicFunctionLoadFuture;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +119,7 @@ pub struct CallableRequest {
     fallback_policy: CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
+    function_input_callsite: Option<crate::callsite::CallsiteInfo>,
 }
 
 impl CallableRequest {
@@ -127,6 +129,7 @@ impl CallableRequest {
             fallback_policy: CallableFallbackPolicy::None,
             args,
             requested_outputs,
+            function_input_callsite: None,
         }
     }
 
@@ -141,7 +144,16 @@ impl CallableRequest {
             fallback_policy,
             args,
             requested_outputs,
+            function_input_callsite: None,
         }
+    }
+
+    pub fn with_function_input_callsite(
+        mut self,
+        callsite: Option<crate::callsite::CallsiteInfo>,
+    ) -> Self {
+        self.function_input_callsite = callsite;
+        self
     }
 }
 
@@ -518,10 +530,19 @@ pub async fn try_load_and_call_dynamic_function(
     args: Vec<Value>,
     requested_outputs: usize,
     phase: DynamicFunctionLoadPhase,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Option<Result<ValueSequence, RuntimeError>> {
     let context = crate::context::legacy::active()?;
     let loader = context.state().call.borrow().dynamic_loader.clone()?;
-    loader(context, name, args, requested_outputs, phase).await
+    loader(
+        context,
+        name,
+        args,
+        requested_outputs,
+        phase,
+        input_callsite,
+    )
+    .await
 }
 
 pub async fn try_clear_dynamic_functions(
@@ -590,9 +611,14 @@ pub async fn try_call_semantic_descriptor(
         fallback_policy,
         args,
         requested_outputs,
+        function_input_callsite,
     } = request;
     if let CallableIdentity::BoundFunction(function) = identity {
-        return try_call_semantic_function(function.0, &args, requested_outputs).await;
+        return crate::callsite::with_function_input_callsite(
+            function_input_callsite,
+            try_call_semantic_function(function.0, &args, requested_outputs),
+        )
+        .await;
     }
     if !fallback_policy.allows_semantic_name_resolution_for(&identity) {
         return None;
@@ -649,15 +675,22 @@ pub async fn try_call_semantic_descriptor(
             args.clone(),
             requested_outputs,
             DynamicFunctionLoadPhase::BeforeSemantic,
+            None,
         )
         .await
         {
             return Some(result);
         }
     }
-    if let Some(result) = try_call_semantic_function_by_name(&name, &args, requested_outputs).await
-    {
-        return Some(result);
+    if let Some(function) = resolve_semantic_function_by_name(&name) {
+        if let Some(result) = crate::callsite::with_function_input_callsite(
+            function_input_callsite.clone(),
+            try_call_semantic_function(function, &args, requested_outputs),
+        )
+        .await
+        {
+            return Some(result);
+        }
     }
     if matches!(
         identity,
@@ -670,6 +703,7 @@ pub async fn try_call_semantic_descriptor(
             args.clone(),
             requested_outputs,
             DynamicFunctionLoadPhase::AfterSemantic,
+            function_input_callsite,
         )
         .await
         {
@@ -690,6 +724,10 @@ pub async fn try_call_semantic_descriptor(
     }
     None
 }
+
+#[cfg(test)]
+#[path = "user_functions/input_callsite_tests.rs"]
+mod input_callsite_tests;
 
 #[cfg(test)]
 mod lexical_tests {

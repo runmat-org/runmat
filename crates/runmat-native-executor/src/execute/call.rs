@@ -126,23 +126,15 @@ fn evaluate_inner(
                 requested_outputs,
                 call.fallback_policy,
                 CallableCallKind::Direct,
-            );
-            let runtime = state.runtime.clone();
-            let input_callsite = matches!(
-                identity,
-                runmat_hir::CallableIdentity::BoundFunction(_)
-                    | runmat_hir::CallableIdentity::ExternalFunction { .. }
             )
-            .then_some(input_callsite);
+            .with_function_input_callsite(input_callsite);
+            let runtime = state.runtime.clone();
             complete_call(
                 state,
                 embedded.cloned(),
                 async move {
-                    runmat_runtime::callsite::with_function_input_callsite(
-                        input_callsite,
-                        runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
-                            &runtime, descriptor,
-                        ),
+                    runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
+                        &runtime, descriptor,
                     )
                     .await
                 },
@@ -151,22 +143,15 @@ fn evaluate_inner(
         }
         MirCallee::Dynamic(operand) => {
             let target = materialize_operand(state, operand)?;
-            let input_callsite = matches!(
-                &target,
-                Value::BoundFunctionHandle { .. } | Value::Closure(_)
-            )
-            .then_some(input_callsite);
             let runtime = state.runtime.clone();
             let value = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::callsite::with_function_input_callsite(
-                    input_callsite,
-                    runmat_runtime::call_feval_async_with_outputs_in_context(
-                        &runtime,
-                        target,
-                        &arguments,
-                        requested_outputs,
-                    ),
+                runmat_runtime::call_feval_async_with_outputs_and_callsite_in_context(
+                    &runtime,
+                    target,
+                    &arguments,
+                    requested_outputs,
+                    Some(input_callsite),
                 ),
                 "dynamic call",
             )
