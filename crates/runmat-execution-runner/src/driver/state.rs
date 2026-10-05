@@ -143,7 +143,11 @@ impl Driver {
                     if current == Some(CancellationEscalation::Request) {
                         actions.push(DriverAction::Terminate(attempt.request.clone()));
                     }
-                    self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                    self.finish_attempt(
+                        &attempt,
+                        crate::task::AttemptDisposition::Cancelled,
+                        None,
+                    )?;
                     self.snapshot
                         .attempts
                         .get_mut(&attempt_id)

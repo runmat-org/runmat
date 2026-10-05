@@ -30,7 +30,7 @@ impl Driver {
         }
         Ok(Self {
             snapshot: DriverSnapshot {
-                schema_version: 1,
+                schema_version: 2,
                 config,
                 driver_fence,
                 now_millis: 0,
@@ -67,8 +67,23 @@ impl Driver {
         self.snapshot.clone()
     }
 
+    /// Current logical driver clock without copying its task/attempt inventory.
+    pub fn now_millis(&self) -> u64 {
+        self.snapshot.now_millis
+    }
+
     pub fn events(&self) -> &[DriverEvent] {
         &self.snapshot.events
+    }
+
+    fn advance_clock(&mut self, now_millis: u64) -> RunnerResult<()> {
+        if now_millis < self.snapshot.now_millis {
+            return Err(RunnerError::Invalid(
+                "driver clock cannot move backwards".into(),
+            ));
+        }
+        self.snapshot.now_millis = now_millis;
+        Ok(())
     }
 
     pub fn handle(&mut self, command: DriverCommand) -> RunnerResult<Vec<DriverAction>> {
@@ -137,6 +152,7 @@ impl Driver {
                 reason,
                 now_millis,
             } => {
+                self.advance_clock(now_millis)?;
                 let scopes = self
                     .snapshot
                     .cancellation
@@ -154,7 +170,7 @@ impl Driver {
                 }
             }
             DriverCommand::Tick { now_millis } => {
-                self.snapshot.now_millis = now_millis;
+                self.advance_clock(now_millis)?;
                 for task_id in self.snapshot.deadlines.expired(now_millis) {
                     if !self.task_is_terminal(task_id)? {
                         self.emit(DriverEventKind::DeadlineExpired { task_id });

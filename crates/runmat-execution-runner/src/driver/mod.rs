@@ -1,4 +1,5 @@
 mod actor;
+mod attempt_history;
 mod command;
 #[path = "loop.rs"]
 mod driver_loop;

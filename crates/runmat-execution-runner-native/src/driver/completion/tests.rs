@@ -1,0 +1,180 @@
+use super::*;
+use runmat_execution::identity::{ArtifactId, WorkerId};
+use runmat_execution::resource::{ResourceInventory, ResourceRequest};
+use runmat_execution::state::PoolState;
+use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+use runmat_execution::{
+    CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, TaskId,
+};
+use runmat_execution_runner::port::BackendReport;
+use runmat_execution_runner::{
+    AttemptReport, Driver, DriverAction, DriverCommand, DriverConfig, PoolSpec, TaskSubmission,
+    WorkerSpec,
+};
+use std::collections::BTreeSet;
+
+fn assigned() -> (Driver, AttemptRequest) {
+    let scope = ExecutionScopeId::derive(&[b"completion"]);
+    let pool = PoolId::derive(&[b"completion"]);
+    let worker = WorkerId::derive(&[b"completion"]);
+    let inventory = ResourceInventory {
+        cpu_millicores: 1000,
+        memory_bytes: 1024,
+        scratch_bytes: 1024,
+        accelerators: Vec::new(),
+        capabilities: BTreeSet::new(),
+    };
+    let mut driver = Driver::new(DriverConfig::default(), 1).unwrap();
+    driver
+        .handle(DriverCommand::RegisterScope {
+            scope_id: scope,
+            parent: None,
+        })
+        .unwrap();
+    driver
+        .handle(DriverCommand::CreatePool(PoolSpec {
+            id: pool,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory.clone(),
+        }))
+        .unwrap();
+    driver
+        .handle(DriverCommand::SetPoolState {
+            pool_id: pool,
+            state: PoolState::Ready,
+        })
+        .unwrap();
+    driver
+        .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            id: worker,
+            pool_id: pool,
+            resources: inventory,
+        }))
+        .unwrap();
+    let request = TaskRequest {
+        id: TaskId::derive(&[b"completion"]),
+        scope_id: scope,
+        pool_id: pool,
+        program_artifact_id: ArtifactId::derive(&[b"completion"]),
+        callable: Callable {
+            owner_identity: "test".into(),
+            qualified_name: "completion".into(),
+            entrypoint_digest: Digest::sha256(b"completion"),
+        },
+        inputs: Vec::new(),
+        outputs: OutputContract {
+            requested_outputs: 0,
+        },
+        resources: ResourceRequest {
+            cpu_millicores: 1000,
+            memory_bytes: 1024,
+            scratch_bytes: 1024,
+            max_wall_millis: 1000,
+            max_artifact_bytes: 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: Vec::new(),
+            required_capabilities: BTreeSet::new(),
+        },
+        retry: RetryPolicy::Never,
+        deadline_unix_millis: None,
+    };
+    let attempt = driver
+        .handle(DriverCommand::Submit(Box::new(TaskSubmission {
+            request,
+            dependencies: BTreeSet::new(),
+            priority: 0,
+        })))
+        .unwrap()
+        .into_iter()
+        .find_map(|action| match action {
+            DriverAction::Launch(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    (driver, attempt)
+}
+
+#[test]
+fn completion_publishes_result_and_history_once() {
+    let completion = TaskCompletion::new();
+    assert!(completion.try_value().is_none());
+    assert!(completion.try_attempt_history().is_none());
+    completion.complete(CompletedTask {
+        result: Err("original".into()),
+        attempts: Vec::new(),
+    });
+    completion.complete(CompletedTask {
+        result: Err("late".into()),
+        attempts: Vec::new(),
+    });
+    assert_eq!(completion.try_value(), Some(Err("original".into())));
+    assert_eq!(completion.try_attempt_history(), Some(Vec::new()));
+}
+
+#[test]
+fn late_worker_success_cannot_override_scheduler_cancellation() {
+    let (mut driver, request) = assigned();
+    let success = AttemptSuccess::new(&request, Vec::new(), Vec::new(), 1, 0, 0).unwrap();
+    driver
+        .handle(DriverCommand::CancelScope {
+            scope_id: request.scope_id,
+            reason: CancellationReason::User,
+            now_millis: 1,
+        })
+        .unwrap();
+    driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &request,
+            AttemptReport::Succeeded {
+                result: success.clone(),
+            },
+        )))
+        .unwrap();
+    let completed = from_snapshot(&driver.snapshot(), &request, Ok(success)).unwrap();
+    assert_eq!(completed.result, Err("execution was cancelled".into()));
+    assert_eq!(completed.attempts.len(), 1);
+    assert!(completed.attempts[0]
+        .terminal
+        .as_ref()
+        .unwrap()
+        .resources
+        .is_some());
+    assert!(driver.snapshot().tasks[&request.task_id]
+        .committed
+        .is_none());
+}
+
+#[test]
+fn committed_original_result_wins_over_a_different_raw_response() {
+    let (mut driver, request) = assigned();
+    let success = AttemptSuccess::new(&request, Vec::new(), Vec::new(), 1, 0, 0).unwrap();
+    driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &request,
+            AttemptReport::Succeeded {
+                result: success.clone(),
+            },
+        )))
+        .unwrap();
+    let completed =
+        from_snapshot(&driver.snapshot(), &request, Err("stale raw error".into())).unwrap();
+    assert_eq!(completed.result, Ok(success));
+    assert_eq!(completed.attempts.len(), 1);
+    let mut invalid = driver.snapshot();
+    invalid.attempts.get_mut(&request.id).unwrap().terminal = None;
+    assert!(from_snapshot(
+        &invalid,
+        &request,
+        Ok(AttemptSuccess {
+            outputs: Vec::new(),
+            result_objects: Vec::new(),
+            resources: None,
+        })
+    )
+    .unwrap()
+    .result
+    .is_err());
+}

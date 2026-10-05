@@ -198,6 +198,12 @@ impl NativeProgramTask {
         self.completion.try_value()
     }
 
+    /// Complete original scheduler history, available atomically with terminal completion.
+    /// Missing worker accounting remains explicit on unsuccessful attempts.
+    pub fn try_attempt_history(&self) -> Option<Vec<runmat_execution_runner::task::AttemptRecord>> {
+        self.completion.try_attempt_history()
+    }
+
     pub fn drain_progress(&self) -> Vec<ProgramProgress> {
         self.completion.drain_progress()
     }

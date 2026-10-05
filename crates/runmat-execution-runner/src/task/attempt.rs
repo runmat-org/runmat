@@ -220,6 +220,8 @@ pub struct AttemptRecord {
     pub request: AttemptRequest,
     pub state: AttemptState,
     pub assigned_at_millis: u64,
+    /// Driver closure and original worker evidence; absence means still active.
+    pub terminal: Option<super::AttemptTerminal>,
     pub cancellation_requested_at: Option<u64>,
     pub cancellation_escalation: Option<CancellationEscalation>,
 }

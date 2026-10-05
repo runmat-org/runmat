@@ -3,6 +3,7 @@ mod graph;
 mod lifecycle;
 mod result_commit;
 mod retry;
+mod terminal;
 
 pub use attempt::{
     AttemptFailureKind, AttemptRecord, AttemptReport, AttemptRequest, AttemptResourceAccounting,
@@ -12,3 +13,4 @@ pub use graph::TaskGraph;
 pub use lifecycle::{TaskRecord, TaskSubmission};
 pub use result_commit::{CommitDecision, ResultCommit};
 pub use retry::{retry_decision, RetryCause, RetryDecision};
+pub use terminal::{AttemptDisposition, AttemptTerminal};

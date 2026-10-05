@@ -1,3 +1,5 @@
+#[path = "meshing_process_conformance/attempt_lifecycle.rs"]
+mod attempt_lifecycle;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -231,6 +233,17 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
 
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
+    if arguments
+        .iter()
+        .any(|argument| argument == "--attempt-lifecycle-only")
+    {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(attempt_lifecycle::run());
+        return;
+    }
     if let Some(mode) = arguments.get(1) {
         if mode == runmat_process_host::HiddenMode::ExecutionDriver.marker() {
             tokio::runtime::Builder::new_current_thread()

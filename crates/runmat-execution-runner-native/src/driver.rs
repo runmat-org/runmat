@@ -1,5 +1,5 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
@@ -28,59 +28,15 @@ use crate::{
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
 pub const NATIVE_ACCELERATOR_REQUIRED_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED";
 pub const NATIVE_ACCELERATOR_REQUESTS_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUESTS";
-const MAX_BUFFERED_PROGRESS: usize = 256;
-
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
-pub(crate) struct TaskCompletion {
-    value: Mutex<Option<TransferResult>>,
-    progress: Mutex<VecDeque<crate::protocol::ProgramProgress>>,
-    cancelled: AtomicBool,
-}
-
-impl TaskCompletion {
-    fn new() -> Self {
-        Self {
-            value: Mutex::new(None),
-            progress: Mutex::new(VecDeque::new()),
-            cancelled: AtomicBool::new(false),
-        }
-    }
-
-    pub(crate) fn try_value(&self) -> Option<TransferResult> {
-        self.value.lock().expect("task completion poisoned").clone()
-    }
-
-    pub(crate) fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-    }
-
-    pub(crate) fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
-        let mut buffered = self.progress.lock().expect("task progress poisoned");
-        if buffered.len() == MAX_BUFFERED_PROGRESS {
-            buffered.pop_front();
-        }
-        buffered.push_back(progress);
-    }
-
-    pub(crate) fn drain_progress(&self) -> Vec<crate::protocol::ProgramProgress> {
-        self.progress
-            .lock()
-            .expect("task progress poisoned")
-            .drain(..)
-            .collect()
-    }
-
-    fn complete(&self, value: TransferResult) {
-        let mut result = self.value.lock().expect("task completion poisoned");
-        if result.is_none() {
-            *result = Some(value);
-        }
-    }
-}
+mod clock;
+mod completion;
+pub(crate) use completion::TaskCompletion;
 
 pub(crate) struct LocalDriver {
     config: NativeExecutionConfig,
+    clock: clock::DriverClock,
     store_lifetime: Arc<crate::program_object_source::SessionStoreLifetime>,
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
@@ -151,8 +107,13 @@ impl LocalDriver {
             FilesystemObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let checkpoints = CheckpointStore::new(config.store_root.join("checkpoints"))?;
+        let clock = clock::DriverClock::new()?;
+        driver.handle(DriverCommand::Tick {
+            now_millis: clock.now_millis(),
+        })?;
         let local = Arc::new(Self {
             store_lifetime,
+            clock,
             config,
             scope_id,
             pool_id,
@@ -163,6 +124,7 @@ impl LocalDriver {
             completions: Mutex::new(HashMap::new()),
         });
         local.checkpoint()?;
+        clock::start(&local)?;
         Ok(local)
     }
 
@@ -342,9 +304,12 @@ impl LocalDriver {
         };
         drop(completions);
         for (completion, state) in inherited_terminals {
-            completion.complete(Err(format!(
-                "local task inherited terminal dependency state {state:?}"
-            )));
+            completion.complete(completion::CompletedTask {
+                result: Err(format!(
+                    "local task inherited terminal dependency state {state:?}"
+                )),
+                attempts: Vec::new(),
+            });
         }
         Self::dispatch(Arc::clone(self), actions);
         Ok(registrations
@@ -354,16 +319,17 @@ impl LocalDriver {
     }
 
     pub(crate) fn cancel_all(self: &Arc<Self>, reason: CancellationReason) {
-        let actions = self
-            .driver
-            .lock()
-            .expect("local driver poisoned")
-            .handle(DriverCommand::CancelScope {
-                scope_id: self.scope_id,
-                reason,
-                now_millis: runmat_time_millis(),
-            })
-            .unwrap_or_default();
+        let actions = {
+            let mut driver = self.driver.lock().expect("local driver poisoned");
+            let now_millis = self.clock.now_millis().max(driver.now_millis());
+            driver
+                .handle(DriverCommand::CancelScope {
+                    scope_id: self.scope_id,
+                    reason,
+                    now_millis,
+                })
+                .expect("native cancellation uses a monotonic driver clock")
+        };
         Self::dispatch(Arc::clone(self), actions);
         let _ = self.checkpoint();
     }
@@ -426,21 +392,13 @@ impl LocalDriver {
                     &request, report,
                 )))
                 .unwrap_or_default();
-            let accepted = this
+            let snapshot = this
                 .driver
                 .lock()
                 .expect("local driver poisoned")
-                .snapshot()
-                .tasks
-                .get(&request.task_id)
-                .is_some_and(|task| {
-                    matches!(
-                        task.state,
-                        TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
-                    )
-                });
-            if accepted {
-                completion.complete(result);
+                .snapshot();
+            if let Some(terminal) = completion::from_snapshot(&snapshot, &request, result) {
+                completion.complete(terminal);
             }
             let _ = this.checkpoint();
             Self::dispatch(Arc::clone(&this), actions);
@@ -455,27 +413,5 @@ impl LocalDriver {
                 .expect("local driver poisoned")
                 .snapshot(),
         )
-    }
-}
-
-fn runmat_time_millis() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis() as u64)
-}
-
-#[cfg(test)]
-mod task_completion_tests {
-    use super::{TaskCompletion, TransferResult};
-
-    #[test]
-    fn completion_is_pollable_without_blocking_the_await_caller() {
-        let completion = TaskCompletion::new();
-        assert_eq!(completion.try_value(), None);
-
-        let result: TransferResult = Err("completed".into());
-        completion.complete(result.clone());
-        assert_eq!(completion.try_value(), Some(result));
     }
 }

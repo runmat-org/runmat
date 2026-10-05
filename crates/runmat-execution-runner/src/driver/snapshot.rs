@@ -33,7 +33,7 @@ pub struct DriverSnapshot {
 
 impl DriverSnapshot {
     pub fn validate(&self) -> RunnerResult<()> {
-        if self.schema_version != 1 || self.driver_fence == 0 {
+        if self.schema_version != 2 || self.driver_fence == 0 {
             return Err(RunnerError::Invalid(
                 "driver snapshot schema or fence is invalid".into(),
             ));
@@ -101,6 +101,9 @@ impl DriverSnapshot {
                     "attempt identity or ownership reference is invalid".into(),
                 ));
             }
+            attempt
+                .validate_terminal(self.now_millis)
+                .map_err(RunnerError::Invalid)?;
             let task = &self.tasks[&attempt.request.task_id];
             let request = &attempt.request;
             let expected_id = AttemptId::derive(&[
@@ -172,6 +175,14 @@ impl DriverSnapshot {
         {
             return Err(RunnerError::Invalid(
                 "snapshot commit does not belong to a completed task attempt".into(),
+            ));
+        }
+        if attempt.terminal.as_ref().is_none_or(|terminal| {
+            terminal.disposition != crate::task::AttemptDisposition::Succeeded
+                || terminal.resources != commit.resources
+        }) {
+            return Err(RunnerError::Invalid(
+                "commit differs from original terminal attempt evidence".into(),
             ));
         }
         let success = AttemptSuccess {

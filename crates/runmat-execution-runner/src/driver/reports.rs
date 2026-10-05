@@ -4,8 +4,8 @@ use runmat_execution::TaskId;
 use crate::port::BackendReport;
 use crate::scheduler;
 use crate::task::{
-    retry_decision, AttemptFailureKind, AttemptRecord, AttemptReport, CommitDecision, ResultCommit,
-    RetryCause, RetryDecision,
+    retry_decision, AttemptDisposition, AttemptFailureKind, AttemptRecord, AttemptReport,
+    AttemptTerminal, CommitDecision, ResultCommit, RetryCause, RetryDecision,
 };
 use crate::{RunnerError, RunnerResult};
 
@@ -51,7 +51,11 @@ impl Driver {
                     return Ok(());
                 }
                 let uncommitted_objects = result.result_objects.clone();
-                self.finish_attempt(&attempt, AttemptState::Completed)?;
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Succeeded,
+                    result.resources.clone(),
+                )?;
                 let decision = self.commit_result(&attempt, result)?;
                 if let CommitDecision::Accepted(commit) = decision {
                     self.emit(DriverEventKind::ResultCommitted {
@@ -76,7 +80,7 @@ impl Driver {
                 self.fail_attempt(&attempt, report.task_id, report.attempt_id, kind)?;
             }
             AttemptReport::Lost { .. } => {
-                self.finish_attempt(&attempt, AttemptState::Lost)?;
+                self.finish_attempt(&attempt, AttemptDisposition::Lost, None)?;
                 self.emit(DriverEventKind::AttemptLost {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
@@ -84,7 +88,7 @@ impl Driver {
                 self.finish_unsuccessful(report.task_id, RetryCause::Lost)?;
             }
             AttemptReport::Cancelled => {
-                self.finish_attempt(&attempt, AttemptState::Cancelled)?;
+                self.finish_attempt(&attempt, AttemptDisposition::Cancelled, None)?;
                 self.emit(DriverEventKind::AttemptCancelled {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
@@ -121,12 +125,7 @@ impl Driver {
         attempt_id: runmat_execution::identity::AttemptId,
         kind: AttemptFailureKind,
     ) -> RunnerResult<()> {
-        let state = if kind == AttemptFailureKind::Rejected {
-            AttemptState::Rejected
-        } else {
-            AttemptState::Completed
-        };
-        self.finish_attempt(attempt, state)?;
+        self.finish_attempt(attempt, AttemptDisposition::Failed { kind }, None)?;
         self.emit(DriverEventKind::AttemptFailed {
             task_id,
             attempt_id,
@@ -143,13 +142,24 @@ impl Driver {
     pub(super) fn finish_attempt(
         &mut self,
         attempt: &AttemptRecord,
-        state: AttemptState,
+        disposition: AttemptDisposition,
+        resources: Option<Box<crate::task::AttemptResourceAccounting>>,
     ) -> RunnerResult<()> {
-        self.snapshot
+        let terminal = AttemptTerminal {
+            disposition,
+            closed_at_driver_millis: self.snapshot.now_millis,
+            resources,
+        };
+        terminal
+            .validate_against(attempt)
+            .map_err(RunnerError::Invalid)?;
+        let record = self
+            .snapshot
             .attempts
             .get_mut(&attempt.request.id)
-            .expect("attempt was validated")
-            .state = state;
+            .expect("attempt was validated");
+        record.state = disposition.state();
+        record.terminal = Some(terminal);
         let pool = self.pool_mut(attempt.request.task.pool_id)?;
         let worker = pool
             .workers

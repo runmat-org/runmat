@@ -26,6 +26,7 @@ pub fn reconcile_snapshot_at_fence(
         ));
     }
     snapshot.driver_fence = replacement_fence;
+    let closed_at_driver_millis = snapshot.now_millis;
     let lost = snapshot
         .attempts
         .values_mut()
@@ -37,6 +38,11 @@ pub fn reconcile_snapshot_at_fence(
         })
         .map(|attempt| {
             attempt.state = AttemptState::Lost;
+            attempt.terminal = Some(crate::task::AttemptTerminal {
+                disposition: crate::task::AttemptDisposition::Lost,
+                closed_at_driver_millis,
+                resources: None,
+            });
             (attempt.request.id, attempt.request.task_id)
         })
         .collect::<Vec<_>>();
