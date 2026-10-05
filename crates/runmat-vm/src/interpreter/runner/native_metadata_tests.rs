@@ -87,3 +87,52 @@ fn native_metadata_merges_partial_top_and_bound_classes_once_in_dependency_order
     );
     assert!(runmat_runtime::class_registry::get_class(&parent).is_some());
 }
+
+#[test]
+fn native_metadata_rejects_conflicting_duplicate_before_publication() {
+    let mut bytecode =
+        Bytecode::with_instructions(vec![native_class("VmNativeConflictTop", None)], 0);
+    let mut conflicting = native_class("VmNativeConflictTop", None);
+    if let Instr::RegisterClass { is_sealed, .. } = &mut conflicting {
+        *is_sealed = true;
+    }
+    bytecode.function_registry = FunctionRegistry::new(HashMap::from([(
+        FunctionId(1),
+        bound_function(1, vec![conflicting]),
+    )]));
+    let before = runmat_runtime::class_registry::class_registry_generation();
+    let error = prepare_native_execution_metadata(&bytecode).expect_err("conflicting class");
+    assert_eq!(error.identifier(), Some("RunMat:ClassMetadataConflict"));
+    assert_eq!(
+        runmat_runtime::class_registry::class_registry_generation(),
+        before
+    );
+}
+
+#[test]
+fn native_metadata_rejects_superclass_cycle_before_publication() {
+    let mut bytecode = Bytecode::empty();
+    bytecode.function_registry = FunctionRegistry::new(HashMap::from([
+        (
+            FunctionId(1),
+            bound_function(
+                1,
+                vec![native_class("VmNativeCycleA", Some("VmNativeCycleB"))],
+            ),
+        ),
+        (
+            FunctionId(2),
+            bound_function(
+                2,
+                vec![native_class("VmNativeCycleB", Some("VmNativeCycleA"))],
+            ),
+        ),
+    ]));
+    let before = runmat_runtime::class_registry::class_registry_generation();
+    let error = prepare_native_execution_metadata(&bytecode).expect_err("cycle");
+    assert_eq!(error.identifier(), Some("RunMat:ClassInheritanceCycle"));
+    assert_eq!(
+        runmat_runtime::class_registry::class_registry_generation(),
+        before
+    );
+}
