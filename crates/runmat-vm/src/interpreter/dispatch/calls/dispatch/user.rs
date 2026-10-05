@@ -29,7 +29,7 @@ pub(super) async fn dispatch(
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
                     source_id,
-                    call_arg_spans: call_arg_spans.clone(),
+                    call_arg_spans: call_arg_spans.as_ref().cloned(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -68,7 +68,7 @@ pub(super) async fn dispatch(
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count,
                     source_id,
-                    call_arg_spans: call_arg_spans.clone(),
+                    call_arg_spans: call_arg_spans.as_ref().cloned(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -113,7 +113,7 @@ pub(super) async fn dispatch(
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
                     source_id,
-                    call_arg_spans.clone(),
+                    call_arg_spans.as_ref().cloned(),
                 );
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
@@ -156,7 +156,7 @@ pub(super) async fn dispatch(
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
                     source_id,
-                    call_arg_spans.clone(),
+                    call_arg_spans.as_ref().cloned(),
                 );
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
@@ -196,7 +196,7 @@ pub(super) async fn dispatch(
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
                     source_id,
-                    call_arg_spans: call_arg_spans.clone(),
+                    call_arg_spans: call_arg_spans.as_ref().cloned(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -240,7 +240,7 @@ pub(super) async fn dispatch(
                     fallback_policy: *fallback_policy,
                     out_count,
                     source_id,
-                    call_arg_spans: call_arg_spans.clone(),
+                    call_arg_spans: call_arg_spans.as_ref().cloned(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {

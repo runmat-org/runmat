@@ -28,7 +28,7 @@ pub(super) async fn dispatch(
                     name,
                     arg_count: *arg_count,
                     source_id,
-                    call_arg_spans: call_arg_spans.clone(),
+                    call_arg_spans: call_arg_spans.as_ref().cloned(),
                     imports: imports.as_slice(),
                     call_counts,
                     function_registry,
@@ -68,7 +68,7 @@ pub(super) async fn dispatch(
                     name,
                     arg_count: *arg_count,
                     source_id,
-                    call_arg_spans: call_arg_spans.clone(),
+                    call_arg_spans: call_arg_spans.as_ref().cloned(),
                     imports: imports.as_slice(),
                     call_counts,
                     function_registry,
@@ -155,7 +155,7 @@ pub(super) async fn dispatch(
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
                     source_id,
-                    call_arg_spans.clone(),
+                    call_arg_spans.as_ref().cloned(),
                 );
             match crate::call::feval::execute_feval(
                 &context.runtime,
@@ -181,7 +181,7 @@ pub(super) async fn dispatch(
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
                     source_id,
-                    call_arg_spans.clone(),
+                    call_arg_spans.as_ref().cloned(),
                 );
             match crate::call::feval::execute_feval(
                 &context.runtime,
@@ -208,7 +208,7 @@ pub(super) async fn dispatch(
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
                     source_id,
-                    call_arg_spans.clone(),
+                    call_arg_spans.as_ref().cloned(),
                 );
             match crate::call::feval::execute_feval(
                 &context.runtime,
@@ -236,7 +236,7 @@ pub(super) async fn dispatch(
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
                     source_id,
-                    call_arg_spans.clone(),
+                    call_arg_spans.as_ref().cloned(),
                 );
             match crate::call::feval::execute_feval(
                 &context.runtime,

@@ -768,7 +768,7 @@ pub async fn dispatch_instruction(
         imports: &*imports,
         pc: &mut *pc,
         source_id: source_id.clone(),
-        call_arg_spans: call_arg_spans.clone(),
+        call_arg_spans: &call_arg_spans,
         call_counts,
         function_registry,
         current_function_name,

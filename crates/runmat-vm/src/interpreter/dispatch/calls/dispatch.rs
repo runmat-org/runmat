@@ -26,7 +26,7 @@ pub(super) struct CallDispatchContext<'a> {
     pub imports: &'a Vec<(Vec<String>, bool)>,
     pub pc: &'a mut usize,
     pub source_id: Option<runmat_hir::SourceId>,
-    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub call_arg_spans: &'a Option<Vec<runmat_hir::Span>>,
     pub call_counts: &'a [(usize, usize)],
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub current_function_name: &'a str,
