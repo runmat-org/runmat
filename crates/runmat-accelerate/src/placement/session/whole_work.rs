@@ -50,14 +50,16 @@ struct Admitted<'a> {
     observation: CandidateObservationEvidence,
 }
 
-struct SelectionDraft {
-    selected: Option<SelectedExecutionCandidate>,
-    kind: WholeWorkDecisionKind,
-    predicted_total_ns: Option<u64>,
-    probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+enum SelectionDraft {
+    Direct {
+        selected: SelectedExecutionCandidate,
+        kind: WholeWorkDecisionKind,
+        predicted_total_ns: Option<u64>,
+        probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    },
     /// A compared route waits for the caller to transfer its original
     /// signature into the graph planner. A borrowed caller clones only here.
-    compared_graph: Option<PlacementGraph>,
+    Compared { graph: PlacementGraph },
 }
 
 impl PlacementSession {
@@ -69,7 +71,7 @@ impl PlacementSession {
         self.finish_whole_work_selection(
             draft,
             request.signature,
-            Some(request.resources),
+            || request.resources,
             request.deterministic,
             request.require_transactional_results,
         )
@@ -80,14 +82,10 @@ impl PlacementSession {
         request: WholeWorkPlacementRequestRef<'_>,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
         let draft = self.select_whole_work_untracked(request)?;
-        let resources = draft
-            .compared_graph
-            .as_ref()
-            .map(|_| (*request.resources).clone());
         self.finish_whole_work_selection(
             draft,
             (*request.signature).clone(),
-            resources,
+            || (*request.resources).clone(),
             request.deterministic,
             request.require_transactional_results,
         )
@@ -97,17 +95,17 @@ impl PlacementSession {
         &self,
         draft: SelectionDraft,
         signature: runmat_execution::PlacementSignature,
-        resources: Option<runmat_execution::PlacementResourceSnapshot>,
+        resources: impl FnOnce() -> runmat_execution::PlacementResourceSnapshot,
         deterministic: bool,
         require_transactional_results: bool,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
-        let (signature, selected_candidate, kind, predicted_total_ns) =
-            if let Some(graph) = draft.compared_graph {
+        let (signature, selected_candidate, kind, predicted_total_ns, probe) = match draft {
+            SelectionDraft::Compared { graph } => {
                 let plan = self.plan(PlacementPlanRequest {
                     signature,
                     graph,
                     limits: PlacementGraphLimits::default(),
-                    resources: resources.expect("compared route retains resource snapshot"),
+                    resources: resources(),
                     deterministic,
                     require_transactional_results,
                 })?;
@@ -116,15 +114,16 @@ impl PlacementSession {
                     plan.selections.into_iter().next().expect("one-node graph"),
                     WholeWorkDecisionKind::Compared,
                     Some(plan.predicted_total_ns),
+                    None,
                 )
-            } else {
-                (
-                    signature,
-                    draft.selected.expect("non-compared route has a selection"),
-                    draft.kind,
-                    draft.predicted_total_ns,
-                )
-            };
+            }
+            SelectionDraft::Direct {
+                selected,
+                kind,
+                predicted_total_ns,
+                probe,
+            } => (signature, selected, kind, predicted_total_ns, probe),
+        };
         let mut selected = RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
                 signature,
@@ -132,7 +131,7 @@ impl PlacementSession {
                 kind,
                 predicted_total_ns,
             },
-            probe: draft.probe,
+            probe,
             observation_permit: None,
         };
         selected.observation_permit = Some(
@@ -247,8 +246,8 @@ impl PlacementSession {
                 })
                 .or_else(|| admitted.first())
                 .expect("nonempty admitted whole-work candidates");
-            return Ok(SelectionDraft {
-                selected: Some(item.selected.clone()),
+            return Ok(SelectionDraft::Direct {
+                selected: item.selected.clone(),
                 kind: if matches!(
                     request.constraint,
                     WholeWorkConstraint::ProviderRequired { .. }
@@ -262,7 +261,6 @@ impl PlacementSession {
                     .estimate()
                     .and_then(|cost| cost.checked_total_ns()),
                 probe: None,
-                compared_graph: None,
             });
         }
 
@@ -276,15 +274,14 @@ impl PlacementSession {
                     item.selected.kind,
                 );
                 lock_probes(&self.whole_work_probes).insert(key.clone());
-                return Ok(SelectionDraft {
-                    selected: Some(item.selected.clone()),
+                return Ok(SelectionDraft::Direct {
+                    selected: item.selected.clone(),
                     kind: WholeWorkDecisionKind::Exploratory,
                     predicted_total_ns: None,
                     probe: Some(Box::new(ProbeLease {
                         active: Arc::clone(&self.whole_work_probes),
                         key,
                     })),
-                    compared_graph: None,
                 });
             }
         }
@@ -329,15 +326,11 @@ impl PlacementSession {
                 })
                 .collect(),
         };
-        Ok(SelectionDraft {
-            selected: None,
-            kind: WholeWorkDecisionKind::Compared,
-            predicted_total_ns: None,
-            probe: None,
-            compared_graph: Some(PlacementGraph {
+        Ok(SelectionDraft::Compared {
+            graph: PlacementGraph {
                 nodes: vec![node],
                 edges: Vec::new(),
-            }),
+            },
         })
     }
 }
@@ -347,12 +340,11 @@ fn unmeasured_host(admitted: &[Admitted<'_>]) -> Result<SelectionDraft, Placemen
         .iter()
         .find(|item| !item.candidate.kind.is_provider())
         .ok_or_else(no_legal_candidate)?;
-    Ok(SelectionDraft {
-        selected: Some(item.selected.clone()),
+    Ok(SelectionDraft::Direct {
+        selected: item.selected.clone(),
         kind: WholeWorkDecisionKind::Unmeasured,
         predicted_total_ns: None,
         probe: None,
-        compared_graph: None,
     })
 }
 
