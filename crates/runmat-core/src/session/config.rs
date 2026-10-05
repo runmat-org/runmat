@@ -119,6 +119,70 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
     }
 
+    /// Preallocate finite in-flight placement observation slots on the same
+    /// managed ledger as the installed parallel service. This does not create
+    /// a host-effect resource certificate or change ordinary unbounded calls.
+    pub fn install_managed_host_effect_placement(
+        &mut self,
+        slots: usize,
+    ) -> Result<(), RuntimeError> {
+        let parallel = self
+            .runtime_context
+            .service_ports()
+            .parallel()
+            .ok_or_else(|| managed_placement_error("parallel allocation service is absent"))?;
+        let ledger = parallel.managed_host_effect_ledger().ok_or_else(|| {
+            managed_placement_error("parallel service has no managed allocation owner")
+        })?;
+        let before = ledger.snapshot();
+        if !before.current || before.epoch != parallel.placement_resources().epoch {
+            return Err(managed_placement_error(
+                "parallel allocation epoch is stale",
+            ));
+        }
+        let replacement = std::rc::Rc::new(
+            runmat_accelerate::placement::PlacementSession::new_with_managed_observations(
+                runmat_accelerate::placement::PlacementSessionConfig::default(),
+                &ledger,
+                slots,
+            )
+            .map_err(|source| {
+                runmat_runtime::build_runtime_error(
+                    "managed placement backing could not be reserved",
+                )
+                .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .with_source(source)
+                .build()
+            })?,
+        );
+        let profile = self.placement_session.profile_snapshot();
+        replacement.restore_profile(profile).map_err(|source| {
+            runmat_runtime::build_runtime_error("placement profile could not be transferred")
+                .with_identifier(source.code)
+                .with_source(source)
+                .build()
+        })?;
+        let after = ledger.snapshot();
+        if !after.current
+            || after.epoch != before.epoch
+            || parallel.placement_resources().epoch != after.epoch
+        {
+            return Err(managed_placement_error(
+                "parallel allocation owner changed during setup",
+            ));
+        }
+        self.placement_session
+            .invalidate(runmat_execution::PlacementInvalidation::All);
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_placement(replacement.clone());
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+        self.placement_session = replacement;
+        Ok(())
+    }
+
     /// Install one host-owned complete-call resource evidence service. The
     /// service must use the same managed allocation authority exposed by the
     /// installed parallel port; this does not create a separate quota.
@@ -497,6 +561,12 @@ impl RunMatSession {
     }
 }
 
+fn managed_placement_error(message: &'static str) -> RuntimeError {
+    runmat_runtime::build_runtime_error(message)
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
@@ -573,6 +643,39 @@ mod tests {
         assert_eq!(resources.cpu_millicores_available, 250);
         assert_eq!(resources.memory_available_bytes, Some(4_096));
         assert_eq!(resources.epoch, 7);
+    }
+
+    #[test]
+    fn managed_placement_setup_uses_installed_parallel_ledger_and_is_failure_atomic() {
+        let ledger = ManagedHostEffectLedger::new_with_epoch(16 * 1024, 9);
+        let mut first = RunMatSession::with_options(false, false).unwrap();
+        let mut second = RunMatSession::with_options(false, false).unwrap();
+        first.install_parallel_service(Rc::new(ManagedAllocation(ledger.clone())));
+        second.install_parallel_service(Rc::new(ManagedAllocation(ledger.clone())));
+        first
+            .install_managed_host_effect_placement(1)
+            .expect("one preallocated slot on first session");
+        let charged = ledger.snapshot().live_reserved_bytes;
+        assert!(charged > 0);
+        second
+            .install_managed_host_effect_placement(1)
+            .expect("independent session shares the ledger, not slot identity");
+        assert_eq!(ledger.snapshot().live_reserved_bytes, charged * 2);
+        let prior = first.placement_session.clone();
+        let error = first
+            .install_managed_host_effect_placement(usize::MAX)
+            .expect_err("unrepresentable backing must not replace placement");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Placement:InsufficientResourceEvidence")
+        );
+        assert!(Rc::ptr_eq(&prior, &first.placement_session));
+        assert_eq!(ledger.snapshot().live_reserved_bytes, charged * 2);
+        drop(prior);
+        drop(first);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, charged);
+        drop(second);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
     #[test]
