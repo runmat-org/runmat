@@ -20,10 +20,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if request.arguments.first().is_some_and(|input| {
-        !matches!(
-            input.kind,
-            ValueKindFact::Struct(_) | ValueKindFact::Object(_) | ValueKindFact::Unknown
-        )
+        !super::super::receiver_inference::may_be_receiver(input, super::super::TCPCLIENT_CLASS)
     }) {
         result.diagnostics.push(argument_error(
             "RM-CATALOG-READLINE-CLIENT",

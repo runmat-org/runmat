@@ -5,18 +5,18 @@ use std::collections::BTreeMap;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut fields = BTreeMap::new();
     fields.insert("Address".into(), ValueFact::scalar(ValueKindFact::String));
-    fields.insert(
-        "Port".into(),
-        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::UInt16,
-            domain: NumericDomain::Real,
-        })),
-    );
+    fields.insert("Port".into(), real_double());
     fields.insert(
         "Connected".into(),
         ValueFact::scalar(ValueKindFact::Logical),
     );
-    let output = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, false)));
+    let output = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(super::super::TCPCLIENT_CLASS.owned()),
+        properties: fields,
+        properties_complete: false,
+        handle_semantics: Some(true),
+    }));
     let mut contract = CallContract::fixed(vec![output]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
@@ -29,10 +29,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if request.arguments.first().is_some_and(|server| {
-        !matches!(
-            server.kind,
-            ValueKindFact::Struct(_) | ValueKindFact::Object(_) | ValueKindFact::Unknown
-        )
+        !super::super::receiver_inference::may_be_receiver(server, super::super::TCPSERVER_CLASS)
     }) {
         result.diagnostics.push(argument_error(
             "RM-CATALOG-NET-ACCEPT-SERVER",

@@ -14,7 +14,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         "Connected".into(),
         ValueFact::scalar(ValueKindFact::Logical),
     );
-    let output = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, false)));
+    let output = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(super::super::TCPSERVER_CLASS.owned()),
+        properties: fields,
+        properties_complete: false,
+        handle_semantics: Some(true),
+    }));
     let mut contract = CallContract::fixed(vec![output]);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();

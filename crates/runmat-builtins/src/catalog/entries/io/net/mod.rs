@@ -2,10 +2,12 @@
 
 mod accept;
 mod capability;
+mod class;
 mod constructor_option;
 mod datatype;
 mod constructor_inference;
 mod read;
+mod receiver_inference;
 mod readline;
 mod tcpclient;
 mod tcpserver;
@@ -13,6 +15,7 @@ mod write;
 
 pub use accept::*;
 pub use capability::NET_ERROR_UNSUPPORTED_TARGET;
+pub use class::{TCPCLIENT_CLASS, TCPSERVER_CLASS};
 pub use constructor_option::NetConstructorOption;
 pub use datatype::NetDataType;
 pub use read::*;
