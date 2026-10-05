@@ -18,3 +18,9 @@ pub use contract::{
 pub use entry::MEMMAPFILE_CATALOG_ENTRY;
 pub use subsasgn::MEMMAPFILE_SUBSASGN_CATALOG_ENTRY;
 pub use subsref::MEMMAPFILE_SUBSREF_CATALOG_ENTRY;
+
+pub const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
+    &MEMMAPFILE_CATALOG_ENTRY,
+    &MEMMAPFILE_SUBSREF_CATALOG_ENTRY,
+    &MEMMAPFILE_SUBSASGN_CATALOG_ENTRY,
+];
