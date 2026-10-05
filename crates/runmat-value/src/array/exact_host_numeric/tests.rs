@@ -99,6 +99,29 @@ fn canonical_requested_bytes_equal_the_retained_charge_for_every_numeric_class()
 }
 
 #[test]
+fn retained_exact_claim_follows_last_original_owner_not_later_cow_copy() {
+    let requested = ExactHostTensor2dAllocation::requested_bytes(NumericDType::U64, 1, 2).unwrap();
+    let quota = permit(requested);
+    let original = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &quota)
+        .unwrap()
+        .into_tensor()
+        .unwrap();
+    let mut later_copy = original.clone();
+    assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+    later_copy
+        .set_numeric_assignment_at(0, NumericScalar::U64(7))
+        .unwrap();
+    assert_eq!(original.numeric_value_at(0), Some(NumericScalar::U64(0)));
+    assert_eq!(later_copy.numeric_value_at(0), Some(NumericScalar::U64(7)));
+    assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+    drop(original);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    // The ordinary COW allocation belongs to the later mutation, not this
+    // initial output reservation or its complete-call certificate.
+    assert_eq!(later_copy.numeric_value_at(0), Some(NumericScalar::U64(7)));
+}
+
+#[test]
 fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
     let shape_bytes = 2 * std::mem::size_of::<usize>();
     let denied = permit(integer_charge(16 + shape_bytes) - 1);
