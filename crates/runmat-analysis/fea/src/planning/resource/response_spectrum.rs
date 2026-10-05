@@ -7,7 +7,7 @@ use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    algebra::CoercivitySymbolicPlan,
+    algebra::CoercivityWorkEnvelope,
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
         CanonicalSemanticState, StructuralModalResponseSpectrumAssemblyRequest,
@@ -128,9 +128,9 @@ impl StructuralModalResponseSpectrumResourceProjection {
                     reduced_stiffness.column_indices().len(),
                     "missing-mass reduced stiffness nonzeros",
                 )?,
-                CoercivitySymbolicPlan::derive(&reduced_stiffness)
+                CoercivityWorkEnvelope::derive(&reduced_stiffness)
                     .map_err(invalid_error)?
-                    .resident_bytes_upper_bound(),
+                    .resident_bytes_limit(),
             )?;
         if basis
             .modes()

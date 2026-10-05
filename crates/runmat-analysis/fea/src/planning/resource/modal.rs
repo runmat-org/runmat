@@ -1,5 +1,5 @@
 use crate::{
-    algebra::CoercivitySymbolicPlan,
+    algebra::CoercivityWorkEnvelope,
     constraints::CanonicalStructuralConstraintPlan,
     execution::{CanonicalSemanticState, StructuralModalWorkload},
     post::fields::structural_observable_field_definitions,
@@ -141,7 +141,7 @@ pub fn build_structural_modal_resource_plan(
     let reduced_mass = reduction
         .reduce_sparse_pattern(facts.symbolic.mass_upper_bound())
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let admission = CoercivitySymbolicPlan::derive(&reduced_tangent)
+    let admission = CoercivityWorkEnvelope::derive(&reduced_tangent)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let reduced_tangent_nonzeros = count(
         reduced_tangent.column_indices().len(),
@@ -185,7 +185,7 @@ pub fn build_structural_modal_resource_plan(
         residual_vector_count,
         reduced_tangent_nonzeros,
         reduced_mass_nonzeros,
-        admission.resident_bytes_upper_bound(),
+        admission.resident_bytes_limit(),
     )?;
     let modal_output_values =
         modal_output_value_count(full_dimension, reduced_dimension, residual_vector_count)?;

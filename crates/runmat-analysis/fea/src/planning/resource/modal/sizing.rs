@@ -17,7 +17,7 @@ pub(super) fn modal_workspace_bytes(
     residual_vector_count: u64,
     reduced_stiffness_nonzeros: u64,
     reduced_mass_nonzeros: u64,
-    ilu_bytes: u64,
+    coercivity_bytes: u64,
 ) -> Result<u64, ResourcePlanningError> {
     let reduced_row_offsets = checked_bytes(
         checked_mul(
@@ -81,7 +81,7 @@ pub(super) fn modal_workspace_bytes(
     checked_add(
         checked_add(
             reduced_operator_bytes,
-            ilu_bytes,
+            coercivity_bytes,
             "reduced operators and ILU",
         )?,
         vector_and_dense,

@@ -2,7 +2,7 @@ use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    algebra::CoercivitySymbolicPlan,
+    algebra::CoercivityWorkEnvelope,
     constraints::CanonicalStructuralConstraintPlan,
     execution::{CanonicalSemanticState, StructuralBucklingWorkload},
     post::fields::structural_observable_field_definitions,
@@ -115,7 +115,7 @@ pub fn build_structural_buckling_resource_plan(
     let reduced_geometric = reduction
         .reduce_sparse_pattern(linearization.geometric_stiffness().pattern())
         .map_err(|error| invalid(error.to_string()))?;
-    let admission = CoercivitySymbolicPlan::derive(&reduced_stiffness)
+    let admission = CoercivityWorkEnvelope::derive(&reduced_stiffness)
         .map_err(|error| invalid(error.to_string()))?;
     let reduced_stiffness_nonzeros = count(
         reduced_stiffness.column_indices().len(),
@@ -152,8 +152,8 @@ pub fn build_structural_buckling_resource_plan(
     )?;
     let workspace_bytes = checked_add(
         checked_mul(phase_values, 8, "buckling phase bytes")?,
-        admission.resident_bytes_upper_bound(),
-        "buckling preconditioner workspace",
+        admission.resident_bytes_limit(),
+        "buckling coercivity workspace",
     )?;
     let result_payload = structural_buckling_result_payload_bytes_upper_bound(
         reduction.full_dof_count,

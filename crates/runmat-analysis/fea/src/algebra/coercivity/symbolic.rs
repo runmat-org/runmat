@@ -6,6 +6,8 @@ use crate::algebra::SparsePattern;
 
 use super::CoercivityError;
 
+mod numeric_support;
+
 const MAX_FACTOR_FILL_MULTIPLIER: u64 = 16;
 // Connected physical patches include 4,096 Tet4 and 1,024 Tet10 elements. The latter
 // crossed the former 768x update envelope by 38,559 updates at pivot 4,402, while its
@@ -102,10 +104,10 @@ pub(crate) struct CoercivitySymbolicPlan {
     pivot_neighbors: Vec<Vec<usize>>,
     factor_nonzero_count: u64,
     update_count: u64,
-    resident_bytes_upper_bound: u64,
 }
 
 impl CoercivitySymbolicPlan {
+    #[cfg(test)]
     pub(crate) fn derive(pattern: &SparsePattern) -> Result<Self, CoercivityError> {
         let dimension = pattern.rows();
         if dimension == 0 || pattern.columns() != dimension {
@@ -121,6 +123,14 @@ impl CoercivitySymbolicPlan {
                 }
             }
         }
+        Self::derive_graph(pattern, original_graph)
+    }
+
+    fn derive_graph(
+        pattern: &SparsePattern,
+        original_graph: Vec<BTreeSet<usize>>,
+    ) -> Result<Self, CoercivityError> {
+        let dimension = pattern.rows();
         let elimination_order = reverse_cuthill_mckee(&original_graph)?;
         let mut inverse_order = vec![0; dimension];
         for (position, original) in elimination_order.iter().copied().enumerate() {
@@ -135,14 +145,9 @@ impl CoercivitySymbolicPlan {
         }
 
         let dimension_u64 = u64::try_from(dimension).map_err(|_| CoercivityError::WorkOverflow)?;
-        let edge_count = original_graph
-            .iter()
-            .try_fold(0_usize, |total, neighbors| {
-                total.checked_add(neighbors.len())
-            })
-            .ok_or(CoercivityError::WorkOverflow)?
-            / 2;
-        let envelope = CoercivityWorkEnvelope::from_graph_counts(dimension_u64, edge_count)?;
+        // The source CSR pattern retains its original resource ceiling even when
+        // an exact-zero numerical support is smaller. No cap is enlarged.
+        let envelope = CoercivityWorkEnvelope::derive(pattern)?;
         let factor_limit = envelope.factor_nonzero_limit();
         let update_limit = envelope.update_limit();
 
@@ -190,9 +195,6 @@ impl CoercivitySymbolicPlan {
             graph[pivot].clear();
             pivot_neighbors.push(neighbors);
         }
-        let resident_bytes_upper_bound =
-            symbolic_resident_bytes(dimension_u64, factor_nonzero_count)
-                .ok_or(CoercivityError::WorkOverflow)?;
         Ok(Self {
             pattern_identity: pattern
                 .identity()
@@ -203,7 +205,6 @@ impl CoercivitySymbolicPlan {
             pivot_neighbors,
             factor_nonzero_count,
             update_count,
-            resident_bytes_upper_bound,
         })
     }
 
@@ -263,8 +264,10 @@ impl CoercivitySymbolicPlan {
         self.update_count
     }
 
-    pub(crate) const fn resident_bytes_upper_bound(&self) -> u64 {
-        self.resident_bytes_upper_bound
+    #[cfg(test)]
+    pub(crate) fn resident_bytes_upper_bound(&self) -> u64 {
+        symbolic_resident_bytes(self.dimension, self.factor_nonzero_count)
+            .expect("admitted symbolic counts fit the source envelope")
     }
 }
 

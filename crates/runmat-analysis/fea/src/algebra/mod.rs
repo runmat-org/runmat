@@ -7,8 +7,8 @@ mod pattern;
 mod reference;
 mod right_inverse;
 
+pub(crate) use coercivity::CoercivityWorkEnvelope;
 pub use coercivity::{CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility};
-pub(crate) use coercivity::{CoercivitySymbolicPlan, CoercivityWorkEnvelope};
 pub use compatibility::{
     validate_prepared_solver_compatibility, validate_solver_compatibility, CompatibilityError,
     RealPreconditioner, RealSolver,

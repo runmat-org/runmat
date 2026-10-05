@@ -41,8 +41,12 @@ pub enum BucklingSolveError {
     BaseStateMismatch,
     #[error("buckling constraint reduction failed: {0}")]
     ConstraintReduction(String),
-    #[error("buckling elastic operator is not coercive: {0}")]
-    NonCoercive(String),
+    #[error("buckling sparse operator construction failed: {0}")]
+    SparseOperatorConstruction(#[source] crate::algebra::RealSparseMatrixError),
+    #[error("buckling elastic operator admission failed: {0}")]
+    OperatorAdmission(#[source] crate::algebra::RealSystemError),
+    #[error("buckling elastic preconditioner construction failed: {0}")]
+    Preconditioner(#[source] crate::solve::preconditioner::PreconditionerError),
     #[error("buckling inner elastic solve failed its forcing bound: {0}")]
     InnerSolve(String),
     #[error(
@@ -107,29 +111,29 @@ pub fn solve_eigenvalue_buckling(
                 OperatorRole::Mass,
                 MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
             )
-            .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?,
+            .map_err(BucklingSolveError::SparseOperatorConstruction)?,
             RealSparseMatrix::diagonal(
                 vec![0.0; dimension],
                 OperatorRole::Damping,
                 MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
             )
-            .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?,
+            .map_err(BucklingSolveError::SparseOperatorConstruction)?,
         )
-        .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?,
+        .map_err(BucklingSolveError::OperatorAdmission)?,
         vec![false; dimension],
         vec![0.0; dimension],
     )
-    .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?;
+    .map_err(BucklingSolveError::OperatorAdmission)?;
     let prepared = system
         .prepare_linear()
-        .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?;
+        .map_err(BucklingSolveError::OperatorAdmission)?;
     let (preconditioner_kind, preconditioner) =
         match build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0) {
             Ok(preconditioner) => (SpdPreconditionerKind::Ilu0, preconditioner),
             Err(_) => (
                 SpdPreconditionerKind::Jacobi,
                 build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi)
-                    .map_err(|error| BucklingSolveError::NonCoercive(error.to_string()))?,
+                    .map_err(BucklingSolveError::Preconditioner)?,
             ),
         };
 

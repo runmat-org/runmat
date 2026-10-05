@@ -163,7 +163,7 @@ pub fn solve_modal_system(
                 code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
                 severity: FeaDiagnosticSeverity::Error,
                 message: format!(
-                    "modal stiffness is not coercive on the constraint space: {error}"
+                    "modal stiffness admission failed on the constraint space: {error}"
                 ),
             }],
             solver_method: SolverMethod::MatrixFreeSubspaceIteration,

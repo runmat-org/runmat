@@ -101,7 +101,7 @@ impl CoercivityCertificate {
             .iter()
             .map(|value| value.sqrt())
             .collect::<Vec<_>>();
-        let symbolic = CoercivitySymbolicPlan::derive(matrix.pattern())?;
+        let symbolic = CoercivitySymbolicPlan::derive_for_matrix(matrix)?;
         symbolic.validate_for(matrix.pattern())?;
         let mut rows = symbolic.factor_rows();
         for row in 0..dimension {
@@ -115,7 +115,7 @@ impl CoercivityCertificate {
                 }
                 let ordered_row = symbolic.inverse_order()[row];
                 let ordered_column = symbolic.inverse_order()[column];
-                if ordered_row >= ordered_column {
+                if ordered_row >= ordered_column && value != 0.0 {
                     let scaled = value / (scales[row] * scales[column]);
                     let entry = factor_entry_mut(&mut rows, ordered_row, ordered_column)?;
                     *entry = scaled;
@@ -333,7 +333,7 @@ mod tests {
         let operator = matrix([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
         let evidence =
             PreparedSolverAdmissibility::prove(&operator, &[1.0, 2.0, 3.0], None).unwrap();
-        let symbolic = CoercivitySymbolicPlan::derive(operator.pattern()).unwrap();
+        let symbolic = CoercivitySymbolicPlan::derive_for_matrix(&operator).unwrap();
         assert_eq!(
             evidence.coercivity.factor_nonzero_count,
             symbolic.factor_nonzero_count()
