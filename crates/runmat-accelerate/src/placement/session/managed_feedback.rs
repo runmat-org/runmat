@@ -122,6 +122,10 @@ impl ManagedFeedbackPool {
                 })
             })
             .ok_or(HostEffectAllocationError::ExceedsCapacity)?;
+        // An inactive zero-sample slot may be recycled, but its old bytes
+        // cannot remain published while the bounded writer overwrites them.
+        // A failed larger write leaves the slot vacant, not a corrupt key.
+        state.slots[index] = Series::default();
         let start = index * state.bytes_per_series;
         let end = start + state.bytes_per_series;
         let mut writer = BoundedWriter::new(&mut state.signatures[start..end]);
@@ -284,12 +288,14 @@ mod tests {
         let kind = ExecutionCandidateKind::SharedRuntime;
         let ledger = ManagedHostEffectLedger::new(16 * 1024);
         let pool = ManagedFeedbackPool::new(&ledger, 1, encoded.len()).unwrap();
+        let before_observations = ledger.snapshot().live_reserved_bytes;
         let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
         let charged = ledger.snapshot().live_reserved_bytes;
         assert_eq!(
-            charged,
+            before_observations,
             (std::mem::size_of::<Series>() + encoded.len()) as u64
         );
+        assert!(charged > before_observations);
         let key = pool
             .ensure(&signature, candidate, kind, None, &observations)
             .unwrap();
@@ -354,5 +360,35 @@ mod tests {
             .expect("abandoned zero-sample series can be replaced");
         assert_eq!(pool.state.borrow().slots[0].key, Some(replacement));
         assert_eq!(pool.profile_snapshot().len(), 0);
+    }
+
+    #[test]
+    fn failed_larger_eviction_cannot_republish_corrupted_prior_signature() {
+        let first = signature();
+        let capacity = serde_json::to_vec(&first).unwrap().len();
+        let ledger = ManagedHostEffectLedger::new(16 * 1024);
+        let pool = ManagedFeedbackPool::new(&ledger, 1, capacity).unwrap();
+        let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
+        let candidate = Digest::sha256(b"route");
+        let kind = ExecutionCandidateKind::SharedRuntime;
+        let original = pool
+            .ensure(&first, candidate, kind, None, &observations)
+            .unwrap();
+        let mut oversized = first.clone();
+        oversized.operation = "x".repeat(128);
+        assert!(matches!(
+            pool.ensure(&oversized, candidate, kind, None, &observations),
+            Err(HostEffectAllocationError::ExceedsCapacity)
+        ));
+        assert!(pool.state.borrow().slots[0].key.is_none());
+        let retry = pool
+            .ensure(&first, candidate, kind, None, &observations)
+            .unwrap();
+        assert_eq!(retry, original);
+        pool.record(retry, 23, true, 1).unwrap();
+        let exported = pool.profile_snapshot();
+        assert_eq!(exported.len(), 1);
+        assert_eq!(exported[0].signature, first);
+        assert_eq!(exported[0].samples, 1);
     }
 }
