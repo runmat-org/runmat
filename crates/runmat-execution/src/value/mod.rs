@@ -269,9 +269,42 @@ struct CallableValueWire {
     captures: Vec<ValuePayload>,
 }
 
-#[derive(Deserialize)]
-#[serde(transparent)]
 struct RequiredNullableString(Option<String>);
+
+impl<'de> Deserialize<'de> for RequiredNullableString {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PresentNullableString;
+
+        impl<'de> serde::de::Visitor<'de> for PresentNullableString {
+            type Value = RequiredNullableString;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a present string or null")
+            }
+
+            fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(RequiredNullableString(None))
+            }
+
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(RequiredNullableString(None))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(RequiredNullableString(Some(value.to_owned())))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(RequiredNullableString(Some(value)))
+            }
+        }
+
+        // MissingFieldDeserializer only synthesizes an absent Option via
+        // deserialize_option. A required wire field uses deserialize_any so
+        // omission is an error while explicit null remains a valid value.
+        deserializer.deserialize_any(PresentNullableString)
+    }
+}
 
 impl From<CallableValueWire> for CallableValue {
     fn from(value: CallableValueWire) -> Self {

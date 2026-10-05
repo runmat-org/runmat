@@ -37,6 +37,13 @@ fn callable_form_and_role_are_required_revision_fields() {
         .remove("source_file");
     assert!(serde_json::from_value::<CallableValue>(old_source_file).is_err());
 
+    let mut explicit_absent_file = serde_json::to_value(&value).unwrap();
+    explicit_absent_file["source_file"] = serde_json::Value::Null;
+    let decoded: CallableValue =
+        serde_json::from_value(explicit_absent_file).expect("explicit null is a valid field");
+    assert_eq!(decoded.source_file, None);
+    assert!(decoded.validate_identity().is_err());
+
     let mut wrong_form = value.clone();
     wrong_form.form = CallableForm::Handle;
     assert!(wrong_form.validate_identity().is_err());
