@@ -12,7 +12,7 @@ use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::builtins::common::tensor::{
     is_scalar_tensor, scalar_integer_value, tensor_value_f64,
 };
-use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_runtime::RuntimeError;
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
