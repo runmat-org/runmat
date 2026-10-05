@@ -5,7 +5,8 @@ use super::*;
 use crate::context::host_effect::{
     AudioDecodeOutput, HostEffectRequest, HostEffectResourceAdmission, HostEffectResourceEvidence,
     HostEffectResourceLivenessLease, HostEffectStageAdmission, HostEffectStageEvidence,
-    HostEffectStageReservation, HostEffectWorkload,
+    HostEffectStageReservation, HostEffectWorkload, ManagedHostEffectLedger,
+    ManagedHostEffectStageReservation,
 };
 use crate::context::{RuntimeContext, RuntimeHostEffectResourceService, RuntimeServicePorts};
 use runmat_execution::{Digest, ResourceByteBound};
@@ -16,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
 struct TestOutputReservation {
+    _managed: Arc<dyn ExactHostAllocationReservation>,
     live_total: Arc<AtomicUsize>,
     live_output: Arc<AtomicUsize>,
     bytes: usize,
@@ -30,11 +32,12 @@ impl Drop for TestOutputReservation {
 impl ExactHostAllocationReservation for TestOutputReservation {}
 
 struct TestStageReservation {
+    managed: Arc<ManagedHostEffectStageReservation>,
+    ledger: ManagedHostEffectLedger,
     current: Arc<AtomicBool>,
     live_stage: Arc<AtomicUsize>,
     live_output: Arc<AtomicUsize>,
     live_total: Arc<AtomicUsize>,
-    capacity: usize,
 }
 impl Drop for TestStageReservation {
     fn drop(&mut self) {
@@ -43,31 +46,47 @@ impl Drop for TestStageReservation {
     }
 }
 impl HostEffectStageReservation for TestStageReservation {
+    fn managed_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.ledger.clone())
+    }
     fn reserved_bytes(&self) -> u64 {
-        128 * 1024
+        self.managed.reserved_bytes()
     }
     fn capacity_bytes(&self) -> u64 {
-        self.capacity as u64
+        self.managed.capacity_bytes()
+    }
+    fn promote_scan_envelope(
+        &self,
+        bytes: u64,
+    ) -> Result<(), crate::context::host_effect::HostEffectAllocationError> {
+        self.managed.promote_scan_envelope(bytes)
+    }
+    fn reserve_live_exact(
+        &self,
+        kind: crate::context::host_effect::HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<
+        Arc<dyn crate::context::host_effect::HostEffectLiveAllocationReservation>,
+        crate::context::host_effect::HostEffectAllocationError,
+    > {
+        self.managed.reserve_live_exact(kind, bytes)
     }
     fn reserve_output_exact(
         &self,
         bytes: usize,
     ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
-        self.live_total
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
-                live.checked_add(bytes)
-                    .filter(|total| *total <= self.capacity)
-            })
-            .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
+        let managed = self.managed.reserve_output_exact(bytes)?;
+        self.live_total.fetch_add(bytes, Ordering::SeqCst);
         self.live_output.fetch_add(bytes, Ordering::SeqCst);
         Ok(Arc::new(TestOutputReservation {
+            _managed: managed,
             live_total: self.live_total.clone(),
             live_output: self.live_output.clone(),
             bytes,
         }))
     }
     fn is_current(&self) -> bool {
-        self.current.load(Ordering::SeqCst)
+        self.current.load(Ordering::SeqCst) && self.managed.is_current()
     }
 }
 struct TestCurrent(Arc<AtomicBool>);
@@ -87,7 +106,28 @@ struct StagedTestResources {
     current: Arc<AtomicBool>,
     live_stage: Arc<AtomicUsize>,
     live_total: Arc<AtomicUsize>,
-    capacity: usize,
+    ledger: ManagedHostEffectLedger,
+}
+
+struct ManagedBudget(ManagedHostEffectLedger);
+
+impl crate::context::RuntimeParallelService for ManagedBudget {
+    fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        crate::context::RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..Default::default()
+        }
+    }
+
+    fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
 }
 
 impl RuntimeHostEffectResourceService for StagedTestResources {
@@ -111,12 +151,8 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
         {
             return None;
         }
-        self.live_total
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
-                live.checked_add(128 * 1024)
-                    .filter(|total| *total <= self.capacity)
-            })
-            .ok()?;
+        let managed = self.ledger.reserve_stage(128 * 1024).ok()?;
+        self.live_total.fetch_add(128 * 1024, Ordering::SeqCst);
         self.live_stage.fetch_add(128 * 1024, Ordering::SeqCst);
         Some(HostEffectStageAdmission {
             evidence: HostEffectStageEvidence {
@@ -124,11 +160,12 @@ impl RuntimeHostEffectResourceService for StagedTestResources {
                 scratch_bytes: ResourceByteBound::Known(128 * 1024),
             },
             reservation: Arc::new(TestStageReservation {
+                managed,
+                ledger: self.ledger.clone(),
                 current: self.current.clone(),
                 live_stage: self.live_stage.clone(),
                 live_output: self.live_output.clone(),
                 live_total: self.live_total.clone(),
-                capacity: self.capacity,
             }),
         })
     }
@@ -183,6 +220,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     let provider: Arc<dyn runmat_filesystem::FsProvider> =
         Arc::new(runmat_filesystem::NativeFsProvider);
     let _guard = runmat_filesystem::replace_provider(provider.clone());
+    let ledger = ManagedHostEffectLedger::new(256 * 1024);
     let resources = Rc::new(StagedTestResources {
         filesystem: provider,
         source: path.clone(),
@@ -193,13 +231,13 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
         current: Arc::new(AtomicBool::new(true)),
         live_stage: Arc::new(AtomicUsize::new(0)),
         live_total: Arc::new(AtomicUsize::new(0)),
-        capacity: 256 * 1024,
+        ledger: ledger.clone(),
     });
     let placement = Rc::new(Placement::default());
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()
-                .with_parallel(Rc::new(Budget(Some(256 * 1024))))
+                .with_parallel(Rc::new(ManagedBudget(ledger)))
                 .with_host_effect_resources(resources.clone())
                 .with_placement(placement.clone()),
         );
@@ -297,12 +335,14 @@ fn scan_and_exact_output_compete_in_one_managed_allocation_ledger() {
     let live_stage = Arc::new(AtomicUsize::new(128 * 1024));
     let live_output = Arc::new(AtomicUsize::new(0));
     let live_total = Arc::new(AtomicUsize::new(128 * 1024));
+    let first_ledger = ManagedHostEffectLedger::new(128 * 1024);
     let reservation = TestStageReservation {
+        managed: first_ledger.reserve_stage(128 * 1024).expect("full stage"),
+        ledger: first_ledger,
         current: Arc::new(AtomicBool::new(true)),
         live_stage: live_stage.clone(),
         live_output: live_output.clone(),
         live_total: live_total.clone(),
-        capacity: 128 * 1024,
     };
     assert!(matches!(
         reservation.reserve_output_exact(16),
@@ -312,12 +352,16 @@ fn scan_and_exact_output_compete_in_one_managed_allocation_ledger() {
     drop(reservation);
     assert_eq!(live_total.load(Ordering::SeqCst), 0);
 
+    let second_ledger = ManagedHostEffectLedger::new(128 * 1024 + 16);
     let reservation = TestStageReservation {
+        managed: second_ledger
+            .reserve_stage(128 * 1024)
+            .expect("second stage"),
+        ledger: second_ledger,
         current: Arc::new(AtomicBool::new(true)),
         live_stage,
         live_output: live_output.clone(),
         live_total: live_total.clone(),
-        capacity: 128 * 1024 + 16,
     };
     live_total.store(128 * 1024, Ordering::SeqCst);
     reservation.live_stage.store(128 * 1024, Ordering::SeqCst);

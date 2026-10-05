@@ -4,19 +4,41 @@ use std::sync::atomic::AtomicBool;
 struct Reserved {
     live: Arc<AtomicBool>,
     drops: Arc<AtomicUsize>,
-    bytes: u64,
-    capacity: u64,
+    ledger: ManagedHostEffectLedger,
+    inner: Arc<ManagedHostEffectStageReservation>,
 }
 
 impl HostEffectStageReservation for Reserved {
+    fn managed_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.ledger.clone())
+    }
     fn reserved_bytes(&self) -> u64 {
-        self.bytes
+        self.inner.reserved_bytes()
     }
     fn capacity_bytes(&self) -> u64 {
-        self.capacity
+        self.inner.capacity_bytes()
+    }
+    fn promote_scan_envelope(&self, bytes: u64) -> Result<(), HostEffectAllocationError> {
+        self.inner.promote_scan_envelope(bytes)
+    }
+    fn reserve_live_exact(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
+        self.inner.reserve_live_exact(kind, bytes)
+    }
+    fn reserve_output_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<
+        Arc<dyn runmat_value::ExactHostAllocationReservation>,
+        runmat_value::ExactHostNumericAllocationError,
+    > {
+        self.inner.reserve_output_exact(bytes)
     }
     fn is_current(&self) -> bool {
-        self.live.load(Ordering::SeqCst)
+        self.live.load(Ordering::SeqCst) && self.inner.is_current()
     }
 }
 
@@ -31,10 +53,31 @@ struct StagedResources {
     stage_scratch: ResourceByteBound,
     final_scratch: ResourceByteBound,
     reserved: u64,
-    capacity: u64,
     separate_final_permit: bool,
     live: Arc<AtomicBool>,
     drops: Arc<AtomicUsize>,
+    ledger: ManagedHostEffectLedger,
+}
+
+struct ManagedParallel(ManagedHostEffectLedger);
+
+impl RuntimeParallelService for ManagedParallel {
+    fn supports(&self, _: ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..RuntimeParallelResources::default()
+        }
+    }
+
+    fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
 }
 
 impl RuntimeHostEffectResourceService for StagedResources {
@@ -57,20 +100,23 @@ impl RuntimeHostEffectResourceService for StagedResources {
         request: &HostEffectRequest<'_>,
         _: &RuntimeContext,
     ) -> Option<HostEffectStageAdmission> {
-        (request.operation == "unzip" && Arc::ptr_eq(request.filesystem, fixture_fs())).then(|| {
-            HostEffectStageAdmission {
-                evidence: HostEffectStageEvidence {
-                    authority_revision: self.revision,
-                    scratch_bytes: self.stage_scratch,
-                },
-                reservation: Arc::new(Reserved {
-                    live: self.live.clone(),
-                    drops: self.drops.clone(),
-                    bytes: self.reserved,
-                    capacity: self.capacity,
-                }),
-            }
-        })
+        (request.operation == "unzip" && Arc::ptr_eq(request.filesystem, fixture_fs()))
+            .then(|| {
+                let inner = self.ledger.reserve_stage(self.reserved).ok()?;
+                Some(HostEffectStageAdmission {
+                    evidence: HostEffectStageEvidence {
+                        authority_revision: self.revision,
+                        scratch_bytes: self.stage_scratch,
+                    },
+                    reservation: Arc::new(Reserved {
+                        live: self.live.clone(),
+                        drops: self.drops.clone(),
+                        ledger: self.ledger.clone(),
+                        inner,
+                    }),
+                })
+            })
+            .flatten()
     }
 
     fn final_admission_after_stage(
@@ -118,22 +164,23 @@ fn staged_runtime(
     placement.revision_available.set(true);
     let live = Arc::new(AtomicBool::new(true));
     let drops = Arc::new(AtomicUsize::new(0));
+    let ledger = ManagedHostEffectLedger::new(budget);
     let resources = Rc::new(StagedResources {
         revision: Digest::sha256(b"staged-resource-v1"),
         stage_scratch,
         final_scratch,
         reserved,
-        capacity: budget,
         separate_final_permit: false,
         live: live.clone(),
         drops: drops.clone(),
+        ledger: ledger.clone(),
     });
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()
                 .with_placement(placement.clone())
                 .with_host_effect_resources(resources)
-                .with_parallel(Rc::new(Parallel(Some(budget)))),
+                .with_parallel(Rc::new(ManagedParallel(ledger))),
         );
     (runtime, placement, live, drops)
 }
@@ -191,7 +238,7 @@ fn missing_or_excess_scan_reservation_rejects_before_placement() {
             Some("RunMat:Placement:InsufficientResourceEvidence")
         );
         assert_eq!(placement.selections.get(), 0);
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), usize::from(reserved <= 64));
     }
 }
 
@@ -381,10 +428,14 @@ fn staged_final_rejects_a_second_output_quota_authority() {
         stage_scratch: ResourceByteBound::Known(16),
         final_scratch: ResourceByteBound::Known(16),
         reserved: 16,
-        capacity: 64,
         separate_final_permit: true,
         live: Arc::new(AtomicBool::new(true)),
         drops: drops.clone(),
+        ledger: runtime
+            .service_ports()
+            .parallel()
+            .and_then(|owner| owner.managed_host_effect_ledger())
+            .expect("original managed budget"),
     });
     let ports = runtime
         .service_ports()
@@ -440,10 +491,14 @@ fn same_session_cannot_rebind_placement_parallel_or_cancellation_authority() {
                         stage_scratch: ResourceByteBound::Known(16),
                         final_scratch: ResourceByteBound::Known(16),
                         reserved: 16,
-                        capacity: 64,
                         separate_final_permit: false,
                         live,
                         drops: Arc::new(AtomicUsize::new(0)),
+                        ledger: runtime
+                            .service_ports()
+                            .parallel()
+                            .and_then(|owner| owner.managed_host_effect_ledger())
+                            .expect("original managed budget"),
                     })),
             ),
             _ => runtime

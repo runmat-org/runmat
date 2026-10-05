@@ -55,6 +55,11 @@ pub struct HostEffectStageEvidence {
 /// same managed-byte ledger. A size assertion or separate output budget is
 /// not a valid implementation of this trait.
 pub trait HostEffectStageReservation: Send + Sync {
+    /// Exact managed host allocation owner that atomically backs this stage.
+    /// A finite stage without the parallel service's same owner is invalid.
+    fn managed_ledger(&self) -> Option<super::ManagedHostEffectLedger> {
+        None
+    }
     fn reserved_bytes(&self) -> u64;
     /// Capacity of the same managed-allocation ledger used for the scan and
     /// every exact output reservation. This is not a process-RSS certificate.
@@ -296,6 +301,27 @@ impl HostEffectStagePermit {
     }
 
     pub fn checkpoint(&self) -> BuiltinResult<()> {
+        let parallel_owner = self
+            .runtime
+            .service_ports()
+            .parallel()
+            .and_then(|parallel| parallel.managed_host_effect_ledger())
+            .ok_or_else(stale_resource)?;
+        let reserved_owner = self
+            .reservation
+            .managed_ledger()
+            .ok_or_else(stale_resource)?;
+        let snapshot = parallel_owner.snapshot();
+        if !parallel_owner.same_owner(&reserved_owner)
+            || !snapshot.current
+            || self
+                .runtime
+                .service_ports()
+                .parallel()
+                .is_none_or(|parallel| parallel.placement_resources().epoch != snapshot.epoch)
+        {
+            return Err(stale_resource());
+        }
         if !self
             .cancellation
             .same_generation(&self.runtime.cancellation())
@@ -350,7 +376,7 @@ impl HostEffectStagePermit {
     ) -> BuiltinResult<()> {
         self.checkpoint()?;
         if evidence.authority_revision != self.authority_revision
-            || !matches!(evidence.scratch_bytes, ResourceByteBound::Known(bytes) if bytes >= self.reservation.reserved_bytes())
+            || !matches!(evidence.scratch_bytes, ResourceByteBound::Known(bytes) if bytes <= self.reservation.reserved_bytes())
         {
             return Err(invalid_stage(
                 "final route does not cover staged resource authority",
@@ -397,11 +423,21 @@ pub fn try_admit_host_effect_stage(
     if runtime.is_cancelled() {
         return Err(cancelled());
     }
-    let available = runtime
+    let parallel = runtime
         .service_ports()
         .parallel()
-        .and_then(|port| port.placement_resources().memory_available_bytes)
+        .ok_or_else(|| insufficient("staged scan requires an installed parallel resource owner"))?;
+    let resources = parallel.placement_resources();
+    let _available = resources
+        .memory_available_bytes
         .ok_or_else(|| insufficient("staged scan requires an installed finite memory budget"))?;
+    let managed = parallel
+        .managed_host_effect_ledger()
+        .ok_or_else(|| insufficient("staged scan has no managed allocation owner"))?;
+    let before = managed.snapshot();
+    if !before.current || before.epoch != resources.epoch {
+        return Err(stale_resource());
+    }
     let resource_service = runtime
         .service_ports()
         .host_effect_resources()
@@ -412,13 +448,24 @@ pub fn try_admit_host_effect_stage(
     let ResourceByteBound::Known(scratch_bytes) = admission.evidence.scratch_bytes else {
         return Err(insufficient("staged scan peak is unavailable"));
     };
+    let reservation_owner = admission
+        .reservation
+        .managed_ledger()
+        .ok_or_else(|| insufficient("staged reservation has no managed allocation owner"))?;
+    let after = managed.snapshot();
+    if !managed.same_owner(&reservation_owner)
+        || !after.current
+        || after.epoch != before.epoch
+        || parallel.placement_resources().epoch != after.epoch
+    {
+        return Err(stale_resource());
+    }
     if !admission.reservation.is_current() {
         return Err(stale_resource());
     }
     if admission.reservation.reserved_bytes() < scratch_bytes
         || admission.reservation.reserved_bytes() > admission.reservation.capacity_bytes()
-        || admission.reservation.capacity_bytes() > available
-        || admission.reservation.reserved_bytes() > available
+        || admission.reservation.capacity_bytes() != after.capacity_bytes
     {
         return Err(insufficient(
             "staged scan reservation does not fit the memory budget",

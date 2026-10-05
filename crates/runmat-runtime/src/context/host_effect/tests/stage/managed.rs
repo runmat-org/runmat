@@ -54,6 +54,7 @@ fn managed_runtime(
     ledger: &ManagedHostEffectLedger,
     capacity: u64,
 ) -> (RuntimeContext, Rc<Placement>) {
+    assert_eq!(ledger.snapshot().capacity_bytes, capacity);
     let placement = Rc::new(Placement::default());
     placement.revision_available.set(true);
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
@@ -64,7 +65,7 @@ fn managed_runtime(
                     ledger: ledger.clone(),
                     revision: Digest::sha256(b"managed-stage-v1"),
                 }))
-                .with_parallel(Rc::new(Parallel(Some(capacity)))),
+                .with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
         );
     (runtime, placement)
 }

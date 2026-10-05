@@ -168,6 +168,12 @@ impl ManagedHostEffectStageReservation {
 }
 
 impl HostEffectStageReservation for ManagedHostEffectStageReservation {
+    fn managed_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(ManagedHostEffectLedger {
+            state: self.inner.ledger.clone(),
+        })
+    }
+
     fn reserved_bytes(&self) -> u64 {
         self.inner.reserved_bytes.load(Ordering::Acquire)
     }

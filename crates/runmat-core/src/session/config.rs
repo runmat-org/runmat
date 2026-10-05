@@ -93,6 +93,22 @@ impl RunMatSession {
         &mut self,
         service: std::rc::Rc<dyn runmat_runtime::context::RuntimeParallelService>,
     ) {
+        let old_managed = self
+            .runtime_context
+            .service_ports()
+            .parallel()
+            .and_then(|owner| owner.managed_host_effect_ledger());
+        let next_managed = service.managed_host_effect_ledger();
+        if let Some(old) = old_managed {
+            let same_epoch_owner = next_managed.as_ref().is_some_and(|next| {
+                old.same_owner(next) && old.snapshot().epoch == service.placement_resources().epoch
+            });
+            if !same_epoch_owner {
+                // Existing returned Values keep their exact charges until
+                // drop; only new claims on the superseded session owner stop.
+                old.revoke();
+            }
+        }
         let ports = self
             .runtime_context
             .service_ports()
@@ -468,6 +484,7 @@ impl RunMatSession {
 mod tests {
     use std::rc::Rc;
 
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
     use runmat_runtime::context::{
         ParallelCapability, RuntimeParallelResources, RuntimeParallelService,
     };
@@ -475,6 +492,27 @@ mod tests {
     use super::RunMatSession;
 
     struct FixedAllocation;
+
+    struct ManagedAllocation(ManagedHostEffectLedger);
+
+    impl RuntimeParallelService for ManagedAllocation {
+        fn supports(&self, _capability: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
 
     impl RuntimeParallelService for FixedAllocation {
         fn supports(&self, _capability: ParallelCapability) -> bool {
@@ -505,5 +543,25 @@ mod tests {
         assert_eq!(resources.cpu_millicores_available, 250);
         assert_eq!(resources.memory_available_bytes, Some(4_096));
         assert_eq!(resources.epoch, 7);
+    }
+
+    #[test]
+    fn rebind_preserves_same_managed_owner_but_revokes_a_replaced_epoch() {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let first = ManagedHostEffectLedger::new_with_epoch(16, 5);
+        session.install_parallel_service(Rc::new(ManagedAllocation(first.clone())));
+        let claim = first.reserve_stage(8).expect("original session owner");
+        session.install_parallel_service(Rc::new(ManagedAllocation(first.clone())));
+        assert!(first.snapshot().current);
+        assert_eq!(first.snapshot().free_bytes(), 8);
+
+        let replacement = ManagedHostEffectLedger::new_with_epoch(16, 6);
+        session.install_parallel_service(Rc::new(ManagedAllocation(replacement.clone())));
+        assert!(!first.snapshot().current);
+        assert_eq!(first.snapshot().live_reserved_bytes, 8);
+        assert!(first.reserve_stage(1).is_err());
+        assert!(replacement.reserve_stage(16).is_ok());
+        drop(claim);
+        assert_eq!(first.snapshot().live_reserved_bytes, 0);
     }
 }

@@ -30,6 +30,10 @@ impl StageReservationView {
 }
 
 impl HostEffectStageReservation for StageReservationView {
+    fn managed_ledger(&self) -> Option<super::super::ManagedHostEffectLedger> {
+        self.current_reservation()?.managed_ledger()
+    }
+
     fn reserved_bytes(&self) -> u64 {
         self.current_reservation()
             .map_or(0, |owner| owner.reserved_bytes())

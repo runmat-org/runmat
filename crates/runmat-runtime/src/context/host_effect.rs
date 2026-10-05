@@ -248,9 +248,39 @@ fn select_host_effect_inner(
     };
     let epoch_digest =
         Digest::sha256(serde_json::to_vec(&parallel.epoch).expect("parallel epoch serializes"));
+    // The staged reservation has already atomically debited the installed
+    // parallel owner's free bytes. Return only this invocation's own precharge
+    // to the placement comparison; other live stages remain unavailable.
+    let placement_memory = match stage.as_ref() {
+        Some(stage) => {
+            let owner = stage
+                .reservation
+                .managed_ledger()
+                .ok_or_else(|| insufficient("staged allocation owner is absent"))?;
+            let parallel_owner = runtime
+                .service_ports()
+                .parallel()
+                .and_then(|parallel| parallel.managed_host_effect_ledger())
+                .ok_or_else(|| insufficient("parallel allocation owner is absent"))?;
+            if !owner.same_owner(&parallel_owner) {
+                return Err(stale_resource());
+            }
+            let snapshot = owner.snapshot();
+            if !snapshot.current || snapshot.epoch != parallel.epoch {
+                return Err(stale_resource());
+            }
+            Some(
+                snapshot
+                    .free_bytes()
+                    .checked_add(stage.reservation.reserved_bytes())
+                    .ok_or_else(|| insufficient("staged resource snapshot overflow"))?,
+            )
+        }
+        None => parallel.memory_available_bytes,
+    };
     let resources = PlacementResourceSnapshot {
         cpu_millicores_available: parallel.cpu_millicores_available,
-        memory_available_bytes: parallel.memory_available_bytes,
+        memory_available_bytes: placement_memory,
         cancellation_requested: runtime.is_cancelled(),
         providers: Vec::new(),
         epoch: u64::from_le_bytes(epoch_digest.bytes()[..8].try_into().expect("digest length")),
