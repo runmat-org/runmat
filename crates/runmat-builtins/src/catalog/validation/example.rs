@@ -64,6 +64,7 @@ pub(super) fn validate(
                     BuiltinExampleHarness::Portable,
                     BuiltinExampleHarness::Browser,
                     BuiltinExampleHarness::NativeFilesystem,
+                    BuiltinExampleHarness::Wgpu,
                 ],
                 errors,
             );

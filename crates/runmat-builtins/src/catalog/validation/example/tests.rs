@@ -11,6 +11,35 @@ use crate::{
 };
 
 #[test]
+fn wgpu_browser_lane_accepts_an_isolated_filesystem_fixture() {
+    let example = BuiltinExample {
+        id: "gpu-file",
+        title: "GPU file import",
+        program: "G = gpuArray(1); A = readmatrix('data.csv', 'Like', G);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Wgpu,
+        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "gpu-file",
+            },
+            root: BuiltinFilesystemRoot::IsolatedWorkspace,
+            entries: &[BuiltinFilesystemEntry::File {
+                relative_path: "data.csv",
+                content: BuiltinFixtureContent::Utf8("1,2\n"),
+            }],
+        }),
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(gather(A),[1 2]));",
+        },
+    };
+    let mut errors = Vec::new();
+    validate("readmatrix", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
 fn application_settings_fixture_requires_supported_engine_and_valid_id() {
     let mut example = BuiltinExample {
         id: "isolated",

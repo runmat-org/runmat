@@ -46,6 +46,17 @@ test("application settings fixture is explicit, bounded, and portable", () => {
   assert.throws(() => validateBuiltinExampleFixture(fixture, "fixture", { ...context, harness: "NativeFilesystem" }), /harness/);
 });
 
+test("Wgpu browser lane accepts only an isolated filesystem fixture", () => {
+  const fixture = { Filesystem: {
+    id: { local_name: "gpu-file" },
+    root: "IsolatedWorkspace",
+    entries: [{ File: { relative_path: "data.csv", content: { Utf8: "1,2\n" } } }]
+  } };
+  const context = { program: "G = gpuArray(1); A = readmatrix('data.csv', 'Like', G);", harness: "Wgpu", requirements: NO_EXAMPLE_REQUIREMENTS };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", context), fixture);
+  assert.throws(() => validateBuiltinExampleFixture({ Filesystem: { ...fixture.Filesystem, entries: [{ File: { relative_path: "../escape", content: { Utf8: "x" } } }] } }, "fixture", context), /relative path/);
+});
+
 test("mail outbox fixture requires a native host and bounded exact message", () => {
   const fixture = { MailOutbox: { id: { local_name: "mail" }, expected_message: "To: a\n\nbody\n" } };
   const context = { program: "sendmail('a','s');", harness: "Native", requirements: nativeRequirements };

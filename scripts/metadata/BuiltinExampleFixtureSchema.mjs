@@ -430,7 +430,7 @@ function compatibility(fixture, context, label) {
     return;
   }
   const [tag, value] = Object.entries(fixture)[0];
-  const expectedHarnesses = { Filesystem: ["Portable", "Browser", "NativeFilesystem"], ApplicationSettings: ["Portable", "Browser", "Native"], MailOutbox: ["Native"], Loopback: ["NativeLoopbackNetwork"], ForeignAdapter: ["NativeForeignRuntime"], CliInteraction: ["InteractiveHost"], DesktopHostOnly: ["InteractiveHost"] };
+  const expectedHarnesses = { Filesystem: ["Portable", "Browser", "NativeFilesystem", "Wgpu"], ApplicationSettings: ["Portable", "Browser", "Native"], MailOutbox: ["Native"], Loopback: ["NativeLoopbackNetwork"], ForeignAdapter: ["NativeForeignRuntime"], CliInteraction: ["InteractiveHost"], DesktopHostOnly: ["InteractiveHost"] };
   if (!expectedHarnesses[tag].includes(harness)) throw new Error(`${label} is incompatible with its harness`);
   if (["MailOutbox", "Loopback", "ForeignAdapter", "CliInteraction"].includes(tag) && requirements.host !== "NativeOnly") throw new Error(`${label} requires a native-only host`);
   if (tag === "DesktopHostOnly" && requirements.host !== "DesktopHostOnly") throw new Error(`${label} requires a desktop-host-only boundary`);
