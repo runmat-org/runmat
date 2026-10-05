@@ -11,6 +11,20 @@ fn assert_error_identifier(err: RuntimeError, expected: &str) {
     assert_eq!(err.identifier(), Some(expected));
 }
 
+fn prepare_payload(
+    data: &Value,
+    datatype: DataType,
+    order: ByteOrder,
+) -> BuiltinResult<codec::Payload> {
+    let mut work = super::super::transport::NetCooperation::new(None, BUILTIN_NAME);
+    futures::executor::block_on(super::prepare_payload(data, datatype, order, &mut work))
+}
+
+fn prepare_default_payload(data: &Value, order: ByteOrder) -> BuiltinResult<codec::Payload> {
+    let mut work = super::super::transport::NetCooperation::new(None, BUILTIN_NAME);
+    futures::executor::block_on(super::prepare_default_payload(data, order, &mut work))
+}
+
 #[test]
 fn terminal_socket_errors_retain_original_causes_without_replay() {
     use std::error::Error;
@@ -341,6 +355,44 @@ fn write_char_payload_reads_typed_integer_storage_exactly() {
         .expect("char payload");
     assert_eq!(payload.elements, 2);
     assert_eq!(payload.bytes, b"RM");
+}
+
+#[test]
+fn borrowed_codec_preserves_column_major_pages_and_text_classes() {
+    let tensor = Tensor::new_integer(
+        IntegerStorage::I32(vec![-1, 2, i32::MIN, i32::MAX]),
+        vec![1, 2, 2],
+    )
+    .expect("paged exact integer tensor");
+    let payload = prepare_default_payload(&Value::Tensor(tensor), ByteOrder::Big)
+        .expect("borrowed paged payload");
+    assert_eq!(payload.elements, 4);
+    assert_eq!(
+        payload.bytes,
+        [-1_i32, 2, i32::MIN, i32::MAX]
+            .into_iter()
+            .flat_map(i32::to_be_bytes)
+            .collect::<Vec<_>>()
+    );
+
+    let chars = CharArray::new_with_shape(vec!['A', 'é', '𐀀'], vec![1, 1, 3])
+        .expect("paged character input");
+    let payload = prepare_payload(
+        &Value::CharArray(chars.clone()),
+        DataType::Char,
+        ByteOrder::Little,
+    )
+    .expect("byte-oriented char payload");
+    assert_eq!(payload.elements, 3);
+    assert_eq!(payload.bytes, [b'A', 0xe9, 0]);
+    let payload = prepare_payload(
+        &Value::CharArray(chars),
+        DataType::String,
+        ByteOrder::Little,
+    )
+    .expect("UTF-8 string payload");
+    assert_eq!(payload.elements, 1);
+    assert_eq!(payload.bytes, "Aé𐀀".as_bytes());
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

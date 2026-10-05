@@ -1,3 +1,4 @@
+use super::super::transport::NetCooperation;
 use super::{
     write_error_with_message, write_flow, BuiltinResult, DataType, Value, WRITE_ERROR_INTERNAL,
     WRITE_ERROR_INVALID_DATA, WRITE_ERROR_INVALID_DATATYPE, WRITE_ERROR_INVALID_INPUT,
@@ -54,8 +55,12 @@ pub(super) fn preflight_datatype(args: Vec<Value>) -> BuiltinResult<PreparedWrit
     }
 }
 
-pub(super) fn prepare_default_payload(data: &Value, order: ByteOrder) -> BuiltinResult<Payload> {
-    prepare_payload(data, default_datatype(data)?, order)
+pub(super) async fn prepare_default_payload(
+    data: &Value,
+    order: ByteOrder,
+    work: &mut NetCooperation,
+) -> BuiltinResult<Payload> {
+    prepare_payload(data, default_datatype(data)?, order, work).await
 }
 
 fn default_datatype(data: &Value) -> BuiltinResult<DataType> {
@@ -130,59 +135,81 @@ pub(super) fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
     })
 }
 
-pub(super) fn prepare_payload(
+pub(super) async fn prepare_payload(
     data: &Value,
     datatype: DataType,
     order: ByteOrder,
+    work: &mut NetCooperation,
 ) -> BuiltinResult<Payload> {
     match datatype {
-        DataType::Char => char_payload(data),
-        DataType::String => string_payload(data),
-        _ => numeric_payload(data, datatype, order),
+        DataType::Char => char_payload(data, work).await,
+        DataType::String => string_payload(data, work).await,
+        _ => numeric_payload(data, datatype, order, work).await,
     }
 }
 
-fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> BuiltinResult<Payload> {
-    let values = flatten_numeric(data)?;
-    let mut bytes = Vec::with_capacity(values.len() * datatype.element_size());
-    for value in &values {
+async fn numeric_payload(
+    data: &Value,
+    datatype: DataType,
+    order: ByteOrder,
+    work: &mut NetCooperation,
+) -> BuiltinResult<Payload> {
+    let values = numeric_elements(data)?;
+    let mut bytes = Vec::new();
+    let mut elements = 0usize;
+    for value in values {
+        if elements.is_multiple_of(1024) {
+            let additional = datatype.element_size().checked_mul(1024).ok_or_else(|| {
+                write_flow(
+                    &WRITE_ERROR_INTERNAL,
+                    "write: encoded payload size overflow",
+                )
+            })?;
+            bytes.try_reserve(additional).map_err(|source| {
+                write_flow(
+                    &WRITE_ERROR_INTERNAL,
+                    format!("write: encoded payload allocation failed ({source})"),
+                )
+            })?;
+            work.completed(0).await?;
+        }
         let floating = value.as_f64();
         match datatype {
             DataType::UInt8 => bytes.push(
-                integer_unsigned(value, u8::MAX as u64)
+                integer_unsigned(&value, u8::MAX as u64)
                     .map_or_else(|| cast_to_u8(floating), |v| v as u8),
             ),
             DataType::Int8 => bytes.push(
-                integer_signed(value, i8::MIN as i64, i8::MAX as i64)
+                integer_signed(&value, i8::MIN as i64, i8::MAX as i64)
                     .map_or_else(|| cast_to_i8(floating), |v| v as i8) as u8,
             ),
             DataType::UInt16 => {
-                let encoded = integer_unsigned(value, u16::MAX as u64)
+                let encoded = integer_unsigned(&value, u16::MAX as u64)
                     .map_or_else(|| cast_to_u16(floating), |v| v as u16);
                 extend_u16(&mut bytes, encoded, order)
             }
             DataType::Int16 => {
-                let encoded = integer_signed(value, i16::MIN as i64, i16::MAX as i64)
+                let encoded = integer_signed(&value, i16::MIN as i64, i16::MAX as i64)
                     .map_or_else(|| cast_to_i16(floating), |v| v as i16);
                 extend_i16(&mut bytes, encoded, order)
             }
             DataType::UInt32 => {
-                let encoded = integer_unsigned(value, u32::MAX as u64)
+                let encoded = integer_unsigned(&value, u32::MAX as u64)
                     .map_or_else(|| cast_to_u32(floating), |v| v as u32);
                 extend_u32(&mut bytes, encoded, order)
             }
             DataType::Int32 => {
-                let encoded = integer_signed(value, i32::MIN as i64, i32::MAX as i64)
+                let encoded = integer_signed(&value, i32::MIN as i64, i32::MAX as i64)
                     .map_or_else(|| cast_to_i32(floating), |v| v as i32);
                 extend_i32(&mut bytes, encoded, order)
             }
             DataType::UInt64 => {
                 let encoded =
-                    integer_unsigned(value, u64::MAX).unwrap_or_else(|| cast_to_u64(floating));
+                    integer_unsigned(&value, u64::MAX).unwrap_or_else(|| cast_to_u64(floating));
                 extend_u64(&mut bytes, encoded, order)
             }
             DataType::Int64 => {
-                let encoded = integer_signed(value, i64::MIN, i64::MAX)
+                let encoded = integer_signed(&value, i64::MIN, i64::MAX)
                     .unwrap_or_else(|| cast_to_i64(floating));
                 extend_i64(&mut bytes, encoded, order)
             }
@@ -190,220 +217,170 @@ fn numeric_payload(data: &Value, datatype: DataType, order: ByteOrder) -> Builti
             DataType::Double => extend_f64(&mut bytes, floating, order),
             DataType::Char | DataType::String => unreachable!(),
         }
+        elements = elements.checked_add(1).ok_or_else(|| {
+            write_flow(
+                &WRITE_ERROR_INTERNAL,
+                "write: encoded element count overflow",
+            )
+        })?;
+        if elements.is_multiple_of(1024) {
+            work.completed(1024 * datatype.element_size()).await?;
+        }
     }
-    Ok(Payload {
-        bytes,
-        elements: values.len(),
-    })
+    work.completed((elements % 1024) * datatype.element_size())
+        .await?;
+    Ok(Payload { bytes, elements })
 }
 
-fn char_payload(data: &Value) -> BuiltinResult<Payload> {
-    let bytes = match data {
-        Value::CharArray(ca) => ca.data.iter().map(|&ch| (ch as u32 & 0xFF) as u8).collect(),
-        Value::String(text) => text.bytes().collect(),
-        Value::StringArray(sa) => {
-            if sa.data.len() != 1 {
-                return Err(write_flow(
-                    &WRITE_ERROR_INVALID_DATA,
-                    "write: string array input must be scalar when using 'char'",
-                ));
-            }
-            sa.data[0].as_bytes().to_vec()
+async fn char_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResult<Payload> {
+    let mut bytes = Vec::new();
+    if matches!(data, Value::Num(_) | Value::Int(_) | Value::Bool(_)) {
+        bytes.try_reserve(1).map_err(|source| {
+            write_flow(
+                &WRITE_ERROR_INTERNAL,
+                format!("write: encoded payload allocation failed ({source})"),
+            )
+        })?;
+    }
+    match data {
+        Value::CharArray(array) => {
+            append_bounded(
+                &mut bytes,
+                array.data.iter().map(|ch| (u32::from(*ch) & 0xff) as u8),
+                work,
+            )
+            .await?
         }
-        Value::Tensor(_) => flatten_numeric(data)?
-            .iter()
-            .map(|value| {
-                let floating = value.as_f64();
-                integer_unsigned(value, u8::MAX as u64)
-                    .map_or_else(|| cast_to_u8(floating), |v| v as u8)
-            })
-            .collect(),
-        Value::Num(n) => vec![cast_to_u8(*n)],
-        Value::Int(iv) => vec![
-            integer_unsigned(&WriteElement::Integer(iv.clone()), u8::MAX as u64)
-                .expect("integer conversion is always available for integer input")
-                as u8,
-        ],
-        Value::Bool(b) => vec![if *b { 1 } else { 0 }],
-        Value::LogicalArray(la) => la
-            .data
-            .iter()
-            .map(|&b| if b != 0 { 1 } else { 0 })
-            .collect(),
+        Value::String(text) => append_bounded(&mut bytes, text.bytes(), work).await?,
+        Value::StringArray(array) if array.data.len() == 1 => {
+            append_bounded(&mut bytes, array.data[0].bytes(), work).await?
+        }
+        Value::StringArray(_) => {
+            return Err(write_flow(
+                &WRITE_ERROR_INVALID_DATA,
+                "write: string array input must be scalar when using 'char'",
+            ))
+        }
+        Value::Tensor(_) => {
+            append_bounded(
+                &mut bytes,
+                numeric_elements(data)?.map(|value| {
+                    integer_unsigned(&value, u8::MAX as u64)
+                        .map_or_else(|| cast_to_u8(value.as_f64()), |v| v as u8)
+                }),
+                work,
+            )
+            .await?
+        }
+        Value::Num(number) => bytes.push(cast_to_u8(*number)),
+        Value::Int(integer) => bytes.push(
+            integer_unsigned(&WriteElement::Integer(integer.clone()), u8::MAX as u64)
+                .expect("integer input converts exactly") as u8,
+        ),
+        Value::Bool(boolean) => bytes.push(u8::from(*boolean)),
+        Value::LogicalArray(array) => {
+            append_bounded(
+                &mut bytes,
+                array.data.iter().map(|byte| u8::from(*byte != 0)),
+                work,
+            )
+            .await?
+        }
         _ => {
             return Err(write_flow(
                 &WRITE_ERROR_INVALID_DATA,
                 "write: unsupported input for 'char' datatype",
             ))
         }
-    };
+    }
+    work.completed(0).await?;
     Ok(Payload {
         elements: bytes.len(),
         bytes,
     })
 }
 
-fn string_payload(data: &Value) -> BuiltinResult<Payload> {
-    match data {
-        Value::String(text) => Ok(Payload {
-            elements: 1,
-            bytes: text.as_bytes().to_vec(),
-        }),
-        Value::CharArray(ca) => {
-            let string: String = ca.data.iter().collect();
-            Ok(Payload {
-                elements: 1,
-                bytes: string.into_bytes(),
-            })
+async fn string_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResult<Payload> {
+    let mut bytes = Vec::new();
+    let elements = match data {
+        Value::String(text) => {
+            append_bounded(&mut bytes, text.bytes(), work).await?;
+            1
         }
-        Value::StringArray(sa) => {
-            if sa.data.is_empty() {
-                return Ok(Payload {
-                    elements: 0,
-                    bytes: Vec::new(),
-                });
+        Value::CharArray(array) => {
+            for group in array.data.chunks(1024) {
+                bytes
+                    .try_reserve(group.len().checked_mul(4).ok_or_else(|| {
+                        write_flow(&WRITE_ERROR_INTERNAL, "write: encoded text size overflow")
+                    })?)
+                    .map_err(|source| {
+                        write_flow(
+                            &WRITE_ERROR_INTERNAL,
+                            format!("write: encoded text allocation failed ({source})"),
+                        )
+                    })?;
+                for ch in group {
+                    let mut encoded = [0u8; 4];
+                    bytes.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
+                }
+                work.completed(group.len()).await?;
             }
-            if sa.data.len() != 1 {
-                return Err(write_flow(
-                    &WRITE_ERROR_INVALID_DATA,
-                    "write: string array input must be scalar when using 'string'",
-                ));
-            }
-            Ok(Payload {
-                elements: 1,
-                bytes: sa.data[0].as_bytes().to_vec(),
-            })
+            1
         }
-        _ => Err(write_flow(
-            &WRITE_ERROR_INVALID_DATA,
-            "write: expected text input when using 'string' datatype",
-        )),
-    }
+        Value::StringArray(array) if array.data.is_empty() => 0,
+        Value::StringArray(array) if array.data.len() == 1 => {
+            append_bounded(&mut bytes, array.data[0].bytes(), work).await?;
+            1
+        }
+        Value::StringArray(_) => {
+            return Err(write_flow(
+                &WRITE_ERROR_INVALID_DATA,
+                "write: string array input must be scalar when using 'string'",
+            ))
+        }
+        _ => {
+            return Err(write_flow(
+                &WRITE_ERROR_INVALID_DATA,
+                "write: expected text input when using 'string' datatype",
+            ))
+        }
+    };
+    work.completed(0).await?;
+    Ok(Payload { elements, bytes })
 }
 
-fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
-    match value {
-        Value::Tensor(t) => Ok((0..t.len())
-            .map(|index| {
-                let value = t
-                    .numeric_value_at(index)
-                    .expect("index within authoritative numeric storage");
-                value.into_int_value().map_or_else(
-                    || WriteElement::Floating(value.materialize_f64()),
-                    WriteElement::Integer,
-                )
-            })
-            .collect()),
-        Value::SparseTensor(s) => {
-            let total_elements = s.rows.checked_mul(s.cols).ok_or_else(|| {
-                write_error_with_message(
-                    "write: sparse matrix dimensions overflow",
+async fn append_bounded(
+    bytes: &mut Vec<u8>,
+    values: impl Iterator<Item = u8>,
+    work: &mut NetCooperation,
+) -> BuiltinResult<()> {
+    let mut pending = 0usize;
+    for value in values {
+        if pending == 0 {
+            bytes.try_reserve(4096).map_err(|source| {
+                write_flow(
                     &WRITE_ERROR_INTERNAL,
+                    format!("write: encoded payload allocation failed ({source})"),
                 )
             })?;
-            if total_elements > 10_000_000 {
-                return Err(write_error_with_message(
-                    format!("write: cannot densify sparse tensor {}x{} ({} elements exceeds safe threshold)", s.rows, s.cols, total_elements),
-                    &WRITE_ERROR_INTERNAL,
-                ));
-            }
-            if s.is_logical() {
-                let dense = s.to_dense_logical().map_err(|err| {
-                    write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
-                })?;
-                return Ok(dense
-                    .data
-                    .into_iter()
-                    .map(|value| WriteElement::Floating(f64::from(value)))
-                    .collect());
-            }
-            let dense = s.to_dense().map_err(|err| {
-                write_error_with_message(format!("write: {err}"), &WRITE_ERROR_INTERNAL)
-            })?;
-            Ok((0..dense.len())
-                .map(|index| {
-                    let value = dense
-                        .numeric_value_at(index)
-                        .expect("index within authoritative numeric storage");
-                    value.into_int_value().map_or_else(
-                        || WriteElement::Floating(value.materialize_f64()),
-                        WriteElement::Integer,
-                    )
-                })
-                .collect())
         }
-        Value::Num(n) => Ok(vec![WriteElement::Floating(*n)]),
-        Value::Int(iv) => Ok(vec![WriteElement::Integer(iv.clone())]),
-        Value::Bool(b) => Ok(vec![WriteElement::Floating(if *b { 1.0 } else { 0.0 })]),
-        Value::LogicalArray(la) => Ok(la
-            .data
-            .iter()
-            .map(|&b| WriteElement::Floating(if b != 0 { 1.0 } else { 0.0 }))
-            .collect()),
-        Value::CharArray(ca) => Ok(ca
-            .data
-            .iter()
-            .map(|&ch| WriteElement::Floating((ch as u32 & 0xFF) as f64))
-            .collect()),
-        Value::String(text) => Ok(text
-            .chars()
-            .map(|ch| WriteElement::Floating((ch as u32) as f64))
-            .collect()),
-        Value::StringArray(sa) => {
-            if sa.data.len() != 1 {
-                return Err(write_flow(
-                    &WRITE_ERROR_INVALID_DATA,
-                    "write: string array input must be scalar",
-                ));
-            }
-            Ok(sa.data[0]
-                .chars()
-                .map(|ch| WriteElement::Floating((ch as u32) as f64))
-                .collect())
+        bytes.push(value);
+        pending += 1;
+        if pending == 4096 {
+            work.completed(pending).await?;
+            pending = 0;
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(write_flow(
-            &WRITE_ERROR_INVALID_DATA,
-            "write: complex data is not supported",
-        )),
-        Value::Symbolic(_) | Value::SymbolicArray(_) => Err(write_flow(
-            &WRITE_ERROR_INVALID_DATA,
-            "write: symbolic data is not supported",
-        )),
-        Value::Cell(_)
-        | Value::Struct(_)
-        | Value::StructArray(_)
-        | Value::ObjectArray(_)
-        | Value::Object(_)
-        | Value::HandleObject(_)
-        | Value::Listener(_)
-        | Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_)
-        | Value::ClassRef(_)
-        | Value::MException(_)
-        | Value::Future(_)
-        | Value::Task(_)
-        | Value::Pool(_)
-        | Value::Job(_)
-        | Value::Distributed(_)
-        | Value::Composite(_)
-        | Value::Foreign(_)
-        | Value::OutputList(_) => Err(write_flow(
-            &WRITE_ERROR_INVALID_DATA,
-            "write: unsupported input type",
-        )),
-        Value::GpuTensor(_) => Err(write_flow(
-            &WRITE_ERROR_INVALID_DATA,
-            "write: GPU tensor should have been gathered before encoding",
-        )),
     }
+    work.completed(pending).await
 }
 
 #[path = "codec/cast.rs"]
 mod cast;
 pub(super) use cast::*;
+
+#[path = "codec/elements.rs"]
+mod elements;
+use elements::numeric_elements;
 
 fn scalar_string(value: &Value) -> BuiltinResult<String> {
     crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {

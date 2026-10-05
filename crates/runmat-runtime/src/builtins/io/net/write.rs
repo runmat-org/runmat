@@ -156,8 +156,8 @@ pub(super) async fn write_builtin(
     };
 
     let payload = match datatype {
-        Some(datatype) => prepare_payload(&data, datatype, byte_order)?,
-        None => prepare_default_payload(&data, byte_order)?,
+        Some(datatype) => prepare_payload(&data, datatype, byte_order, &mut work).await?,
+        None => prepare_default_payload(&data, byte_order, &mut work).await?,
     };
     if payload.bytes.is_empty() {
         work.completed(0).await?;
