@@ -14,12 +14,22 @@ struct CountedProvider {
     opens: Arc<AtomicUsize>,
     reads: Arc<AtomicUsize>,
     writes: Arc<AtomicUsize>,
+    pending_reads: bool,
+    backing_drops: Arc<AtomicUsize>,
 }
 
 struct CountedBacking {
     bytes: Arc<Mutex<Vec<u8>>>,
     reads: Arc<AtomicUsize>,
     writes: Arc<AtomicUsize>,
+    pending_reads: bool,
+    backing_drops: Arc<AtomicUsize>,
+}
+
+impl Drop for CountedBacking {
+    fn drop(&mut self) {
+        self.backing_drops.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -38,6 +48,9 @@ impl FsMappedBacking for CountedBacking {
 
     async fn read_at(&mut self, offset: u64, buffer: &mut [u8]) -> io::Result<usize> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        if self.pending_reads {
+            std::future::pending::<()>().await;
+        }
         let bytes = self.bytes.lock().unwrap();
         let start = usize::try_from(offset).unwrap();
         let count = buffer.len().min(bytes.len().saturating_sub(start));
@@ -77,6 +90,8 @@ impl FsProvider for CountedProvider {
             bytes: self.bytes.clone(),
             reads: self.reads.clone(),
             writes: self.writes.clone(),
+            pending_reads: self.pending_reads,
+            backing_drops: self.backing_drops.clone(),
         })))
     }
 
@@ -138,6 +153,8 @@ fn invalid_repeat_forms_do_not_open_or_touch_mapped_bytes() {
         opens: Arc::new(AtomicUsize::new(0)),
         reads: Arc::new(AtomicUsize::new(0)),
         writes: Arc::new(AtomicUsize::new(0)),
+        pending_reads: false,
+        backing_drops: Arc::new(AtomicUsize::new(0)),
     });
     let _selected = vfs::replace_provider(provider.clone());
     let invalid = [
@@ -182,4 +199,51 @@ fn invalid_repeat_forms_do_not_open_or_touch_mapped_bytes() {
     assert_eq!(provider.reads.load(Ordering::SeqCst), 0);
     assert_eq!(provider.writes.load(Ordering::SeqCst), 0);
     assert_eq!(*provider.bytes.lock().unwrap(), [1, 2, 3, 4]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn abandoned_pending_mapped_read_releases_session_backing_without_replay() {
+    use crate::execution::RuntimeExecutionService;
+    use std::future::Future;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    let _lock = vfs::provider_override_lock();
+    #[cfg(target_arch = "wasm32")]
+    let root = PathBuf::from("/pending-mapped-read");
+    #[cfg(not(target_arch = "wasm32"))]
+    let root = std::env::temp_dir().join("runmat-pending-mapped-read");
+    let provider = Arc::new(CountedProvider {
+        root,
+        bytes: Arc::new(Mutex::new(vec![1, 2, 3, 4])),
+        opens: Arc::new(AtomicUsize::new(0)),
+        reads: Arc::new(AtomicUsize::new(0)),
+        writes: Arc::new(AtomicUsize::new(0)),
+        pending_reads: true,
+        backing_drops: Arc::new(AtomicUsize::new(0)),
+    });
+    let _selected = vfs::replace_provider(provider.clone());
+    let runtime = crate::context::RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let mapped = futures::executor::block_on(super::super::super::super::memmapfile_builtin(
+        Some(runtime.clone()),
+        vec![Value::String("data.bin".into())],
+    ))
+    .unwrap();
+    let mut call = Box::pin(subsref(
+        Some(runtime.clone()),
+        mapped.clone(),
+        property("Data"),
+    ));
+    let waker = futures::task::noop_waker_ref();
+    let mut task = Context::from_waker(waker);
+    assert!(matches!(call.as_mut().poll(&mut task), Poll::Pending));
+    assert_eq!(provider.reads.load(Ordering::SeqCst), 1);
+    drop(call);
+    drop(runtime);
+    assert_eq!(provider.backing_drops.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.writes.load(Ordering::SeqCst), 0);
+    assert_eq!(*provider.bytes.lock().unwrap(), [1, 2, 3, 4]);
+    drop(mapped);
+    assert_eq!(provider.backing_drops.load(Ordering::SeqCst), 1);
 }
