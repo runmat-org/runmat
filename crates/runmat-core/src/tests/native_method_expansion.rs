@@ -8,6 +8,8 @@ use std::task::{Context, Poll};
 
 #[path = "native_method_expansion/pending_managed.rs"]
 mod pending_managed;
+#[path = "native_method_expansion/pending_operator.rs"]
+mod pending_operator;
 
 const COMPOUND_EXPANSION: &str = r#"
 function output = first(value)

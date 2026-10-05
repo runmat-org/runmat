@@ -31,13 +31,10 @@ pub(super) fn evaluate_rvalue(
     match value {
         MirRvalue::Use(operand) => evaluate_operand(state, operand).map(|value| vec![value]),
         MirRvalue::Unary(operator, operand) => {
-            let argument = materialize_operand(state, operand)?;
-            super::operator::evaluate(state, *operator, vec![argument]).map(|value| vec![value])
+            super::operator::evaluate(state, *operator, &[operand]).map(|value| vec![value])
         }
         MirRvalue::Binary(left, operator, right) => {
-            let left = materialize_operand(state, left)?;
-            let right = materialize_operand(state, right)?;
-            super::operator::evaluate(state, *operator, vec![left, right]).map(|value| vec![value])
+            super::operator::evaluate(state, *operator, &[left, right]).map(|value| vec![value])
         }
         MirRvalue::ShortCircuit {
             left,

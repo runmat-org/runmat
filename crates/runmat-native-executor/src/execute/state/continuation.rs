@@ -130,6 +130,17 @@ impl HostState {
                 slot,
             });
         }
+        if let Some(pending) = &self.pending_call {
+            for value in &pending.retained_roots {
+                let slot = u32::try_from(self.roots.len())
+                    .expect("pending native call root cardinality is bounded by operation arity");
+                self.roots.push(NativeRoot {
+                    value: *value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
         let mut sequence_root_slot = self.roots.len();
         for values in self.captured_sequences.values() {
             for value in values {

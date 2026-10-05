@@ -91,6 +91,7 @@ pub(super) fn begin_sequence_stage(
         generation,
         request,
         embedded,
+        retained_roots: Vec::new(),
         future,
     });
     Err(NativeExecutorError::CallSuspended)

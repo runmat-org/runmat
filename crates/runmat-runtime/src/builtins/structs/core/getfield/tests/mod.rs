@@ -23,7 +23,7 @@ fn error_message(err: crate::RuntimeError) -> String {
 }
 
 fn run_getfield(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(getfield_builtin(base, rest))
+    futures::executor::block_on(getfield_builtin(None, base, rest))
 }
 
 mod aggregate_indexing;

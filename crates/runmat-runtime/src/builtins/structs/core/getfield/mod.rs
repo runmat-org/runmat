@@ -28,14 +28,18 @@ pub(crate) use spec::{
     binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
-async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn getfield_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    base: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::GETFIELD_DESCRIPTOR,
         &runmat_builtins::GETFIELD_ERROR_TOO_MANY_OUTPUTS,
         "getfield",
     )?;
 
-    execution::getfield(None, base, rest, true).await
+    execution::getfield(runtime.as_ref(), base, rest, true).await
 }
 
 pub(crate) async fn getfield_internal(

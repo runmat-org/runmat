@@ -242,6 +242,7 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
                 generation: 1,
                 request,
                 embedded: None,
+                retained_roots: Vec::new(),
                 future: Box::pin(async move {
                     service.assign("x", Value::Num(42.0))?;
                     if fail {

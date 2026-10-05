@@ -1,6 +1,80 @@
 use super::*;
 
 #[test]
+fn public_getfield_dependent_getter_uses_selected_session() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let wrong = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _wrong_scope = wrong.enter();
+    let selected = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let expected_session = selected.session_lease();
+    let class = runmat_types::ClassIdentity::from("SelectedGetfieldSession");
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        name: class.clone(),
+        parent: None,
+        properties: std::collections::HashMap::from([(
+            runmat_types::MemberName::from("p"),
+            crate::class_registry::RuntimeProperty {
+                name: "p".into(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: true,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
+                default_value: None,
+            },
+        )]),
+        methods: std::collections::HashMap::from([(
+            runmat_types::MethodName::from("get.p"),
+            crate::class_registry::RuntimeMethod {
+                name: "get.p".into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: MemberAccess::Public,
+                function_name: "SelectedGetfieldSession.get.p".into(),
+                implicit_class_argument: None,
+            },
+        )]),
+    });
+    let _resolver = crate::user_functions::install_semantic_function_resolver(Some(
+        std::sync::Arc::new(|name| (name == "SelectedGetfieldSession.get.p").then_some(942)),
+    ));
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+        std::sync::Arc::new(move |function, args, requested_outputs| {
+            assert_eq!(function, 942);
+            assert_eq!(requested_outputs, 1);
+            assert!(matches!(args, [Value::Object(_)]));
+            let active = crate::context::legacy::active().expect("selected getter scope");
+            assert!(std::sync::Weak::ptr_eq(
+                &active.session_lease(),
+                &expected_session
+            ));
+            Box::pin(async {
+                crate::sequence::ValueSequence::single(Value::Num(29.0))
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            })
+        }),
+    ));
+    let result = futures::executor::block_on(getfield_builtin(
+        Some(selected),
+        Value::Object(ObjectInstance::new(class)),
+        vec![Value::from("p")],
+    ))
+    .expect("selected public getfield getter");
+    assert_eq!(result, Value::Num(29.0));
+    assert!(std::sync::Weak::ptr_eq(
+        &crate::context::legacy::active()
+            .expect("wrong enclosing session restored")
+            .session_lease(),
+        &wrong.session_lease()
+    ));
+}
+
+#[test]
 fn getfield_textual_index_and_object_family_extensions_are_mode_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let mut st = StructValue::new();

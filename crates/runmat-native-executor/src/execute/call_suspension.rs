@@ -35,6 +35,7 @@ pub(super) struct PendingCall {
     pub(super) generation: u64,
     pub(super) request: NativeSiteRequest,
     pub(super) embedded: Option<super::state::EmbeddedOperationIdentity>,
+    pub(super) retained_roots: Vec<NativeValueRef>,
     pub(super) future: CompletionFuture,
 }
 
@@ -119,6 +120,15 @@ pub(super) fn begin(
     embedded: Option<super::state::EmbeddedOperationIdentity>,
     future: CallFuture,
 ) -> NativeExecutorResult<Vec<Value>> {
+    begin_with_roots(state, embedded, Vec::new(), future)
+}
+
+pub(super) fn begin_with_roots(
+    state: &mut HostState,
+    embedded: Option<super::state::EmbeddedOperationIdentity>,
+    retained_roots: Vec<NativeValueRef>,
+    future: CallFuture,
+) -> NativeExecutorResult<Vec<Value>> {
     let mut future: CompletionFuture =
         Box::pin(async move { future.await.map(CallCompletion::Values) });
     if let Some(result) = future.as_mut().now_or_never() {
@@ -139,6 +149,7 @@ pub(super) fn begin(
         generation,
         request,
         embedded,
+        retained_roots,
         future,
     });
     Err(NativeExecutorError::CallSuspended)

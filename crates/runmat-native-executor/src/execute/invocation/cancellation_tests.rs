@@ -82,6 +82,7 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
             reserved: 0,
         },
         embedded: None,
+        retained_roots: Vec::new(),
         future: Box::pin(work),
     });
     NativeInvocation::new(

@@ -74,6 +74,7 @@ pub(in crate::execute) fn begin_prepared_receiver(
         generation,
         request,
         embedded,
+        retained_roots: Vec::new(),
         future,
     });
     Err(NativeExecutorError::CallSuspended)
