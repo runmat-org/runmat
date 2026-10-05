@@ -30,7 +30,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         matrix.residency = ResidencyFact::Unknown;
     }
     let mut diagnostics = Vec::new();
-    if len == 0 || (len > 1 && !second_is_unknown && ((len % 2 == 0) != second_is_struct)) {
+    if len == 0 || (len > 1 && !second_is_unknown && (len.is_multiple_of(2) != second_is_struct)) {
         diagnostics.push(argument_error(
             "RM-CATALOG-READMATRIX-ARITY",
             "readmatrix requires a filename, an optional options struct, and complete name-value pairs",
