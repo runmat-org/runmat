@@ -76,3 +76,47 @@ fn retained_execution_facts_do_not_replace_published_portable_resolution() {
     assert_eq!(resolve_binding_origin(published_origin), Some(9));
     assert!(source_function_for(10).is_none());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn selected_old_definition_issues_old_owner_under_one_runtime() {
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let old_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let new_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let old = SourceFunctionInfo {
+        source_id: SourceId(1),
+        name: "reused".into(),
+        function: 9,
+        role: runmat_types::FunctionSourceRole::Local,
+        binding_origin: None,
+        definition_owners: Some(vec![(9, Arc::clone(&old_owner))]),
+    };
+    let published = SourceFunctionInfo {
+        source_id: SourceId(2),
+        name: "reused".into(),
+        function: 9,
+        role: runmat_types::FunctionSourceRole::Primary,
+        binding_origin: None,
+        definition_owners: Some(vec![(9, new_owner)]),
+    };
+    let entry = runtime.enter();
+    let catalog = install_source_function_catalog(Some(Arc::new(vec![published])));
+    let execution = install_execution_source_resolver(Some(Rc::new(move |function| {
+        (function == 9).then(|| old.clone())
+    })));
+    let Value::BoundFunctionHandle { authority, .. } = bound_function_handle("reused".into(), 9)
+    else {
+        panic!("bound handle");
+    };
+    assert!(authority.admits_local(&runtime.session_lease()));
+    assert!(authority
+        .local_lease(9)
+        .is_some_and(|lease| lease.matches(&old_owner)));
+    drop(execution);
+    drop(catalog);
+    drop(entry);
+    drop(runtime);
+    assert!(!authority.admits_local(&std::sync::Weak::new()));
+}
