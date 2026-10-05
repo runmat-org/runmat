@@ -189,7 +189,7 @@ async fn write_spreadsheet(
     workbook
         .overlay(&request, table, &mut cooperation, &selected)
         .await?;
-    let bytes = workbook.to_xlsx_bytes(&mut cooperation, &selected).await?;
+    let bytes = workbook.into_xlsx_bytes(&mut cooperation, &selected).await?;
     write_owner::safe_replace_file(runtime, &mut cooperation, BUILTIN_NAME, &selected, &bytes)
         .await
         .map_err(|source| match source {

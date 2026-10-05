@@ -10,7 +10,7 @@ use super::target::PendingSequenceTarget;
 use super::{PreparedMultiAssignment, PreparedTarget};
 use crate::execute::state::HostState;
 
-pub(super) struct PendingMultiPreparation {
+pub(in crate::execute) struct PendingMultiPreparation {
     request: NativeSiteRequest,
     targets: MirOutputTargetList,
     next_target: usize,
@@ -21,7 +21,7 @@ pub(super) struct PendingMultiPreparation {
 }
 
 impl PendingMultiPreparation {
-    pub(super) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
+    pub(in crate::execute) fn root_references(&self) -> impl Iterator<Item = NativeValueRef> + '_ {
         self.retained.iter().copied().chain(
             self.active
                 .iter()

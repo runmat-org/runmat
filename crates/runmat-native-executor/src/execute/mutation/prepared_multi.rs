@@ -12,7 +12,7 @@ use crate::execute::state::HostState;
 mod roots;
 mod target;
 mod preparation;
-pub(super) use preparation::PendingMultiPreparation;
+pub(in crate::execute) use preparation::PendingMultiPreparation;
 use roots::local_value;
 
 #[derive(Clone)]

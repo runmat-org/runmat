@@ -393,9 +393,9 @@ fn normalize_spreadsheet_path(text: &str) -> BuiltinResult<String> {
 }
 
 mod range;
-use range::{parse_range, parse_range_string, text_looks_like_range, RangeSpec};
 #[cfg(test)]
 use range::MAX_EXCEL_ROW_INDEX;
+use range::{parse_range, parse_range_string, text_looks_like_range, RangeSpec};
 mod output;
 use output::{XlsReadOutputs, XlsReadResult};
 mod workbook;

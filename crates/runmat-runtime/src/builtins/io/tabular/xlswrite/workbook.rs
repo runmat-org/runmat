@@ -93,7 +93,7 @@ impl XlsWorkbook {
         "Sheet".to_string()
     }
 
-    pub(super) async fn to_xlsx_bytes(
+    pub(super) async fn into_xlsx_bytes(
         self,
         cooperation: &mut TabularCooperation<'_>,
         selected: &TabularFsPath,
