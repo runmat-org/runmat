@@ -744,6 +744,12 @@ pub fn clamp_u32(value: f64) -> f64 {
 
 /// Cast all elements of a tensor to the target dtype through typed constructors.
 pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
+    // A same-class tensor already has the requested representation. Moving it
+    // preserves its payload, shape allocation, and any exact host reservation
+    // carried by that payload; rebuilding it would silently detach the claim.
+    if tensor.numeric_dtype() == dtype {
+        return tensor;
+    }
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
@@ -795,7 +801,52 @@ pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
 #[cfg(test)]
 mod dtype_tests {
     use super::{coerce_tensor_dtype, ones_with_dtype, zeros_with_dtype};
-    use runmat_value::{IntegerStorage, NumericDType, Tensor};
+    use runmat_value::{IntegerStorage, NumericDType, NumericStorage, Tensor};
+
+    #[test]
+    fn same_dtype_coercion_moves_all_ten_numeric_classes_and_shape() {
+        let cases = [
+            NumericStorage::F64(vec![-0.0, f64::INFINITY]),
+            NumericStorage::F32(vec![-0.0, f32::INFINITY]),
+            NumericStorage::I8(vec![i8::MIN, i8::MAX]),
+            NumericStorage::I16(vec![i16::MIN, i16::MAX]),
+            NumericStorage::I32(vec![i32::MIN, i32::MAX]),
+            NumericStorage::I64(vec![i64::MIN, i64::MAX]),
+            NumericStorage::U8(vec![u8::MIN, u8::MAX]),
+            NumericStorage::U16(vec![u16::MIN, u16::MAX]),
+            NumericStorage::U32(vec![u32::MIN, u32::MAX]),
+            NumericStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+        for storage in cases {
+            let input = Tensor::from_numeric_storage(storage, vec![1, 2]).expect("typed input");
+            let dtype = input.numeric_dtype();
+            let shape_pointer = input.shape.as_ptr();
+            let payload_pointer = unsafe { input.host_buffer().foreign_data_pointer() };
+            let output = coerce_tensor_dtype(input, dtype);
+            assert_eq!(output.numeric_dtype(), dtype);
+            assert_eq!(output.shape, [1, 2]);
+            assert_eq!(output.shape.as_ptr(), shape_pointer);
+            assert_eq!(
+                unsafe { output.host_buffer().foreign_data_pointer() },
+                payload_pointer
+            );
+            match dtype {
+                NumericDType::F64 => assert_eq!(
+                    output.as_f64_slice().expect("double output")[0].to_bits(),
+                    (-0.0_f64).to_bits()
+                ),
+                NumericDType::F32 => assert_eq!(
+                    output.as_f32_slice().expect("single output")[0].to_bits(),
+                    (-0.0_f32).to_bits()
+                ),
+                NumericDType::U64 => assert_eq!(
+                    output.integer_storage(),
+                    Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+                ),
+                _ => {}
+            }
+        }
+    }
 
     #[test]
     fn dtype_directed_constructors_materialize_all_integer_classes() {
