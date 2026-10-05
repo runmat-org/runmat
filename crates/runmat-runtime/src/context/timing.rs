@@ -38,7 +38,7 @@ pub trait RuntimeTimingService {
 #[derive(Debug)]
 pub(crate) struct TimingSessionState {
     pause_enabled: bool,
-    latest: Option<StopwatchToken>,
+    latest: Option<Duration>,
     starts: HashMap<StopwatchToken, Duration>,
 }
 
@@ -61,16 +61,21 @@ impl TimingSessionState {
         std::mem::replace(&mut self.pause_enabled, enabled)
     }
 
-    /// Tokens are unique within this process generation and only this session
-    /// stores the start. A foreign or stale token cannot decode as a timestamp.
-    pub(crate) fn start(&mut self, now: Duration) -> StopwatchToken {
-        let token = NEXT_STOPWATCH_TOKEN
+    /// A no-output start updates only the latest clock instant, keeping
+    /// repeated `tic; toc;` at constant retained state. Published tokens are
+    /// unique within this process generation and valid only in this session.
+    pub(crate) fn start(&mut self, now: Duration, publish: bool) -> Option<StopwatchToken> {
+        if !publish {
+            self.latest = Some(now);
+            return None;
+        }
+        let raw = NEXT_STOPWATCH_TOKEN
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .expect("stopwatch token identity space exhausted");
-        let token = StopwatchToken(token);
+            .ok()?;
+        let token = StopwatchToken(raw);
         self.starts.insert(token, now);
-        self.latest = Some(token);
-        token
+        self.latest = Some(now);
+        Some(token)
     }
 
     pub(crate) fn start_for(&self, token: StopwatchToken) -> Option<Duration> {
@@ -78,7 +83,7 @@ impl TimingSessionState {
     }
 
     pub(crate) fn latest_start(&self) -> Option<Duration> {
-        self.latest.and_then(|token| self.start_for(token))
+        self.latest
     }
 
     #[cfg(test)]
@@ -130,12 +135,29 @@ mod tests {
             .state()
             .timing
             .borrow_mut()
-            .start(first.service_ports().timing().monotonic_elapsed());
+            .start(first.service_ports().timing().monotonic_elapsed(), true)
+            .expect("token");
         assert_eq!(
             first_clone.state().timing.borrow().start_for(token),
             Some(Duration::from_secs(3))
         );
         assert_eq!(second.state().timing.borrow().start_for(token), None);
+        for _ in 0..1000 {
+            first
+                .state()
+                .timing
+                .borrow_mut()
+                .start(Duration::from_secs(5), false);
+        }
+        assert_eq!(first.state().timing.borrow().starts.len(), 1);
+        assert_eq!(
+            first.state().timing.borrow().latest_start(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            first.state().timing.borrow().start_for(token),
+            Some(Duration::from_secs(3))
+        );
         first.state().timing.borrow_mut().set_pause_enabled(false);
         assert!(!first_clone.state().timing.borrow().pause_enabled());
         assert!(second.state().timing.borrow().pause_enabled());

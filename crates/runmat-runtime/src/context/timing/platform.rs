@@ -30,6 +30,11 @@ impl RuntimeTimingService for PlatformTimingService {
         #[cfg(not(target_arch = "wasm32"))]
         {
             Box::pin(async move {
+                if Instant::now().checked_add(duration).is_none() {
+                    return Err(crate::RuntimeError::new(
+                        "timing: duration exceeds host clock range",
+                    ));
+                }
                 async_io::Timer::after(duration).await;
                 Ok(())
             })
@@ -94,7 +99,7 @@ fn process_cpu_seconds() -> Option<f64> {
     let ticks =
         |value: FileTime| ((value.high_date_time as u64) << 32) | value.low_date_time as u64;
     let (kernel, user) = unsafe { (kernel.assume_init(), user.assume_init()) };
-    Some((ticks(kernel) + ticks(user)) as f64 / 10_000_000.0)
+    Some(ticks(kernel) as f64 / 10_000_000.0 + ticks(user) as f64 / 10_000_000.0)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -104,26 +109,71 @@ fn process_cpu_seconds() -> Option<f64> {
 
 #[cfg(target_arch = "wasm32")]
 async fn browser_sleep(duration: Duration) -> Result<(), crate::RuntimeError> {
-    use js_sys::{Function, Promise, Reflect};
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
+    let mut remaining = duration.as_millis() + u128::from(duration.subsec_nanos() % 1_000_000 != 0);
+    loop {
+        let chunk = remaining.min(i32::MAX as u128) as i32;
+        browser_sleep_chunk(chunk).await?;
+        if remaining <= chunk as u128 {
+            break;
+        }
+        remaining -= chunk as u128;
+    }
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn browser_sleep_chunk(millis: i32) -> Result<(), crate::RuntimeError> {
+    use futures::channel::oneshot;
+    use js_sys::{Function, Reflect};
+    use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+
+    struct ScheduledTimeout {
+        global: JsValue,
+        clear: Function,
+        id: JsValue,
+        _callback: Closure<dyn FnMut()>,
+    }
+
+    impl Drop for ScheduledTimeout {
+        fn drop(&mut self) {
+            let _ = self.clear.call1(&self.global, &self.id);
+        }
+    }
 
     let global = js_sys::global();
-    let set_timeout = Reflect::get(&global, &wasm_bindgen::JsValue::from_str("setTimeout"))
-        .map_err(|_| crate::RuntimeError::new("pause: setTimeout unavailable"))?
-        .dyn_into::<Function>()
-        .map_err(|_| crate::RuntimeError::new("pause: setTimeout unavailable"))?;
-    let millis = duration.as_millis().min(i32::MAX as u128) as i32;
-    let promise = Promise::new(&mut |resolve, _reject| {
-        let resolve: Function = resolve.unchecked_into();
-        let _ = set_timeout.call2(
+    let timer = |name: &str| -> Result<Function, crate::RuntimeError> {
+        Reflect::get(&global, &JsValue::from_str(name))
+            .map_err(|_| crate::RuntimeError::new(format!("pause: {name} unavailable")))?
+            .dyn_into::<Function>()
+            .map_err(|_| crate::RuntimeError::new(format!("pause: {name} unavailable")))
+    };
+    let set = timer("setTimeout")?;
+    let clear = timer("clearTimeout")?;
+    let (sender, receiver) = oneshot::channel::<()>();
+    let mut sender = Some(sender);
+    let callback = Closure::wrap(Box::new(move || {
+        if let Some(sender) = sender.take() {
+            let _ = sender.send(());
+        }
+    }) as Box<dyn FnMut()>);
+    let id = set
+        .call2(
             &global,
-            &resolve.into(),
-            &wasm_bindgen::JsValue::from_f64(millis as f64),
-        );
-    });
-    JsFuture::from(promise)
+            callback.as_ref(),
+            &JsValue::from_f64(millis as f64),
+        )
+        .map_err(|error| {
+            crate::RuntimeError::new(format!("pause: timer setup failed ({error:?})"))
+        })?;
+    let scheduled = ScheduledTimeout {
+        global,
+        clear,
+        id,
+        _callback: callback,
+    };
+    receiver
         .await
-        .map_err(|error| crate::RuntimeError::new(format!("pause: timer failed ({error:?})")))?;
+        .map_err(|_| crate::RuntimeError::new("pause: timer callback was dropped"))?;
+    drop(scheduled);
     Ok(())
 }
