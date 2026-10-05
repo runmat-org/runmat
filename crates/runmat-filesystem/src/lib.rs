@@ -11,6 +11,7 @@ use std::time::SystemTime;
 mod dialog;
 mod mapped_backing;
 mod memory;
+mod provider_path;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_path;
 mod native_path_intent;
@@ -39,6 +40,7 @@ pub use native_path::{
     NativeProcessRevocation,
 };
 pub use native_path_intent::NativePathIntent;
+pub use provider_path::is_absolute_provider_path;
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
@@ -174,7 +176,7 @@ impl OpenOptions {
     /// consulting the ambient provider or working directory again.
     pub fn open_on(&self, provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<File> {
         let path = path.as_ref();
-        if !path.is_absolute() {
+        if !is_absolute_provider_path(path) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "captured filesystem opens require an absolute path",
@@ -682,7 +684,7 @@ fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
 }
 
 fn resolve_path(path: &Path) -> PathBuf {
-    if path.is_absolute() {
+    if is_absolute_provider_path(path) {
         return path.to_path_buf();
     }
     let state = provider_state_lock()
@@ -1089,7 +1091,7 @@ pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64
 /// `copy_file`, this never consults the process-wide provider or CWD after
 /// capture. It preserves the existing synchronous stream-copy semantics.
 pub fn copy_file_on(provider: &dyn FsProvider, from: &Path, to: &Path) -> io::Result<u64> {
-    if !from.is_absolute() || !to.is_absolute() {
+    if !is_absolute_provider_path(from) || !is_absolute_provider_path(to) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "copy_file_on requires captured absolute paths",

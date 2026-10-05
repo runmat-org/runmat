@@ -15,7 +15,7 @@ pub(super) struct CapturedFsPath {
 
 impl CapturedFsPath {
     pub(super) fn capture(path: PathBuf, builtin: &'static str) -> BuiltinResult<Self> {
-        let (provider, path) = if path.is_absolute() {
+        let (provider, path) = if vfs::is_absolute_provider_path(&path) {
             (vfs::current_provider(), path)
         } else {
             let (provider, cwd) = vfs::current_provider_with_current_dir().map_err(|source| {

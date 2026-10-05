@@ -8,7 +8,7 @@ pub(super) fn begin(
     provider: MemoryFsProvider,
     destination: &Path,
 ) -> io::Result<Box<dyn FsStagedOutput>> {
-    if !destination.is_absolute() {
+    if !crate::is_absolute_provider_path(destination) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "staged replacement requires an absolute destination",

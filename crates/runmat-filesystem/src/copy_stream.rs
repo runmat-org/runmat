@@ -28,7 +28,7 @@ pub async fn copy_file_on_async<C: FsCopyCheckpoint>(
     to: &Path,
     checkpoint: &mut C,
 ) -> Result<u64, FsCopyError<C::Error>> {
-    if !from.is_absolute() || !to.is_absolute() {
+    if !crate::is_absolute_provider_path(from) || !crate::is_absolute_provider_path(to) {
         return Err(FsCopyError::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "copy_file_on_async requires captured absolute paths",

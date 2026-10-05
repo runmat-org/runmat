@@ -146,7 +146,7 @@ pub async fn capture_mapped_backing(
     path: impl AsRef<Path>,
     writable: bool,
 ) -> io::Result<Option<CapturedMappedBacking>> {
-    let (provider, path) = if path.as_ref().is_absolute() {
+    let (provider, path) = if crate::is_absolute_provider_path(path.as_ref()) {
         (current_provider(), path.as_ref().to_path_buf())
     } else {
         let (provider, cwd) = current_provider_with_current_dir()?;
@@ -162,7 +162,7 @@ pub async fn capture_mapped_backing_on(
     path: PathBuf,
     writable: bool,
 ) -> io::Result<Option<CapturedMappedBacking>> {
-    if !path.is_absolute() {
+    if !crate::is_absolute_provider_path(&path) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "mapped backing requires a captured absolute path",
