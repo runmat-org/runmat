@@ -14,6 +14,7 @@ mod import;
 mod inference;
 mod json;
 mod mat;
+mod net;
 mod repl_fs;
 mod structured_data;
 mod tabular;
@@ -32,6 +33,7 @@ pub use self::import::*;
 pub(in crate::catalog) use self::inference::infer;
 pub use self::json::*;
 pub use self::mat::*;
+pub use self::net::*;
 pub use self::repl_fs::*;
 pub use self::structured_data::*;
 pub use self::tabular::*;
@@ -51,4 +53,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(structured_data::ENTRIES.iter().copied());
     values.extend(import::ENTRIES.iter().copied());
     values.extend(tabular::ENTRIES.iter().copied());
+    values.extend(net::ENTRIES.iter().copied());
 }

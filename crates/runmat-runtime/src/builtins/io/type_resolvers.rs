@@ -20,7 +20,6 @@ pub fn close_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-
 pub fn data_unknown_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
