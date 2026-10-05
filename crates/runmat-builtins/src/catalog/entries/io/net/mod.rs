@@ -43,11 +43,11 @@ pub use tcpserver::{
 };
 pub use write::*;
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &ACCEPT_CATALOG_ENTRY,
-    &READ_CATALOG_ENTRY,
-    &READLINE_CATALOG_ENTRY,
-    &TCPCLIENT_CATALOG_ENTRY,
-    &TCPSERVER_CATALOG_ENTRY,
-    &WRITE_CATALOG_ENTRY,
-];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(accept::ENTRIES.iter().copied());
+    values.extend(read::ENTRIES.iter().copied());
+    values.extend(readline::ENTRIES.iter().copied());
+    values.extend(tcpclient::ENTRIES.iter().copied());
+    values.extend(tcpserver::ENTRIES.iter().copied());
+    values.extend(write::ENTRIES.iter().copied());
+}

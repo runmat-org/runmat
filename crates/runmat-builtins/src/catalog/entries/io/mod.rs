@@ -52,6 +52,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(mat::ENTRIES.iter().copied());
     values.extend(structured_data::ENTRIES.iter().copied());
     values.extend(import::ENTRIES.iter().copied());
-    values.extend(tabular::ENTRIES.iter().copied());
-    values.extend(net::ENTRIES.iter().copied());
+    tabular::extend_entries(values);
+    net::extend_entries(values);
 }

@@ -2,6 +2,7 @@ mod contract;
 mod documentation;
 mod entry;
 mod inference;
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&DLMWRITE_CATALOG_ENTRY];
 #[cfg(test)]
 mod tests;
 

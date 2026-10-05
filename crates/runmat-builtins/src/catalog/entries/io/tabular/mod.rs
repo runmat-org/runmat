@@ -20,14 +20,14 @@ pub use writematrix::*;
 pub use xlsread::*;
 pub use xlswrite::*;
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &CSVREAD_CATALOG_ENTRY,
-    &CSVWRITE_CATALOG_ENTRY,
-    &DLMREAD_CATALOG_ENTRY,
-    &DLMWRITE_CATALOG_ENTRY,
-    &READMATRIX_CATALOG_ENTRY,
-    &WRITEMATRIX_CATALOG_ENTRY,
-    &WRITECELL_CATALOG_ENTRY,
-    &XLSWRITE_CATALOG_ENTRY,
-    &XLSREAD_CATALOG_ENTRY,
-];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(csvread::ENTRIES.iter().copied());
+    values.extend(csvwrite::ENTRIES.iter().copied());
+    values.extend(dlmread::ENTRIES.iter().copied());
+    values.extend(dlmwrite::ENTRIES.iter().copied());
+    values.extend(readmatrix::ENTRIES.iter().copied());
+    values.extend(writematrix::ENTRIES.iter().copied());
+    values.extend(writecell::ENTRIES.iter().copied());
+    values.extend(xlswrite::ENTRIES.iter().copied());
+    values.extend(xlsread::ENTRIES.iter().copied());
+}

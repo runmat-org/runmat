@@ -11,7 +11,7 @@ fn registry_preserves_reviewed_family_order_and_entry_identity() {
         super::super::file_transfer::ENTRIES,
         super::super::genpath::ENTRIES,
         super::super::installation_path::ENTRIES,
-        &[&super::super::memmapfile::MEMMAPFILE_CATALOG_ENTRY],
+        super::super::memmapfile::ENTRIES,
         super::super::open::ENTRIES,
         super::super::opentoline::ENTRIES,
         super::super::path::ENTRIES,
