@@ -10,23 +10,12 @@ use super::host_effect::{
 use runmat_execution::{Digest, PlacementInvalidation, PlacementPermitIdentity};
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 struct Slot {
     generation: u64,
     identity: Option<PlacementPermitIdentity>,
     candidate: Option<Digest>,
     current: bool,
-}
-
-impl Default for Slot {
-    fn default() -> Self {
-        Self {
-            generation: 0,
-            identity: None,
-            candidate: None,
-            current: false,
-        }
-    }
 }
 
 struct PoolState {
