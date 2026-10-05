@@ -34,6 +34,19 @@ fn execution_snapshot_clone_is_shared_until_publication_mutates() {
 }
 
 #[test]
+fn function_execution_uses_shared_registry_without_cloning_legacy_body_map() {
+    let registry = registry();
+    let function = registry.get(FunctionId(1)).unwrap();
+    let bytecode = function.execution_bytecode(&registry);
+    assert!(bytecode.bound_functions.is_empty());
+    assert!(std::sync::Arc::ptr_eq(
+        &registry.data,
+        &bytecode.function_registry.data
+    ));
+    assert!(bytecode.function_registry.get(FunctionId(2)).is_some());
+}
+
+#[test]
 fn source_retirement_removes_all_target_aliases_and_preserves_rebound_names() {
     let mut registry = registry();
     registry.names.insert("first_alias".into(), FunctionId(1));

@@ -1199,7 +1199,7 @@ impl RunMatSession {
             session_registry.remove_source(source_id);
         }
 
-        for (old_id, function) in current_registry.functions {
+        for (old_id, function) in current_registry.into_functions() {
             let Some(new_id) = remap.get(&old_id).copied() else {
                 continue;
             };

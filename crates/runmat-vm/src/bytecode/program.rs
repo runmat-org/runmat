@@ -178,7 +178,9 @@ impl FunctionBytecode {
         bytecode.spmd_regions = self.spmd_regions.clone();
         bytecode.distributed_values = self.distributed_values.clone();
         bytecode.collective_contracts = self.collective_contracts.clone();
-        bytecode.bound_functions = registry.functions.clone();
+        // The authoritative registry below is already a shared immutable
+        // execution snapshot. Duplicating every body into the legacy fallback
+        // map on each call makes invocation scale with the whole program.
         bytecode.function_registry = registry.clone();
         bytecode
     }
@@ -296,6 +298,15 @@ impl<'de> Deserialize<'de> for FunctionRegistry {
 }
 
 impl FunctionRegistry {
+    /// Consume the authoring registry at publication boundaries. Executing
+    /// snapshots retain their own immutable Arc; only shared publication
+    /// inputs require a copy of the map here.
+    pub fn into_functions(self) -> HashMap<FunctionId, FunctionBytecode> {
+        std::sync::Arc::try_unwrap(self.data)
+            .unwrap_or_else(|data| (*data).clone())
+            .functions
+    }
+
     pub fn new(functions: HashMap<FunctionId, FunctionBytecode>) -> Self {
         let mut names = HashMap::new();
         let mut source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>> = HashMap::new();
