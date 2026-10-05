@@ -119,10 +119,14 @@ impl PlacementSession {
         else {
             unreachable!("a managed one-route policy has no graph or dynamic probe")
         };
-        let identity = request
-            .signature
-            .permit_identity()
-            .map_err(invalid_request)?;
+        let identity =
+            request
+                .signature
+                .permit_identity()
+                .map_err(|source| PlacementPlanError {
+                    code: "RunMat:Placement:InvalidRequest",
+                    message: source.to_string(),
+                })?;
         let seed = self
             .state
             .borrow()
