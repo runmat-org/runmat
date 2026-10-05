@@ -44,6 +44,10 @@ fn callable_form_and_role_are_required_revision_fields() {
     assert_eq!(decoded.source_file, None);
     assert!(decoded.validate_identity().is_err());
 
+    let mut invalid_file_type = serde_json::to_value(&value).unwrap();
+    invalid_file_type["source_file"] = serde_json::json!(7);
+    assert!(serde_json::from_value::<CallableValue>(invalid_file_type).is_err());
+
     let mut wrong_form = value.clone();
     wrong_form.form = CallableForm::Handle;
     assert!(wrong_form.validate_identity().is_err());

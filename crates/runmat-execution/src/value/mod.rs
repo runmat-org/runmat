@@ -242,7 +242,6 @@ pub struct ExceptionValue {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(from = "CallableValueWire")]
 pub struct CallableValue {
     pub owner_identity: String,
     pub qualified_name: String,
@@ -252,72 +251,17 @@ pub struct CallableValue {
     pub form: CallableForm,
     pub source_role: runmat_types::FunctionSourceRole,
     /// Original registered display path, if the callable was created from a file-backed source.
+    #[serde(deserialize_with = "deserialize_required_source_file")]
     pub source_file: Option<String>,
     pub captures: Vec<ValuePayload>,
 }
 
-// An Option field in a Serde-derived struct otherwise accepts an absent key.
-// The wire newtype requires source_file to be present, including explicit null.
-#[derive(Deserialize)]
-struct CallableValueWire {
-    owner_identity: String,
-    qualified_name: String,
-    callable_digest: Digest,
-    form: CallableForm,
-    source_role: runmat_types::FunctionSourceRole,
-    source_file: RequiredNullableString,
-    captures: Vec<ValuePayload>,
-}
-
-struct RequiredNullableString(Option<String>);
-
-impl<'de> Deserialize<'de> for RequiredNullableString {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct PresentNullableString;
-
-        impl<'de> serde::de::Visitor<'de> for PresentNullableString {
-            type Value = RequiredNullableString;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a present string or null")
-            }
-
-            fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(RequiredNullableString(None))
-            }
-
-            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-                Ok(RequiredNullableString(None))
-            }
-
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(RequiredNullableString(Some(value.to_owned())))
-            }
-
-            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
-                Ok(RequiredNullableString(Some(value)))
-            }
-        }
-
-        // MissingFieldDeserializer only synthesizes an absent Option via
-        // deserialize_option. A required wire field uses deserialize_any so
-        // omission is an error while explicit null remains a valid value.
-        deserializer.deserialize_any(PresentNullableString)
-    }
-}
-
-impl From<CallableValueWire> for CallableValue {
-    fn from(value: CallableValueWire) -> Self {
-        Self {
-            owner_identity: value.owner_identity,
-            qualified_name: value.qualified_name,
-            callable_digest: value.callable_digest,
-            form: value.form,
-            source_role: value.source_role,
-            source_file: value.source_file.0,
-            captures: value.captures,
-        }
-    }
+// Custom field deserialization makes a missing Option field an error while
+// retaining explicit null for callables without file-backed provenance.
+fn deserialize_required_source_file<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
