@@ -9,6 +9,9 @@ use super::{
     constructor_builtin::*, dateshift_builtin::*, legacy_builtins::*, operators::*,
 };
 
+#[path = "tests/cooperation.rs"]
+mod cooperation;
+
 async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::operators::datetime_subsref(obj, subscript).await
@@ -22,6 +25,10 @@ async fn datetime_subsasgn(
 ) -> crate::BuiltinResult<Value> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
     super::operators::datetime_subsasgn(obj, subscript, rhs).await
+}
+
+async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    super::constructor_builtin::datetime_builtin(None, args).await
 }
 
 fn run_datetime(args: Vec<Value>) -> Value {

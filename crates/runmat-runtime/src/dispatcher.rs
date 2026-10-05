@@ -8,6 +8,10 @@ use runmat_value::Value;
 use std::cell::RefCell;
 
 mod provenance;
+#[path = "dispatcher/owned_gather.rs"]
+mod owned_gather;
+
+pub use owned_gather::gather_if_needed_owned_async;
 
 #[cfg(test)]
 mod provenance_tests;

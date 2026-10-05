@@ -8,9 +8,13 @@ use super::*;
 #[runmat_macros::runtime_builtin(
     name = "datetime",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn datetime_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     ensure_datetime_class_registered();
     let (positional_end, options) = parse_trailing_options(&args)?;
     let positional_inputs = &args[..positional_end];
@@ -72,7 +76,23 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let positional = gather_args(positional_inputs).await?;
+    let mut budget = runtime
+        .as_ref()
+        .map(crate::context::RuntimeContext::cpu_cooperation);
+    if let Some(budget) = budget.as_mut() {
+        budget
+            .checkpoint(0)
+            .await
+            .map_err(|source| datetime_execution_error(runtime.as_ref(), source))?;
+    }
+    let mut positional = Vec::with_capacity(positional_end);
+    for value in args.into_iter().take(positional_end) {
+        positional.push(
+            crate::dispatcher::gather_if_needed_owned_async(value, budget.as_mut())
+                .await
+                .map_err(|err| datetime_gather_error(runtime.as_ref(), err))?,
+        );
+    }
 
     if options.convert_from.is_some() {
         return numeric_value_to_datetime(positional[0].clone(), options.format);
@@ -97,9 +117,29 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
                     .unwrap_or_else(|| datetime_format_from_value(&positional[0]));
                 datetime_object_from_serial_tensor(serials, format)
             }
-            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
+            Value::Cell(_) => {
+                let (serials, shape, inferred_format) = parse_cell_text_input(
+                    &positional[0],
+                    options.input_format.as_deref(),
+                    budget.as_mut(),
+                    runtime.as_ref(),
+                )
+                .await?;
+                if let Some(budget) = budget.as_mut() {
+                    budget
+                        .checkpoint(0)
+                        .await
+                        .map_err(|source| datetime_execution_error(runtime.as_ref(), source))?;
+                }
+                datetime_object_from_serials(
+                    serials,
+                    shape,
+                    options.format.unwrap_or(inferred_format),
+                )
+            }
+            Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
                 let (serials, shape, inferred_format) =
-                    parse_text_input(positional[0].clone(), options.input_format.as_deref())?;
+                    parse_text_input(&positional[0], options.input_format.as_deref())?;
                 datetime_object_from_serials(
                     serials,
                     shape,

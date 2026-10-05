@@ -27,6 +27,63 @@ pub(super) fn datetime_argument_error(message: impl Into<String>) -> RuntimeErro
         .build()
 }
 
+pub(super) fn datetime_execution_error(
+    runtime: Option<&crate::context::RuntimeContext>,
+    source: crate::execution::ExecutionServiceError,
+) -> RuntimeError {
+    let mut error = if source == crate::execution::ExecutionServiceError::Cancelled {
+        build_runtime_error("datetime: execution was cancelled")
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(format!(
+                "{}:Cancelled",
+                runtime.map_or(
+                    "RunMat".to_string(),
+                    crate::context::RuntimeContext::error_namespace
+                )
+            ))
+            .build()
+    } else {
+        source.clone().into_runtime_error()
+    };
+    error.source = Some(Box::new(source));
+    error
+}
+
+pub(super) fn datetime_gather_error(
+    runtime: Option<&crate::context::RuntimeContext>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut cause: &(dyn std::error::Error + 'static) = &source;
+    let cancelled = loop {
+        if matches!(
+            cause.downcast_ref::<crate::execution::ExecutionServiceError>(),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ) {
+            break true;
+        }
+        let Some(next) = cause.source() else {
+            break false;
+        };
+        cause = next;
+    };
+    let mut error = if cancelled {
+        build_runtime_error("datetime: execution was cancelled")
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(format!(
+                "{}:Cancelled",
+                runtime.map_or(
+                    "RunMat".to_string(),
+                    crate::context::RuntimeContext::error_namespace
+                )
+            ))
+            .build()
+    } else {
+        datetime_error(format!("datetime: {}", source.message()))
+    };
+    error.source = Some(Box::new(source));
+    error
+}
+
 pub(super) fn ensure_datetime_class_registered() {
     DATETIME_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();

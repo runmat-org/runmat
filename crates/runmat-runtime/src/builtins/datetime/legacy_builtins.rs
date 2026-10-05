@@ -65,7 +65,7 @@ pub(super) async fn datenum_builtin(args: Vec<Value>) -> crate::BuiltinResult<Va
         1 => match &args[0] {
             Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj)?,
             Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-                let (serials, shape, _) = parse_text_input(args[0].clone(), None)?;
+                let (serials, shape, _) = parse_text_input(&args[0], None)?;
                 Tensor::new(serials, shape)
                     .map_err(|err| datetime_error(format!("datenum: {err}")))?
             }

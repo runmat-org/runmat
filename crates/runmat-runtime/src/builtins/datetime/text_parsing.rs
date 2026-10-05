@@ -94,7 +94,7 @@ pub(super) fn parse_datetime_text_with_input_format(
 }
 
 pub(super) fn parse_text_input(
-    value: Value,
+    value: &Value,
     input_format: Option<&str>,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>, String)> {
     match value {
@@ -163,42 +163,66 @@ pub(super) fn parse_text_input(
                 );
             }
             parse_text_input(
-                Value::StringArray(
+                &Value::StringArray(
                     StringArray::new(texts, vec![array.rows, 1])
                         .map_err(|err| datetime_error(format!("datetime: {err}")))?,
                 ),
                 input_format,
             )
         }
-        Value::Cell(cells) => {
-            validate_cell_text_elements(&cells)?;
-            let mut serials = Vec::with_capacity(cells.data.len());
-            let mut has_time = false;
-            for element in &cells.data {
-                let text = crate::builtins::common::validation::value_text_scalar_string(element)
-                    .expect("validated character vector cell");
-                let parsed = relative_datetime(text.trim())
-                    .map(|value| (value, text.trim().eq_ignore_ascii_case("now")))
-                    .or_else(|| parse_datetime_text_with_input_format(&text, input_format));
-                let (naive, parsed_has_time) = parsed.ok_or_else(|| {
-                    datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
-                })?;
-                serials.push(datenum_from_naive(naive));
-                has_time |= parsed_has_time;
-            }
-            // A cell array carries its own exact geometry, including 0×N and
-            // empty N-D shapes; the generic empty-tensor default would erase it.
-            let shape = cells.shape.clone();
-            Ok((
-                serials,
-                shape,
-                if has_time { DEFAULT_DATETIME_FORMAT } else { DEFAULT_DATE_FORMAT }.to_string(),
-            ))
-        }
         _ => Err(datetime_error(
             "datetime: text input must be a string scalar, string array, character array, or cell array of character vectors",
         )),
     }
+}
+
+pub(super) async fn parse_cell_text_input(
+    value: &Value,
+    input_format: Option<&str>,
+    budget: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(Vec<f64>, Vec<usize>, String)> {
+    let Value::Cell(cells) = value else {
+        return Err(datetime_argument_error(
+            "datetime: expected cell array of character vectors",
+        ));
+    };
+    let mut budget = budget;
+    let mut serials = Vec::with_capacity(cells.data.len());
+    let mut has_time = false;
+    for (index, element) in cells.data.iter().enumerate() {
+        if let Some(budget) = budget.as_deref_mut() {
+            budget
+                .checkpoint(1)
+                .await
+                .map_err(|source| datetime_execution_error(runtime, source))?;
+        }
+        let text = crate::builtins::common::validation::value_text_scalar_string(element)
+            .ok_or_else(|| {
+                datetime_argument_error(format!(
+                    "datetime: cell element {} must be a character vector",
+                    index + 1
+                ))
+            })?;
+        let parsed = relative_datetime(text.trim())
+            .map(|value| (value, text.trim().eq_ignore_ascii_case("now")))
+            .or_else(|| parse_datetime_text_with_input_format(&text, input_format));
+        let (naive, parsed_has_time) = parsed.ok_or_else(|| {
+            datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
+        })?;
+        serials.push(datenum_from_naive(naive));
+        has_time |= parsed_has_time;
+    }
+    Ok((
+        serials,
+        cells.shape.clone(),
+        if has_time {
+            DEFAULT_DATETIME_FORMAT
+        } else {
+            DEFAULT_DATE_FORMAT
+        }
+        .to_string(),
+    ))
 }
 
 pub(super) fn relative_datetime(text: &str) -> Option<NaiveDateTime> {

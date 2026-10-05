@@ -202,7 +202,7 @@ pub(super) fn numeric_or_datetime_serial_tensor(
     match &value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            let (serials, shape, _) = parse_text_input(value, None)?;
+            let (serials, shape, _) = parse_text_input(&value, None)?;
             Tensor::new(serials, shape).map_err(|err| datetime_error(format!("{context}: {err}")))
         }
         _ => serial_tensor_from_value(value, context),
