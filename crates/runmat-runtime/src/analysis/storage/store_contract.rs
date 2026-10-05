@@ -1,5 +1,13 @@
 use super::*;
 pub trait AnalysisArtifactStore: Send + Sync {
+    /// Export one authenticated original field under the caller's cumulative read ceiling.
+    fn export_initial_field(
+        &self,
+        run_id: &str,
+        field_id: &str,
+        maximum_bytes: u64,
+    ) -> Result<Option<runmat_analysis_fea::execution::InitialFieldBinding>, AnalysisPublicationError>;
+
     /// Publish one privately prepared closed inventory; no child is made visible first.
     fn commit_publication(
         &self,

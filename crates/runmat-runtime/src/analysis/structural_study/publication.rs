@@ -89,6 +89,7 @@ mod state_publication;
 use state_publication::{validate_and_persist_states, validate_entry_scoped_acoustic_states};
 mod deferred;
 pub(in crate::analysis) use deferred::DeferredStudyRun;
+pub(in crate::analysis) mod original_fields;
 mod preparation;
 mod run_persistence;
 pub(in crate::analysis) use preparation::complete_study_run;
@@ -102,7 +103,9 @@ pub(in crate::analysis) fn complete_study_run_prepared(
     preparation: crate::analysis::study_publication::preparation::PublicationPreparation,
 ) -> Result<DeferredStudyRun, OperationErrorEnvelope> {
     let mut thermal_observations = None;
+    let mut thermal_original_fields = None;
     if let Some(prefix) = prepared.thermal_prefix.take() {
+        thermal_original_fields = Some(original_fields::thermal(&prefix, &prepared.context)?);
         if prefix.thermal.observations.is_some() {
             let CompletedStudyStepRun::Standard(run) = &prefix.completed.run else {
                 return Err(completion_error(
@@ -170,6 +173,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
     let mut acoustic_frequency_runs_to_persist = Vec::new();
     let mut entry_scoped_state_steps = BTreeSet::new();
     let mut solver_results = BTreeMap::new();
+    let mut original_sources = BTreeMap::new();
     for (ordinal, authored) in authored_steps.into_iter().enumerate() {
         let completed = completed_by_id
             .remove(&authored.procedure_step.step_id)
@@ -180,7 +184,18 @@ pub(in crate::analysis) fn complete_study_run_prepared(
                     "completed solver results are missing an authored procedure step",
                 )
             })?;
-        let run = completed_run_facts(completed.run);
+        let (completed_run, source) = original_fields::take(completed.run);
+        let run = completed_run_facts(completed_run);
+        if let Some(source) = source {
+            original_fields::validate_source(
+                &context,
+                sequence_identity,
+                &authored.procedure_step,
+                completed.solver_result_identity,
+                &source,
+            )?;
+            original_sources.insert(run.run_id.clone(), source);
+        }
         if let crate::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(result) =
             &run.numerical_result
         {
@@ -303,6 +318,13 @@ pub(in crate::analysis) fn complete_study_run_prepared(
     )?;
     for run in &runs_to_persist {
         run_persistence::stage(&context, &staging, run)?;
+        original_fields::stage(
+            &context,
+            &staging,
+            &run.run_id,
+            &thermal_original_fields,
+            &original_sources,
+        )?;
     }
     if let Some((run_id, completed, source)) = thermal_observations {
         staging

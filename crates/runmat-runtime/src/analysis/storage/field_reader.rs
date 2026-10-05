@@ -85,7 +85,7 @@ fn hydrate_field_values(
     Ok(())
 }
 
-fn read_field_payload(
+pub(in crate::analysis::storage) fn read_field_payload(
     field: &PersistedFieldArtifact,
     read_chunk: &mut impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<Vec<u8>, String> {

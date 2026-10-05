@@ -263,10 +263,7 @@ impl RecoveredFieldDefinition {
         }
     }
 
-    pub(crate) fn storage_shape(
-        &self,
-        entity_count: usize,
-    ) -> Result<Vec<usize>, RecoveredFieldError> {
+    pub fn storage_shape(&self, entity_count: usize) -> Result<Vec<usize>, RecoveredFieldError> {
         let logical = self.logical_component_count()?;
         Ok(match (self.numeric_representation, logical) {
             (RecoveredFieldNumericRepresentation::Real, 1) => vec![entity_count],
@@ -392,6 +389,8 @@ pub struct RecoveredFieldArtifact {
 }
 
 mod entry;
+mod manifest_builder;
+use manifest_builder::derive_artifact_identity;
 mod profile;
 pub use entry::RecoveredFieldArtifactEntry;
 
@@ -767,27 +766,6 @@ impl RecoveredFieldArtifact {
                 .collect::<Result<Vec<_>, RecoveredFieldError>>()?,
         })
     }
-}
-
-fn derive_artifact_identity(
-    manifest: &RecoveredFieldArtifactManifest,
-) -> Result<RecoveredFieldArtifactIdentity, RecoveredFieldError> {
-    encode_contract(
-        FIELD_PREFIX,
-        "recovered-field-artifact-identity",
-        &(
-            manifest.schema_version,
-            manifest.recovery_request,
-            manifest.source,
-            manifest.topology_digest,
-            manifest.entity_counts,
-            &manifest.fields,
-        ),
-        FIELD_LIMITS,
-    )
-    .map(Digest::sha256)
-    .map(RecoveredFieldArtifactIdentity)
-    .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }
 
 fn sample_identity(

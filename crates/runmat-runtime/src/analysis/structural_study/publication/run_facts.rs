@@ -3,7 +3,8 @@ use super::*;
 
 pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
     match run {
-        CompletedStudyStepRun::Standard(run) => {
+        CompletedStudyStepRun::Standard(run)
+        | CompletedStudyStepRun::OriginalFields { run, .. } => {
             let run = *run;
             let data = run.data;
             CompletedRunFacts {

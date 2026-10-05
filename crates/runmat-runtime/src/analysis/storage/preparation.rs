@@ -180,6 +180,7 @@ pub(super) fn prepare_run_artifact(
         &materialized_field_ids,
         render_tiles.as_ref(),
         &observation_histories,
+        None,
     )?;
     let metadata = compact_run_metadata(&run_value)?;
     Ok(PreparedRunArtifact {
@@ -195,6 +196,7 @@ pub(super) fn prepare_run_artifact(
             fields: fields.into_values().collect(),
             render_tiles,
             observation_histories,
+            original_fields: None,
         },
         chunks,
     })

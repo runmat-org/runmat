@@ -302,6 +302,7 @@ pub(in crate::analysis) fn complete_modal_transient_study(
             error.to_string(),
         )
     })?;
+    let source_producer = numerical.transient_result.manifest().scope.step;
     let transient_result_identity = numerical.transient_result.manifest().identity;
     let recovered_transient =
         runmat_analysis_fea::pipeline::transient::recover_completed_transient_run(
@@ -317,6 +318,21 @@ pub(in crate::analysis) fn complete_modal_transient_study(
             modal_completion_error(
                 &prepared,
                 "RM.FEA.RUN_STUDY.TRANSIENT_RESULT_ADMISSION_FAILED",
+                error.to_string(),
+            )
+        })?;
+    let original_fields =
+        runmat_analysis_fea::pipeline::transient::original_transient_field_source(
+            &prepared.model,
+            &solver_mesh,
+            source_producer,
+            transient_result_identity,
+            &recovered_transient,
+        )
+        .map_err(|error| {
+            modal_completion_error(
+                &prepared,
+                "RM.FEA.RUN_STUDY.ORIGINAL_FIELDS_INVALID",
                 error.to_string(),
             )
         })?;
@@ -396,7 +412,10 @@ pub(in crate::analysis) fn complete_modal_transient_study(
             CompletedStudyStep {
                 step_id: numerical.transient_step_id,
                 solver_result_identity: transient_result_identity,
-                run: CompletedStudyStepRun::Standard(Box::new(transient_run)),
+                run: CompletedStudyStepRun::OriginalFields {
+                    run: Box::new(transient_run),
+                    source: Box::new(original_fields),
+                },
                 resolved_solver_options: AnalysisSolverOptions::StructuralTransient(
                     transient_options,
                 ),

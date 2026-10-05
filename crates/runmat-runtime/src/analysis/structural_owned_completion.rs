@@ -349,11 +349,19 @@ pub fn analysis_complete_structural_study_op(
         step.numerical_receipt
             .validate_against(step.solver_result_identity, &step.result)
             .map_err(|error| study_sequence_contract_error(&prepared.study.context, error))?;
+        let original_fields =
+            runmat_analysis_fea::pipeline::linear_static::original_static_displacement_source(
+                &linear.workload,
+                linear.solver_mesh.as_ref(),
+                step.solver_result_identity,
+                &step.result.run,
+            )
+            .map_err(|error| study_sequence_contract_error(&prepared.study.context, error))?;
         let run = analysis_admit_linear_static_run_with_id(linear, step.result.run, None)?;
         completed.push(CompletedStudyStep {
             step_id: step.step_id,
             solver_result_identity: step.solver_result_identity,
-            run: CompletedStudyStepRun::Standard(Box::new(run)),
+            run: structural_study::publication::original_fields::standard(run, original_fields),
             resolved_solver_options,
         });
     }

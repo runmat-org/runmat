@@ -23,6 +23,16 @@ impl InMemoryAnalysisArtifactStore {
 }
 
 impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
+    fn export_initial_field(
+        &self,
+        run_id: &str,
+        field_id: &str,
+        maximum: u64,
+    ) -> Result<Option<runmat_analysis_fea::execution::InitialFieldBinding>, AnalysisPublicationError>
+    {
+        self.export_original_field(run_id, field_id, maximum)
+    }
+
     fn commit_publication(
         &self,
         publication: PreparedAnalysisPublication,

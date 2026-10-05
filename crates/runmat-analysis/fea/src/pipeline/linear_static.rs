@@ -1,3 +1,5 @@
+mod original_fields;
+pub use original_fields::original_static_displacement_source;
 use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, StructuralConstraintKind,
 };

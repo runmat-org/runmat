@@ -1,5 +1,5 @@
 use super::{
-    compile_analysis_study, plan_thermal_study, AnalysisStudyCompilationError,
+    compile_analysis_study, plan_thermal_study_with_fields, AnalysisStudyCompilationError,
     AnalysisStudyCompilationInput, CompiledAnalysisStudy, ThermalStudyPlanningError,
     ThermalStudyPlanningPolicy,
 };
@@ -46,8 +46,18 @@ pub fn plan_thermal_study_product(
     mesh: &SolverMeshArtifact,
     planning: ThermalStudyPlanningPolicy,
 ) -> Result<ThermalStudyProduct, ThermalStudyProductError> {
+    plan_thermal_study_product_with_fields(compiled, mesh, planning, Vec::new())
+}
+
+/// Exact product with closed original fields; storage lookup stays at the host boundary.
+pub fn plan_thermal_study_product_with_fields(
+    compiled: CompiledAnalysisStudy,
+    mesh: &SolverMeshArtifact,
+    planning: ThermalStudyPlanningPolicy,
+    initial_fields: Vec<crate::execution::InitialFieldBinding>,
+) -> Result<ThermalStudyProduct, ThermalStudyProductError> {
     compiled.validate_against(mesh)?;
-    let workload = plan_thermal_study(&compiled, planning)?;
+    let workload = plan_thermal_study_with_fields(&compiled, planning, initial_fields)?;
     crate::planning::resource::ThermalObservationResourceFacts::derive(
         mesh,
         &compiled.model.sequence.steps[0],

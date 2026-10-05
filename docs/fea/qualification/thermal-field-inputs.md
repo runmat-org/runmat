@@ -106,6 +106,15 @@ coercivity proof-work ceilings before their numerical solves; they remain requir
 
 ## Remaining gates
 
+The current authored-field draft adds explicit with-fields study/product planning
+and bounded native standalone source lookup through shared analysis storage. Thermal
+portable admission now uses the shared declaration validator: missing, duplicate or
+extra bindings reject before numerical execution. The existing solved nonuniform
+Tet4/Tet10 witness also checks authored product planning, retaining its original
+temperature, gradient, flux and power references. The isolated thermal regression
+set passes208/208. These checks do not establish a native authored producer-process
+termination/restart envelope or measured memory qualification.
+
 Mesh-aware source and boundary artifacts,
 generated/artifact source-energy equivalence, generic authored family dispatch,
 solver-specific process restart, measured residency, complete accuracy admission,

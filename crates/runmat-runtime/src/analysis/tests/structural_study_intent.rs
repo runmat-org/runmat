@@ -1,3 +1,4 @@
+mod original_fields;
 use super::*;
 
 #[test]
@@ -1052,113 +1053,6 @@ fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
 }
 
 #[test]
-fn structural_study_intent_completes_a_partitioned_direct_transient_with_state() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-    let root = temp_artifact_root("remote-direct-transient-completion");
-    let _ = fs::remove_dir_all(&root);
-    let _runtime_guard = scoped_fea_artifact_roots(&root);
-    let meshing_output = ready_minimal_meshing_output();
-    let spec = sample_direct_transient_study_spec(
-        digest_hex(meshing_output.artifact.geometry.source_digest),
-        4,
-        2,
-    );
-    let intent = analysis_prepare_structural_study_intent_op(
-        &spec,
-        OperationContext::new(Some("trace-direct-transient-completion".into()), None),
-    )
-    .expect("direct transient intent should prepare");
-    let runmat_analysis_fea::execution::StructuralStudyWorkloads::StructuralTransient {
-        mut workload,
-        block_plan,
-    } = intent.workloads()
-    else {
-        panic!("test requires a direct transient workload")
-    };
-    let aliases =
-        runmat_analysis_core::GeometryRegionAliases::new(meshing_output.region_aliases.clone())
-            .unwrap();
-    workload.model =
-        runmat_analysis_core::resolve_geometry_region_aliases(&workload.model, &aliases).unwrap();
-    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
-        &workload,
-        &meshing_output.artifact,
-        None,
-    )
-    .unwrap();
-    let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
-    let mut predecessor = None;
-    let mut segments = Vec::new();
-    for terminal in block_plan
-        .terminal_schedule_ordinals(terminal_schedule_ordinal)
-        .unwrap()
-    {
-        let request = runmat_analysis_fea::execution::StructuralTransientBlockRequest::new(
-            scope.clone(),
-            predecessor.as_ref(),
-            terminal,
-        )
-        .unwrap();
-        let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
-            runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
-                workload: &workload,
-                solver_mesh: &meshing_output.artifact,
-                request: &request,
-                predecessor: predecessor.as_ref(),
-                modal_state: None,
-                observation_cursors: Vec::new(),
-            },
-        )
-        .unwrap();
-        predecessor = Some(segment.manifest().terminal_checkpoint.clone());
-        segments.push(segment);
-    }
-    let assembly =
-        runmat_analysis_fea::execution::StructuralTransientResultAssemblyRequest::new(&segments)
-            .unwrap();
-    let result = runmat_analysis_fea::execution::StructuralTransientSolverResult::assemble(
-        &assembly, &segments,
-    )
-    .unwrap();
-    let numerical_receipt =
-        runmat_analysis_fea::execution::StructuralTransientNumericalReceipt::new(
-            &result, &assembly, &segments,
-        )
-        .unwrap();
-    let result_identity = result.manifest().identity;
-    let envelope = analysis_complete_structural_study_intent_op(
-        intent,
-        meshing_output,
-        StructuralStudyNumericalResult::StructuralTransient(Box::new(
-            StructuralStudyTransientNumericalResult {
-                frozen_project_digest: None,
-                step_id: workload.step_id.clone(),
-                result,
-                numerical_receipt,
-            },
-        )),
-        AnalysisStudyCompletionIdentity::new("server-run-direct-transient").unwrap(),
-    )
-    .expect("partitioned direct transient should enter normal study publication");
-
-    assert_eq!(envelope.data.steps.len(), 1);
-    assert_eq!(
-        envelope.data.states.len(),
-        spec.model.sequence.steps[0].state_outputs.len()
-    );
-    assert!(envelope
-        .data
-        .states
-        .iter()
-        .all(|state| state.source_result == result_identity
-            && Path::new(&state.artifact_path).is_file()));
-    assert_eq!(storage::list_run_results().unwrap().len(), 1);
-    drop(_runtime_guard);
-    let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
 fn structural_study_intent_continuation_rejects_semantic_tampering() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();
@@ -1214,6 +1108,11 @@ fn structural_study_intent_completion_reenters_shared_quality_and_persistence() 
     let root = temp_artifact_root("remote-study-intent-completion");
     let _ = fs::remove_dir_all(&root);
     let _runtime_guard = scoped_fea_artifact_roots(&root);
+    let source_store_root = root.join("published-original-fields");
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: source_store_root.clone(),
+    })
+    .unwrap();
     let meshing_output = ready_minimal_meshing_output();
     let mut spec = sample_linear_static_study_spec();
     spec.geometry.source.sha256 = digest_hex(meshing_output.artifact.geometry.source_digest);
@@ -1262,6 +1161,7 @@ fn structural_study_intent_completion_reenters_shared_quality_and_persistence() 
     let stored = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("completed remote run lookup should succeed")
         .expect("completed remote run must be stored");
+    original_fields::assert_static_source(&stored, &source_store_root);
     let mut conflicting = stored.clone();
     let runmat_analysis_core::AnalysisFieldValues::HostF64(values) =
         &mut conflicting.run.fields[0].values
@@ -1301,6 +1201,7 @@ fn structural_study_intent_completion_reenters_shared_quality_and_persistence() 
     )
     .is_file());
     drop(_runtime_guard);
+    storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
 }
 

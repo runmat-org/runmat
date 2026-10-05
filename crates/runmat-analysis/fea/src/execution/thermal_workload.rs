@@ -66,9 +66,7 @@ impl ThermalWorkload {
             step.accuracy.resources.maximum_resident_bytes,
         )
         .map_err(|error| invalid(error.to_string()))?;
-        for field in &self.initial_fields {
-            field.validate()?;
-        }
+        super::validate_initial_field_declarations(&self.model, step, &self.initial_fields)?;
         Ok(step)
     }
 

@@ -48,6 +48,10 @@ pub(in crate::analysis) struct ThermalPrefixCompletion {
 
 pub(in crate::analysis) enum CompletedStudyStepRun {
     Standard(Box<OperationEnvelope<AnalysisRunResult>>),
+    OriginalFields {
+        run: Box<OperationEnvelope<AnalysisRunResult>>,
+        source: Box<runmat_analysis_fea::results::field::OriginalFieldSourcePlan>,
+    },
     AcousticFrequency(Box<crate::analysis::study_publication::CompletedAcousticFrequencyStep>),
     StructuralFrequency(Box<CompletedStructuralFrequencyStep>),
     StructuralResponseSpectrum(Box<CompletedStructuralResponseSpectrumStep>),

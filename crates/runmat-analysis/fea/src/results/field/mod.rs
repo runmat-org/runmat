@@ -7,6 +7,8 @@ mod finite_volume;
 mod partition;
 mod partition_set;
 mod sampling;
+mod source_plan;
+pub use source_plan::{OriginalFieldSourceEntry, OriginalFieldSourcePlan};
 mod topology;
 mod view;
 

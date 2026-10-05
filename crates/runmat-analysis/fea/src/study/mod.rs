@@ -75,10 +75,12 @@ pub use product::{
     StructuralStudyProductInput,
 };
 pub use thermal_planning::{
-    plan_thermal_step, plan_thermal_study, thermal_step_initial_selection_supported,
+    plan_thermal_step, plan_thermal_step_with_fields, plan_thermal_study,
+    plan_thermal_study_with_fields, thermal_step_initial_selection_supported,
     ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
 };
 pub use thermal_product::{
-    build_thermal_study_product, plan_thermal_study_product, ThermalStudyProduct,
-    ThermalStudyProductError, ThermalStudyProductInput,
+    build_thermal_study_product, plan_thermal_study_product,
+    plan_thermal_study_product_with_fields, ThermalStudyProduct, ThermalStudyProductError,
+    ThermalStudyProductInput,
 };

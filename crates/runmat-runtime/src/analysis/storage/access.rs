@@ -159,6 +159,18 @@ impl FilesystemAccess<'_> {
 }
 
 impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
+    fn export_initial_field(
+        &self,
+        run_id: &str,
+        field_id: &str,
+        maximum: u64,
+    ) -> Result<Option<runmat_analysis_fea::execution::InitialFieldBinding>, AnalysisPublicationError>
+    {
+        self.access_with_budget(false, maximum)
+            .map_err(AnalysisPublicationError::from)?
+            .export_original_field(run_id, field_id, maximum)
+    }
+
     fn commit_publication(
         &self,
         publication: PreparedAnalysisPublication,

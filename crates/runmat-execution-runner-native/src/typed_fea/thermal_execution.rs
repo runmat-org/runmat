@@ -7,7 +7,10 @@ use crate::{
 };
 use runmat_analysis_execution::{AnalysisOutputPolicy, ThermalStudyPreparation, ThermalStudyScope};
 use runmat_analysis_fea::{
-    study::{compile_analysis_study, plan_thermal_study_product, AnalysisStudyCompilationInput},
+    study::{
+        compile_analysis_study, plan_thermal_study_product_with_fields,
+        AnalysisStudyCompilationInput,
+    },
     FeaProgressPhase, FeaProgressStatus,
 };
 use runmat_execution::{
@@ -138,9 +141,22 @@ pub(super) async fn execute(
     .map_err(|e| e.to_string())?;
     crate::input_materialization::apply_to_model(&mut compiled.model, materialized)
         .map_err(|e| e.to_string())?;
-    let product =
-        plan_thermal_study_product(compiled, &geometry.meshing.artifact, prepared.planning)
-            .map_err(|e| e.to_string())?;
+    let [step] = compiled.model.sequence.steps.as_slice() else {
+        return Err("authored thermal execution requires a standalone step".into());
+    };
+    let initial_fields = runmat_runtime::analysis::storage::resolve_initial_fields(
+        &compiled.model,
+        step,
+        step.accuracy.resources.maximum_resident_bytes,
+    )
+    .map_err(|error| error.to_string())?;
+    let product = plan_thermal_study_product_with_fields(
+        compiled,
+        &geometry.meshing.artifact,
+        prepared.planning,
+        initial_fields,
+    )
+    .map_err(|error| error.to_string())?;
     emit_local_progress(
         &observers,
         "fea.typed_study",

@@ -188,6 +188,22 @@ fn complete_linear_sequence(
             ));
         };
         options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
+        let original_fields =
+            runmat_analysis_fea::pipeline::linear_static::original_static_displacement_source(
+                &workload,
+                Some(&solver_mesh),
+                numerical.solver_result_identity,
+                &numerical.result.run,
+            )
+            .map_err(|error| {
+                intent_completion_error(
+                    &intent,
+                    "RM.FEA.RUN_STUDY.ORIGINAL_FIELDS_INVALID",
+                    OperationErrorType::Contract,
+                    OperationErrorSeverity::Fatal,
+                    error.to_string(),
+                )
+            })?;
         let prepared_linear = PreparedStructuralLinearRun {
             workload,
             solver_mesh: Some(solver_mesh.clone()),
@@ -214,7 +230,7 @@ fn complete_linear_sequence(
         completion_steps.push(CompletedStudyStep {
             step_id: step.procedure_step.step_id,
             solver_result_identity: numerical.solver_result_identity,
-            run: CompletedStudyStepRun::Standard(Box::new(run)),
+            run: super::publication::original_fields::standard(run, original_fields),
             resolved_solver_options: AnalysisSolverOptions::StructuralLinear(options),
         });
     }
@@ -296,6 +312,7 @@ fn complete_direct_transient(
         ));
     };
     workload.model = resolved_model.clone();
+    let source_producer = result.result.manifest().scope.step;
     let solver_result_identity = result.result.manifest().identity;
     let recovered = runmat_analysis_fea::pipeline::transient::recover_completed_transient_run(
         runmat_analysis_fea::pipeline::transient::CompletedStructuralTransientRunInput {
@@ -315,6 +332,23 @@ fn complete_direct_transient(
             error.to_string(),
         )
     })?;
+    let original_fields =
+        runmat_analysis_fea::pipeline::transient::original_transient_field_source(
+            &resolved_model,
+            &solver_mesh,
+            source_producer,
+            solver_result_identity,
+            &recovered,
+        )
+        .map_err(|error| {
+            intent_completion_error(
+                &intent,
+                "RM.FEA.RUN_STUDY.ORIGINAL_FIELDS_INVALID",
+                OperationErrorType::Contract,
+                OperationErrorSeverity::Fatal,
+                error.to_string(),
+            )
+        })?;
     options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
     let assigned_run_id = completion_identity.local_run_id(
         runmat_analysis_core::PhysicsFamily::Structural,
@@ -409,7 +443,10 @@ fn complete_direct_transient(
         vec![CompletedStudyStep {
             step_id: result.step_id,
             solver_result_identity,
-            run: CompletedStudyStepRun::Standard(Box::new(run)),
+            run: CompletedStudyStepRun::OriginalFields {
+                run: Box::new(run),
+                source: Box::new(original_fields),
+            },
             resolved_solver_options: AnalysisSolverOptions::StructuralTransient(options),
         }],
         states,

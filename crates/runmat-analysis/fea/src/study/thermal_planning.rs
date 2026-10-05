@@ -30,6 +30,15 @@ pub fn plan_thermal_study(
     study: &CompiledAnalysisStudy,
     policy: ThermalStudyPlanningPolicy,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
+    plan_thermal_study_with_fields(study, policy, Vec::new())
+}
+
+/// Plan with closed original fields resolved by the host before numerical admission.
+pub fn plan_thermal_study_with_fields(
+    study: &CompiledAnalysisStudy,
+    policy: ThermalStudyPlanningPolicy,
+    initial_fields: Vec<crate::execution::InitialFieldBinding>,
+) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
     if policy.formulation_requirement != study.formulation_requirement {
         return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
     }
@@ -43,7 +52,7 @@ pub fn plan_thermal_study(
     {
         return Err(ThermalStudyPlanningError::UnsupportedSequence);
     }
-    plan_selected(study, &step.step_id.0, policy, false)
+    plan_selected(study, &step.step_id.0, policy, false, initial_fields)
 }
 
 /// Plan an independent thermal producer in its full authored mixed-physics sequence.
@@ -53,7 +62,17 @@ pub fn plan_thermal_step(
     step_id: &str,
     policy: ThermalStudyPlanningPolicy,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
-    plan_selected(study, step_id, policy, true)
+    plan_thermal_step_with_fields(study, step_id, policy, Vec::new())
+}
+
+/// Selected mixed-sequence producer with the same original-field admission.
+pub fn plan_thermal_step_with_fields(
+    study: &CompiledAnalysisStudy,
+    step_id: &str,
+    policy: ThermalStudyPlanningPolicy,
+    initial_fields: Vec<crate::execution::InitialFieldBinding>,
+) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
+    plan_selected(study, step_id, policy, true, initial_fields)
 }
 
 fn plan_selected(
@@ -61,13 +80,14 @@ fn plan_selected(
     step_id: &str,
     policy: ThermalStudyPlanningPolicy,
     mixed_context: bool,
+    initial_fields: Vec<crate::execution::InitialFieldBinding>,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
     if policy.formulation_requirement != study.formulation_requirement {
         return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
     }
     let (step, procedure, residual_target) = authored_controls(&study.model, step_id)?;
     let workload = ThermalWorkload {
-        initial_fields: Vec::new(),
+        initial_fields,
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,

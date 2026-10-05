@@ -28,6 +28,10 @@ use super::render_tiles::{
 };
 
 mod assessment;
+mod initial_fields;
+mod metadata_identity;
+pub use initial_fields::{export_initial_field, resolve_initial_fields};
+use metadata_identity::persisted_run_digest;
 mod discovery;
 pub use assessment::{AssessmentRunEvidence, AssessmentStoreError};
 mod filesystem;
@@ -63,6 +67,8 @@ struct PersistedRunArtifact {
     render_tiles: Option<RenderTileIndex>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     observation_histories: Vec<PersistedObservationHistory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original_fields: Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
 }
 
 /// Histories own sample-local field identities; they cannot be flattened into the
@@ -344,6 +350,7 @@ fn validate_persisted_run(
         &persisted.materialized_field_ids,
         persisted.render_tiles.as_ref(),
         &persisted.observation_histories,
+        persisted.original_fields.as_ref(),
     )? != persisted.run_digest
     {
         return Err("analysis run metadata differs from its content digest".into());
@@ -477,6 +484,7 @@ fn validate_persisted_run(
             "analysis run field inventory differs from its persisted manifests".to_string(),
         );
     }
+    initial_fields::validate_catalog(persisted)?;
     Ok(())
 }
 
@@ -528,29 +536,6 @@ fn collect_persisted_field_shells(
         _ => {}
     }
     Ok(())
-}
-
-fn persisted_run_digest(
-    value: &serde_json::Value,
-    field_inventory: &[AnalysisField],
-    materialized_field_ids: &[String],
-    render_tiles: Option<&RenderTileIndex>,
-    observation_histories: &[PersistedObservationHistory],
-) -> Result<Digest, String> {
-    if !observation_histories.is_empty() {
-        return serde_json::to_vec(&(
-            value,
-            field_inventory,
-            materialized_field_ids,
-            render_tiles,
-            observation_histories,
-        ))
-        .map(Digest::sha256)
-        .map_err(|error| error.to_string());
-    }
-    serde_json::to_vec(&(value, field_inventory, materialized_field_ids, render_tiles))
-        .map(Digest::sha256)
-        .map_err(|error| format!("failed to encode analysis run metadata: {error}"))
 }
 
 fn validate_owned_directory_metadata(

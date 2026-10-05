@@ -43,7 +43,9 @@ mod finalization;
 mod initial_fields;
 mod modal_motion;
 mod motion;
+mod original_fields;
 mod preassembly;
+pub use original_fields::original_transient_field_source;
 #[cfg(test)]
 mod preassembly_tests;
 mod reconstruction;

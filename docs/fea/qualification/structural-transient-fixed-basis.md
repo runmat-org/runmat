@@ -138,7 +138,13 @@ scope/block inputs. Source residency is checked against the unchanged authored
 ceiling; source identity and cold continuation bind the selected content. These are
 analytical resource reservations, not measured peak memory.
 
-This is an explicit portable-input/API capability. The runtime authored preparation
-adapter still supplies an empty binding inventory and therefore rejects unresolved
-field references; automatic artifact lookup and end-user authored field loading are
-not qualified. Original rod continuum failures remain mandatory and unchanged.
+The current authored-field draft adds bounded lookup through shared analysis storage.
+Direct and modal transient preparation resolve active immutable references before
+portable admission. Original transient displacement/velocity catalogs attach to the
+same atomic publication root; static displacement catalogs describe an existing
+retained host field, and never trigger another solve or recovery for omitted output.
+The both-order authored cold producer-to-consumer witness passes with exact original
+initial displacement and velocity. Source metadata authenticates provenance and
+content; it is not a numerical proof. Independent producer-process termination,
+modal field-input physics and measured memory remain separate open gates. Original
+rod continuum failures remain mandatory and unchanged.

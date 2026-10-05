@@ -1,5 +1,6 @@
 use super::*;
 use runmat_analysis_core::*;
+mod planning;
 
 fn prescribed(id: &str, face: &str, value: PrescribedValue<Temperature>) -> AnalysisConstraint {
     AnalysisConstraint::Thermal(ThermalConstraint {
@@ -169,6 +170,7 @@ fn solved_nonuniform_initial_field_obeys_independent_heat_equation_and_power() {
                 action_ids: vec![ExcitationId("heat".into())],
                 activation: ExcitationCaseActivation::Always,
             }];
+            let consumer = planning::through_authored_product(consumer, &mesh);
             let cold = ThermalWorkload::from_canonical_bytes(&consumer.canonical_bytes().unwrap())
                 .unwrap();
             let result = cold.execute(&mesh).unwrap();
