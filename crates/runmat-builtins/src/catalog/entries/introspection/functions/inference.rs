@@ -13,12 +13,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(input) = request.arguments.first() {
-        if input.residency == ResidencyFact::Host
-            && !matches!(
-                input.kind,
-                ValueKindFact::Callable(_) | ValueKindFact::Unknown
-            )
-        {
+        if !matches!(
+            input.kind,
+            ValueKindFact::Callable(_) | ValueKindFact::Unknown
+        ) {
             diagnostics.push(argument_error(
                 "RM-FUNCTIONS-HANDLE",
                 "expected a function handle",

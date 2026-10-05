@@ -12,10 +12,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(index) = request.arguments.first() {
-        if index.residency == ResidencyFact::Host
-            && (!matches!(index.kind, ValueKindFact::Numeric(_))
-                || index.shape.element_count().is_some_and(|count| count != 1))
-            && !matches!(index.kind, ValueKindFact::Unknown)
+        if !matches!(
+            index.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Unknown
+        ) || index.shape.is_definitely_nonscalar()
         {
             diagnostics.push(argument_error(
                 "RM-INPUTNAME-INDEX",

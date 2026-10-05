@@ -14,4 +14,23 @@ fn caller_dependent_name_is_character_and_non_numeric_is_rejected() {
     assert!(!inference::infer(&request, &INPUTNAME_CATALOG_ENTRY)
         .diagnostics
         .is_empty());
+    for residency in [
+        ResidencyFact::Device { provider: None },
+        ResidencyFact::Remote { pool: None },
+        ResidencyFact::Unknown,
+    ] {
+        request.arguments[0].residency = residency;
+        assert!(!inference::infer(&request, &INPUTNAME_CATALOG_ENTRY)
+            .diagnostics
+            .is_empty());
+    }
+    request.arguments[0] = ValueFact::unknown(DynamicReason::RuntimeValue);
+    request.arguments[0].shape = ShapeFact::from(vec![Some(2), Some(1)]);
+    assert!(!inference::infer(&request, &INPUTNAME_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+    request.arguments[0].shape = ShapeFact::Unknown;
+    assert!(inference::infer(&request, &INPUTNAME_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
 }
