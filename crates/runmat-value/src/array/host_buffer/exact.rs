@@ -21,10 +21,16 @@ impl<T> ExactShared<T> {
     }
 
     pub(super) fn try_new(value: T) -> Result<Self, T> {
-        Self::try_new_with(value, |layout| unsafe { std::alloc::alloc(layout) })
+        // SAFETY: `alloc` returns either null or a fresh pointer with the
+        // exact requested global-allocator layout.
+        unsafe { Self::try_new_with(value, |layout| std::alloc::alloc(layout)) }
     }
 
-    fn try_new_with(
+    /// # Safety
+    /// A non-null allocator result must be a fresh, uniquely owned block from
+    /// the global allocator with exactly the supplied layout and alignment.
+    /// Its ownership transfers to this exact shared owner for Box release.
+    unsafe fn try_new_with(
         value: T,
         allocate: impl FnOnce(std::alloc::Layout) -> *mut u8,
     ) -> Result<Self, T> {
@@ -103,8 +109,32 @@ mod allocation_tests {
     #[test]
     fn denied_exact_owner_allocation_returns_the_original_payload() {
         let payload = vec![3_u64, 5, 8];
-        let result = ExactShared::try_new_with(payload, |_| std::ptr::null_mut());
+        // SAFETY: null never transfers an allocation into the owner.
+        let result = unsafe { ExactShared::try_new_with(payload, |_| std::ptr::null_mut()) };
         assert_eq!(result.err(), Some(vec![3, 5, 8]));
+    }
+
+    #[test]
+    fn denied_owner_releases_a_retained_allocation_claim_on_payload_drop() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        struct Claim(Arc<AtomicUsize>);
+        impl Drop for Claim {
+            fn drop(&mut self) {
+                self.0.fetch_sub(7, Ordering::SeqCst);
+            }
+        }
+        let live = Arc::new(AtomicUsize::new(7));
+        // SAFETY: null never transfers an allocation into the owner.
+        let payload =
+            unsafe { ExactShared::try_new_with(Claim(live.clone()), |_| std::ptr::null_mut()) }
+                .err()
+                .expect("failed owner returns the claim-bearing payload");
+        assert_eq!(live.load(Ordering::SeqCst), 7);
+        drop(payload);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
     }
 }
 
