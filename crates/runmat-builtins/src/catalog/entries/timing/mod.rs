@@ -1,6 +1,7 @@
 mod cputime;
 mod pause;
 mod stopwatch;
+mod timeit;
 
 pub use cputime::{CPUTIME_DESCRIPTOR, CPUTIME_ERROR_TOO_MANY_INPUTS, CPUTIME_ERROR_UNAVAILABLE};
 pub use pause::{
@@ -11,9 +12,17 @@ pub use stopwatch::{
     TIC_ERROR_CONTEXT_UNAVAILABLE, TIC_ERROR_TOKEN_EXHAUSTED, TOC_ERROR_INVALID_HANDLE,
     TOC_ERROR_NO_MATCHING_TIC, TOC_ERROR_TOO_MANY_INPUTS,
 };
+pub use timeit::{
+    EXPLICIT_GPU_NUM_OUTPUTS_EXTENSION, INTEGER_NUM_OUTPUTS_EXTENSION, TIMEIT_DESCRIPTOR,
+    TIMEIT_ERROR_CONTEXT_UNAVAILABLE, TIMEIT_ERROR_EMPTY_HANDLE,
+    TIMEIT_ERROR_EXPECTS_AT_HANDLE_STRING, TIMEIT_ERROR_FIRST_ARG_KIND, TIMEIT_ERROR_HANDLE_KIND,
+    TIMEIT_ERROR_NUM_OUTPUTS_FINITE, TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
+    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG, TIMEIT_ERROR_NUM_OUTPUTS_SCALAR, TIMEIT_ERROR_TOO_MANY_INPUTS,
+};
 
 pub(crate) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend_from_slice(cputime::ENTRIES);
     values.extend_from_slice(pause::ENTRIES);
     values.extend_from_slice(stopwatch::ENTRIES);
+    values.extend_from_slice(timeit::ENTRIES);
 }
