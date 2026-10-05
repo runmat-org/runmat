@@ -34,12 +34,11 @@ impl Drop for PendingTurn {
 struct PendingDateService {
     turns: Rc<Cell<usize>>,
     dropped: Rc<Cell<bool>>,
+    quantum: u64,
 }
 impl RuntimeExecutionServices for PendingDateService {
     fn cpu_cooperation_policy(&self) -> CpuCooperationPolicy {
-        // The owned cell gather charges 256 cells; the first parse element
-        // reaches the service turn, proving later phase cooperation.
-        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(257).unwrap())
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(self.quantum).unwrap())
     }
     fn cooperate_cpu(&self) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
         self.turns.set(self.turns.get() + 1);
@@ -115,6 +114,9 @@ fn public_datetime_cellstr_parse_turn_cancels_or_drops_without_publication() {
             Rc::new(PendingDateService {
                 turns: turns.clone(),
                 dropped: dropped.clone(),
+                // Preflight and owned gather each charge 256 cells; the first
+                // decoded character reaches the parse-phase service turn.
+                quantum: 513,
             }),
             source.token(),
         );
@@ -158,4 +160,45 @@ fn public_datetime_cellstr_parse_turn_cancels_or_drops_without_publication() {
             [1, 1]
         );
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn canonical_dispatcher_passes_invocation_cooperation_to_datetime() {
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let dropped = Rc::new(Cell::new(false));
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(PendingDateService {
+            turns: turns.clone(),
+            dropped: dropped.clone(),
+            quantum: 1,
+        }),
+        source.token(),
+    );
+    let args = [Value::Cell(
+        runmat_value::CellArray::new(
+            vec![Value::CharArray(CharArray::new_row("2024-04-09"))],
+            1,
+            1,
+        )
+        .unwrap(),
+    )];
+    let mut call = Box::pin(crate::dispatcher::call_builtin_async_in_context(
+        &runtime, "datetime", &args,
+    ));
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert_eq!(turns.get(), 1);
+    source.cancel(CancellationReason::User);
+    let error = match call.as_mut().poll(&mut Context::from_waker(&waker)) {
+        Poll::Ready(Err(error)) => error,
+        _ => panic!("canonical datetime cancellation must complete"),
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    drop(call);
+    assert!(dropped.get());
 }

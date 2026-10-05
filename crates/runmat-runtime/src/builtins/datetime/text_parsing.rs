@@ -2,15 +2,30 @@ use super::capabilities::{DEFAULT_DATETIME_FORMAT, DEFAULT_DATE_FORMAT};
 use super::*;
 use runmat_value::CellArray;
 
-pub(super) fn validate_cell_text_input(value: &Value) -> BuiltinResult<()> {
+pub(super) async fn validate_cell_text_input(
+    value: &Value,
+    budget: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
     let Value::Cell(cells) = value else {
         return Ok(());
     };
-    validate_cell_text_elements(cells)
+    validate_cell_text_elements(cells, budget, runtime).await
 }
 
-fn validate_cell_text_elements(cells: &CellArray) -> BuiltinResult<()> {
+async fn validate_cell_text_elements(
+    cells: &CellArray,
+    budget: Option<&mut crate::execution::CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<()> {
+    let mut budget = budget;
     for (index, element) in cells.data.iter().enumerate() {
+        if let Some(budget) = budget.as_deref_mut() {
+            budget
+                .checkpoint(1)
+                .await
+                .map_err(|source| datetime_execution_error(runtime, source))?;
+        }
         if !matches!(element, Value::CharArray(_))
             || !crate::builtins::common::validation::value_is_text_scalar(element)
         {
@@ -191,19 +206,44 @@ pub(super) async fn parse_cell_text_input(
     let mut serials = Vec::with_capacity(cells.data.len());
     let mut has_time = false;
     for (index, element) in cells.data.iter().enumerate() {
-        if let Some(budget) = budget.as_deref_mut() {
-            budget
-                .checkpoint(1)
-                .await
-                .map_err(|source| datetime_execution_error(runtime, source))?;
+        let Value::CharArray(chars) = element else {
+            return Err(datetime_argument_error(format!(
+                "datetime: cell element {} must be a character vector",
+                index + 1
+            )));
+        };
+        if !crate::builtins::common::validation::value_is_text_scalar(element) {
+            return Err(datetime_argument_error(format!(
+                "datetime: cell element {} must be a character vector",
+                index + 1
+            )));
         }
-        let text = crate::builtins::common::validation::value_text_scalar_string(element)
-            .ok_or_else(|| {
-                datetime_argument_error(format!(
-                    "datetime: cell element {} must be a character vector",
-                    index + 1
-                ))
+        let mut text = String::new();
+        for chunk in chars.data.chunks(1024) {
+            if let Some(budget) = budget.as_deref_mut() {
+                budget
+                    .checkpoint(u64::try_from(chunk.len()).unwrap_or(u64::MAX))
+                    .await
+                    .map_err(|source| datetime_execution_error(runtime, source))?;
+            }
+            let additional = chunk.len().checked_mul(4).ok_or_else(|| {
+                datetime_error("datetime: character vector allocation exceeds platform limits")
             })?;
+            text.try_reserve(additional).map_err(|source| {
+                let mut error = datetime_error("datetime: character vector allocation failed");
+                error.source = Some(Box::new(source));
+                error
+            })?;
+            text.extend(chunk.iter().copied());
+        }
+        if chars.data.is_empty() {
+            if let Some(budget) = budget.as_deref_mut() {
+                budget
+                    .checkpoint(1)
+                    .await
+                    .map_err(|source| datetime_execution_error(runtime, source))?;
+            }
+        }
         let parsed = relative_datetime(text.trim())
             .map(|value| (value, text.trim().eq_ignore_ascii_case("now")))
             .or_else(|| parse_datetime_text_with_input_format(&text, input_format));

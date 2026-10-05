@@ -18,9 +18,12 @@ pub(super) async fn datetime_builtin(
     ensure_datetime_class_registered();
     let (positional_end, options) = parse_trailing_options(&args)?;
     let positional_inputs = &args[..positional_end];
+    let mut budget = runtime
+        .as_ref()
+        .map(crate::context::RuntimeContext::cpu_cooperation);
 
     if let [input] = positional_inputs {
-        validate_cell_text_input(input)?;
+        validate_cell_text_input(input, budget.as_mut(), runtime.as_ref()).await?;
     }
 
     // Reject malformed call structure and host-only options before a resident
@@ -76,9 +79,6 @@ pub(super) async fn datetime_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let mut budget = runtime
-        .as_ref()
-        .map(crate::context::RuntimeContext::cpu_cooperation);
     if let Some(budget) = budget.as_mut() {
         budget
             .checkpoint(0)

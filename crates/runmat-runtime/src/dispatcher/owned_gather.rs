@@ -30,6 +30,10 @@ fn gather_owned<'a>(
             budget.checkpoint(0).await.map_err(execution_error)?;
         }
         match value {
+            Value::OutputList(_) => Err(crate::runtime_error::semantic_error(
+                "TransientSequenceBelowDispatch",
+                "legacy output-list carrier reached scalar gather dispatch",
+            )),
             Value::Cell(cell) => {
                 let mut gathered = Vec::with_capacity(cell.data.len());
                 for element in cell.data {
@@ -122,6 +126,23 @@ mod tests {
         assert_eq!(allocation.probe.retirements(), 0);
         allocation.handle.release().unwrap();
         assert_eq!(allocation.probe.retirements(), 1);
+    }
+
+    #[test]
+    fn transient_output_list_is_rejected_at_top_level_and_inside_cell() {
+        for input in [
+            Value::OutputList(vec![Value::Num(1.0)]),
+            Value::Cell(
+                CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1).unwrap(),
+            ),
+        ] {
+            let error = block_on(gather_if_needed_owned_async(input, None))
+                .expect_err("transient list may not pass scalar gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:TransientSequenceBelowDispatch")
+            );
+        }
     }
 
     #[test]
