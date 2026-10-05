@@ -523,6 +523,15 @@ pub trait RuntimeParallelService {
     fn placement_resources(&self) -> RuntimeParallelResources {
         RuntimeParallelResources::default()
     }
+
+    /// Optional host-managed allocation owner for finite host-effect routes.
+    /// This must be the *same* quota authority whose atomically observed free
+    /// bytes and epoch are reported by `placement_resources`, not a fresh
+    /// ledger constructed from that snapshot for each call. The default
+    /// refuses finite host-effect allocation rather than inventing capacity.
+    fn managed_host_effect_ledger(&self) -> Option<super::host_effect::ManagedHostEffectLedger> {
+        None
+    }
 }
 
 #[derive(Clone)]

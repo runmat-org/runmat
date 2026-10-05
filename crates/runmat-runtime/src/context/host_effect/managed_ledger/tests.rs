@@ -150,3 +150,31 @@ fn independent_stages_charge_atomically_under_concurrent_claims() {
     drop(second);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn owner_snapshot_has_one_epoch_and_does_not_double_subtract_concurrent_claims() {
+    let owner = ManagedHostEffectLedger::new_with_epoch(16, 7);
+    let same = owner.clone();
+    let replacement = ManagedHostEffectLedger::new_with_epoch(16, 8);
+    assert!(owner.same_owner(&same));
+    assert!(!owner.same_owner(&replacement));
+    let first = owner.reserve_stage(8).expect("first call");
+    let second = same.reserve_stage(8).expect("second call on same quota");
+    let snapshot = owner.snapshot();
+    assert_eq!(snapshot.epoch, 7);
+    assert_eq!(snapshot.capacity_bytes, 16);
+    assert_eq!(snapshot.live_reserved_bytes, 16);
+    assert_eq!(snapshot.free_bytes(), 0);
+    assert_eq!(
+        owner.reserve_stage(1).err(),
+        Some(HostEffectAllocationError::ExceedsCapacity)
+    );
+    owner.revoke();
+    assert!(!owner.snapshot().current);
+    assert_eq!(owner.snapshot().live_reserved_bytes, 16);
+    assert!(replacement.snapshot().current);
+    drop(first);
+    drop(second);
+    assert_eq!(owner.snapshot().free_bytes(), 16);
+}

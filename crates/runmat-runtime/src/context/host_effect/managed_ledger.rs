@@ -14,6 +14,9 @@ use std::sync::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ManagedHostEffectLedgerSnapshot {
+    /// Immutable issuer epoch. Rebinding to a different epoch revokes new
+    /// claims on the previous owner without releasing retained outputs.
+    pub epoch: u64,
     pub capacity_bytes: u64,
     /// Conservative precharges and retained outputs, not process RSS.
     pub live_reserved_bytes: u64,
@@ -22,6 +25,14 @@ pub struct ManagedHostEffectLedgerSnapshot {
     pub live_claimed_bytes: u64,
     pub peak_claimed_bytes: u64,
     pub current: bool,
+}
+
+impl ManagedHostEffectLedgerSnapshot {
+    /// Free bytes are derived from the same atomic snapshot as live claims;
+    /// callers must not subtract staged claims from a second budget snapshot.
+    pub fn free_bytes(self) -> u64 {
+        self.capacity_bytes - self.live_reserved_bytes
+    }
 }
 
 struct LedgerState {
@@ -35,9 +46,14 @@ pub struct ManagedHostEffectLedger {
 
 impl ManagedHostEffectLedger {
     pub fn new(capacity_bytes: u64) -> Self {
+        Self::new_with_epoch(capacity_bytes, 0)
+    }
+
+    pub fn new_with_epoch(capacity_bytes: u64, epoch: u64) -> Self {
         Self {
             state: Arc::new(Mutex::new(LedgerState {
                 snapshot: ManagedHostEffectLedgerSnapshot {
+                    epoch,
                     capacity_bytes,
                     live_reserved_bytes: 0,
                     peak_reserved_bytes: 0,
@@ -51,6 +67,10 @@ impl ManagedHostEffectLedger {
 
     pub fn snapshot(&self) -> ManagedHostEffectLedgerSnapshot {
         self.state.lock().expect("host ledger lock").snapshot
+    }
+
+    pub fn same_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
     }
 
     /// Revocation forbids new claims. It does not erase bytes held by owners.
