@@ -43,7 +43,7 @@ fn finite_missing_and_unknown_evidence_reject_both_identities_before_file_effect
     let no_port = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()
-                .with_parallel(Rc::new(Budget(Some(1024))))
+                .with_parallel(Rc::new(Budget::new(Some(1024))))
                 .with_placement(Rc::new(Placement::default())),
         );
     for error in [

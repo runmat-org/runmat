@@ -71,6 +71,34 @@ fn managed_runtime(
     (runtime, placement)
 }
 
+#[test]
+fn foreign_stage_ledger_rejects_before_selection_and_releases_its_charge() {
+    let parallel_ledger = ManagedHostEffectLedger::new(12);
+    let stage_ledger = ManagedHostEffectLedger::new(12);
+    let placement = Rc::new(Placement::default());
+    placement.revision_available.set(true);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(placement.clone())
+                .with_parallel(Rc::new(ManagedParallel(parallel_ledger.clone())))
+                .with_host_effect_resources(Rc::new(ManagedResources {
+                    ledger: stage_ledger.clone(),
+                    revision: Digest::sha256(b"managed-stage-v1"),
+                })),
+        );
+    let error = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .err()
+        .expect("a stage charged to a different managed owner must fail");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:StaleResourceAuthority")
+    );
+    assert_eq!(placement.selections.get(), 0);
+    assert_eq!(stage_ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(parallel_ledger.snapshot().live_reserved_bytes, 0);
+}
+
 struct OverreservedResources(ManagedHostEffectLedger);
 
 impl RuntimeHostEffectResourceService for OverreservedResources {

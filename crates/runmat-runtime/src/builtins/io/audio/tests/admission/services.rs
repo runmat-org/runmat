@@ -1,6 +1,7 @@
 use super::*;
 use crate::context::host_effect::{
     HostEffectOutput, HostEffectRequest, HostEffectResourceEvidence, HostEffectWorkload,
+    ManagedHostEffectLedger,
 };
 use crate::context::{
     ParallelCapability, RuntimeContext, RuntimeHostEffectResourceService, RuntimeParallelResources,
@@ -20,16 +21,27 @@ use std::sync::{
     Arc,
 };
 
-pub(super) struct Budget(pub(super) Option<u64>);
+pub(super) struct Budget(Option<ManagedHostEffectLedger>);
+impl Budget {
+    pub(super) fn new(available: Option<u64>) -> Self {
+        Self(available.map(ManagedHostEffectLedger::new))
+    }
+}
 impl RuntimeParallelService for Budget {
     fn supports(&self, _: ParallelCapability) -> bool {
         false
     }
     fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.as_ref().map(ManagedHostEffectLedger::snapshot);
         RuntimeParallelResources {
-            memory_available_bytes: self.0,
+            memory_available_bytes: snapshot.map(|owner| owner.free_bytes()),
+            epoch: snapshot.map_or(0, |owner| owner.epoch),
             ..Default::default()
         }
+    }
+
+    fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        self.0.clone()
     }
 }
 
@@ -190,7 +202,7 @@ pub(super) fn context(
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()
-                .with_parallel(Rc::new(Budget(available)))
+                .with_parallel(Rc::new(Budget::new(available)))
                 .with_host_effect_resources(resources.clone())
                 .with_placement(placement.clone()),
         );

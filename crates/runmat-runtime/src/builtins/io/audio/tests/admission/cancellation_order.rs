@@ -16,7 +16,7 @@ fn cancelled_finite_calls_precede_missing_resource_evidence_without_file_effects
         .with_cancellation_token(cancellation.token())
         .with_service_ports(
             RuntimeServicePorts::default()
-                .with_parallel(Rc::new(Budget(Some(1024))))
+                .with_parallel(Rc::new(Budget::new(Some(1024))))
                 .with_placement(Rc::new(Placement::default())),
         );
     cancellation.cancel(CancellationReason::User);
