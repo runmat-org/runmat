@@ -441,6 +441,7 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
+        let (_input_guard, _input_events) = self.install_execution_input();
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
