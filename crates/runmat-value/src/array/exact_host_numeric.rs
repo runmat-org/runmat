@@ -82,9 +82,12 @@ pub struct ExactHostNumericAllocation {
     len: usize,
 }
 
-/// One exact numeric payload plus an exact two-element retained tensor shape.
-/// A single reservation covers both allocations before either is created.
-/// This does not certify the remaining fixed tensor/Arc metadata overhead.
+/// One initial exact numeric payload plus its exact two-element tensor shape.
+/// A single reservation covers both producer allocations before either is
+/// created and remains through their initial retained ownership. A later
+/// Tensor clone/reshape is a separate operation and must account for its own
+/// new shape or payload; this claim does not certify those future allocations
+/// or the remaining fixed Tensor/Arc metadata overhead.
 pub struct ExactHostTensor2dAllocation {
     numeric: ExactHostNumericAllocation,
     shape: [usize; 2],

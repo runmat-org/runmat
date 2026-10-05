@@ -2,10 +2,13 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    storage: HostNumericBuffer,
     pub shape: Vec<usize>, // Column-major layout
     pub rows: usize,       // Compatibility for 2D usage
     pub cols: usize,       // Compatibility for 2D usage
+    // Keep storage last: an exact producer reservation attached to storage
+    // may also account for this tensor's initial shape allocation. Field
+    // drop order must release that claim only after shape deallocation.
+    storage: HostNumericBuffer,
 }
 
 impl Tensor {
