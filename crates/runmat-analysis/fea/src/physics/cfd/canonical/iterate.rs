@@ -32,7 +32,7 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
         let rau = (0..n)
             .map(|c| p.topology.cells[c].volume_m3 / m.diagonal[c])
             .collect::<Vec<_>>();
-        let gp = gradient(p, &pressure_fluctuation, None)?;
+        let gp = pressure_gradient(p, &pressure_fluctuation)?;
         let old_force = pressure_force(p, &pressure_fluctuation, &gp)?;
         let pressure_term = (0..n)
             .map(|c| scale(old_force[c], rau[c] / p.topology.cells[c].volume_m3))
@@ -55,7 +55,7 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
                 pressure_defect.push(delta);
             }
         }
-        let gp = gradient(p, &pressure_fluctuation, None)?;
+        let gp = pressure_gradient(p, &pressure_fluctuation)?;
         let force = pressure_force(p, &pressure_fluctuation, &gp)?;
         u = (0..n)
             .map(|c| {

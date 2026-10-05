@@ -56,96 +56,18 @@ pub(super) fn interpolate(a: V, b: V, w: f64) -> V {
     add(scale(a, w), scale(b, 1.0 - w))
 }
 
-/// Each local 3x3 stencil uses neighbour differences or the exact boundary law.
-/// Neumann rows use unit physical normals. No pseudo-inverse, diagonal floor or
-/// Cartesian projection silently repairs a rank-deficient stencil.
-pub(super) fn gradient(
+pub(super) fn pressure_gradient(
     p: &CanonicalFluidProblem<'_>,
     values: &[f64],
-    velocity_component: Option<usize>,
 ) -> Result<Vec<V>, Error> {
-    if velocity_component.is_none() {
-        return super::pressure_gradient::evaluate(p, values);
-    }
-    let mut out = Vec::with_capacity(p.topology.cells.len());
-    for (c, cell) in p.topology.cells.iter().enumerate() {
-        let mut a = [[0.0; 3]; 3];
-        let mut b = [0.0; 3];
-        for incidence in cell.faces {
-            let f = &p.topology.faces[incidence.face_index];
-            let other = if c == f.owner {
-                f.neighbor
-            } else {
-                Some(f.owner)
-            };
-            let (d, delta) = if let Some(n) = other {
-                (
-                    sub(p.topology.cells[n].centroid_m, cell.centroid_m),
-                    values[n] - values[c],
-                )
-            } else {
-                match (&p.boundaries[incidence.face_index], velocity_component) {
-                    (FaceBoundary::Velocity { value, .. }, Some(k)) => {
-                        (sub(f.centroid_m, cell.centroid_m), value[k] - values[c])
-                    }
-                    _ => (scale(f.owner_area_vector_m2, 1.0 / f.area_m2), 0.0),
-                }
-            };
-            let dsq = dot(d, d);
-            if !dsq.is_finite() || dsq <= 0.0 {
-                return Err(Error::Invalid("gradient stencil distance"));
-            }
-            for i in 0..3 {
-                b[i] += d[i] * delta / dsq;
-                for j in 0..3 {
-                    a[i][j] += d[i] * d[j] / dsq;
-                }
-            }
-        }
-        out.push(solve_three(a, b)?);
-    }
-    Ok(out)
-}
-
-pub(super) fn solve_three(mut a: [[f64; 3]; 3], mut b: V) -> Result<V, Error> {
-    let scale = a.iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
-    for k in 0..3 {
-        let pivot = (k..3)
-            .max_by(|i, j| a[*i][k].abs().total_cmp(&a[*j][k].abs()))
-            .unwrap();
-        if a[pivot][k].abs() <= scale * f64::EPSILON * 128.0 {
-            return Err(Error::Invalid("rank-deficient physical gradient stencil"));
-        }
-        a.swap(k, pivot);
-        b.swap(k, pivot);
-        for i in k + 1..3 {
-            let q = a[i][k] / a[k][k];
-            for j in k..3 {
-                a[i][j] -= q * a[k][j];
-            }
-            b[i] -= q * b[k];
-        }
-    }
-    let mut x = [0.0; 3];
-    for i in (0..3).rev() {
-        x[i] = (b[i] - (i + 1..3).map(|j| a[i][j] * x[j]).sum::<f64>()) / a[i][i];
-    }
-    if x.iter().any(|v| !v.is_finite()) {
-        return Err(Error::Invalid("nonfinite physical gradient"));
-    }
-    Ok(x)
+    super::pressure_gradient::evaluate(p, values)
 }
 
 pub(super) fn velocity_gradients(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
 ) -> Result<Vec<[V; 3]>, Error> {
-    let g = (0..3)
-        .map(|k| gradient(p, &u.iter().map(|v| v[k]).collect::<Vec<_>>(), Some(k)))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((0..u.len())
-        .map(|c| std::array::from_fn(|k| g[k][c]))
-        .collect())
+    super::velocity_gradient::evaluate(p, u)
 }
 
 pub(super) fn pressure_force(

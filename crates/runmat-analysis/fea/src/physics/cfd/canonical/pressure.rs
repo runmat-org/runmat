@@ -66,7 +66,7 @@ pub(super) fn corrected_flux(
     rf: &[f64],
     pressure: &[f64],
 ) -> Result<Vec<f64>, Error> {
-    let gp = gradient(p, pressure, None)?;
+    let gp = pressure_gradient(p, pressure)?;
     p.topology
         .faces
         .iter()
@@ -104,7 +104,7 @@ pub(super) fn solve(
     let mut pressure = old_pressure.to_vec();
     let mut linear_iterations = 0;
     for _ in 0..p.policy.maximum_nonorthogonal_iterations {
-        let gp = gradient(p, &pressure, None)?;
+        let gp = pressure_gradient(p, &pressure)?;
         let mut a = linear::assembler(p, "incompressible-pressure-rhie-chow")?;
         let mut b = vec![0.0; pressure.len()];
         for (i, f) in p.topology.faces.iter().enumerate() {

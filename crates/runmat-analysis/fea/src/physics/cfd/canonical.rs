@@ -15,10 +15,12 @@ mod linear;
 mod momentum;
 mod pressure;
 mod pressure_gradient;
+mod reconstruction;
 mod recovery;
 mod resources;
 #[cfg(test)]
 mod tests;
+mod velocity_gradient;
 
 use crate::topology::{AnalysisProjection, FiniteVolumeTopology};
 use runmat_analysis_core::{
@@ -135,6 +137,7 @@ pub struct CanonicalFluidProblem<'a> {
     authored_authority_identity: Digest,
     pressure_reference_pa: Vec<f64>,
     pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
+    velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
 }
 
 /// Shared authored authorities are borrowed during preparation, never replaced by
@@ -258,8 +261,9 @@ impl<'a> CanonicalFluidProblem<'a> {
         let boundary_balance_plan = boundary_balances::BoundaryBalancePlan::derive(&boundaries);
         let pressure_reference_pa = boundary::pressure_references(topology, &boundaries)?;
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
+        let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let numerical_input_identity = identity(
-            "fea-fluid-numerical-input/v3",
+            "fea-fluid-numerical-input/v4",
             &(
                 topology.mesh_digest,
                 topology.projection_digest,
@@ -285,6 +289,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             authored_authority_identity,
             pressure_reference_pa,
             pressure_stencils,
+            velocity_stencils,
         })
     }
 

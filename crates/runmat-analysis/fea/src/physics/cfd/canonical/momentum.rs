@@ -29,7 +29,7 @@ pub(super) fn assemble(
     let n = u.len();
     let mut a = linear::assembler(p, "incompressible-newtonian-momentum")?;
     let gu = velocity_gradients(p, u)?;
-    let gp = gradient(p, pressure_fluctuation, None)?;
+    let gp = pressure_gradient(p, pressure_fluctuation)?;
     let pf = pressure_force(p, pressure_fluctuation, &gp)?;
     let mut rhs = (0..n)
         .map(|c| {

@@ -63,24 +63,15 @@ pub(super) fn derive(
         if samples.len() > 265 {
             return Err(Error::Invalid("pressure stencil sample bound"));
         }
-        let mut a = [[0.0; 3]; 3];
-        let mut displacements = Vec::with_capacity(samples.len());
-        for (sample, x) in samples {
-            let d = sub(x, cell.centroid_m);
-            let dsq = dot(d, d);
-            if dsq <= 0.0 || !dsq.is_finite() {
-                return Err(Error::Invalid("pressure stencil metric"));
-            }
-            for i in 0..3 {
-                for j in 0..3 {
-                    a[i][j] += d[i] * d[j] / dsq;
-                }
-            }
-            displacements.push((sample, scale(d, 1.0 / dsq)));
-        }
-        let weights = displacements
+        let displacements = samples
+            .iter()
+            .map(|(_, x)| sub(*x, cell.centroid_m))
+            .collect::<Vec<_>>();
+        let metric = super::reconstruction::GradientMetric::derive(&displacements)?;
+        let weights = samples
             .into_iter()
-            .map(|(s, d)| solve_three(a, d).map(|w| (s, w)))
+            .zip(displacements)
+            .map(|((sample, _), d)| metric.weight(d).map(|weight| (sample, weight)))
             .collect::<Result<Vec<_>, _>>()?;
         if weights.is_empty() {
             return Err(Error::Unsupported(

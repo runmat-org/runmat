@@ -126,7 +126,7 @@ pub(super) fn evaluate(
     let rau = (0..n)
         .map(|c| p.topology.cells[c].volume_m3 * p.policy.momentum_relaxation / m.diagonal[c])
         .collect::<Vec<_>>();
-    let gp = gradient(p, pressure_fluctuation_pa, None)?;
+    let gp = pressure_gradient(p, pressure_fluctuation_pa)?;
     let pf = pressure_force(p, pressure_fluctuation_pa, &gp)?;
     let pressure_term = (0..n)
         .map(|c| scale(pf[c], rau[c] / p.topology.cells[c].volume_m3))

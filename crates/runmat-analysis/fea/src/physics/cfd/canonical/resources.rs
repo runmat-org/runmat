@@ -253,6 +253,18 @@ impl CanonicalFluidReservation {
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 16)?, 48)?)?;
+        // Frozen velocity reconstruction: four source/weight records per cell,
+        // doubled payload growth plus the owning Vec header. No field is retained.
+        bytes = add(
+            bytes,
+            add(
+                mul(
+                    n,
+                    2 * super::velocity_gradient::VelocityGradientStencil::RESIDENT_BYTES,
+                )?,
+                48,
+            )?,
+        )?;
         // Exact index-pair plan (unstable in-place sort has no merge allocation),
         // one descriptor per exterior face at most, and two coexisting report arrays
         // during safeguarded recovery. IDs obey the existing256-byte authority limit.

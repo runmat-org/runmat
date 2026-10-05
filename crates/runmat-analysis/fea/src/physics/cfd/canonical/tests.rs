@@ -6,6 +6,7 @@ mod boundary_balances;
 mod fixture;
 mod linear_correction;
 mod pressure_reference;
+mod reconstruction;
 mod reference;
 
 use super::*;
@@ -123,7 +124,7 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
             reference::pressure(f.reference, c.centroid_m, false) - p.pressure_reference_pa[i]
         })
         .collect::<Vec<_>>();
-    let gradients = geometry_ops::gradient(&p, &samples, None).unwrap();
+    let gradients = geometry_ops::pressure_gradient(&p, &samples).unwrap();
     for g in gradients {
         assert!(
             norm(sub(g, [-0.2, 0.0, 0.0])) < 1e-12,

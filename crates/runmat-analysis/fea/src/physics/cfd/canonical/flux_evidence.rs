@@ -24,7 +24,7 @@ pub(super) fn evaluate(
     q: &[f64],
 ) -> Result<CanonicalFluidFaceForces, Error> {
     let gu = velocity_gradients(p, u)?;
-    let gp = gradient(p, pressure_fluctuation, None)?;
+    let gp = pressure_gradient(p, pressure_fluctuation)?;
     let mut advective = Vec::with_capacity(q.len());
     let mut viscous = Vec::with_capacity(q.len());
     let mut pressure_force = Vec::with_capacity(q.len());
