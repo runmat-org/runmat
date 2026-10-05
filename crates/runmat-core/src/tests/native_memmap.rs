@@ -207,7 +207,9 @@ fn core_dropped_pending_mapped_read_retires_owner_and_fresh_call_reads_exact_byt
             Box::pin(session.invoke_executable(&unit, invocation("mappedRead", 1), &control));
         for _ in 0..8 {
             let mut task = Context::from_waker(noop_waker_ref());
-            assert!(matches!(pending.as_mut().poll(&mut task), Poll::Pending));
+            if let Poll::Ready(outcome) = pending.as_mut().poll(&mut task) {
+                panic!("mapped call completed before the backing read suspended: {outcome:?}");
+            }
             if evidence.reads.load(Ordering::SeqCst) == 1 {
                 break;
             }
