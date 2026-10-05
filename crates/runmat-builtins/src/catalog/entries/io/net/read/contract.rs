@@ -12,7 +12,7 @@ pub const READ_INPUTS_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescrip
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "tcpclient handle struct.",
+    description: "tcpclient object with sealed session-owned socket authority.",
 }];
 pub const READ_INPUTS_CLIENT_COUNT: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -20,7 +20,7 @@ pub const READ_INPUTS_CLIENT_COUNT: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "tcpclient handle struct.",
+        description: "tcpclient object with sealed session-owned socket authority.",
     },
     BuiltinParamDescriptor {
         name: "count",
@@ -36,7 +36,7 @@ pub const READ_INPUTS_CLIENT_COUNT_DATATYPE: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "tcpclient handle struct.",
+        description: "tcpclient object with sealed session-owned socket authority.",
     },
     BuiltinParamDescriptor {
         name: "count",

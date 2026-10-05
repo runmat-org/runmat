@@ -4,14 +4,14 @@ const ACCEPT_OUTPUT_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "tcpclient handle struct representing the accepted connection.",
+    description: "tcpclient object with sealed authority for the accepted connection.",
 }];
 const ACCEPT_INPUTS_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "server",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "tcpserver handle struct returned by tcpserver.",
+    description: "tcpserver object returned by tcpserver.",
 }];
 const ACCEPT_INPUTS_SERVER_TIMEOUT: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
@@ -19,7 +19,7 @@ const ACCEPT_INPUTS_SERVER_TIMEOUT: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "tcpserver handle struct returned by tcpserver.",
+        description: "tcpserver object returned by tcpserver.",
     },
     BuiltinParamDescriptor {
         name: "name",
@@ -42,7 +42,7 @@ const ACCEPT_INPUTS_SERVER_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "tcpserver handle struct returned by tcpserver.",
+        description: "tcpserver object returned by tcpserver.",
     },
     BuiltinParamDescriptor {
         name: "name_value_pairs",

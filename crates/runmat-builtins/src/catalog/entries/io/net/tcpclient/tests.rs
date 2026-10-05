@@ -61,19 +61,23 @@ fn constructor_facts_preserve_host_property_classes_and_known_invalid_controls()
     };
     let inferred = inference::infer(&valid, &TCPCLIENT_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    let ValueKindFact::Struct(fields) = &inferred.outputs[0].kind else {
-        panic!("tcpclient returns a host struct in the current runtime contract");
+    let ValueKindFact::Object(object) = &inferred.outputs[0].kind else {
+        panic!("tcpclient returns a sealed host object");
     };
     assert_eq!(
-        fields
-            .fields
+        object.runtime_class,
+        Some(super::super::TCPCLIENT_CLASS.owned())
+    );
+    assert_eq!(
+        object
+            .properties
             .get("Port")
             .and_then(ValueFact::numeric)
             .map(|n| n.class),
         Some(NumericClass::Double)
     );
     assert!(matches!(
-        fields.fields.get("Connected").map(|v| &v.kind),
+        object.properties.get("Connected").map(|v| &v.kind),
         Some(ValueKindFact::Logical)
     ));
     assert_eq!(TCPCLIENT_DESCRIPTOR.signatures.len(), 2);

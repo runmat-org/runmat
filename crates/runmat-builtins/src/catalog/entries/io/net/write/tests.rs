@@ -43,7 +43,13 @@ fn request(arguments: Vec<ValueFact>, literal_args: Vec<LiteralValue>) -> CallRe
 }
 
 fn client() -> ValueFact {
-    ValueFact::unknown(DynamicReason::RuntimeValue)
+    ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(super::super::TCPCLIENT_CLASS.owned()),
+        properties: Default::default(),
+        properties_complete: false,
+        handle_semantics: Some(true),
+    }))
 }
 
 fn double() -> ValueFact {

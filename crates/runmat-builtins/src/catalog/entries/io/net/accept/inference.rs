@@ -5,7 +5,13 @@ use std::collections::BTreeMap;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut fields = BTreeMap::new();
     fields.insert("Address".into(), ValueFact::scalar(ValueKindFact::String));
-    fields.insert("Port".into(), real_double());
+    fields.insert(
+        "Port".into(),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Real,
+        })),
+    );
     fields.insert(
         "Connected".into(),
         ValueFact::scalar(ValueKindFact::Logical),

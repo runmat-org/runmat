@@ -72,19 +72,23 @@ fn server_constructor_has_sound_fields_and_invalid_control_diagnostics() {
     };
     let inferred = inference::infer(&valid, &TCPSERVER_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    let ValueKindFact::Struct(fields) = &inferred.outputs[0].kind else {
-        panic!("tcpserver returns a host struct in the current runtime contract");
+    let ValueKindFact::Object(object) = &inferred.outputs[0].kind else {
+        panic!("tcpserver returns a sealed host object");
     };
     assert_eq!(
-        fields
-            .fields
+        object.runtime_class,
+        Some(super::super::TCPSERVER_CLASS.owned())
+    );
+    assert_eq!(
+        object
+            .properties
             .get("ServerPort")
             .and_then(ValueFact::numeric)
             .map(|n| n.class),
         Some(NumericClass::Double)
     );
     assert!(matches!(
-        fields.fields.get("Connected").map(|v| &v.kind),
+        object.properties.get("Connected").map(|v| &v.kind),
         Some(ValueKindFact::Logical)
     ));
     assert_eq!(TCPSERVER_DESCRIPTOR.signatures.len(), 2);

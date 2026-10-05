@@ -15,7 +15,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The documented one-argument `tcpserver(port)` form is not implemented; provide both address and port.",
         ] },
         BuiltinDocumentationSection { heading: "Result, placement, and failures", paragraphs: &[
-            "The current RunMat result is a server structure rather than a MATLAB handle object. Public port properties are double values; `ClientPort` is empty until a client connects. Editing copied properties does not reconfigure the listener.",
+            "RunMat returns a `tcpserver` object with a sealed session-owned listener authority, not a MATLAB handle-class implementation. Public port properties are `double`; `ClientPort` is empty until a client connects. Editing copied properties does not reconfigure the listener.",
             "Automatically resident inputs gather through their owner. Explicit `gpuArray` input requires RunMat mode; the result remains host-resident. No accelerator kernel participates in socket binding.",
             "Bind failures raise `RunMat:tcpserver:BindFailed` with the operating-system error message. Callback properties are not active; use `accept`, `read`, and `write` for explicit I/O.",
         ] },

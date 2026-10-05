@@ -79,7 +79,7 @@ const TCPSERVER_OUTPUT_SERVER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescri
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "tcpserver handle struct for accept/close operations.",
+    description: "tcpserver object with sealed authority for accept/close operations.",
 }];
 const TCPSERVER_INPUTS_ADDRESS_PORT: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {

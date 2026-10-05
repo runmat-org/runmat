@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "`data = read(t, count, datatype)` interprets the values using the requested MATLAB datatype. Supported tokens are `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric results retain the requested native class, including exact 64-bit integer values and physical single precision; `\"char\"` produces a character row vector and `\"string\"` returns a scalar string.",
             "Every call honours the byte order configured when the live client was constructed. Little-endian is the default, but `\"big-endian\"` is respected for data written in network byte order; editing a visible copied property does not reconfigure the socket.",
             "The builtin gathers GPU-resident arguments automatically, executes the socket read on the CPU, and returns host values.",
-            "Errors are raised with MATLAB-compatible identifiers: invalid client structs trigger `RunMat:read:InvalidTcpClient`, timeouts emit `RunMat:read:Timeout`, and connection closures before a requested count is met raise `RunMat:read:ConnectionClosed`.",
+            "Errors are raised with stable identifiers: invalid or stale client objects trigger `RunMat:read:InvalidTcpClient`, timeouts emit `RunMat:read:Timeout`, and connection closures before a requested count is met raise `RunMat:read:ConnectionClosed`.",
         ] },
         BuiltinDocumentationSection { heading: "Host placement and compatibility", paragraphs: &[
             "Networking is a host-only subsystem. Resident client metadata or count arguments gather transparently before socket I/O. No acceleration-provider hook participates, and the result is always a host value in its selected native numeric class, a character array, or a string.",
@@ -44,7 +44,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     }],
     example_exemption: None,
     faqs: &[
-        BuiltinDocumentationFaq { question: "Does `read` modify the client struct?", answer: "No. The builtin interacts with the socket stored in RunMat’s internal registry. The visible struct returned from `tcpclient` is passed by value and is not mutated in place." },
+        BuiltinDocumentationFaq { question: "Does `read` modify the client object?", answer: "No. The builtin uses its sealed session-owned socket authority; visible object properties are not mutated in place." },
         BuiltinDocumentationFaq { question: "What happens when the remote host closes the connection?", answer: "If the peer closes the connection before the requested count is satisfied, `read` raises `RunMat:read:ConnectionClosed`. When no specific count is requested (`read(t)`), the builtin returns whatever data was available before the closure (possibly an empty vector)." },
         BuiltinDocumentationFaq { question: "Does `read` support infinite timeouts?", answer: "Yes. Pass `\"Timeout\", inf` when constructing the client to leave its socket in blocking mode. Editing the visible client property does not reconfigure the captured live socket." },
         BuiltinDocumentationFaq { question: "How are multibyte integers decoded?", answer: "RunMat honours the client’s `ByteOrder` property (`\"little-endian\"` or `\"big-endian\"`). For example, `read(t, 4, \"uint16\")` consumes eight bytes and interprets each pair in the configured byte order." },

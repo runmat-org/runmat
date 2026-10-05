@@ -14,7 +14,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "If no client connects before a finite timeout, `accept` raises `RunMat:accept:Timeout`. Other OS accept failures raise `RunMat:accept:AcceptFailed` with the underlying error detail.",
         ] },
         BuiltinDocumentationSection { heading: "Result and host execution", paragraphs: &[
-            "The current RunMat result is a client structure with fields such as `Address`, `Port`, `NumBytesAvailable`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`, plus internal socket registry fields. It is not yet a MATLAB handle object.",
+            "The RunMat result is a `tcpclient` object with visible properties such as `Address`, `Port`, `NumBytesAvailable`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`. A sealed session-owned socket authority is not exposed as a public property. The accepted peer `Port` is stored as `uint16`, unlike the `double` port property on a directly constructed client. This does not implement MATLAB handle-class behavior.",
             "The socket wait executes on the host. Resident server or timeout controls gather through their owner before waiting; no accelerator kernel performs network I/O. A successful call creates a separate accepted client while the server remains available for later accepts.",
             "The operating-system backlog determines how many connections can queue. Use `close(client)` to release an accepted socket and `close(server)` to release the listener. TLS is not supported by this plain TCP route.",
         ] },
@@ -44,7 +44,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does RunMat support IPv6 clients?", answer: "Yes. IPv4 and IPv6 peer addresses are recorded as text in the returned client’s `Address` field." },
         BuiltinDocumentationFaq { question: "Is there a queue limit for pending connections?", answer: "The OS backlog applies; a full queue can refuse new connections before `accept` sees them." },
         BuiltinDocumentationFaq { question: "Can I use `accept` in parallel workers?", answer: "Socket values are process-local registry references in the current implementation; do not transfer a server value to another worker as a portable ownership mechanism." },
-        BuiltinDocumentationFaq { question: "How do I close the accepted client?", answer: "Call `close(client)`; dropping the current struct alone does not necessarily close its registered socket." },
+        BuiltinDocumentationFaq { question: "How do I close the accepted client?", answer: "Call `close(client)` for deterministic release. The final owner or session teardown also retires its socket authority." },
         BuiltinDocumentationFaq { question: "What does `NumBytesAvailable` represent?", answer: "It is initially zero in the returned snapshot. The current value is not a live view of changing socket buffer state." },
         BuiltinDocumentationFaq { question: "Does the builtin support TLS?", answer: "No. This route supports plain TCP only." },
     ],

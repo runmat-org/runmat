@@ -2,7 +2,13 @@ use super::*;
 use runmat_types::*;
 
 fn server() -> ValueFact {
-    ValueFact::unknown(DynamicReason::RuntimeValue)
+    ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(super::super::TCPSERVER_CLASS.owned()),
+        properties: Default::default(),
+        properties_complete: false,
+        handle_semantics: Some(true),
+    }))
 }
 
 fn text() -> ValueFact {
@@ -31,12 +37,16 @@ fn accepted_client_port_is_uint16_and_option_accepts_character_row() {
     };
     let inferred = inference::infer(&request(option.clone()), &ACCEPT_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    let ValueKindFact::Struct(fields) = &inferred.outputs[0].kind else {
-        panic!("accepted client has struct facts");
+    let ValueKindFact::Object(object) = &inferred.outputs[0].kind else {
+        panic!("accepted client has sealed object facts");
     };
     assert_eq!(
-        fields
-            .fields
+        object.runtime_class,
+        Some(super::super::TCPCLIENT_CLASS.owned())
+    );
+    assert_eq!(
+        object
+            .properties
             .get("Port")
             .and_then(ValueFact::numeric)
             .map(|n| n.class),
@@ -63,7 +73,7 @@ fn accepted_client_fields_and_timeout_controls_are_sound() {
     };
     let inferred = inference::infer(&valid, &ACCEPT_CATALOG_ENTRY);
     assert!(inferred.diagnostics.is_empty());
-    assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Struct(_)));
+    assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Object(_)));
     assert_eq!(ACCEPT_DESCRIPTOR.signatures.len(), 3);
 
     let invalid = CallRequest {

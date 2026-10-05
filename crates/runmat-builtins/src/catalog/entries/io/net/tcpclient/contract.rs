@@ -122,7 +122,7 @@ const TCPCLIENT_OUTPUT_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescri
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "tcpclient handle struct for subsequent read/write/close operations.",
+    description: "tcpclient object with sealed authority for read/write/close operations.",
 }];
 const TCPCLIENT_INPUTS_HOST_PORT: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {

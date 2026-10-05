@@ -12,7 +12,7 @@ const WRITE_INPUTS_CLIENT_DATA: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "tcpclient handle struct.",
+        description: "tcpclient object with sealed session-owned socket authority.",
     },
     BuiltinParamDescriptor {
         name: "data",
@@ -28,7 +28,7 @@ const WRITE_INPUTS_CLIENT_DATA_DATATYPE: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "tcpclient handle struct.",
+        description: "tcpclient object with sealed session-owned socket authority.",
     },
     BuiltinParamDescriptor {
         name: "data",

@@ -15,7 +15,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Read and write timeouts use the captured `Timeout`. Passing `Inf` keeps operations blocking. The returned value reports the configured timeout verbatim.",
         ] },
         BuiltinDocumentationSection { heading: "Result, placement, and failures", paragraphs: &[
-            "The current RunMat implementation returns a client structure rather than a MATLAB handle object. Public port properties are double values; an internal field currently retains the socket registry identity. Editing visible properties does not reconfigure the live connection.",
+            "RunMat returns a `tcpclient` object with a sealed session-owned socket authority, not a MATLAB handle-class implementation. Public port properties are `double`; editing visible properties does not reconfigure the live connection.",
             "Connection failures raise `RunMat:tcpclient:ConnectionFailed` with the operating-system error. Invalid addresses, ports, and Name/Value controls use stable RunMat identifiers.",
             "Automatically resident inputs gather through their owner. Explicit `gpuArray` input requires RunMat mode; the result remains host-resident. No accelerator kernel participates in TCP connection setup.",
         ] },

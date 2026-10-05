@@ -4,7 +4,13 @@ use runmat_types::*;
 #[test]
 fn inference_keeps_peer_dependent_string_or_timeout_double_dynamic_but_host_owned() {
     let request = CallRequest {
-        arguments: vec![ValueFact::unknown(DynamicReason::RuntimeValue)],
+        arguments: vec![ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(super::super::TCPCLIENT_CLASS.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }))],
         literals: LiteralContext::default(),
         outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
     };

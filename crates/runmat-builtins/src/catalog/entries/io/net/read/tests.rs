@@ -5,6 +5,16 @@ fn unknown_client() -> ValueFact {
     ValueFact::unknown(DynamicReason::RuntimeValue)
 }
 
+fn sealed_client() -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(super::super::TCPCLIENT_CLASS.owned()),
+        properties: Default::default(),
+        properties_complete: false,
+        handle_semantics: Some(true),
+    }))
+}
+
 fn numeric_count() -> ValueFact {
     ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
@@ -41,7 +51,7 @@ fn datatype_character_row_is_admitted_and_multiline_character_is_rejected() {
 #[test]
 fn default_and_literal_datatype_keep_exact_host_output_class_and_count_shape() {
     let default = CallRequest {
-        arguments: vec![unknown_client()],
+        arguments: vec![sealed_client()],
         literals: LiteralContext::default(),
         outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
     };
