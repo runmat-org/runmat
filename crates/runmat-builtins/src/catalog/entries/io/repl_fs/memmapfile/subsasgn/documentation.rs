@@ -40,6 +40,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "The receiver's selected provider, opened file identity, and session authority remain captured. A pending resident rhs or index may materialize before file effects; unsupported or invalid geometry rejects before writes.",
                 "A multi-chunk update is not atomic. The source of a mapped write error reports whether the current chunk committed bytes or has indeterminate effects, while earlier successful chunks remain committed. Synchronous codec and provider phases may delay cancellation, and large assignments may use substantial host memory.",
+                "A malformed standard S reports InvalidObjectSubscriptPath; a well-formed S naming an unsupported mapped property reports the memmapfile format diagnostic.",
             ],
         },
     ],

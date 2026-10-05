@@ -39,6 +39,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "The selected filesystem provider and session owner remain captured across suspension. Provider-resident indices may materialize before a mapped read. The result is a host value; no GPU kernel or distributed transfer of the opened file handle is implied.",
                 "Whole Data and codec decoding can allocate substantial host memory, and synchronous provider or codec work may delay cancellation. A file extent limits offsets, not host memory use.",
+                "A malformed standard S reports InvalidObjectSubscriptPath; a well-formed S naming an unsupported mapped property reports the memmapfile format diagnostic.",
             ],
         },
     ],
