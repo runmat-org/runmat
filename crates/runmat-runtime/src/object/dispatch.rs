@@ -439,6 +439,23 @@ pub async fn invoke_resolved_object_index_path_method(
     .await
 }
 
+pub async fn invoke_resolved_object_index_path_method_in_context(
+    runtime: &crate::context::RuntimeContext,
+    resolution: &crate::object::protocol::ProtocolResolution,
+    base: Value,
+    path: ObjectSubscriptPath,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    crate::object::protocol::invoke_resolved_object_protocol_in_context(
+        runtime,
+        resolution,
+        base,
+        path,
+        requested_outputs,
+    )
+    .await
+}
+
 pub async fn call_method_or_member_index_with_outputs(
     base: Value,
     identity: CallableIdentity,

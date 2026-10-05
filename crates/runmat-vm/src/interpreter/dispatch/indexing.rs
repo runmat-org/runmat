@@ -12,7 +12,7 @@ use runmat_runtime::indexing::selectors::{
 use runmat_runtime::indexing::write_linear as idx_write_linear;
 use runmat_runtime::indexing::write_slice as idx_write_slice;
 use runmat_runtime::object::dispatch::{
-    invoke_resolved_object_index_path_method, resolve_object_index_protocol,
+    invoke_resolved_object_index_path_method_in_context, resolve_object_index_protocol,
 };
 use runmat_runtime::object::indexing::{
     ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
@@ -236,6 +236,7 @@ fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Optio
 }
 
 async fn assign_object_scalar_indices(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     indices: Vec<usize>,
     rhs: Value,
@@ -247,7 +248,8 @@ async fn assign_object_scalar_indices(
         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
             ObjectIndexSelector::ScalarIndices { indices },
         ));
-        return runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+        return runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
+            runtime,
             &method,
             base,
             path,
@@ -259,6 +261,7 @@ async fn assign_object_scalar_indices(
 }
 
 async fn invoke_object_brace_read(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     indices: Vec<Value>,
     requested_outputs: usize,
@@ -269,13 +272,19 @@ async fn invoke_object_brace_read(
         ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
             components: indices.into_iter().map(Into::into).collect(),
         }));
-    let sequence =
-        invoke_resolved_object_index_path_method(&resolution, base, path, requested_outputs)
-            .await?;
+    let sequence = invoke_resolved_object_index_path_method_in_context(
+        runtime,
+        &resolution,
+        base,
+        path,
+        requested_outputs,
+    )
+    .await?;
     resolve_single_sequence(sequence)
 }
 
 async fn invoke_object_brace_assignment(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     indices: Vec<Value>,
     rhs: Value,
@@ -292,7 +301,8 @@ async fn invoke_object_brace_assignment(
         ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
             components: indices.into_iter().map(Into::into).collect(),
         }));
-    runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+    runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
+        runtime,
         &method,
         base,
         path,
@@ -435,7 +445,8 @@ async fn execute_brace_operation(
                     ) {
                         return Err(err);
                     }
-                    invoke_object_brace_read(Value::Object(obj), raw_indices.to_vec(), 1).await?
+                    invoke_object_brace_read(runtime, Value::Object(obj), raw_indices.to_vec(), 1)
+                        .await?
                 }
                 Value::HandleObject(handle) => {
                     if let Some(err) = missing_member_index_overload_error(
@@ -444,8 +455,13 @@ async fn execute_brace_operation(
                     ) {
                         return Err(err);
                     }
-                    invoke_object_brace_read(Value::HandleObject(handle), raw_indices.to_vec(), 1)
-                        .await?
+                    invoke_object_brace_read(
+                        runtime,
+                        Value::HandleObject(handle),
+                        raw_indices.to_vec(),
+                        1,
+                    )
+                    .await?
                 }
                 Value::Cell(ca) => {
                     let indices = resolve_cell_indices(raw_indices).await?;
@@ -506,6 +522,7 @@ async fn execute_brace_operation(
                         return Err(err);
                     }
                     invoke_object_brace_assignment(
+                        runtime,
                         Value::Object(obj),
                         raw_indices.to_vec(),
                         rhs,
@@ -520,6 +537,7 @@ async fn execute_brace_operation(
                         return Err(err);
                     }
                     invoke_object_brace_assignment(
+                        runtime,
                         Value::HandleObject(handle),
                         raw_indices.to_vec(),
                         rhs,
@@ -709,7 +727,8 @@ pub async fn paren_index_sequence(
                     components: raw_indices.into_iter().map(Into::into).collect(),
                 },
             ));
-            return invoke_resolved_object_index_path_method(
+            return invoke_resolved_object_index_path_method_in_context(
+                runtime,
                 &resolution,
                 base,
                 path,
@@ -1017,15 +1036,28 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Object(obj) => stack.push(
-                    assign_object_scalar_indices(Value::Object(obj), indices, rhs, delete).await?,
+                    assign_object_scalar_indices(runtime, Value::Object(obj), indices, rhs, delete)
+                        .await?,
                 ),
                 Value::HandleObject(handle) => stack.push(
-                    assign_object_scalar_indices(Value::HandleObject(handle), indices, rhs, delete)
-                        .await?,
+                    assign_object_scalar_indices(
+                        runtime,
+                        Value::HandleObject(handle),
+                        indices,
+                        rhs,
+                        delete,
+                    )
+                    .await?,
                 ),
                 Value::ObjectArray(array) => stack.push(
-                    assign_object_scalar_indices(Value::ObjectArray(array), indices, rhs, delete)
-                        .await?,
+                    assign_object_scalar_indices(
+                        runtime,
+                        Value::ObjectArray(array),
+                        indices,
+                        rhs,
+                        delete,
+                    )
+                    .await?,
                 ),
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
@@ -1195,9 +1227,14 @@ pub async fn dispatch_indexing(
                         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
                             object_slice_selector(*dims, *colon_mask, *end_mask, &numeric)?,
                         ));
-                        let sequence =
-                            invoke_resolved_object_index_path_method(&resolution, base, path, 1)
-                                .await?;
+                        let sequence = invoke_resolved_object_index_path_method_in_context(
+                            runtime,
+                            &resolution,
+                            base,
+                            path,
+                            1,
+                        )
+                        .await?;
                         stack.push(resolve_single_sequence(sequence)?);
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
@@ -1405,7 +1442,8 @@ pub async fn dispatch_indexing(
                             unreachable!()
                         };
                         stack.push(
-                            runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+                            runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
+                                runtime,
                                 &method,
                                 base,
                                 path,

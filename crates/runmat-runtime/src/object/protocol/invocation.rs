@@ -1,5 +1,9 @@
 use super::{ObjectProtocolCallingConvention, ProtocolResolution, ResolvedObjectMethod};
-use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+use crate::call::descriptor::{
+    execute_callable_descriptor, execute_callable_descriptor_in_context, CallableCallKind,
+    CallableDescriptor,
+};
+use crate::context::RuntimeContext;
 use crate::object::indexing::ObjectSubscriptPath;
 use crate::runtime_error::semantic_error;
 use crate::sequence::{ResolveValueSequence, SequenceResolutionContext};
@@ -12,6 +16,34 @@ pub async fn invoke_resolved_object_protocol(
     path: ObjectSubscriptPath,
     requested_outputs: usize,
 ) -> Result<ValueSequence, RuntimeError> {
+    invoke_resolved_object_protocol_with_context(None, resolution, base, path, requested_outputs)
+        .await
+}
+
+pub async fn invoke_resolved_object_protocol_in_context(
+    runtime: &RuntimeContext,
+    resolution: &ProtocolResolution,
+    base: Value,
+    path: ObjectSubscriptPath,
+    requested_outputs: usize,
+) -> Result<ValueSequence, RuntimeError> {
+    invoke_resolved_object_protocol_with_context(
+        Some(runtime),
+        resolution,
+        base,
+        path,
+        requested_outputs,
+    )
+    .await
+}
+
+async fn invoke_resolved_object_protocol_with_context(
+    runtime: Option<&RuntimeContext>,
+    resolution: &ProtocolResolution,
+    base: Value,
+    path: ObjectSubscriptPath,
+    requested_outputs: usize,
+) -> Result<ValueSequence, RuntimeError> {
     let ProtocolResolution::Method(method) = resolution else {
         return Err(semantic_error(
             "MissingObjectProtocol",
@@ -19,7 +51,7 @@ pub async fn invoke_resolved_object_protocol(
         ));
     };
     let arguments = invocation_arguments(method, base, path)?;
-    invoke_resolved_object_method(method, arguments, requested_outputs).await
+    invoke_resolved_object_method_with_context(runtime, method, arguments, requested_outputs).await
 }
 
 /// Invoke a prepared assignment protocol with the exact comma-separated RHS.
@@ -31,9 +63,29 @@ pub async fn invoke_resolved_object_assignment(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
 ) -> Result<Value, RuntimeError> {
+    invoke_resolved_object_assignment_with_context(None, method, base, path, values).await
+}
+
+pub async fn invoke_resolved_object_assignment_in_context(
+    runtime: &RuntimeContext,
+    method: &ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values).await
+}
+
+async fn invoke_resolved_object_assignment_with_context(
+    runtime: Option<&RuntimeContext>,
+    method: &ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+) -> Result<Value, RuntimeError> {
     let mut arguments = invocation_arguments(method, base, path)?;
     arguments.extend(values);
-    let mut values = invoke_resolved_object_method(method, arguments, 1)
+    let mut values = invoke_resolved_object_method_with_context(runtime, method, arguments, 1)
         .await?
         .resolve(
             runmat_types::SequenceUse::RequireSingle,
@@ -52,20 +104,42 @@ pub async fn invoke_resolved_object_method(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<ValueSequence, RuntimeError> {
+    invoke_resolved_object_method_with_context(None, method, arguments, requested_outputs).await
+}
+
+pub async fn invoke_resolved_object_method_in_context(
+    runtime: &RuntimeContext,
+    method: &ResolvedObjectMethod,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<ValueSequence, RuntimeError> {
+    invoke_resolved_object_method_with_context(Some(runtime), method, arguments, requested_outputs)
+        .await
+}
+
+async fn invoke_resolved_object_method_with_context(
+    runtime: Option<&RuntimeContext>,
+    method: &ResolvedObjectMethod,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<ValueSequence, RuntimeError> {
     if !super::resolved_method_is_current(method) {
         return Err(semantic_error(
             "StaleObjectProtocolResolution",
             "object protocol binding changed after the operation was prepared",
         ));
     }
-    execute_callable_descriptor(CallableDescriptor::resolved(
+    let descriptor = CallableDescriptor::resolved(
         method.callable.clone(),
         arguments,
         requested_outputs,
         method.fallback,
         CallableCallKind::Direct,
-    ))
-    .await
+    );
+    match runtime {
+        Some(runtime) => execute_callable_descriptor_in_context(runtime, descriptor).await,
+        None => execute_callable_descriptor(descriptor).await,
+    }
 }
 
 /// Invoke an object-defined `end(obj, k, n)` selector exactly once. `k` and
