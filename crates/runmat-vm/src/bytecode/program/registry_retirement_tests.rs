@@ -220,3 +220,55 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
     assert_eq!(old.resolve_name("second"), Some(FunctionId(5)));
     assert!(registry.get(FunctionId(1)).is_none());
 }
+
+#[test]
+fn reused_id_static_edge_and_dynamic_name_have_distinct_owners() {
+    let mut registry = registry();
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .private_owner_scope = "old/private".into();
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)];
+    let owners = registry
+        .definition_dependency_owners(FunctionId(1))
+        .unwrap();
+    let issuer = std::sync::Arc::new(());
+    let authority = runmat_value::BoundFunctionAuthority::local(
+        std::sync::Arc::downgrade(&issuer),
+        runmat_value::FunctionDefinitionOwner::issue(&owners[0].1, 1),
+        owners[1..]
+            .iter()
+            .map(|(id, owner)| runmat_value::FunctionDefinitionOwner::issue(owner, id.0))
+            .collect(),
+        runmat_value::LocalExport::Ephemeral,
+    );
+    registry.insert_replacing_name(function(1, "first", 7));
+    registry.insert_replacing_name(function(2, "second", 7));
+    let view = registry.owned_view(FunctionId(1), &authority).unwrap();
+    assert_eq!(view.resolve_name("second"), Some(FunctionId(2)));
+    assert_eq!(
+        view.get(FunctionId(2)).unwrap().source_id,
+        Some(SourceId(5))
+    );
+    assert_eq!(
+        view.current_view().get(FunctionId(2)).unwrap().source_id,
+        Some(SourceId(7))
+    );
+    assert_eq!(
+        view.get(FunctionId(1)).unwrap().private_owner_scope,
+        "old/private"
+    );
+    assert_eq!(
+        view.current_view()
+            .get(FunctionId(1))
+            .unwrap()
+            .private_owner_scope,
+        ""
+    );
+    assert!(view.static_binding(FunctionId(2)).is_some());
+}
