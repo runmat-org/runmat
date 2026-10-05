@@ -185,8 +185,8 @@ impl<'a> RowReader<'a> {
             if trailing_cr_work != 0 {
                 checked_row_work(cooperation, path, trailing_cr_work).await?;
             }
-            // Validation happens once per completed row, not once per trailing
-            // CR or BOM. The bytewise suffix scan above cannot split UTF-8.
+            // Validate here rather than repeatedly during trailing CR/BOM
+            // trimming. The bytewise suffix scan above cannot split UTF-8.
             let line_text = self.line.as_str();
             let mut text_start = if self.line_number == 1 && line_text.starts_with('\u{FEFF}') {
                 '\u{FEFF}'.len_utf8()

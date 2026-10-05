@@ -14,6 +14,14 @@ pub struct ExactHostEffectBytes {
 }
 
 impl ExactHostEffectBytes {
+    #[cfg(test)]
+    pub(crate) fn test_buffer(capacity: usize) -> Self {
+        #[derive(Debug)]
+        struct TestClaim;
+        impl HostEffectLiveAllocationReservation for TestClaim {}
+        Self::new(capacity, Arc::new(TestClaim)).expect("test exact byte buffer")
+    }
+
     pub(super) fn new(
         capacity: usize,
         claim: Arc<dyn HostEffectLiveAllocationReservation>,

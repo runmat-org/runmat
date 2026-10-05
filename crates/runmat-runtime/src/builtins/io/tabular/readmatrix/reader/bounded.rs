@@ -34,7 +34,12 @@ struct SampleRows {
 }
 
 impl SampleRows {
-    fn new(staged: Option<ExactHostEffectBytes>) -> Self {
+    fn new(mut staged: Option<ExactHostEffectBytes>) -> Self {
+        if let Some(buffer) = staged.as_mut() {
+            // A claimed workspace may be reused after a previous parse. Its
+            // initialized prefix is not assumed to contain valid UTF-8.
+            buffer.clear();
+        }
         Self {
             text: staged.map_or_else(|| LineBuffer::Ordinary(String::new()), LineBuffer::Staged),
             lines: [SampleLine::default(); 32],
@@ -191,4 +196,20 @@ fn matrix_overflow() -> RuntimeError {
         &READMATRIX_ERROR_TENSOR_BUILD,
         "readmatrix: matrix dimensions exceed addressable storage",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reused_sample_workspace_discards_invalid_old_bytes_before_utf8_access() {
+        let mut workspace = ExactHostEffectBytes::test_buffer(16);
+        workspace.append(&[0xff]).expect("previous invalid bytes");
+        let mut samples = SampleRows::new(Some(workspace));
+        samples.push(3, "1,2").expect("fresh sample");
+        let line = samples.lines[0];
+        assert_eq!(line.number, 3);
+        assert_eq!(&samples.text.as_str()[line.start..line.end], "1,2");
+    }
 }
