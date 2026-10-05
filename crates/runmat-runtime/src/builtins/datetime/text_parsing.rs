@@ -127,7 +127,7 @@ pub(super) fn parse_text_input(
                     .to_string(),
                 ));
             }
-            let (naive, has_time) = parse_datetime_text_with_input_format(&text, input_format)
+            let (naive, has_time) = parse_datetime_text_with_input_format(text, input_format)
                 .ok_or_else(|| {
                     datetime_error(format!("datetime: unable to parse date/time text '{text}'"))
                 })?;
