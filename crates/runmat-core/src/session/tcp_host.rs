@@ -20,6 +20,26 @@ struct LazyNativeTcpService {
 }
 
 impl LazyNativeTcpService {
+    fn get_or_initialize(
+        service: &OnceCell<NativeTcpService>,
+    ) -> Result<&NativeTcpService, TcpTransportError> {
+        if service.get().is_none() {
+            let driver = super::host_driver::host_driver().map_err(|source| {
+                TcpTransportError::with_source(
+                    TcpTransportErrorKind::Unsupported,
+                    "native TCP host driver is unavailable",
+                    source,
+                )
+            })?;
+            // The cell has one local owner. Failed initialization remains
+            // retryable; no await or callback separates check and publication.
+            let _ = service.set(NativeTcpService::new(driver.handle().clone()));
+        }
+        Ok(service
+            .get()
+            .expect("TCP service initialized on this local owner"))
+    }
+
     fn call<T: 'static>(
         &self,
         call: impl FnOnce(&NativeTcpService) -> RuntimeServiceFuture<Result<T, TcpTransportError>>
@@ -27,28 +47,22 @@ impl LazyNativeTcpService {
     ) -> RuntimeServiceFuture<Result<T, TcpTransportError>> {
         let service = Rc::clone(&self.service);
         Box::pin(async move {
-            if service.get().is_none() {
-                let driver = super::host_driver::host_driver().map_err(|source| {
-                    TcpTransportError::with_source(
-                        TcpTransportErrorKind::Unsupported,
-                        "native TCP host driver is unavailable",
-                        source,
-                    )
-                })?;
-                // One local Rc owner; there is no await or callback between
-                // this check and publication. Failed driver construction is
-                // returned and remains retryable, never cached as a dummy.
-                let _ = service.set(NativeTcpService::new(driver.handle().clone()));
-            }
-            let native = service
-                .get()
-                .expect("TCP service initialized on this local owner");
+            let native = Self::get_or_initialize(&service)?;
             call(native).await
         })
     }
 }
 
 impl RuntimeTcpService for LazyNativeTcpService {
+    fn register_session_cleanup(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), TcpTransportError> {
+        // Registration happens at TCP invocation admission, not session
+        // construction. Use the same native owner as subsequent socket calls.
+        Self::get_or_initialize(&self.service)?.register_session_cleanup(runtime)
+    }
+
     fn describe_client(
         &self,
         issuer: RuntimeTcpIssuer,
@@ -120,3 +134,6 @@ impl RuntimeTcpService for LazyNativeTcpService {
 pub(super) fn default_tcp_service() -> Rc<dyn RuntimeTcpService> {
     Rc::new(LazyNativeTcpService::default())
 }
+
+#[cfg(test)]
+mod tests;
