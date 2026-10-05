@@ -15,6 +15,10 @@ use runmat_runtime::RuntimeError;
 use runmat_types::MemberAccess;
 use runmat_value::{MException, Value};
 
+#[path = "calls/dispatch.rs"]
+mod dispatch;
+pub(super) use dispatch::{dispatch_call, CallDispatchContext};
+
 pub enum BuiltinHandling {
     Completed(runmat_value::ValueSequence),
     Caught,
