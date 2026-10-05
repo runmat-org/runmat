@@ -7,7 +7,7 @@ use crate::RuntimeError;
 
 pub(super) enum LineReadError {
     Io(io::Error),
-    Cooperation(RuntimeError),
+    Cooperation(Box<RuntimeError>),
 }
 
 /// Reads through one retained invocation budget. At most 4 KiB is copied
@@ -44,7 +44,7 @@ pub(super) async fn read_line_bytes<R: BufRead>(
         cooperation
             .completed(count)
             .await
-            .map_err(LineReadError::Cooperation)?;
+            .map_err(|source| LineReadError::Cooperation(Box::new(source)))?;
         if done {
             return Ok(total);
         }

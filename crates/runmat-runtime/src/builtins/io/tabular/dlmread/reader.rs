@@ -41,7 +41,7 @@ pub(super) async fn read_dlm_rows(
                     format!("dlmread: failed to read '{}': {source}", path.display()),
                     source,
                 ),
-                LineReadError::Cooperation(source) => source,
+                LineReadError::Cooperation(source) => *source,
             })?;
         if bytes == 0 {
             break;

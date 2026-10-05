@@ -114,7 +114,7 @@ pub(super) async fn read_numeric_matrix(
                     checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
                 }
             }
-            if max_cols % ROW_WORK_CHUNK != 0 {
+            if !max_cols.is_multiple_of(ROW_WORK_CHUNK) {
                 checked_row_work(cooperation, path, max_cols % ROW_WORK_CHUNK).await?;
             }
         }
@@ -137,7 +137,7 @@ pub(super) async fn read_numeric_matrix(
                 checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
             }
         }
-        if max_cols % ROW_WORK_CHUNK != 0 {
+        if !max_cols.is_multiple_of(ROW_WORK_CHUNK) {
             checked_row_work(cooperation, path, max_cols % ROW_WORK_CHUNK).await?;
         }
     }

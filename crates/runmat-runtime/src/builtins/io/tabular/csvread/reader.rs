@@ -41,7 +41,7 @@ pub(super) async fn read_csv_rows(
                     format!("csvread: failed to read '{}': {source}", path.display()),
                     source,
                 ),
-                LineReadError::Cooperation(source) => source,
+                LineReadError::Cooperation(source) => *source,
             })?;
         if bytes == 0 {
             break;

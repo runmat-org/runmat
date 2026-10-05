@@ -355,9 +355,7 @@ fn resolve_path(value: &Value, captured_home: Option<&Path>) -> BuiltinResult<Pa
                 "xlsread: unable to resolve home directory",
             )
         })?;
-        let suffix = path
-            .trim_start_matches('~')
-            .trim_start_matches(|ch| ch == '/' || ch == '\\');
+        let suffix = path.trim_start_matches('~').trim_start_matches(['/', '\\']);
         return Ok(home.join(suffix));
     }
     Ok(PathBuf::from(path))
