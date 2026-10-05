@@ -141,12 +141,15 @@ mod tests {
         assert_eq!(input.path, PathBuf::from("/selected/tone.wav"));
         let _replacement_guard = fs::replace_provider(replacement);
         fs::set_current_dir("/replacement").expect("replacement cwd");
-        let opened = block_on(input.open()).expect("captured source open");
+        let mut opened = block_on(input.open()).expect("captured source open");
         assert_eq!(
             opened.opened_extent(),
-            None,
-            "memory-backed opened input does not inherit native direct-read certification"
+            Some(8),
+            "MemoryFS now supplies its own bounded opened snapshot, not a native memory-peak certificate"
         );
+        let mut opened_bytes = [0; 8];
+        opened.read_exact(&mut opened_bytes).expect("opened snapshot");
+        assert_eq!(&opened_bytes, b"selected");
         drop(opened);
         let bytes = block_on(input.provider.read(&input.path)).expect("captured read");
         assert_eq!(bytes, b"selected");
