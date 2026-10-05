@@ -134,7 +134,13 @@ async fn build_numeric_output(
             source,
         )
     })?;
-    data.resize(data_len, f64::NAN);
+    while data.len() < data_len {
+        let chunk = (data_len - data.len()).min(1024);
+        let next = data.len() + chunk;
+        data.resize(next, f64::NAN);
+        checkpoint_cells(cooperation, selected, chunk).await?;
+    }
+    let mut work = 0;
     for out_row in 0..row_count {
         for out_col in 0..col_count {
             let source_row = first_row + out_row;
@@ -145,9 +151,14 @@ async fn build_numeric_output(
                 .and_then(cell_to_numeric)
                 .unwrap_or(f64::NAN);
             data[out_row + out_col * row_count] = value;
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
-        checkpoint_cells(cooperation, selected, col_count).await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
     let tensor = Tensor::new(data, vec![row_count, col_count]).map_err(|err| {
         xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}"))
     })?;
@@ -163,6 +174,7 @@ async fn numeric_bounds(
     let mut last_row = None;
     let mut first_col = None;
     let mut last_col = None;
+    let mut work = 0;
     for (row_idx, row) in rows.iter().enumerate() {
         for (col_idx, cell) in row.iter().enumerate() {
             if cell_to_numeric(cell).is_some() {
@@ -171,9 +183,14 @@ async fn numeric_bounds(
                 first_col = Some(first_col.map_or(col_idx, |current: usize| current.min(col_idx)));
                 last_col = Some(last_col.map_or(col_idx, |current: usize| current.max(col_idx)));
             }
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
-        checkpoint_cells(cooperation, selected, row.len()).await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
     match (first_row, last_row, first_col, last_col) {
         (Some(first_row), Some(last_row), Some(first_col), Some(last_col)) => {
             Ok(Some((first_row, last_row, first_col, last_col)))
@@ -187,8 +204,9 @@ async fn build_text_output(
     cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
 ) -> BuiltinResult<Value> {
-    let (row_count, col_count) = rectangular_shape(rows);
+    let (row_count, col_count) = rectangular_shape(rows, cooperation, selected).await?;
     let mut values = output_values(row_count, col_count)?;
+    let mut work = 0;
     for row_idx in 0..row_count {
         for col_idx in 0..col_count {
             let text = rows
@@ -200,9 +218,14 @@ async fn build_text_output(
                 None => String::new(),
             };
             values.push(Value::from(text));
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
-        checkpoint_cells(cooperation, selected, col_count).await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
     crate::make_cell(values, row_count, col_count)
         .map_err(|err| xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}")))
 }
@@ -212,8 +235,9 @@ async fn build_raw_output(
     cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
 ) -> BuiltinResult<Value> {
-    let (row_count, col_count) = rectangular_shape(rows);
+    let (row_count, col_count) = rectangular_shape(rows, cooperation, selected).await?;
     let mut values = output_values(row_count, col_count)?;
+    let mut work = 0;
     for row_idx in 0..row_count {
         for col_idx in 0..col_count {
             let value = rows
@@ -225,9 +249,14 @@ async fn build_raw_output(
                 None => Value::Num(f64::NAN),
             };
             values.push(value);
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
-        checkpoint_cells(cooperation, selected, col_count).await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
     crate::make_cell(values, row_count, col_count)
         .map_err(|err| xlsread_error_with(&XLSREAD_ERROR_TENSOR_BUILD, format!("xlsread: {err}")))
 }
@@ -250,10 +279,21 @@ fn output_values(rows: usize, cols: usize) -> BuiltinResult<Vec<Value>> {
     Ok(values)
 }
 
-fn rectangular_shape(rows: &[Vec<SpreadsheetData>]) -> (usize, usize) {
+async fn rectangular_shape(
+    rows: &[Vec<SpreadsheetData>],
+    cooperation: &mut TabularCooperation<'_>,
+    selected: &TabularFsPath,
+) -> BuiltinResult<(usize, usize)> {
     let row_count = rows.len();
-    let col_count = rows.iter().map(Vec::len).max().unwrap_or(0);
-    (row_count, col_count)
+    let mut col_count = 0;
+    for (index, row) in rows.iter().enumerate() {
+        col_count = col_count.max(row.len());
+        if (index + 1) % 1024 == 0 {
+            checkpoint_cells(cooperation, selected, 1024).await?;
+        }
+    }
+    checkpoint_cells(cooperation, selected, row_count % 1024).await?;
+    Ok((row_count, col_count))
 }
 
 fn cell_to_numeric(cell: &SpreadsheetData) -> Option<f64> {

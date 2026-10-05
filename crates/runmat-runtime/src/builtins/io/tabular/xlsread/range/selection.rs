@@ -11,11 +11,19 @@ pub(super) async fn trim_empty_edges(
         return Ok(rows);
     }
     let row_count = rows.len();
-    let col_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let mut col_count = 0;
+    for (index, row) in rows.iter().enumerate() {
+        col_count = col_count.max(row.len());
+        if (index + 1) % 1024 == 0 {
+            checkpoint_cells(cooperation, selected, 1024).await?;
+        }
+    }
+    checkpoint_cells(cooperation, selected, row_count % 1024).await?;
     let mut first_row = None;
     let mut last_row = None;
     let mut first_col = None;
     let mut last_col = None;
+    let mut work = 0;
 
     for row in 0..row_count {
         for col in 0..col_count {
@@ -29,9 +37,14 @@ pub(super) async fn trim_empty_edges(
                 first_col = Some(first_col.map_or(col, |current: usize| current.min(col)));
                 last_col = Some(last_col.map_or(col, |current: usize| current.max(col)));
             }
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
-        checkpoint_cells(cooperation, selected, col_count).await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
 
     let (Some(first_row), Some(last_row), Some(first_col), Some(last_col)) =
         (first_row, last_row, first_col, last_col)
@@ -39,6 +52,7 @@ pub(super) async fn trim_empty_edges(
         return Ok(Vec::new());
     };
     let mut trimmed = Vec::new();
+    let mut work = 0;
     for row in rows.iter().take(last_row + 1).skip(first_row) {
         let mut out = Vec::new();
         for col in first_col..=last_col {
@@ -47,9 +61,14 @@ pub(super) async fn trim_empty_edges(
                 None => SpreadsheetData::Empty,
             };
             out.push(cell);
+            work += 1;
+            if work == 1024 {
+                checkpoint_cells(cooperation, selected, work).await?;
+                work = 0;
+            }
         }
         trimmed.push(out);
-        checkpoint_cells(cooperation, selected, last_col - first_col + 1).await?;
     }
+    checkpoint_cells(cooperation, selected, work).await?;
     Ok(trimmed)
 }
