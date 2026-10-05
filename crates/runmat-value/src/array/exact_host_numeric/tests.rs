@@ -47,27 +47,36 @@ fn permit(limit: usize) -> Permit {
 }
 
 fn floating_charge(payload_and_shape: usize) -> usize {
-    payload_and_shape + std::mem::size_of::<RustExactRelease>()
+    payload_and_shape
+        + std::mem::size_of::<RustExactRelease>()
+        + HostNumericBuffer::exact_metadata_bytes()
+}
+
+fn integer_charge(payload_and_shape: usize) -> usize {
+    payload_and_shape + HostNumericBuffer::exact_metadata_bytes()
 }
 
 #[test]
 fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
     let shape_bytes = 2 * std::mem::size_of::<usize>();
-    let denied = permit(16 + shape_bytes - 1);
+    let denied = permit(integer_charge(16 + shape_bytes) - 1);
     assert!(matches!(
         ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &denied),
         Err(ExactHostNumericAllocationError::ExceedsPermit)
     ));
     assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
 
-    let quota = permit(16 + shape_bytes);
+    let quota = permit(integer_charge(16 + shape_bytes));
     let mut allocation = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &quota).unwrap();
     allocation
         .as_u64_slice_mut()
         .unwrap()
         .copy_from_slice(&[9_007_199_254_740_993, u64::MAX]);
     let original = allocation.as_u64_slice_mut().unwrap().as_ptr();
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 16 + shape_bytes);
+    assert_eq!(
+        quota.retained.load(Ordering::SeqCst),
+        integer_charge(16 + shape_bytes)
+    );
     let tensor = allocation.into_tensor().expect("exact geometry");
     assert_eq!(tensor.shape, [1, 2]);
     assert_eq!(tensor.shape.capacity(), 2);
@@ -79,7 +88,10 @@ fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
         unsafe { tensor.host_buffer().foreign_data_pointer() }.cast::<u64>(),
         original.cast_mut()
     );
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 16 + shape_bytes);
+    assert_eq!(
+        quota.retained.load(Ordering::SeqCst),
+        integer_charge(16 + shape_bytes)
+    );
     drop(tensor);
     assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
 }
@@ -171,7 +183,7 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
     drop(tensor);
     assert_eq!(single_quota.retained.load(Ordering::SeqCst), 0);
 
-    let integer_quota = permit(16 + 2 * std::mem::size_of::<usize>());
+    let integer_quota = permit(integer_charge(16 + 2 * std::mem::size_of::<usize>()));
     let mut integers = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &integer_quota)
         .expect("exact integer owner");
     let integer_pointer = integers.as_u64_slice_mut().unwrap().as_ptr();
@@ -231,7 +243,7 @@ fn all_eight_integer_classes_move_exact_extrema_into_the_returned_tensor() {
     macro_rules! check {
         ($dtype:ident, $type:ty, $view:ident, $variant:ident, $low:expr, $high:expr) => {{
             let bytes = 2 * std::mem::size_of::<$type>();
-            let quota = permit(bytes);
+            let quota = permit(integer_charge(bytes));
             let mut allocation = ExactHostNumericAllocation::new(NumericDType::$dtype, 2, &quota)
                 .expect("exact integer allocation");
             assert_eq!(allocation.capacity_bytes(), bytes);
@@ -250,7 +262,7 @@ fn all_eight_integer_classes_move_exact_extrema_into_the_returned_tensor() {
                 pointer.cast_mut(),
                 "integer block moved without a payload copy"
             );
-            assert_eq!(quota.retained.load(Ordering::SeqCst), bytes);
+            assert_eq!(quota.retained.load(Ordering::SeqCst), integer_charge(bytes));
             drop(tensor);
             assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
         }};
@@ -274,7 +286,7 @@ fn all_eight_integer_classes_move_exact_extrema_into_the_returned_tensor() {
 
 #[test]
 fn integer_permit_rejection_overflow_and_shape_failure_release_exact_claim() {
-    let quota = permit(1);
+    let quota = permit(integer_charge(2) - 1);
     assert!(matches!(
         ExactHostNumericAllocation::new(NumericDType::U16, 1, &quota),
         Err(ExactHostNumericAllocationError::ExceedsPermit)
@@ -284,7 +296,7 @@ fn integer_permit_rejection_overflow_and_shape_failure_release_exact_claim() {
         ExactHostNumericAllocation::new(NumericDType::U64, usize::MAX, &quota),
         Err(ExactHostNumericAllocationError::LayoutOverflow)
     ));
-    let quota = permit(8);
+    let quota = permit(integer_charge(8));
     let owned = ExactHostNumericAllocation::new(NumericDType::I64, 1, &quota).unwrap();
     assert!(Tensor::from_host_buffer(owned.into_host_buffer(), vec![2, 1]).is_err());
     assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
@@ -292,7 +304,7 @@ fn integer_permit_rejection_overflow_and_shape_failure_release_exact_claim() {
 
 #[test]
 fn integer_copy_on_write_keeps_only_the_original_block_charged() {
-    let quota = permit(16);
+    let quota = permit(integer_charge(16));
     let mut owned = ExactHostNumericAllocation::new(NumericDType::U64, 2, &quota).unwrap();
     owned
         .as_u64_slice_mut()
@@ -300,7 +312,7 @@ fn integer_copy_on_write_keeps_only_the_original_block_charged() {
         .copy_from_slice(&[9_007_199_254_740_993, u64::MAX]);
     let original = Tensor::from_host_buffer(owned.into_host_buffer(), vec![1, 2]).unwrap();
     let mut clone = original.clone();
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 16);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), integer_charge(16));
     clone.set2(0, 0, 7.0).unwrap();
     assert_eq!(
         original.integer_storage(),
@@ -311,14 +323,14 @@ fn integer_copy_on_write_keeps_only_the_original_block_charged() {
         Some(&IntegerStorage::U64(vec![7, u64::MAX]))
     );
     drop(clone);
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 16);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), integer_charge(16));
     drop(original);
     assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
 }
 
 #[test]
 fn sole_owner_integer_mutation_keeps_block_and_materialization_releases_claim() {
-    let quota = permit(16);
+    let quota = permit(integer_charge(16));
     let mut owned = ExactHostNumericAllocation::new(NumericDType::I64, 2, &quota).unwrap();
     owned
         .as_i64_slice_mut()
@@ -330,7 +342,7 @@ fn sole_owner_integer_mutation_keeps_block_and_materialization_releases_claim() 
         .set_value(0, crate::NumericScalar::I64(-9_007_199_254_740_993))
         .unwrap();
     assert_eq!(unsafe { buffer.foreign_data_pointer_mut() }, pointer);
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 16);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), integer_charge(16));
     let detached = buffer.into_numeric_storage();
     assert_eq!(
         detached,
@@ -390,7 +402,7 @@ fn shared_clone_retains_reservation_until_original_allocation_drops() {
 
 #[test]
 fn exact_allocation_rejects_over_budget_and_overflow_without_leaking() {
-    let permit = permit(11);
+    let permit = permit(integer_charge(4));
     assert!(matches!(
         ExactHostNumericAllocation::new(NumericDType::F32, 3, &permit),
         Err(ExactHostNumericAllocationError::ExceedsPermit)
@@ -401,7 +413,7 @@ fn exact_allocation_rejects_over_budget_and_overflow_without_leaking() {
     ));
     let integer = ExactHostNumericAllocation::new(NumericDType::I16, 2, &permit)
         .expect("I16 is now an exact retained class");
-    assert_eq!(permit.retained.load(Ordering::SeqCst), 4);
+    assert_eq!(permit.retained.load(Ordering::SeqCst), integer_charge(4));
     drop(integer);
     assert_eq!(permit.retained.load(Ordering::SeqCst), 0);
 }

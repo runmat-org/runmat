@@ -187,6 +187,7 @@ impl ExactHostNumericAllocation {
         };
         let charged = charged
             .checked_add(release_bytes)
+            .and_then(|bytes| bytes.checked_add(HostNumericBuffer::exact_metadata_bytes()))
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
         let reservation = permit.reserve_exact(charged)?;
         if dtype.integer_class().is_some() {
@@ -350,7 +351,7 @@ impl ExactHostNumericAllocation {
 
     pub fn into_host_buffer(self) -> HostNumericBuffer {
         match self.allocation {
-            ExactAllocation::Floating(allocation) => HostNumericBuffer::try_adopt(
+            ExactAllocation::Floating(allocation) => HostNumericBuffer::try_adopt_exact(
                 allocation, self.dtype, self.len,
             )
             .unwrap_or_else(|(_, detail)| unreachable!("validated exact allocation: {detail}")),

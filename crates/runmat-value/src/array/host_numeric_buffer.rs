@@ -49,6 +49,10 @@ pub struct HostNumericBuffer {
 }
 
 impl HostNumericBuffer {
+    pub(crate) const fn exact_metadata_bytes() -> usize {
+        HostBuffer::<HostNumericStorage>::exact_metadata_bytes()
+    }
+
     pub fn from_numeric_storage(storage: NumericStorage) -> Self {
         let storage = match storage {
             NumericStorage::F64(values) => HostNumericStorage::F64(HostData::from_vec(values)),
@@ -77,6 +81,23 @@ impl HostNumericBuffer {
         dtype: NumericDType,
         len: usize,
     ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        Self::try_adopt_with_owner(allocation, dtype, len, false)
+    }
+
+    pub(crate) fn try_adopt_exact(
+        allocation: AdoptedHostAllocation,
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        Self::try_adopt_with_owner(allocation, dtype, len, true)
+    }
+
+    fn try_adopt_with_owner(
+        allocation: AdoptedHostAllocation,
+        dtype: NumericDType,
+        len: usize,
+        exact: bool,
+    ) -> Result<Self, (AdoptedHostAllocation, String)> {
         macro_rules! adopt {
             ($variant:ident, $type:ty) => {
                 HostData::<$type>::try_adopt(allocation, len).map(HostNumericStorage::$variant)
@@ -100,7 +121,11 @@ impl HostNumericBuffer {
             }
         }?;
         Ok(Self {
-            storage: HostBuffer::new(storage),
+            storage: if exact {
+                HostBuffer::new_exact(storage)
+            } else {
+                HostBuffer::new(storage)
+            },
         })
     }
 
@@ -109,7 +134,7 @@ impl HostNumericBuffer {
         reservation: Arc<dyn super::ExactHostAllocationReservation>,
     ) -> Self {
         Self {
-            storage: HostBuffer::new(HostNumericStorage::Integer(OwnedIntegerStorage {
+            storage: HostBuffer::new_exact(HostNumericStorage::Integer(OwnedIntegerStorage {
                 values,
                 _reservation: Some(reservation),
             })),
