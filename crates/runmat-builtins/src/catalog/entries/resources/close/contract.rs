@@ -108,9 +108,24 @@ pub const CLOSE_VARIADIC_TARGETS_EXTENSION: BuiltinExtensionDescriptor =
         description: "Separate variadic targets are a RunMat extension.",
         error_identifier: Some("RunMat:compatibility:CloseVariadicTargetsExtension"),
     };
-pub const CLOSE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+pub const CLOSE_NETWORK_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "close-network-selector",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "The clients and servers TCP scope selectors are RunMat extensions.",
+        error_identifier: Some("RunMat:compatibility:CloseNetworkSelectorExtension"),
+    };
+pub const CLOSE_TCP_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "close-tcp-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "A cell containing TCP close targets is a RunMat extension.",
+    error_identifier: Some("RunMat:compatibility:CloseTcpCellExtension"),
+};
+pub const CLOSE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
     CLOSE_INTEGER_FIGURE_NUMBER_EXTENSION,
     CLOSE_VARIADIC_TARGETS_EXTENSION,
+    CLOSE_NETWORK_SELECTOR_EXTENSION,
+    CLOSE_TCP_CELL_EXTENSION,
 ];
 
 const INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {

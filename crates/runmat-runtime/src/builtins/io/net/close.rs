@@ -2,7 +2,10 @@
 
 use crate::context::{RuntimeContext, RuntimeTcpCloseScope, RuntimeTcpIssuer};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::{CloseNetworkSelector, TCPCLIENT_CLASS, TCPSERVER_CLASS};
+use runmat_builtins::{
+    CloseNetworkSelector, CLOSE_NETWORK_SELECTOR_EXTENSION, CLOSE_TCP_CELL_EXTENSION,
+    TCPCLIENT_CLASS, TCPSERVER_CLASS,
+};
 use runmat_value::{ForeignRef, Value};
 
 #[derive(Clone)]
@@ -32,18 +35,19 @@ fn selector(text: &str) -> Option<RuntimeTcpCloseScope> {
     }
 }
 
+fn selector_value(value: &Value) -> Option<RuntimeTcpCloseScope> {
+    let text = crate::builtins::common::validation::value_text_scalar_string(value)?;
+    selector(&text)
+}
+
 fn is_network_target(value: &Value) -> bool {
     match value {
         Value::Object(object) => {
             object.class_name.is(TCPCLIENT_CLASS) || object.class_name.is(TCPSERVER_CLASS)
         }
         Value::Struct(_) => true,
-        Value::String(text) => selector(text).is_some(),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            selector(&chars.data.iter().collect::<String>()).is_some()
-        }
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            selector(&strings.data[0]).is_some()
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            selector_value(value).is_some()
         }
         Value::Cell(cell) => !cell.data.is_empty() && cell.data.iter().all(is_network_target),
         _ => false,
@@ -59,19 +63,19 @@ fn collect(value: &Value, targets: &mut Vec<Target>) -> BuiltinResult<()> {
             targets.push(Target::Endpoint(authority));
         }
         Value::Struct(_) => return Err(invalid_handle()),
-        Value::String(text) => {
-            targets.push(Target::Scope(selector(text).ok_or_else(invalid_argument)?));
-        }
-        Value::CharArray(chars) if chars.rows == 1 => {
-            let text: String = chars.data.iter().collect();
-            targets.push(Target::Scope(selector(&text).ok_or_else(invalid_argument)?));
-        }
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            targets.push(Target::Scope(
-                selector(&strings.data[0]).ok_or_else(invalid_argument)?,
-            ));
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
+            let scope = selector_value(value).ok_or_else(invalid_argument)?;
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLOSE_NETWORK_SELECTOR_EXTENSION,
+                "close",
+            )?;
+            targets.push(Target::Scope(scope));
         }
         Value::Cell(cell) if !cell.data.is_empty() => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &CLOSE_TCP_CELL_EXTENSION,
+                "close",
+            )?;
             for value in &cell.data {
                 collect(value, targets)?;
             }
@@ -129,10 +133,14 @@ fn transport_error(source: crate::tcp::TcpTransportError) -> RuntimeError {
         .build()
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "close/admission_tests.rs"]
+mod admission_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{CellArray, ObjectInstance, StructValue};
+    use runmat_value::{CellArray, CharArray, ObjectInstance, StructValue};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -148,6 +156,39 @@ mod tests {
         ))
         .unwrap()
         .is_none());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scalar_selector_compatibility_precedes_browser_target_rejection() {
+        let trailing = Value::CharArray(
+            CharArray::new_with_shape("clients".chars().collect(), vec![1, 7, 1])
+                .expect("trailing singleton"),
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error =
+                futures::executor::block_on(close_if_network_targets(None, &[trailing.clone()]))
+                    .expect_err("selector extension is rejected before target service");
+            assert_eq!(
+                error.identifier(),
+                CLOSE_NETWORK_SELECTOR_EXTENSION.error_identifier
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let error = futures::executor::block_on(close_if_network_targets(None, &[trailing]))
+                .expect_err("native TCP is unavailable in browser");
+            assert_eq!(
+                error.identifier(),
+                runmat_builtins::NET_ERROR_UNSUPPORTED_TARGET.identifier
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = trailing;
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

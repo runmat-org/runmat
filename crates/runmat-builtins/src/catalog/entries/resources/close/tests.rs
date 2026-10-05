@@ -18,7 +18,15 @@ fn close_contract_has_statement_scalar_and_variadic_forms() {
         ]
     );
     assert_eq!(CLOSE_CATALOG_ENTRY.bindings.len(), 1);
-    assert_eq!(CLOSE_CATALOG_ENTRY.extensions.len(), 2);
+    assert_eq!(CLOSE_CATALOG_ENTRY.extensions.len(), 4);
+    assert_eq!(
+        CLOSE_NETWORK_SELECTOR_EXTENSION.mode,
+        BuiltinExtensionMode::RunMatOnly
+    );
+    assert_eq!(
+        CLOSE_TCP_CELL_EXTENSION.mode,
+        BuiltinExtensionMode::RunMatOnly
+    );
 }
 
 #[test]
