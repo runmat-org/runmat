@@ -28,6 +28,13 @@ pub(super) async fn read_numeric_matrix(
             )
         })?;
     cooperation.completed(0).await?;
+    path.check().map_err(|source| {
+        readmatrix_error_with_source(
+            &READMATRIX_ERROR_IO_READ,
+            "readmatrix: captured filesystem authority was revoked",
+            source,
+        )
+    })?;
     match file {
         TabularReadSource::Bounded(mut source)
             if normalized_encoding_label(options.encoding.trim()).eq_ignore_ascii_case("utf-8") =>
