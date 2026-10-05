@@ -74,6 +74,12 @@ pub const CLOSE_ERROR_CANCELLED: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     when: "An invocation is cancelled while a TCP close is pending.",
     message: "close: cancelled",
 };
+pub const CLOSE_ERROR_GRAPHICS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CLOSE.GRAPHICS",
+    identifier: None,
+    when: "A graphics target cannot be parsed or the selected figure cannot be closed.",
+    message: "close: graphics close failed",
+};
 pub const CLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -84,6 +90,7 @@ pub const CLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
         CLOSE_ERROR_INVALID_HANDLE,
         CLOSE_ERROR_TCP,
         CLOSE_ERROR_CANCELLED,
+        CLOSE_ERROR_GRAPHICS,
     ],
 };
 

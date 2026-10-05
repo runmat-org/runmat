@@ -20,33 +20,61 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         domain: NumericDomain::Real,
     }));
     let mut result = finish_fixed(entry, request, output, diagnostics);
-    if request.arguments.is_empty()
-        || request.arguments.iter().enumerate().all(|(index, value)| {
-            known_graphics_target(value)
-                || (matches!(
-                    &value.kind,
-                    ValueKindFact::String | ValueKindFact::Character
-                ) && request
-                    .literals
-                    .literal_string_at(index)
-                    .is_some_and(|text| super::CloseNetworkSelector::parse(text).is_none()))
-        })
-    {
+    let mut routes = if request.arguments.is_empty() {
+        (true, false)
+    } else {
+        (false, false)
+    };
+    for (index, value) in request.arguments.iter().enumerate() {
+        let possible = possible_routes(value, request.literals.literal_string_at(index).as_deref());
+        routes.0 |= possible.0;
+        routes.1 |= possible.1;
+    }
+    if routes.0 {
         result
             .capabilities
             .0
             .insert(CapabilityRequirement::UserInterface);
-    } else if request.arguments.iter().enumerate().all(|(index, value)| {
-        known_tcp_target(value)
-            || request
-                .literals
-                .literal_string_at(index)
-                .and_then(super::CloseNetworkSelector::parse)
-                .is_some()
-    }) {
+    }
+    if routes.1 {
         result.capabilities.0.insert(CapabilityRequirement::Network);
     }
     result
+}
+
+/// An unknown target may select either route. A fully known cell carries
+/// position-preserving element facts; an incomplete one also needs its common
+/// element fact so a future member cannot silently require another service.
+fn possible_routes(value: &ValueFact, literal: Option<&str>) -> (bool, bool) {
+    if known_tcp_target(value) {
+        return (false, true);
+    }
+    if known_graphics_target(value) {
+        return (true, false);
+    }
+    match &value.kind {
+        ValueKindFact::String | ValueKindFact::Character => match literal {
+            Some(text) if super::CloseNetworkSelector::parse(text).is_some() => (false, true),
+            Some(_) => (true, false),
+            None => (true, true),
+        },
+        ValueKindFact::Cell(cell) => {
+            let mut routes = (false, false);
+            for member in &cell.elements {
+                let possible = possible_routes(member, None);
+                routes.0 |= possible.0;
+                routes.1 |= possible.1;
+            }
+            if !cell.elements_complete {
+                let possible = possible_routes(&cell.element, None);
+                routes.0 |= possible.0;
+                routes.1 |= possible.1;
+            }
+            routes
+        }
+        ValueKindFact::Unknown | ValueKindFact::Composite(_) => (true, true),
+        _ => (false, false),
+    }
 }
 
 fn known_tcp_target(value: &ValueFact) -> bool {
@@ -146,6 +174,21 @@ mod tests {
         )
         .diagnostics
         .is_empty());
+        let unknown = infer(
+            &request(
+                vec![ValueFact::unknown(DynamicReason::RuntimeValue)],
+                RequestedOutputCount::One,
+            ),
+            entry,
+        );
+        assert!(unknown
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::UserInterface));
+        assert!(unknown
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Network));
     }
 
     #[test]
@@ -163,6 +206,46 @@ mod tests {
             .0
             .contains(&CapabilityRequirement::Network));
         assert!(!result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::UserInterface));
+    }
+
+    #[test]
+    fn known_cell_members_and_incomplete_element_require_possible_services() {
+        let entry = &super::super::CLOSE_CATALOG_ENTRY;
+        let endpoint = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(crate::TCPCLIENT_CLASS.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }));
+        let cell = ValueFact::scalar(ValueKindFact::Cell(CellFact {
+            element: Box::new(endpoint.clone()),
+            elements: vec![endpoint],
+            elements_complete: true,
+        }));
+        let result = infer(&request(vec![cell], RequestedOutputCount::One), entry);
+        assert!(result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Network));
+        assert!(!result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::UserInterface));
+        let incomplete = ValueFact::scalar(ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            elements: vec![],
+            elements_complete: false,
+        }));
+        let result = infer(&request(vec![incomplete], RequestedOutputCount::One), entry);
+        assert!(result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Network));
+        assert!(result
             .capabilities
             .0
             .contains(&CapabilityRequirement::UserInterface));

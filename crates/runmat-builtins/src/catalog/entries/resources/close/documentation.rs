@@ -75,7 +75,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "close(client) and close(server) use the receiver's sealed session authority. Closing a server also closes clients accepted from it. Closing an already-closed resource returns double 0; closing one or more live resources returns double 1.",
                 "close('clients') and close('servers') target the current session's TCP resources. Nested cells of TCP receivers are accepted in RunMat mode. The visible object class and properties are not socket authority; a forged or stale receiver cannot close another session's socket.",
-                "TCP closure requires the installed native TCP service. Browser TCP targets report the typed unsupported-target diagnostic after input admission; graphics close remains available in browser rendering. A pending close responds to cancellation, but a prior successful close in a multi-target call is not rolled back.",
+                "TCP closure requires the installed native TCP service. Browser TCP targets report the typed unsupported-target diagnostic after input admission; graphics close remains available in browser rendering. Cancellation is checked before and after each close. If cancellation or a later target fails after an earlier socket has closed, the call reports an error but that closure remains in effect; close does not replay or roll back earlier targets.",
             ],
         },
         BuiltinDocumentationSection {

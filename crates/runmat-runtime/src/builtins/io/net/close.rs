@@ -242,24 +242,52 @@ mod tests {
         );
         let other_session =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-                .with_service_ports(RuntimeServicePorts::default().with_tcp(service));
+                .with_service_ports(RuntimeServicePorts::default().with_tcp(service.clone()));
         assert!(driver
             .block_on(close_if_network_targets(
                 Some(&other_session),
                 &[client.clone()]
             ))
             .is_err());
+        let foreign = driver
+            .block_on(service.connect(
+                RuntimeTcpIssuer::from_context(Some(&other_session)),
+                RuntimeTcpConnect {
+                    host: "127.0.0.1".into(),
+                    port: server.local_addr.port(),
+                    connect_timeout: Some(std::time::Duration::from_secs(2)),
+                    io_timeout: None,
+                    byte_order: RuntimeTcpByteOrder::Little,
+                },
+            ))
+            .expect("second session connects");
+        let foreign = Value::Object(
+            ObjectInstance::new(TCPCLIENT_CLASS).with_tcp_authority(foreign.authority),
+        );
+        let error = driver
+            .block_on(close_if_network_targets(
+                Some(&runtime),
+                &[client.clone(), foreign.clone()],
+            ))
+            .expect_err("later foreign target must not replay or roll back earlier close");
+        assert!(error.message().contains("TCP close failed"));
         assert_eq!(
             driver
                 .block_on(close_if_network_targets(Some(&runtime), &[client.clone()]))
                 .unwrap(),
-            Some(1.0)
+            Some(0.0),
         );
         assert_eq!(
             driver
                 .block_on(close_if_network_targets(Some(&runtime), &[client]))
                 .unwrap(),
             Some(0.0)
+        );
+        assert_eq!(
+            driver
+                .block_on(close_if_network_targets(Some(&other_session), &[foreign]))
+                .unwrap(),
+            Some(1.0),
         );
     }
 }
