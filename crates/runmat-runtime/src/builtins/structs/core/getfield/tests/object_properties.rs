@@ -40,9 +40,7 @@ fn public_getfield_output_admission_uses_selected_session_not_enclosing_session(
     .expect_err("selected two-output request must be rejected before field access");
     assert_eq!(
         error.identifier(),
-        runmat_builtins::GETFIELD_ERROR_TOO_MANY_OUTPUTS
-            .identifier
-            .expect("public output error identifier")
+        runmat_builtins::GETFIELD_ERROR_TOO_MANY_OUTPUTS.identifier
     );
     assert_eq!(crate::output_count::current_output_count(), Some(1));
 }
@@ -108,9 +106,10 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
             },
         )]),
     });
-    let _resolver = crate::user_functions::install_semantic_function_resolver(Some(Arc::new(
-        |name| (name == "PendingSelectedGetfieldSession.get.p").then_some(943),
-    )));
+    let _resolver =
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+            (name == "PendingSelectedGetfieldSession.get.p").then_some(943)
+        })));
     let dropped = Arc::new(AtomicUsize::new(0));
     let getter_dropped = dropped.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(

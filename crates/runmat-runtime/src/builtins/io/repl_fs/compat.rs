@@ -1835,7 +1835,65 @@ mod tests {
         let _active = context.enter();
         let error = run(rehash_builtin(Vec::new())).expect_err("cancelled refresh cannot mutate");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert!(matches!(
+            error.source.as_ref().and_then(|source| {
+                source.downcast_ref::<crate::execution::ExecutionServiceError>()
+            }),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ));
         assert_eq!(calls.get(), 0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pending_rehash_cancellation_keeps_builtin_identifier_and_retires_callback() {
+        use runmat_execution::{cancellation::CancellationSource, CancellationReason};
+        use std::cell::Cell;
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::rc::Rc;
+        use std::task::{Context, Poll};
+
+        struct PendingRefresh(Rc<Cell<bool>>);
+        impl Future for PendingRefresh {
+            type Output = Result<(), RuntimeError>;
+            fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+                Poll::Pending
+            }
+        }
+        impl Drop for PendingRefresh {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let cancellation = CancellationSource::new();
+        let dropped = Rc::new(Cell::new(false));
+        let context = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_cancellation_token(cancellation.token());
+        let selected = Rc::clone(&dropped);
+        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
+            Box::pin(PendingRefresh(Rc::clone(&selected)))
+        })));
+        let _active = context.enter();
+        let mut call = Box::pin(rehash_builtin(Vec::new()));
+        let waker = futures::task::noop_waker();
+        let mut poll = Context::from_waker(&waker);
+        assert!(call.as_mut().poll(&mut poll).is_pending());
+        assert!(cancellation.cancel(CancellationReason::User));
+        let Poll::Ready(Err(error)) = call.as_mut().poll(&mut poll) else {
+            panic!("pending refresh must finish with typed cancellation")
+        };
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert!(matches!(
+            error.source.as_ref().and_then(|source| {
+                source.downcast_ref::<crate::execution::ExecutionServiceError>()
+            }),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ));
+        assert!(dropped.get());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

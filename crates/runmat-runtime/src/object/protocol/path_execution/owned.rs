@@ -45,7 +45,8 @@ where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<Value, RuntimeError>>,
 {
-    let work = execute_owned_subsref_in_scope(runtime, base, path, read_first, caller_function_name);
+    let work =
+        execute_owned_subsref_in_scope(runtime, base, path, read_first, caller_function_name);
     super::super::context::scope(runtime, work).await
 }
 

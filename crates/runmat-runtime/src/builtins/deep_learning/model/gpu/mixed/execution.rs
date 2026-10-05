@@ -299,10 +299,13 @@ pub(super) fn admit_cancellation(
     function: &'static str,
 ) -> BuiltinResult<()> {
     if cancellation_requested(runtime) {
-        return Err(crate::runtime_error::semantic_error(
-            "RunMat:Cancelled",
-            format!("{function}: network forward execution was cancelled"),
-        ));
+        let message = format!("{function}: network forward execution was cancelled");
+        return Err(match runtime {
+            Some(runtime) => crate::build_runtime_error(message)
+                .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+                .build(),
+            None => crate::runtime_error::semantic_error("RunMat:Cancelled", message),
+        });
     }
     Ok(())
 }

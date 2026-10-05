@@ -506,15 +506,28 @@ pub async fn try_refresh_dynamic_functions(
     let refresher = context.state().call.borrow().dynamic_refresher.clone()?;
     let mut cooperation = context.cpu_cooperation();
     if let Err(source) = cooperation.checkpoint(0).await {
-        return Some(Err(source.into_runtime_error()));
+        return Some(Err(refresh_execution_error(&context, source)));
     }
     Some(
         cooperation
-            .await_cancellable(refresher(context, request))
+            .await_cancellable(refresher(context.clone(), request))
             .await
-            .map_err(|source| source.into_runtime_error())
+            .map_err(|source| refresh_execution_error(&context, source))
             .and_then(std::convert::identity),
     )
+}
+
+fn refresh_execution_error(
+    context: &crate::context::RuntimeContext,
+    source: crate::execution::ExecutionServiceError,
+) -> RuntimeError {
+    if matches!(&source, crate::execution::ExecutionServiceError::Cancelled) {
+        return crate::build_runtime_error("source-cache refresh was cancelled")
+            .with_identifier(format!("{}:Cancelled", context.error_namespace()))
+            .with_source(source)
+            .build();
+    }
+    source.into_runtime_error()
 }
 
 fn source_functions_in_catalog(

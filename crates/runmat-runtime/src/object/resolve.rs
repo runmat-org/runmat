@@ -96,13 +96,8 @@ pub async fn read_member_sequence_with_context(
     allow_init: bool,
     caller_function_name: Option<&str>,
 ) -> Result<crate::sequence::ValueSequence, RuntimeError> {
-    let work = read_member_sequence_in_scope(
-        context,
-        base,
-        field,
-        allow_init,
-        caller_function_name,
-    );
+    let work =
+        read_member_sequence_in_scope(context, base, field, allow_init, caller_function_name);
     match context {
         Some(context) => context.scope(work).await,
         None => work.await,
@@ -764,13 +759,8 @@ async fn store_member_sequence_traced_with_context(
     values: Vec<Value>,
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
-    let work = store_member_sequence_traced_in_scope(
-        runtime,
-        base,
-        field,
-        values,
-        caller_function_name,
-    );
+    let work =
+        store_member_sequence_traced_in_scope(runtime, base, field, values, caller_function_name);
     match runtime {
         Some(runtime) => runtime.scope(work).await,
         None => work.await,

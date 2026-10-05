@@ -151,7 +151,8 @@ async fn invoke_resolved_object_method_with_context(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<ValueSequence, RuntimeError> {
-    let work = invoke_resolved_object_method_in_scope(runtime, method, arguments, requested_outputs);
+    let work =
+        invoke_resolved_object_method_in_scope(runtime, method, arguments, requested_outputs);
     super::context::scope(runtime, work).await
 }
 
@@ -215,13 +216,8 @@ async fn invoke_object_end_with_context(
     component_count: usize,
     access: &super::ObjectAccessContext,
 ) -> Result<Option<Value>, RuntimeError> {
-    let work = invoke_object_end_in_scope(
-        runtime,
-        receiver,
-        component_index,
-        component_count,
-        access,
-    );
+    let work =
+        invoke_object_end_in_scope(runtime, receiver, component_index, component_count, access);
     super::context::scope(runtime, work).await
 }
 
