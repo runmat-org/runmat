@@ -4,10 +4,6 @@ pub(crate) fn string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::String
 }
 
-pub(crate) fn num_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Num
-}
-
 pub(crate) fn struct_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Struct { known_fields: None }
 }
