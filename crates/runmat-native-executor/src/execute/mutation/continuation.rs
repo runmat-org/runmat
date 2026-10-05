@@ -12,6 +12,11 @@ enum Phase {
     Writeback,
 }
 
+struct AssignmentPolicy {
+    delete: bool,
+    allow_init: bool,
+}
+
 mod sequence;
 pub(in crate::execute) use sequence::{
     assign_prepared_sequence, assign_sequence, PendingSequenceAssign,
@@ -157,9 +162,9 @@ impl PendingAssign {
         place: &MirPlace,
         explicit_root: Option<Value>,
         rhs: Value,
-        delete: bool,
-        allow_init: bool,
+        policy: AssignmentPolicy,
     ) -> NativeExecutorResult<Self> {
+        let AssignmentPolicy { delete, allow_init } = policy;
         let mut segments = Vec::new();
         let root = flatten_place(place, &mut segments)?;
         let create_struct = allow_init
@@ -411,8 +416,7 @@ fn drive(
             place,
             explicit_root,
             rhs,
-            delete,
-            allow_init,
+            AssignmentPolicy { delete, allow_init },
         )?,
     };
     loop {

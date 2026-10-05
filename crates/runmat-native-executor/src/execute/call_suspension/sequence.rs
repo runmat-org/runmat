@@ -12,7 +12,7 @@ use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
 
 #[derive(Clone)]
 pub(in crate::execute) enum SequenceStage {
-    Builder(SequenceDestinationBuilder),
+    Builder(Box<SequenceDestinationBuilder>),
     Destination(PreparedSequenceDestination),
 }
 

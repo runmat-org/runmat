@@ -149,7 +149,7 @@ impl PendingSequenceTarget {
                         runtime
                             .scope(builder.push_step_in_context(&runtime, spec, Some(&caller)))
                             .await?;
-                        Ok(SequenceStage::Builder(builder))
+                        Ok(SequenceStage::Builder(Box::new(builder)))
                     }),
                 )?;
                 let SequenceStage::Builder(builder) = stage else {
@@ -157,7 +157,7 @@ impl PendingSequenceTarget {
                         "sequence step returned destination payload".into(),
                     ));
                 };
-                self.builder = builder;
+                self.builder = *builder;
                 self.index += 1;
                 self.phase = Phase::MaterializePath;
                 Ok(None)
