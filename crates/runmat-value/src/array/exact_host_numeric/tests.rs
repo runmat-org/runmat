@@ -163,6 +163,29 @@ fn integer_copy_on_write_keeps_only_the_original_block_charged() {
 }
 
 #[test]
+fn sole_owner_integer_mutation_keeps_block_and_materialization_releases_claim() {
+    let quota = permit(16);
+    let mut owned = ExactHostNumericAllocation::new(NumericDType::I64, 2, &quota).unwrap();
+    owned
+        .as_i64_slice_mut()
+        .unwrap()
+        .copy_from_slice(&[i64::MIN, i64::MAX]);
+    let mut buffer = owned.into_host_buffer();
+    let pointer = unsafe { buffer.foreign_data_pointer() };
+    buffer
+        .set_value(0, crate::NumericScalar::I64(-9_007_199_254_740_993))
+        .unwrap();
+    assert_eq!(unsafe { buffer.foreign_data_pointer_mut() }, pointer);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 16);
+    let detached = buffer.into_numeric_storage();
+    assert_eq!(
+        detached,
+        crate::NumericStorage::I64(vec![-9_007_199_254_740_993, i64::MAX])
+    );
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn exact_double_and_empty_allocations_have_exact_reported_capacity() {
     let double_permit = permit(16);
     let mut double = ExactHostNumericAllocation::new(NumericDType::F64, 2, &double_permit).unwrap();
