@@ -258,7 +258,7 @@ pub struct FunctionRegistry {
 #[derive(Debug, Clone)]
 struct StaticDefinitionOverlay {
     authority: runmat_value::BoundFunctionAuthority,
-    bodies: HashMap<FunctionId, FunctionBytecode>,
+    lease_indices: HashMap<FunctionId, usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -344,10 +344,25 @@ impl FunctionRegistry {
     }
 
     pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
-        self.static_overlay
-            .as_ref()
-            .and_then(|overlay| overlay.bodies.get(&function))
-            .or_else(|| self.functions.get(&function))
+        if let Some(overlay) = &self.static_overlay {
+            if let Some(index) = overlay.lease_indices.get(&function) {
+                let runmat_value::BoundFunctionAuthority::Local {
+                    definition,
+                    dependencies,
+                    ..
+                } = &overlay.authority
+                else {
+                    return None;
+                };
+                let lease = if *index == 0 {
+                    definition
+                } else {
+                    dependencies.get(*index - 1)?
+                };
+                return self.get_owned(function, lease);
+            }
+        }
+        self.functions.get(&function)
     }
 
     /// The currently published body, regardless of a retained static call
@@ -371,35 +386,15 @@ impl FunctionRegistry {
         function: FunctionId,
     ) -> Option<runmat_value::BoundFunctionBinding> {
         let overlay = self.static_overlay.as_ref()?;
-        let runmat_value::BoundFunctionAuthority::Local {
-            issuer,
-            definition,
-            dependencies,
-            export,
-        } = &overlay.authority
-        else {
-            return None;
-        };
-        let Some(selected) = std::iter::once(definition)
-            .chain(dependencies.iter())
-            .find(|lease| lease.function() == function.0)
-        else {
+        if !overlay.lease_indices.contains_key(&function) {
             // A stale or malformed static edge in an old body must not fall
             // through to the new numeric body at that same ID.
             return Some(runmat_value::BoundFunctionBinding::unavailable(function.0));
-        };
-        let other_dependencies = std::iter::once(definition)
-            .chain(dependencies.iter())
-            .filter(|lease| lease.function() != function.0)
-            .cloned()
-            .collect();
-        Some(runmat_value::BoundFunctionBinding::local(
-            function.0,
-            issuer.clone(),
-            selected.clone(),
-            other_dependencies,
-            *export,
-        ))
+        }
+        Some(runmat_value::BoundFunctionBinding {
+            function: function.0,
+            authority: overlay.authority.clone(),
+        })
     }
 
     /// A bound value carries the exact definition lease. Numeric IDs only
@@ -442,18 +437,23 @@ impl FunctionRegistry {
         else {
             return None;
         };
-        let mut bodies = HashMap::with_capacity(dependencies.len() + 1);
-        for lease in std::iter::once(definition).chain(dependencies.iter()) {
+        let mut lease_indices = HashMap::with_capacity(dependencies.len() + 1);
+        for (index, lease) in std::iter::once(definition)
+            .chain(dependencies.iter())
+            .enumerate()
+        {
             let id = FunctionId(lease.function());
-            let body = self.get_owned(id, lease)?;
-            bodies.insert(id, body.clone());
+            self.get_owned(id, lease)?;
+            lease_indices.insert(id, index);
         }
-        self.get_owned(function, definition)?;
+        if !lease_indices.contains_key(&function) {
+            return None;
+        }
         Some(Self {
             data: std::sync::Arc::clone(&self.data),
             static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
                 authority: authority.clone(),
-                bodies,
+                lease_indices,
             })),
         })
     }

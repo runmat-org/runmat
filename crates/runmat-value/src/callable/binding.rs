@@ -67,7 +67,7 @@ pub enum BoundFunctionAuthority {
     Local {
         issuer: Weak<()>,
         definition: FunctionDefinitionLease,
-        dependencies: Vec<FunctionDefinitionLease>,
+        dependencies: Arc<[FunctionDefinitionLease]>,
         export: LocalExport,
     },
     Portable {
@@ -146,7 +146,7 @@ impl BoundFunctionAuthority {
         Self::Local {
             issuer,
             definition,
-            dependencies,
+            dependencies: dependencies.into(),
             export,
         }
     }

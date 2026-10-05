@@ -200,8 +200,8 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
     let helper_binding = old.static_binding(FunctionId(2)).unwrap();
     assert!(matches!(
         &helper_binding.authority,
-        runmat_value::BoundFunctionAuthority::Local { definition, .. }
-            if definition.matches(&old.get(FunctionId(2)).unwrap().definition_owner)
+        runmat_value::BoundFunctionAuthority::Local { dependencies, .. }
+            if dependencies.iter().any(|lease| lease.function() == 2 && lease.matches(&old.get(FunctionId(2)).unwrap().definition_owner))
     ));
     assert!(old.static_binding(FunctionId(5)).is_some());
     assert!(!old
