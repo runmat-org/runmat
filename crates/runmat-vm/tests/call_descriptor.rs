@@ -741,20 +741,26 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "inc").then_some(9999)),
     ));
-    let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
-        Arc::new(|function, args, requested_outputs| {
-            assert_eq!(function, 4242);
+    let origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("call descriptor exact fixture"),
+        function: runmat_types::ProgramFunctionId(4242),
+    };
+    let binding = runmat_value::BoundFunctionBinding::portable(4242, origin);
+    let expected_binding = binding.clone();
+    let _invoker_guard = runmat_runtime::user_functions::install_local_bound_function_invoker(
+        std::rc::Rc::new(move |actual, args, requested_outputs| {
+            assert_eq!(actual, expected_binding);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    );
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::BoundFunctionHandle {
             name: "inc".into(),
             function: 4242,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(4242),
+            authority: binding.authority,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
         },
