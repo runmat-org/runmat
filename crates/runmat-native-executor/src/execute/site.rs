@@ -348,6 +348,8 @@ fn execute_statement(
     }
     match statement {
         MirStmtKind::Expr(_) => {
+            state.pending_assign = None;
+            state.pending_plain_multi = None;
             state.pending_place_mutation = None;
             if let Some(value) = instruction
                 .inputs

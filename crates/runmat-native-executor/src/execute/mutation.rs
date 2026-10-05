@@ -10,6 +10,9 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::state::HostState;
 
 mod prepared_multi;
+mod continuation;
+pub(super) use continuation::PendingAssign;
+pub(super) use continuation::PendingPlainMulti;
 pub(super) use prepared_multi::PreparedMultiAssignment;
 
 #[derive(Clone)]
@@ -80,13 +83,15 @@ pub(super) fn execute(
 ) -> NativeExecutorResult<bool> {
     match statement {
         MirStmtKind::PlaceMutation(mutation) => {
+            state.pending_assign = None;
+            state.pending_plain_multi = None;
             state.pending_place_mutation = Some(mutation.clone());
             publish_roots(state, instruction, std::slice::from_ref(&mutation.place))?;
             Ok(true)
         }
         MirStmtKind::Assign { place, .. } => {
             let source = input_value(state, instruction, 0)?;
-            let mutation = state.pending_place_mutation.take();
+            let mutation = state.pending_place_mutation.as_ref();
             let (delete, allow_init) = if let Some(mutation) = mutation {
                 if mutation.place != *place {
                     return Err(NativeExecutorError::Host(
@@ -101,7 +106,8 @@ pub(super) fn execute(
             } else {
                 (false, true)
             };
-            assign_place(state, place, source, delete, allow_init)?;
+            continuation::assign(state, place, source, delete, allow_init)?;
+            state.pending_place_mutation = None;
             publish_roots(state, instruction, std::slice::from_ref(place))?;
             Ok(true)
         }
@@ -112,6 +118,7 @@ pub(super) fn execute(
                 .iter()
                 .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
             {
+                state.pending_plain_multi = None;
                 let prepared = state.prepared_multi_assignment.take().ok_or_else(|| {
                     NativeExecutorError::Host(
                         "native sequence-target multi-assignment has no prepared values".into(),
@@ -135,13 +142,42 @@ pub(super) fn execute(
                     "native multi-assignment result window is incomplete".into(),
                 ));
             }
+            let request = state.current_request.ok_or_else(|| {
+                NativeExecutorError::Host(
+                    "native multi-assignment has no active statement site".into(),
+                )
+            })?;
+            let next_target = match state.pending_plain_multi.take() {
+                Some(pending) if pending.request == request => pending.next_target,
+                Some(_) => {
+                    return Err(NativeExecutorError::Host(
+                        "pending multi-assignment does not match the exact resumed site".into(),
+                    ));
+                }
+                None => 0,
+            };
             for (index, target) in targets.targets.iter().enumerate() {
                 let MirOutputTarget::Place(place) = target else {
                     continue;
                 };
+                if index < next_target {
+                    continuation::skip_completed(state, place)?;
+                    continue;
+                }
                 let source = input_value(state, instruction, index)?;
-                assign_place(state, place, source, false, true)?;
+                match continuation::assign(state, place, source, false, true) {
+                    Ok(()) => {}
+                    Err(NativeExecutorError::CallSuspended) => {
+                        state.pending_plain_multi = Some(PendingPlainMulti {
+                            request,
+                            next_target: index,
+                        });
+                        return Err(NativeExecutorError::CallSuspended);
+                    }
+                    Err(error) => return Err(error),
+                }
             }
+            state.pending_plain_multi = None;
             let places = targets
                 .targets
                 .iter()
@@ -252,30 +288,6 @@ fn commit_prepared_place_write(
     }
     let reference = state.arena.insert(updated);
     state.set_local(prepared.root.0, reference)
-}
-
-fn assign_place(
-    state: &mut HostState,
-    place: &MirPlace,
-    rhs: Value,
-    delete: bool,
-    allow_init: bool,
-) -> NativeExecutorResult<()> {
-    if let MirPlace::Local(local) = place {
-        let reference = state.arena.insert(rhs);
-        return state.set_local(local.0, reference);
-    }
-    let mut segments = Vec::new();
-    let local = flatten_place(place, &mut segments)?;
-    let create_struct = allow_init
-        && matches!(
-            segments.first(),
-            Some(PlaceSegment::Member(_) | PlaceSegment::DynamicMember(_))
-        );
-    let root = state.assignment_root(local.0, create_struct)?;
-    let (local, updated) = assign_place_to_root(state, place, root, rhs, delete, allow_init)?;
-    let reference = state.arena.insert(updated);
-    state.set_local(local.0, reference)
 }
 
 pub(super) fn assign_place_to_root(

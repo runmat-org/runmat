@@ -24,6 +24,19 @@ impl HostState {
                 });
             }
         }
+        if let Some(assignment) = &self.pending_assign {
+            let values = assignment.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len()).expect(
+                    "pending assignment root cardinality is bounded by native value admission",
+                );
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
         let contextual_roots = self.contextual_region_roots().collect::<Vec<_>>();
         for value in contextual_roots {
             let slot = u32::try_from(self.roots.len())
@@ -140,6 +153,8 @@ impl HostState {
             || self.pending_call.is_some()
             || self.completed_call.is_some()
             || self.pending_place_mutation.is_some()
+            || self.pending_assign.is_some()
+            || self.pending_plain_multi.is_some()
             || self.sequence_assignment_register.is_some()
             || self.prepared_multi_assignment.is_some()
             || !self.captured_sequences.is_empty()

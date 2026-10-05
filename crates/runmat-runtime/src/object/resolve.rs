@@ -421,6 +421,30 @@ pub async fn store_member<OnWrite>(
     rhs: Value,
     allow_init: bool,
     caller_function_name: Option<&str>,
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    store_member_with_context(
+        None,
+        base,
+        field,
+        rhs,
+        allow_init,
+        caller_function_name,
+        on_write,
+    )
+    .await
+}
+
+async fn store_member_with_context<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    rhs: Value,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
     mut on_write: OnWrite,
 ) -> Result<Value, RuntimeError>
 where
@@ -442,13 +466,20 @@ where
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
                     crate::object::indexing::ObjectSubscript::member(field),
                 );
-                return crate::object::protocol::invoke_resolved_object_assignment(
-                    &method,
-                    base,
-                    path,
-                    vec![rhs],
-                )
-                .await;
+                return match context {
+                    Some(context) => {
+                        crate::object::protocol::invoke_resolved_object_assignment_in_context(
+                            context, &method, base, path, vec![rhs],
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::object::protocol::invoke_resolved_object_assignment(
+                            &method, base, path, vec![rhs],
+                        )
+                        .await
+                    }
+                };
             }
             property_store::store_value(obj, field, rhs, caller_function_name, &mut on_write).await
         }
@@ -496,13 +527,20 @@ where
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
                     crate::object::indexing::ObjectSubscript::member(field),
                 );
-                return crate::object::protocol::invoke_resolved_object_assignment(
-                    &method,
-                    base,
-                    path,
-                    vec![rhs],
-                )
-                .await;
+                return match context {
+                    Some(context) => {
+                        crate::object::protocol::invoke_resolved_object_assignment_in_context(
+                            context, &method, base, path, vec![rhs],
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::object::protocol::invoke_resolved_object_assignment(
+                            &method, base, path, vec![rhs],
+                        )
+                        .await
+                    }
+                };
             }
             property_store::store_handle(handle, field, rhs, caller_function_name).await
         }
@@ -687,6 +725,26 @@ pub async fn store_member_traced(
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     store_member(
+        base,
+        field,
+        rhs,
+        allow_init,
+        caller_function_name,
+        runmat_gc::gc_record_write,
+    )
+    .await
+}
+
+pub async fn store_member_traced_in_context(
+    context: &crate::context::RuntimeContext,
+    base: Value,
+    field: String,
+    rhs: Value,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    store_member_with_context(
+        Some(context),
         base,
         field,
         rhs,
