@@ -64,7 +64,7 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
         )),
         Value::BoundFunctionHandle { name, function } => {
             let (kind, file) =
-                source_metadata(function).unwrap_or((FunctionHandleKind::Simple, String::new()));
+                source_metadata(function).unwrap_or((FunctionHandleKind::Unknown, String::new()));
             Ok(metadata_struct(name, kind, file))
         }
         Value::Closure(closure) => {
@@ -255,5 +255,14 @@ mod tests {
         }))
         .expect("unknown metadata");
         assert_eq!(field(&unknown, "type"), &Value::String("unknown".into()));
+        let unknown_bound = dispatch_functions(Value::BoundFunctionHandle {
+            name: "display_name".into(),
+            function: usize::MAX,
+        })
+        .expect("unregistered bound handle has unknown source role");
+        assert_eq!(
+            field(&unknown_bound, "type"),
+            &Value::String("unknown".into())
+        );
     }
 }
