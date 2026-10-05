@@ -4,29 +4,27 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "current-figure",
         title: "Close the current figure",
-        program: "figure(7);\nstatus = close\nassert(status == 1);",
+        program: "figure(7);\nassert(isgraphics(7));\nstatus = close\nassert(status == 1);\nassert(~isgraphics(7));",
         display_output: Some("status = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::BrowserGraphics,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Figure {
-            minimum_figures: 0,
-            assertions: "assert(status == 1);",
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(status == 1); assert(~isgraphics(7));",
         },
     },
     BuiltinExample {
         id: "all-figures",
         title: "Close all figures",
-        program: "figure(8);\nfigure(9);\nstatus = close('all')\nassert(status == 1);",
+        program: "figure(8);\nfigure(9);\nassert(isgraphics(8));\nassert(isgraphics(9));\nstatus = close('all')\nassert(status == 1);\nassert(~isgraphics(8));\nassert(~isgraphics(9));",
         display_output: Some("status = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::BrowserGraphics,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Figure {
-            minimum_figures: 0,
-            assertions: "assert(status == 1);",
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(status == 1); assert(~isgraphics(8)); assert(~isgraphics(9));",
         },
     },
     BuiltinExample {

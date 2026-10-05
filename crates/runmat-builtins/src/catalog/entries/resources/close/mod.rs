@@ -36,8 +36,8 @@ pub const CLOSE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::UserInterface,
             EffectKind::Network,
+            EffectKind::UserInterface,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
