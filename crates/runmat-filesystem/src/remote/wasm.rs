@@ -750,6 +750,10 @@ fn should_use_direct_read(length: u64, threshold: u64) -> bool {
 
 #[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::VirtualRooted
+    }
+
     fn current_dir_override(&self) -> Option<std::path::PathBuf> {
         Some(std::path::PathBuf::from("/"))
     }

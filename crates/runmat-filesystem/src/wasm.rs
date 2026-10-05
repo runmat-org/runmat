@@ -11,6 +11,10 @@ pub struct PlaceholderFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for PlaceholderFsProvider {
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::VirtualRooted
+    }
+
     fn supports_read(&self) -> bool {
         false
     }

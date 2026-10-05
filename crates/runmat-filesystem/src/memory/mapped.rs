@@ -11,7 +11,7 @@ pub(super) fn open(
     path: &Path,
     writable: bool,
 ) -> io::Result<Box<dyn FsMappedBacking>> {
-    if !crate::is_absolute_provider_path(path) {
+    if !crate::FsPathNamespace::VirtualRooted.is_absolute(path) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "memory mapped backing requires a resolved absolute path",

@@ -2,9 +2,7 @@
 //! resource/allocator certificate or a transaction across multiple writes.
 
 use crate::resource::capture_resource_lease_for_effect;
-use crate::{
-    current_provider, current_provider_with_current_dir, CapturedFsResourceLease, FsProvider,
-};
+use crate::{CapturedFsResourceLease, FsProvider};
 use async_trait::async_trait;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -146,12 +144,7 @@ pub async fn capture_mapped_backing(
     path: impl AsRef<Path>,
     writable: bool,
 ) -> io::Result<Option<CapturedMappedBacking>> {
-    let (provider, path) = if crate::is_absolute_provider_path(path.as_ref()) {
-        (current_provider(), path.as_ref().to_path_buf())
-    } else {
-        let (provider, cwd) = current_provider_with_current_dir()?;
-        (provider, cwd.join(path))
-    };
+    let (provider, path) = crate::capture_provider_path(path.as_ref())?;
     capture_mapped_backing_on(provider, path, writable).await
 }
 
@@ -162,7 +155,7 @@ pub async fn capture_mapped_backing_on(
     path: PathBuf,
     writable: bool,
 ) -> io::Result<Option<CapturedMappedBacking>> {
-    if !crate::is_absolute_provider_path(&path) {
+    if !provider.path_namespace().is_absolute(&path) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "mapped backing requires a captured absolute path",

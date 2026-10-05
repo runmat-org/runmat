@@ -92,6 +92,10 @@ impl SandboxFsProvider {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::VirtualRooted
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
     }

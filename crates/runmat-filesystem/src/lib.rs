@@ -40,7 +40,8 @@ pub use native_path::{
     NativeProcessRevocation,
 };
 pub use native_path_intent::NativePathIntent;
-pub use provider_path::is_absolute_provider_path;
+pub use provider_path::{capture_provider_for_paths, capture_provider_path, FsPathNamespace};
+use provider_path::{capture_provider_many, capture_provider_pair};
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
@@ -168,15 +169,15 @@ impl OpenOptions {
     }
 
     pub fn open(&self, path: impl AsRef<Path>) -> io::Result<File> {
-        let resolved = resolve_path(path.as_ref());
-        with_provider(|provider| provider.open(&resolved, &self.flags)).map(File::from_handle)
+        let (provider, resolved) = capture_provider_path(path.as_ref())?;
+        provider.open(&resolved, &self.flags).map(File::from_handle)
     }
 
     /// Open an absolute path through a previously captured provider, without
     /// consulting the ambient provider or working directory again.
     pub fn open_on(&self, provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<File> {
         let path = path.as_ref();
-        if !is_absolute_provider_path(path) {
+        if !provider.path_namespace().is_absolute(path) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "captured filesystem opens require an absolute path",
@@ -186,7 +187,7 @@ impl OpenOptions {
     }
 
     pub async fn open_async(&self, path: impl AsRef<Path>) -> io::Result<File> {
-        let provider = current_provider();
+        let (provider, path) = capture_provider_path(path.as_ref())?;
         self.open_async_on(provider.as_ref(), path).await
     }
 
@@ -197,9 +198,15 @@ impl OpenOptions {
         provider: &dyn FsProvider,
         path: impl AsRef<Path>,
     ) -> io::Result<File> {
-        let resolved = resolve_path(path.as_ref());
+        let resolved = path.as_ref();
+        if !provider.path_namespace().is_absolute(resolved) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
         provider
-            .open_async(&resolved, &self.flags)
+            .open_async(resolved, &self.flags)
             .await
             .map(File::from_handle)
     }
@@ -378,6 +385,17 @@ impl DirEntry {
 
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
+    /// Path syntax owned by this provider, independent of the host platform.
+    fn path_namespace(&self) -> FsPathNamespace {
+        #[cfg(target_arch = "wasm32")]
+        {
+            FsPathNamespace::VirtualRooted
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            FsPathNamespace::NativeOs
+        }
+    }
     /// Opt in to an opened, fixed-extent range owner for an existing file.
     /// `None` means the provider cannot supply live range semantics; it does
     /// not mean the source is absent. This is not a memory-peak certificate.
@@ -546,12 +564,18 @@ impl File {
     /// provider replacement between admission and execution cannot redirect
     /// this input to another owner.
     pub fn open_on(provider: &dyn FsProvider, path: impl AsRef<Path>) -> io::Result<Self> {
-        let resolved = resolve_path(path.as_ref());
+        let resolved = path.as_ref();
+        if !provider.path_namespace().is_absolute(resolved) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
         let flags = OpenFlags {
             read: true,
             ..OpenFlags::default()
         };
-        provider.open(&resolved, &flags).map(Self::from_handle)
+        provider.open(resolved, &flags).map(Self::from_handle)
     }
 
     pub async fn open_async(path: impl AsRef<Path>) -> io::Result<Self> {
@@ -566,13 +590,19 @@ impl File {
         provider: &dyn FsProvider,
         path: impl AsRef<Path>,
     ) -> io::Result<Self> {
-        let resolved = resolve_path(path.as_ref());
+        let resolved = path.as_ref();
+        if !provider.path_namespace().is_absolute(resolved) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "captured filesystem opens require an absolute path",
+            ));
+        }
         let flags = OpenFlags {
             read: true,
             ..OpenFlags::default()
         };
         provider
-            .open_async(&resolved, &flags)
+            .open_async(resolved, &flags)
             .await
             .map(Self::from_handle)
     }
@@ -674,29 +704,6 @@ fn replace_current_dir_override(value: Option<PathBuf>) -> Option<PathBuf> {
         .write()
         .expect("filesystem provider lock poisoned");
     std::mem::replace(&mut guard.current_dir_override, value)
-}
-
-fn with_provider<T>(f: impl FnOnce(&dyn FsProvider) -> T) -> T {
-    let guard = provider_state_lock()
-        .read()
-        .expect("filesystem provider lock poisoned");
-    f(&*guard.provider)
-}
-
-fn resolve_path(path: &Path) -> PathBuf {
-    if is_absolute_provider_path(path) {
-        return path.to_path_buf();
-    }
-    let state = provider_state_lock()
-        .read()
-        .expect("filesystem provider lock poisoned");
-    if let Some(base) = &state.current_dir_override {
-        if path.has_root() {
-            return path.to_path_buf();
-        }
-        return base.join(path);
-    }
-    path.to_path_buf()
 }
 
 fn next_current_dir_override(
@@ -861,17 +868,12 @@ impl Drop for ProviderGuard {
 }
 
 pub async fn read_many_async(paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
-    let resolved = paths
-        .iter()
-        .map(|path| resolve_path(path.as_path()))
-        .collect::<Vec<_>>();
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_many(paths)?;
     provider.read_many(&resolved).await
 }
 
 pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.read(&resolved).await
 }
 
@@ -891,8 +893,7 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 }
 
 pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.write(&resolved, data.as_ref()).await
 }
 
@@ -903,8 +904,7 @@ pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
 }
 
 pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.remove_file(&resolved).await
 }
 
@@ -926,8 +926,7 @@ pub fn remove_file_in_provider(
 }
 
 pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.metadata(&resolved).await
 }
 
@@ -937,14 +936,12 @@ pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
 }
 
 pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.symlink_metadata(&resolved).await
 }
 
 pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.read_dir(&resolved).await
 }
 
@@ -954,20 +951,17 @@ pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
 }
 
 pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.canonicalize(&resolved).await
 }
 
 pub async fn create_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.create_dir(&resolved).await
 }
 
 pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.create_dir_all(&resolved).await
 }
 
@@ -977,28 +971,22 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
 }
 
 pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.remove_dir(&resolved).await
 }
 
 pub async fn remove_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.remove_dir_all(&resolved).await
 }
 
 pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-    let resolved_from = resolve_path(from.as_ref());
-    let resolved_to = resolve_path(to.as_ref());
-    let provider = current_provider();
+    let (provider, resolved_from, resolved_to) = capture_provider_pair(from.as_ref(), to.as_ref())?;
     provider.rename(&resolved_from, &resolved_to).await
 }
 
 pub async fn rename_replace_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-    let resolved_from = resolve_path(from.as_ref());
-    let resolved_to = resolve_path(to.as_ref());
-    let provider = current_provider();
+    let (provider, resolved_from, resolved_to) = capture_provider_pair(from.as_ref(), to.as_ref())?;
     provider.rename_replace(&resolved_from, &resolved_to).await
 }
 
@@ -1009,8 +997,7 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
 }
 
 pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
-    let resolved = resolve_path(path.as_ref());
-    let provider = current_provider();
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
     provider.set_readonly(&resolved, readonly).await
 }
 
@@ -1019,7 +1006,7 @@ pub async fn select_file_open_async(
 ) -> io::Result<Option<OpenFileDialogSelection>> {
     let mut resolved = request.clone();
     if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = resolve_path(default_path);
+        *default_path = capture_provider_path(default_path)?.1;
     }
     match current_host_dialog_provider() {
         Some(provider) => provider.select_file_open(&resolved).await,
@@ -1032,7 +1019,7 @@ pub async fn select_file_save_async(
 ) -> io::Result<Option<SaveFileDialogSelection>> {
     let mut resolved = request.clone();
     if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = resolve_path(default_path);
+        *default_path = capture_provider_path(default_path)?.1;
     }
     match current_host_dialog_provider() {
         Some(provider) => provider.select_file_save(&resolved).await,
@@ -1045,7 +1032,7 @@ pub async fn select_directory_async(
 ) -> io::Result<Option<DirectoryDialogSelection>> {
     let mut resolved = request.clone();
     if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = resolve_path(default_path);
+        *default_path = capture_provider_path(default_path)?.1;
     }
     match current_host_dialog_provider() {
         Some(provider) => provider.select_directory(&resolved).await,
@@ -1078,12 +1065,15 @@ pub async fn data_upload_chunk_async(
 /// Copy a file from `from` to `to`, truncating the destination when it exists.
 /// Returns the number of bytes written, matching `std::fs::copy`.
 pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
-    let mut reader = OpenOptions::new().read(true).open(from.as_ref())?;
+    let (provider, from, to) = capture_provider_pair(from.as_ref(), to.as_ref())?;
+    let mut reader = OpenOptions::new()
+        .read(true)
+        .open_on(provider.as_ref(), &from)?;
     let mut writer = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(to.as_ref())?;
+        .open_on(provider.as_ref(), &to)?;
     io::copy(&mut reader, &mut writer)
 }
 
@@ -1091,7 +1081,7 @@ pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64
 /// `copy_file`, this never consults the process-wide provider or CWD after
 /// capture. It preserves the existing synchronous stream-copy semantics.
 pub fn copy_file_on(provider: &dyn FsProvider, from: &Path, to: &Path) -> io::Result<u64> {
-    if !is_absolute_provider_path(from) || !is_absolute_provider_path(to) {
+    if !provider.path_namespace().is_absolute(from) || !provider.path_namespace().is_absolute(to) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "copy_file_on requires captured absolute paths",
@@ -1475,6 +1465,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for VirtualFsProvider {
+        fn path_namespace(&self) -> FsPathNamespace {
+            FsPathNamespace::VirtualRooted
+        }
+
         fn current_dir_override(&self) -> Option<PathBuf> {
             Some(self.default_current_dir.clone())
         }

@@ -24,6 +24,10 @@ pub struct NativeFsProvider;
 
 #[async_trait(?Send)]
 impl FsProvider for NativeFsProvider {
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::NativeOs
+    }
+
     async fn open_mapped_backing(
         &self,
         path: &Path,

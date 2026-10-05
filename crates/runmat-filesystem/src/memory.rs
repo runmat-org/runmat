@@ -247,6 +247,10 @@ impl MemoryFsProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for MemoryFsProvider {
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        crate::FsPathNamespace::VirtualRooted
+    }
+
     async fn open_mapped_backing(
         &self,
         path: &Path,
