@@ -40,18 +40,17 @@ fn evaluate_inner(
         })?;
         return Ok(state.arena.insert(value));
     }
-    let arguments = operands
+    let retained_roots = operands
         .iter()
-        .map(|operand| super::operand::materialize_operand(state, operand))
+        .map(|operand| super::operand::evaluate_operand(state, operand))
+        .collect::<NativeExecutorResult<Vec<_>>>()?;
+    let arguments = retained_roots
+        .iter()
+        .map(|reference| state.arena.get(*reference).cloned())
         .collect::<NativeExecutorResult<Vec<_>>>()?;
     let name = operator
         .overload_name()
         .expect("short-circuit operators do not reach runtime evaluation");
-    let retained_roots = arguments
-        .iter()
-        .cloned()
-        .map(|value| state.arena.insert(value))
-        .collect();
     let runtime = state.runtime.clone();
     let future = async move {
         let unary = match operator {

@@ -144,6 +144,9 @@ pub(super) fn begin_with_roots(
         NativeExecutorError::Host("pending native call has no active site".into())
     })?;
     let (continuation, generation) = state.next_suspension_identity()?;
+    // Existing arena references become continuation roots only if the call
+    // actually suspends. Synchronous-ready arithmetic adds no duplicate
+    // operand entries to the arena.
     state.pending_call = Some(PendingCall {
         continuation,
         generation,
