@@ -97,47 +97,8 @@ fn same_class_declaration(first: &Instr, second: &Instr) -> bool {
         && first_sealed == second_sealed
         && first_abstract == second_abstract
         && first_enumerations == second_enumerations
-        && first_properties.len() == second_properties.len()
-        && first_properties
-            .iter()
-            .zip(second_properties)
-            .all(|(a, b)| {
-                a.name == b.name
-                    && a.is_static == b.is_static
-                    && a.is_constant == b.is_constant
-                    && a.is_dependent == b.is_dependent
-                    && a.get_access == b.get_access
-                    && a.set_access == b.set_access
-                    && same_default_literal(&a.default_literal, &b.default_literal)
-            })
-        && first_methods.len() == second_methods.len()
-        && first_methods.iter().zip(second_methods).all(|(a, b)| {
-            a.name == b.name
-                && a.function_name == b.function_name
-                && a.is_static == b.is_static
-                && a.is_abstract == b.is_abstract
-                && a.is_sealed == b.is_sealed
-                && a.access == b.access
-        })
-}
-
-fn same_default_literal(
-    first: &Option<crate::bytecode::instr::PropertyDefaultLiteral>,
-    second: &Option<crate::bytecode::instr::PropertyDefaultLiteral>,
-) -> bool {
-    use crate::bytecode::instr::PropertyDefaultLiteral;
-    match (first, second) {
-        (None, None) => true,
-        (Some(PropertyDefaultLiteral::Num(a)), Some(PropertyDefaultLiteral::Num(b))) => {
-            a.to_bits() == b.to_bits()
-        }
-        (Some(PropertyDefaultLiteral::Int(a)), Some(PropertyDefaultLiteral::Int(b))) => a == b,
-        (Some(PropertyDefaultLiteral::Bool(a)), Some(PropertyDefaultLiteral::Bool(b))) => a == b,
-        (Some(PropertyDefaultLiteral::String(a)), Some(PropertyDefaultLiteral::String(b))) => {
-            a == b
-        }
-        _ => false,
-    }
+        && first_properties == second_properties
+        && first_methods == second_methods
 }
 
 fn register_native_class_metadata(

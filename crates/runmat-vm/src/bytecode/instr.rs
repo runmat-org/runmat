@@ -197,7 +197,20 @@ pub enum PropertyDefaultLiteral {
     String(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl PartialEq for PropertyDefaultLiteral {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Num(value) => {
+                matches!(other, Self::Num(other) if value.to_bits() == other.to_bits())
+            }
+            Self::Int(value) => matches!(other, Self::Int(other) if value == other),
+            Self::Bool(value) => matches!(other, Self::Bool(other) if value == other),
+            Self::String(value) => matches!(other, Self::String(other) if value == other),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BytecodeClassProperty {
     pub name: runmat_types::MemberName,
     pub is_static: bool,
@@ -208,7 +221,7 @@ pub struct BytecodeClassProperty {
     pub set_access: runmat_types::MemberAccess,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BytecodeClassMethod {
     pub name: MethodName,
     pub function_name: String,
