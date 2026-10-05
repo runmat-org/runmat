@@ -15,6 +15,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+#[path = "tests/revocation.rs"]
+mod revocation;
+
 struct PendingTurn(Rc<Cell<bool>>);
 
 impl Future for PendingTurn {
@@ -157,38 +160,4 @@ fn cancelled_resize_keeps_retained_workbook_valid() {
     assert!(dropped.get());
     futures::executor::block_on(recovered_workbook(&mut workbook, &selected))
         .expect("retained workbook remains valid after cancellation");
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn revoked_lease_error_keeps_retained_workbook_valid() {
-    let _lock = runmat_filesystem::provider_override_lock();
-    let provider = Arc::new(MemoryFsProvider::with_current_dir("/xlswrite-overlay"));
-    let _restore = runmat_filesystem::replace_provider(provider);
-    let selected = TabularFsOwner::capture(Some(Path::new("/xlswrite-overlay/out.xlsx")))
-        .expect("captured owner")
-        .path("/xlswrite-overlay/out.xlsx".into())
-        .expect("selected path");
-    let mut workbook = XlsWorkbook::new();
-    futures::executor::block_on(seed_workbook(&mut workbook, &selected))
-        .expect("initial valid sheet");
-    let replacement = Arc::new(MemoryFsProvider::with_current_dir("/xlswrite-overlay"));
-    let restored = runmat_filesystem::replace_provider(replacement);
-    let request = XlsWriteRequest {
-        sheet: SheetSelector::Default,
-        range: RangeStart { row: 1, col: 1 },
-    };
-    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
-    let incoming = futures::executor::block_on(table("new"));
-    let error = futures::executor::block_on(workbook.overlay(
-        &request,
-        incoming,
-        &mut cooperation,
-        &selected,
-    ))
-    .expect_err("revoked selected owner");
-    assert_eq!(error.identifier(), XLSWRITE_ERROR_IO.identifier);
-    drop(restored);
-    futures::executor::block_on(recovered_workbook(&mut workbook, &selected))
-        .expect("retained workbook remains valid after lease failure");
 }
