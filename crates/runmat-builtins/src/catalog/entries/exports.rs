@@ -10,6 +10,7 @@ pub use super::containers::*;
 pub use super::control::*;
 pub use super::datetime::*;
 pub use super::deep_learning::*;
+pub use super::diagnostics::*;
 pub use super::fea::*;
 pub use super::finance::*;
 pub use super::geometry::*;
