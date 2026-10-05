@@ -132,6 +132,7 @@ fn timeit_decodes_typed_integer_output_counts_without_an_f64_boundary() {
     assert_eq!(
         block_on(parse_num_outputs(
             &runtime,
+            &Value::FunctionHandle("fixture".into()),
             &[Value::Int(IntValue::U64(usize::MAX as u64))]
         ))
         .expect("platform-sized integer should decode exactly"),
@@ -139,6 +140,7 @@ fn timeit_decodes_typed_integer_output_counts_without_an_f64_boundary() {
     );
     assert!(block_on(parse_num_outputs(
         &runtime,
+        &Value::FunctionHandle("fixture".into()),
         &[Value::Int(IntValue::I64(-1))]
     ))
     .is_err());
@@ -152,10 +154,20 @@ fn output_count_extension_policy_is_owned_by_each_invocation() {
     disabled.set_runmat_extensions_enabled(false);
     let count = [Value::Int(IntValue::I32(3))];
     assert_eq!(
-        block_on(parse_num_outputs(&enabled, &count)).unwrap(),
+        block_on(parse_num_outputs(
+            &enabled,
+            &Value::FunctionHandle("fixture".into()),
+            &count
+        ))
+        .unwrap(),
         Some(3)
     );
-    let error = block_on(parse_num_outputs(&disabled, &count)).unwrap_err();
+    let error = block_on(parse_num_outputs(
+        &disabled,
+        &Value::FunctionHandle("fixture".into()),
+        &count,
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         INTEGER_NUM_OUTPUTS_EXTENSION.error_identifier

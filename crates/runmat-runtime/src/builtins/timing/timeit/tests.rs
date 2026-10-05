@@ -40,6 +40,45 @@ fn output_count_rejects_unrepresentable_double_boundary() {
     assert!(parse_non_negative_integer(&Value::Num(boundary)).is_err());
 }
 
+#[test]
+fn invalid_callable_precedes_resident_count_materialization() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("unregistered resident owner");
+    let resident = allocation
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .expect("automatic view");
+    let error = block_on(timeit_builtin(
+        Some(runtime()),
+        Value::Num(7.0),
+        vec![Value::GpuTensor(resident)],
+    ))
+    .expect_err("invalid callable before provider access");
+    assert_eq!(error.identifier(), TIMEIT_ERROR_FIRST_ARG_KIND.identifier);
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop((error, allocation.handle));
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn host_count_validation_keeps_count_before_callable_error_order() {
+    let error = block_on(timeit_builtin(
+        Some(runtime()),
+        Value::Num(7.0),
+        vec![Value::String("invalid count".into())],
+    ))
+    .expect_err("invalid host count first");
+    assert_eq!(
+        error.identifier(),
+        TIMEIT_ERROR_NUM_OUTPUTS_SCALAR.identifier
+    );
+}
+
 use futures::executor::block_on;
 use runmat_value::{Closure, IntValue, IntegerStorage, Tensor};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -50,6 +89,10 @@ struct TestMonotonicClock(Arc<std::sync::atomic::AtomicU64>);
 impl crate::context::RuntimeTimingService for TestMonotonicClock {
     fn monotonic_elapsed(&self) -> std::time::Duration {
         std::time::Duration::from_micros(self.0.load(Ordering::SeqCst))
+    }
+
+    fn wall_time_since_epoch(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
     }
 
     fn process_cpu_seconds(&self) -> Option<f64> {

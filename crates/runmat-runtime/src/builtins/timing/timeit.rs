@@ -54,7 +54,7 @@ async fn timeit_builtin(
             &TIMEIT_ERROR_CONTEXT_UNAVAILABLE,
         )
     })?;
-    let requested_outputs = parse_num_outputs(&runtime, &rest).await?;
+    let requested_outputs = parse_num_outputs(&runtime, &func, &rest).await?;
     let callable = {
         let _context = runtime.enter();
         prepare_callable(func, requested_outputs)?
@@ -77,6 +77,7 @@ async fn timeit_builtin(
 
 async fn parse_num_outputs(
     runtime: &RuntimeContext,
+    func: &Value,
     rest: &[Value],
 ) -> Result<Option<usize>, crate::RuntimeError> {
     match rest.len() {
@@ -96,6 +97,16 @@ async fn parse_num_outputs(
                     &INTEGER_NUM_OUTPUTS_EXTENSION,
                     BUILTIN_NAME,
                 )?;
+            }
+            // Host scalar validation keeps its historical count-before-callable
+            // error order. A resident scalar must be materialized, so reject an
+            // invalid first argument before touching an acceleration provider.
+            if !matches!(value, Value::GpuTensor(_)) {
+                return parse_non_negative_integer(value).map(Some);
+            }
+            {
+                let _context = runtime.enter();
+                prepare_callable(func.clone(), None)?;
             }
             let value = runtime
                 .cpu_cooperation()
