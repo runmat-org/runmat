@@ -31,7 +31,7 @@ impl XlsWorkbook {
         let sheet_index = self.resolve_sheet_index(&request.sheet);
         self.sheets[sheet_index]
             .table
-            .overlay(request.range, &table, cooperation, selected)
+            .overlay(request.range, table, cooperation, selected)
             .await?;
         Ok(())
     }

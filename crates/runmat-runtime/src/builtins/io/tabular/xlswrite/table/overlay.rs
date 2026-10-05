@@ -6,7 +6,7 @@ impl XlsTable {
     pub(in crate::builtins::io::tabular::xlswrite) async fn overlay(
         &mut self,
         start: RangeStart,
-        incoming: &XlsTable,
+        incoming: XlsTable,
         cooperation: &mut TabularCooperation<'_>,
         selected: &TabularFsPath,
     ) -> BuiltinResult<()> {
@@ -27,15 +27,15 @@ impl XlsTable {
             .await?;
         }
         let mut work = 0;
-        for row in 0..incoming.rows {
-            for col in 0..incoming.cols {
-                let dest = (start.row + row) * self.cols + start.col + col;
-                self.cells[dest] = incoming.cells[row * incoming.cols + col].clone();
-                work += 1;
-                if work == 1024 {
-                    checkpoint_table(cooperation, selected, work).await?;
-                    work = 0;
-                }
+        for (index, value) in incoming.cells.into_iter().enumerate() {
+            let row = index / incoming.cols;
+            let col = index % incoming.cols;
+            let dest = (start.row + row) * self.cols + start.col + col;
+            self.cells[dest] = value;
+            work += 1;
+            if work == 1024 {
+                checkpoint_table(cooperation, selected, work).await?;
+                work = 0;
             }
         }
         checkpoint_table(cooperation, selected, work).await?;
@@ -64,15 +64,17 @@ impl XlsTable {
             resized.resize(resized.len() + chunk, CellValue::Empty);
             checkpoint_table(cooperation, selected, chunk).await?;
         }
+        let previous_cols = self.cols;
+        let previous_cells = std::mem::take(&mut self.cells);
         let mut work = 0;
-        for row in 0..self.rows {
-            for col in 0..self.cols {
-                resized[row * cols + col] = self.cells[row * self.cols + col].clone();
-                work += 1;
-                if work == 1024 {
-                    checkpoint_table(cooperation, selected, work).await?;
-                    work = 0;
-                }
+        for (index, value) in previous_cells.into_iter().enumerate() {
+            let row = index / previous_cols;
+            let col = index % previous_cols;
+            resized[row * cols + col] = value;
+            work += 1;
+            if work == 1024 {
+                checkpoint_table(cooperation, selected, work).await?;
+                work = 0;
             }
         }
         checkpoint_table(cooperation, selected, work).await?;
@@ -97,3 +99,7 @@ async fn checkpoint_table(
         )
     })
 }
+
+#[cfg(test)]
+#[path = "overlay/tests.rs"]
+mod tests;

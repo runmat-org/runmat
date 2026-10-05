@@ -9,6 +9,7 @@ pub(super) async fn build_sheet_xml_cooperative(
 ) -> BuiltinResult<String> {
     let mut xml = String::from(writecell::SHEET_XML_HEADER);
     let mut cells = 0;
+    let mut rows = 0;
     for row in 0..table.rows {
         let excel_row = row + 1;
         xml.push_str(&format!(r#"    <row r="{excel_row}">"#));
@@ -44,9 +45,14 @@ pub(super) async fn build_sheet_xml_cooperative(
             }
         }
         xml.push_str("    </row>\n");
+        rows += 1;
+        if rows == 1024 {
+            checkpoint_xml(cooperation, selected, &xml, rows).await?;
+            rows = 0;
+        }
     }
     xml.push_str(writecell::SHEET_XML_FOOTER);
-    checkpoint_xml(cooperation, selected, &xml, cells).await?;
+    checkpoint_xml(cooperation, selected, &xml, cells + rows).await?;
     Ok(xml)
 }
 
