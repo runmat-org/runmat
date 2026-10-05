@@ -487,7 +487,18 @@ impl RunMatSession {
     }
 
     /// Execute a structured runtime/workspace ABI request.
-    pub async fn execute_request(
+    /// The full interpreter/native execution future is heap-owned at this
+    /// public boundary so embedding, CLI, and browser callers retain a small
+    /// stack-resident handle while polling the same invocation.
+    pub fn execute_request(
+        &mut self,
+        request: crate::abi::ExecutionRequest,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = crate::abi::ExecutionResponse> + '_>>
+    {
+        Box::pin(self.execute_request_inner(request))
+    }
+
+    async fn execute_request_inner(
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
