@@ -30,6 +30,7 @@ pub(super) fn reserve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidRes
             1.0_f64,
             Inventory(p.topology.cells.len(), [0.0_f64; 3]),
             Inventory(p.topology.cells.len(), 0.0_f64),
+            Inventory(p.topology.cells.len(), 0.0_f64),
             Inventory(p.topology.faces.len(), 0.0_f64),
         ),
         super::super::INPUT_IDENTITY_LIMITS,

@@ -1,8 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisModel, Direction, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue,
-    Pressure, ProcedureStep, Signal, SignalExtrapolation, SignalInterpolation, SignalKnot,
-    SignalKnotValue, SignalOrdinate, SignalRepresentation, SignalSampleApproach,
-    TabulatedSignalDomain, Temperature,
+    AnalysisModel, Direction, PhysicalSignal, ProcedureStep, Signal, SignalExtrapolation,
+    SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate, SignalRepresentation,
+    SignalSampleApproach, TabulatedSignalDomain,
 };
 
 use super::{
@@ -11,6 +10,11 @@ use super::{
 };
 
 mod point;
+mod prescribed;
+pub(crate) use prescribed::{
+    sample_prescribed_heat_flux, sample_prescribed_potential, sample_prescribed_pressure,
+    sample_prescribed_temperature, sample_prescribed_velocity,
+};
 mod static_table;
 mod values;
 
@@ -111,8 +115,8 @@ fn collect_constraint_signal_ids<'a>(
     ids: &mut std::collections::HashSet<&'a str>,
 ) {
     use runmat_analysis_core::{
-        AnalysisConstraint, CoupledPhysicsFamily, PhysicsFamily, StructuralConstraintKind,
-        ThermalConstraintKind,
+        AnalysisConstraint, BoundaryOperator, CoupledPhysicsFamily, FluidConstraintKind,
+        PhysicsFamily, StructuralConstraintKind, ThermalConstraintKind,
     };
     let structural = matches!(
         step.family,
@@ -125,6 +129,23 @@ fn collect_constraint_signal_ids<'a>(
             | PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
             | PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal)
     );
+    let fluid = matches!(
+        step.family,
+        PhysicsFamily::Fluid
+            | PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+            | PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+    );
+    for boundary in &model.boundaries {
+        if fluid
+            && step.object_is_active(&runmat_analysis_core::StepObjectRef::Boundary(
+                boundary.boundary_id.clone(),
+            ))
+        {
+            if let BoundaryOperator::FluidOutletPressure { value } = &boundary.operator {
+                insert_prescribed_id(ids, value);
+            }
+        }
+    }
     for constraint in &model.constraints {
         if !step.object_is_active(&runmat_analysis_core::StepObjectRef::Constraint(
             constraint.constraint_id().to_string(),
@@ -152,6 +173,18 @@ fn collect_constraint_signal_ids<'a>(
                         } = &translation.history;
                         ids.insert(acceleration.0 .0.as_str());
                     }
+                }
+                _ => {}
+            },
+            AnalysisConstraint::Fluid(constraint) if fluid => match &constraint.kind {
+                FluidConstraintKind::PrescribedVelocity { value, .. } => {
+                    insert_prescribed_id(ids, value)
+                }
+                FluidConstraintKind::MovingWall { velocity, .. } => {
+                    insert_prescribed_id(ids, velocity)
+                }
+                FluidConstraintKind::PressureReference { value, .. } => {
+                    insert_prescribed_id(ids, value)
                 }
                 _ => {}
             },
@@ -239,101 +272,6 @@ pub(crate) fn sample_signal<Q>(
     }
 }
 
-pub(crate) fn sample_prescribed_potential(
-    value: &PrescribedValue<ElectricPotential>,
-    signals: &[PhysicalSignal],
-    sample: ExcitationSamplePoint<'_>,
-) -> Result<ComplexScalar, RealizationError> {
-    sample_prescribed_scalar(
-        value,
-        signals,
-        sample,
-        |signal| match signal {
-            PhysicalSignal::ElectricPotential(signal) => Some(signal),
-            _ => None,
-        },
-        |value| value.volts,
-    )
-}
-
-pub(crate) fn sample_prescribed_temperature(
-    value: &PrescribedValue<Temperature>,
-    signals: &[PhysicalSignal],
-    sample: ExcitationSamplePoint<'_>,
-) -> Result<ComplexScalar, RealizationError> {
-    sample_prescribed_scalar(
-        value,
-        signals,
-        sample,
-        |signal| match signal {
-            PhysicalSignal::Temperature(signal) => Some(signal),
-            _ => None,
-        },
-        |temperature| temperature.kelvin,
-    )
-}
-
-pub(crate) fn sample_prescribed_heat_flux(
-    value: &PrescribedValue<HeatFlux>,
-    signals: &[PhysicalSignal],
-    sample: ExcitationSamplePoint<'_>,
-) -> Result<ComplexScalar, RealizationError> {
-    sample_prescribed_scalar(
-        value,
-        signals,
-        sample,
-        |signal| match signal {
-            PhysicalSignal::HeatFlux(signal) => Some(signal),
-            _ => None,
-        },
-        |heat_flux| heat_flux.watts_per_square_meter,
-    )
-}
-
-pub(crate) fn sample_prescribed_pressure(
-    value: &PrescribedValue<Pressure>,
-    signals: &[PhysicalSignal],
-    sample: ExcitationSamplePoint<'_>,
-) -> Result<ComplexScalar, RealizationError> {
-    sample_prescribed_scalar(
-        value,
-        signals,
-        sample,
-        |signal| match signal {
-            PhysicalSignal::Pressure(signal) => Some(signal),
-            _ => None,
-        },
-        |pressure| pressure.pascals,
-    )
-}
-
-fn sample_prescribed_scalar<'a, Q>(
-    value: &'a PrescribedValue<Q>,
-    signals: &'a [PhysicalSignal],
-    sample: ExcitationSamplePoint<'_>,
-    typed_signal: impl Fn(&'a PhysicalSignal) -> Option<&'a Signal<Q>>,
-    component: impl Fn(&Q) -> f64,
-) -> Result<ComplexScalar, RealizationError> {
-    match value {
-        PrescribedValue::Constant(value) => {
-            expect_scalar(SampledValue::Scalar(ComplexScalar::real(component(value))))
-        }
-        PrescribedValue::Signal(signal_id) => {
-            let signal = signals
-                .iter()
-                .find(|candidate| candidate.signal_id() == signal_id)
-                .and_then(typed_signal)
-                .ok_or_else(|| {
-                    RealizationError::new(format!(
-                        "prescribed value references missing or incompatible signal {}",
-                        signal_id.0
-                    ))
-                })?;
-            expect_scalar(sample_signal(signal, sample, component)?)
-        }
-    }
-}
-
 pub(crate) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, RealizationError> {
     match value {
         SampledValue::Scalar(value) if value.real.is_finite() && value.imaginary.is_finite() => {
@@ -350,18 +288,27 @@ pub(crate) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, Realiz
 
 pub(crate) fn expect_vector3(value: SampledValue) -> Result<ComplexVector3, RealizationError> {
     match value {
-        SampledValue::Vector3(value) => Ok(value),
+        SampledValue::Vector3(value)
+            if value
+                .real
+                .iter()
+                .chain(&value.imaginary)
+                .all(|v| v.is_finite()) =>
+        {
+            Ok(value)
+        }
+        SampledValue::Vector3(_) => Err(RealizationError::new("nonfinite vector3 excitation")),
         SampledValue::Scalar(_) | SampledValue::Tensor(_) => {
             Err(RealizationError::new("excitation requires vector3 signal"))
         }
     }
 }
 
-pub(super) fn expect_vector3_or_direction(
+pub(crate) fn expect_vector3_or_direction(
     value: SampledValue,
     direction: Option<Direction>,
 ) -> Result<ComplexVector3, RealizationError> {
-    match value {
+    let vector = match value {
         SampledValue::Vector3(value) => Ok(value),
         SampledValue::Tensor(_) => Err(RealizationError::new(
             "directional excitation requires scalar or vector3 signal",
@@ -377,7 +324,8 @@ pub(super) fn expect_vector3_or_direction(
                     .map(|component| component * value.imaginary),
             })
         }
-    }
+    }?;
+    expect_vector3(SampledValue::Vector3(vector))
 }
 
 fn sample_abscissa(

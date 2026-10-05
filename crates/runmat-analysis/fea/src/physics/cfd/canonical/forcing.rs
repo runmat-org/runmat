@@ -1,10 +1,9 @@
-//! Steady global-frame shared body-force authority, not a solver-generated RHS.
+//! Sampled global-frame shared body-force authority, not a solver-generated RHS.
 use super::{geometry_ops::*, CanonicalFluidError as Error};
 use crate::topology::{AnalysisProjection, FiniteVolumeTopology};
 use runmat_analysis_core::{
     CoordinateFrame, EntityDimension, ExcitationAction, ExcitationDistribution,
     ExcitationKinematics, ExcitationTarget, ExpectedTopology, PhysicalSignal, SignalProvenance,
-    SignalRepresentation, SignalShape, SignalValue,
 };
 
 pub(super) fn compile(
@@ -12,6 +11,7 @@ pub(super) fn compile(
     t: &FiniteVolumeTopology,
     actions: &[ExcitationAction],
     signals: &[PhysicalSignal],
+    sample: crate::excitation::ExcitationSamplePoint<'_>,
 ) -> Result<Vec<V>, Error> {
     let mut force = vec![[0.0; 3]; t.cells.len()];
     for action in actions {
@@ -26,16 +26,15 @@ pub(super) fn compile(
         {
             return Err(Error::Unsupported("bodyforce frame/distribution/schedule"));
         }
-        let matches = signals
-            .iter()
-            .filter(|s| s.signal_id() == &a.signal_id)
-            .collect::<Vec<_>>();
-        if matches.len() != 1 {
-            return Err(Error::Invalid("exact bodyforce signal identity"));
-        }
-        let PhysicalSignal::BodyForceDensity(s) = matches[0] else {
-            return Err(Error::Invalid("bodyforce signal quantity"));
+        let mut matches = signals.iter().filter(|s| s.signal_id() == &a.signal_id);
+        let Some(PhysicalSignal::BodyForceDensity(s)) = matches.next() else {
+            return Err(Error::Invalid(
+                "exact bodyforce signal quantity and identity",
+            ));
         };
+        if matches.next().is_some() {
+            return Err(Error::Invalid("duplicate bodyforce signal identity"));
+        }
         if s.provenance != SignalProvenance::Authored
             || s.frame.as_ref() != Some(&CoordinateFrame::Global)
         {
@@ -43,27 +42,24 @@ pub(super) fn compile(
                 "unauthenticated/non-global bodyforce source",
             ));
         }
-        let v = match (&s.shape, &s.representation) {
-            (SignalShape::Vector3, SignalRepresentation::Constant(SignalValue::Vector3(v)))
-                if a.direction.is_none() =>
-            {
-                v.map(|x| x.newtons_per_cubic_meter)
-            }
-            (SignalShape::Scalar, SignalRepresentation::Constant(SignalValue::Scalar(v))) => {
-                let d = a
-                    .direction
-                    .ok_or(Error::Invalid("scalar bodyforce requires signed direction"))?
-                    .vector;
-                if (norm(d) - 1.0).abs() > 1e-12 {
-                    return Err(Error::Invalid("bodyforce unit direction"));
-                }
-                scale(d, v.newtons_per_cubic_meter)
-            }
-            _ => return Err(Error::Unsupported("bodyforce signal representation")),
-        };
-        if v.iter().any(|x| !x.is_finite()) {
-            return Err(Error::Invalid("nonfinite bodyforce"));
+        if a.direction.is_some() && s.shape != runmat_analysis_core::SignalShape::Scalar {
+            return Err(Error::Unsupported(
+                "vector fluid bodyforce already declares direction",
+            ));
         }
+        if let Some(direction) = a.direction {
+            if (norm(direction.vector) - 1.0).abs() > 1e-12 {
+                return Err(Error::Invalid("bodyforce unit direction"));
+            }
+        }
+        let sampled = crate::excitation::sample_signal(s, sample, |v| v.newtons_per_cubic_meter)
+            .map_err(|e| Error::InputRealization(e.to_string()))?;
+        let v = crate::excitation::expect_vector3_or_direction(sampled, a.direction)
+            .map_err(|e| Error::InputRealization(e.to_string()))?;
+        if v.imaginary != [0.0; 3] || v.real.iter().any(|v| !v.is_finite()) {
+            return Err(Error::Unsupported("nonreal/nonfinite fluid body force"));
+        }
+        let v = v.real;
         let region = match &a.target {
             ExcitationTarget::WholeModel => None,
             ExcitationTarget::Region(target) => {

@@ -262,6 +262,7 @@ mod tests {
             authored_authority_identity: Digest::from_bytes([2; 32]),
             velocity_m_per_s: vec![[1.0, -2.0, 3.0]; 2],
             pressure_fluctuation_pa: vec![4.0; 2],
+            pressure_reference_pa: vec![0.0; 2],
             pressure_pa: vec![4.0; 2],
             face_volume_flux_m3_per_s: vec![5.0; 7],
             outer_iterations: 1,

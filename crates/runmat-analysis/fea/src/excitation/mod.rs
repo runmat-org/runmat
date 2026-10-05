@@ -33,9 +33,9 @@ pub(crate) use projection::{ScalarProjectionAccumulator, SpatialProjectionAccumu
 pub(crate) use realize::realize_step_excitations;
 pub(crate) use realize::RealizationError;
 pub(crate) use sample::{
-    expect_scalar, expect_vector3, sample_prescribed_heat_flux, sample_prescribed_potential,
-    sample_prescribed_pressure, sample_prescribed_temperature, sample_signal, time_breakpoints,
-    ExcitationSamplePoint,
+    expect_scalar, expect_vector3, expect_vector3_or_direction, sample_prescribed_heat_flux,
+    sample_prescribed_potential, sample_prescribed_pressure, sample_prescribed_temperature,
+    sample_prescribed_velocity, sample_signal, time_breakpoints, ExcitationSamplePoint,
 };
 pub(crate) use time_grid::ProcedureTimeGrid;
 

@@ -93,6 +93,9 @@ pub struct CanonicalFluidResult {
     /// Original governing pressure relative to the source-bound component outlet or gauge.
     /// This is retained independently of the rounded absolute-pressure projection.
     pub pressure_fluctuation_pa: Vec<f64>,
+    /// Original source-bound pressure coordinate; retained without subtracting
+    /// fluctuation from rounded absolute Pa during continuation.
+    pub pressure_reference_pa: Vec<f64>,
     /// Physical pressure in pascals, NOT kinematic pressure.
     /// Exact f64 projection reference + original fluctuation; never restart authority.
     pub pressure_pa: Vec<f64>,
@@ -111,6 +114,8 @@ pub enum CanonicalFluidError {
     Unsupported(&'static str),
     #[error("canonical fluid resource admission failed: {0}")]
     Resource(&'static str),
+    #[error("canonical fluid input realization failed: {0}")]
+    InputRealization(String),
     #[error("canonical fluid sparse operator failed: {0}")]
     Operator(String),
     #[error("canonical fluid execution cancelled")]
@@ -141,6 +146,7 @@ pub struct CanonicalFluidProblem<'a> {
     reservation: CanonicalFluidReservation,
     numerical_input_identity: Digest,
     authored_authority_identity: Digest,
+    sample: crate::excitation::ProjectionSample,
     pressure_reference_pa: Vec<f64>,
     pressure_reference_plan: pressure_reference::PressureReferencePlan,
     pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
@@ -162,6 +168,24 @@ pub struct CanonicalFluidInput<'a> {
 
 impl<'a> CanonicalFluidProblem<'a> {
     pub fn prepare(input: CanonicalFluidInput<'a>) -> Result<Self, CanonicalFluidError> {
+        Self::prepare_at(input, crate::excitation::ProjectionSample::Static)
+    }
+
+    pub fn prepare_at(
+        input: CanonicalFluidInput<'a>,
+        sample: crate::excitation::ProjectionSample,
+    ) -> Result<Self, CanonicalFluidError> {
+        let sample_point = crate::excitation::ExcitationSamplePoint::try_from(&sample)
+            .map_err(|e| CanonicalFluidError::InputRealization(e.to_string()))?;
+        if !matches!(
+            sample_point,
+            crate::excitation::ExcitationSamplePoint::Static
+                | crate::excitation::ExcitationSamplePoint::TimeSeconds { .. }
+        ) {
+            return Err(CanonicalFluidError::Unsupported(
+                "fluid requires static or physical time input",
+            ));
+        }
         let CanonicalFluidInput {
             source,
             topology,
@@ -239,6 +263,8 @@ impl<'a> CanonicalFluidProblem<'a> {
             policy,
             reservation,
         )?;
+        runmat_analysis_core::validate_physical_signals(signals)
+            .map_err(|e| CanonicalFluidError::InputRealization(e.to_string()))?;
         let authored_authority_identity = identity(
             "fea-fluid-authored-authority/v1",
             &(
@@ -262,9 +288,16 @@ impl<'a> CanonicalFluidProblem<'a> {
         if material.turbulence_intensity.ratio != 0.0 {
             return Err(CanonicalFluidError::Unsupported("turbulence closure"));
         }
-        let body_force_n_per_m3 = forcing::compile(source, topology, excitations, signals)?;
-        let boundaries =
-            boundary::compile(source, topology, constraints, boundary_operators, signals)?;
+        let body_force_n_per_m3 =
+            forcing::compile(source, topology, excitations, signals, sample_point)?;
+        let boundaries = boundary::compile(
+            source,
+            topology,
+            constraints,
+            boundary_operators,
+            signals,
+            sample_point,
+        )?;
         let boundary_balance_plan = boundary_balances::BoundaryBalancePlan::derive(&boundaries);
         let (pressure_reference_plan, pressure_reference_pa) =
             pressure_reference::PressureReferencePlan::derive(
@@ -273,11 +306,12 @@ impl<'a> CanonicalFluidProblem<'a> {
                 &boundaries,
                 constraints,
                 signals,
+                sample_point,
             )?;
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let numerical_input_identity = identity(
-            "fea-fluid-numerical-input/v5",
+            "fea-fluid-numerical-input/v6",
             &(
                 topology.mesh_digest,
                 topology.projection_digest,
@@ -288,6 +322,7 @@ impl<'a> CanonicalFluidProblem<'a> {
                 &body_force_n_per_m3,
                 &pressure_reference_pa,
                 &pressure_reference_plan,
+                &sample,
                 policy,
             ),
         )?;
@@ -302,6 +337,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             reservation,
             numerical_input_identity,
             authored_authority_identity,
+            sample,
             pressure_reference_pa,
             pressure_reference_plan,
             pressure_stencils,
@@ -319,6 +355,11 @@ impl<'a> CanonicalFluidProblem<'a> {
     }
 
     pub fn solve(&self) -> Result<CanonicalFluidResult, CanonicalFluidError> {
+        if self.sample != crate::excitation::ProjectionSample::Static {
+            return Err(CanonicalFluidError::Unsupported(
+                "timed fluid solve requires original predecessor interval",
+            ));
+        }
         iterate::solve(self)
     }
 
@@ -326,6 +367,11 @@ impl<'a> CanonicalFluidProblem<'a> {
         &self,
         original: &CanonicalFluidResult,
     ) -> Result<CanonicalFluidResidual, CanonicalFluidError> {
+        if self.sample != crate::excitation::ProjectionSample::Static {
+            return Err(CanonicalFluidError::Unsupported(
+                "timed fluid recovery requires original predecessor interval",
+            ));
+        }
         recovery::recover(self, original)
     }
 }

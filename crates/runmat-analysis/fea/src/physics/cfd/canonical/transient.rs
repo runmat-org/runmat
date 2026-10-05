@@ -16,6 +16,7 @@ use runmat_execution::Digest;
 #[derive(Clone, Copy)]
 pub struct CanonicalFluidFields<'a> {
     pub velocity_m_per_s: &'a [[f64; 3]],
+    pub pressure_reference_pa: &'a [f64],
     pub pressure_fluctuation_pa: &'a [f64],
     pub face_volume_flux_m3_per_s: &'a [f64],
 }
@@ -24,6 +25,7 @@ impl CanonicalFluidResult {
         CanonicalFluidFields {
             velocity_m_per_s: &self.velocity_m_per_s,
             pressure_fluctuation_pa: &self.pressure_fluctuation_pa,
+            pressure_reference_pa: &self.pressure_reference_pa,
             face_volume_flux_m3_per_s: &self.face_volume_flux_m3_per_s,
         }
     }
@@ -87,10 +89,22 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
         {
             return Err(Error::Invalid("finite increasing physical fluid interval"));
         }
+        if let crate::excitation::ProjectionSample::TimeSeconds { value, .. } = self.sample {
+            if value.to_bits() != end_time_s.to_bits() {
+                return Err(Error::Invalid(
+                    "receiving fluid sample differs from interval endpoint",
+                ));
+            }
+        }
         // Admission precedes predecessor traversal, encoding and warm-start copies.
         let reservation = resources::reserve(self)?;
         let n = self.topology.cells.len();
-        if previous.velocity_m_per_s.len() != n
+        if previous.pressure_reference_pa.len() != n
+            || previous
+                .pressure_reference_pa
+                .iter()
+                .any(|v| !v.is_finite())
+            || previous.velocity_m_per_s.len() != n
             || previous.pressure_fluctuation_pa.len() != n
             || previous
                 .velocity_m_per_s
@@ -119,13 +133,14 @@ impl<'mesh> CanonicalFluidProblem<'mesh> {
             derivative.coefficient(self, cell)?;
         }
         let numerical_input_identity = identity(
-            "fea-fluid-backward-euler-interval/v1",
+            "fea-fluid-backward-euler-interval/v2",
             &(
                 self.numerical_input_identity,
                 start_time_s,
                 end_time_s,
                 previous.velocity_m_per_s,
                 previous.pressure_fluctuation_pa,
+                previous.pressure_reference_pa,
                 previous.face_volume_flux_m3_per_s,
             ),
         )?;

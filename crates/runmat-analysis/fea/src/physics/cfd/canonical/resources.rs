@@ -83,6 +83,24 @@ pub(super) fn admit_authority_profile(
     if add(records, profile.resolved_entities)? > p.maximum_authority_items as u64 {
         return Err(Error::Resource("authority records and resolved entities"));
     }
+    let signal_profile =
+        runmat_canonical_codec::profile_serialized(&signals, super::INPUT_IDENTITY_LIMITS)
+            .map_err(|error| match &error.kind {
+                runmat_canonical_codec::CanonicalCodecErrorKind::Invalid => {
+                    Error::InputRealization(error.to_string())
+                }
+                runmat_canonical_codec::CanonicalCodecErrorKind::ResourceLimit => {
+                    Error::Resource("fluid original signal profile")
+                }
+            })?;
+    reservation.resident_bytes_upper_bound = add(
+        reservation.resident_bytes_upper_bound,
+        signal_profile.materialization_resident_bytes_estimate,
+    )?;
+    reservation.operator_work_upper_bound = add(
+        reservation.operator_work_upper_bound,
+        mul(signal_profile.encoded_bytes_upper_bound, 64)?,
+    )?;
     let mut max_signal_bytes = 1;
     for signal in signals {
         let bytes = add(signal.signal_id().0.len() as u64, 1)?;
@@ -252,7 +270,7 @@ impl CanonicalFluidReservation {
         // coexist with the existing shared Krylov peak in a correction solve.
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
-        let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 16)?, 48)?)?;
+        let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 32)?, 96)?)?;
         // Frozen velocity reconstruction: four source/weight records per cell,
         // doubled payload growth plus the owning Vec header. No field is retained.
         bytes = add(

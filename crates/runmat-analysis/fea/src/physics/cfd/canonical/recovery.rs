@@ -65,6 +65,11 @@ pub(super) fn recover_with_time(
     {
         return Err(Error::Invalid("retained iteration authority"));
     }
+    if original.pressure_reference_pa != p.pressure_reference_pa {
+        return Err(Error::Invalid(
+            "retained original pressure reference substitution",
+        ));
+    }
     if original.pressure_pa.len() != p.topology.cells.len()
         || original.pressure_fluctuation_pa.len() != p.topology.cells.len()
         || original

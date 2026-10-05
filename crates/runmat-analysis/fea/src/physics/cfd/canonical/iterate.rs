@@ -150,6 +150,7 @@ pub(super) fn solve_with_time(
                 velocity_m_per_s: u,
                 pressure_pa,
                 pressure_fluctuation_pa: pressure_fluctuation,
+                pressure_reference_pa: p.pressure_reference_pa.clone(),
                 face_volume_flux_m3_per_s: q,
                 outer_iterations: iteration,
                 linear_iterations,

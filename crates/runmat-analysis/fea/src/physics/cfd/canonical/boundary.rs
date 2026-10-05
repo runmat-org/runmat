@@ -25,6 +25,7 @@ pub(super) fn compile(
     constraints: &[FluidConstraint],
     operators: &[AnalysisBoundary],
     signals: &[PhysicalSignal],
+    sample: crate::excitation::ExcitationSamplePoint<'_>,
 ) -> Result<Vec<FaceBoundary>, Error> {
     let mut ids = std::collections::BTreeSet::new();
     for id in constraints
@@ -50,14 +51,16 @@ pub(super) fn compile(
                 {
                     return Err(Error::Unsupported("unauthenticated velocity signal source"));
                 }
-                let v = value.study_constant(signals).ok_or(Error::Unsupported(
-                    "unresolved steady velocity signal/frame",
-                ))?;
+                let v = crate::excitation::sample_prescribed_velocity(value, signals, sample)
+                    .map_err(|e| Error::InputRealization(e.to_string()))?;
+                if v.imaginary != [0.0; 3] {
+                    return Err(Error::Unsupported("complex fluid velocity"));
+                }
                 (
                     target,
                     FaceBoundary::Velocity {
                         authority_id: c.constraint_id.clone(),
-                        value: v.map(|v| v.meters_per_second),
+                        value: v.real,
                         moving_wall: matches!(&c.kind, FluidConstraintKind::MovingWall { .. }),
                     },
                 )
@@ -90,9 +93,11 @@ pub(super) fn compile(
         {
             return Err(Error::Unsupported("unauthenticated pressure signal source"));
         }
-        let p = value.study_constant(signals).ok_or(Error::Unsupported(
-            "unresolved outlet pressure signal/frame",
-        ))?;
+        let p = crate::excitation::sample_prescribed_pressure(value, signals, sample)
+            .map_err(|e| Error::InputRealization(e.to_string()))?;
+        if p.imaginary != 0.0 {
+            return Err(Error::Unsupported("complex fluid pressure"));
+        }
         bind(
             source,
             t,
@@ -100,7 +105,7 @@ pub(super) fn compile(
             &b.target,
             FaceBoundary::PressureOutlet {
                 authority_id: b.boundary_id.clone(),
-                pressure: p.pascals,
+                pressure: p.real,
             },
         )?;
     }

@@ -468,6 +468,7 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
             "volume_flow_rate_m3_per_s",
         ],
         vec!["original", "face_volume_flux_m3_per_s", "0"],
+        vec!["original", "pressure_reference_pa", "0"],
         vec![
             "original",
             "residual",
@@ -501,15 +502,20 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
         )
         .is_err());
     }
-    for legacy_schema in [false, true] {
+    for legacy_schema in 0..4 {
         let mut wire = serde_json::to_value(&result).unwrap();
-        if legacy_schema {
-            wire["data"]["schema_version"] = serde_json::json!(1);
+        if legacy_schema >= 2 {
+            wire["data"]["schema_version"] =
+                serde_json::json!(if legacy_schema == 2 { 1 } else { 3 });
         } else {
             wire["data"]["original"]
                 .as_object_mut()
                 .unwrap()
-                .remove("pressure_fluctuation_pa");
+                .remove(if legacy_schema == 0 {
+                    "pressure_fluctuation_pa"
+                } else {
+                    "pressure_reference_pa"
+                });
         }
         let bytes =
             encode_contract(RESULT_PREFIX, "steady-fluid-retained-result", &wire, LIMITS).unwrap();

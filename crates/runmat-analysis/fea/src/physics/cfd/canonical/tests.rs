@@ -9,6 +9,7 @@ mod linear_correction;
 mod pressure_reference;
 mod reconstruction;
 mod reference;
+mod time_signals;
 mod transient;
 
 use super::*;

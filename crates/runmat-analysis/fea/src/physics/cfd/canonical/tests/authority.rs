@@ -66,6 +66,7 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
         &boundaries,
         &[],
         &[],
+        crate::excitation::ExcitationSamplePoint::Static,
     )
     .unwrap();
     assert_eq!(references, (0..count).map(|i| i as f64).collect::<Vec<_>>());
@@ -77,7 +78,8 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
             &topology,
             &missing,
             &[],
-            &[]
+            &[],
+            crate::excitation::ExcitationSamplePoint::Static,
         )
         .is_err()
     );
@@ -115,6 +117,7 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
         &walls,
         &[gauge],
         &[],
+        crate::excitation::ExcitationSamplePoint::Static,
     )
     .unwrap();
     assert_eq!(closed, vec![101325.0; count]);

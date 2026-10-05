@@ -29,8 +29,14 @@ fn original_uniform(
         .collect();
     (u, pressure, flux)
 }
-fn fields<'a>(u: &'a [V], p: &'a [f64], q: &'a [f64]) -> CanonicalFluidFields<'a> {
+fn fields<'a>(
+    problem: &'a CanonicalFluidProblem<'_>,
+    u: &'a [V],
+    p: &'a [f64],
+    q: &'a [f64],
+) -> CanonicalFluidFields<'a> {
     CanonicalFluidFields {
+        pressure_reference_pa: &problem.pressure_reference_pa,
         velocity_m_per_s: u,
         pressure_fluctuation_pa: p,
         face_volume_flux_m3_per_s: q,
@@ -49,7 +55,7 @@ fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
         let exact_gradient = acceleration.map(|a| -p.density * a);
         let (u, pressure, flux) = original_uniform(&p, initial_velocity, exact_gradient);
         let step = p
-            .prepare_backward_euler(3.0, 3.2, fields(&u, &pressure, &flux))
+            .prepare_backward_euler(3.0, 3.2, fields(&p, &u, &pressure, &flux))
             .unwrap();
         assert!(
             step.reservation().resident_bytes_upper_bound
@@ -76,14 +82,14 @@ fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
             );
         }
         assert!(p
-            .prepare_backward_euler(3.0, 3.4, fields(&u, &pressure, &flux))
+            .prepare_backward_euler(3.0, 3.4, fields(&p, &u, &pressure, &flux))
             .unwrap()
             .recover(&cold)
             .is_err());
         let mut foreign = u.clone();
         foreign[0][0] += 0.001;
         assert!(p
-            .prepare_backward_euler(3.0, 3.2, fields(&foreign, &pressure, &flux))
+            .prepare_backward_euler(3.0, 3.2, fields(&p, &foreign, &pressure, &flux))
             .unwrap()
             .recover(&cold)
             .is_err());
@@ -112,7 +118,7 @@ fn exponential_translation_pressure_shows_first_order_time_convergence() {
             let previous = retained
                 .as_ref()
                 .map(CanonicalFluidResult::original_fields)
-                .unwrap_or_else(|| fields(&initial.0, &initial.1, &initial.2));
+                .unwrap_or_else(|| fields(&p, &initial.0, &initial.1, &initial.2));
             let step = p.prepare_backward_euler(start, finish, previous).unwrap();
             let result = step.solve().unwrap();
             step.recover(&result).unwrap();
@@ -153,41 +159,41 @@ fn interval_admission_rejects_order_nonfinite_divergence_budget_and_cancellation
         (0.0, f64::MIN_POSITIVE * f64::EPSILON),
     ] {
         assert!(p
-            .prepare_backward_euler(start, end, fields(&u, &pressure, &q))
+            .prepare_backward_euler(start, end, fields(&p, &u, &pressure, &q))
             .is_err());
     }
     q[0] = 1.0;
     assert!(p
-        .prepare_backward_euler(0.0, 1.0, fields(&u, &pressure, &q))
+        .prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q))
         .is_err());
     q[0] = 0.0;
     let mut limited_fixture = closed(2, [0.0; 3], 0.0);
     limited_fixture.policy.maximum_resident_bytes = p.reservation().resident_bytes_upper_bound;
     let limited = CanonicalFluidProblem::prepare(limited_fixture.input()).unwrap();
     assert!(matches!(
-        limited.prepare_backward_euler(0.0, 1.0, fields(&u, &pressure, &q)),
+        limited.prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q)),
         Err(Error::Resource(_))
     ));
     let mut work_fixture = closed(2, [0.0; 3], 0.0);
     work_fixture.policy.maximum_operator_work = p.reservation().operator_work_upper_bound;
     let work_limited = CanonicalFluidProblem::prepare(work_fixture.input()).unwrap();
     assert!(matches!(
-        work_limited.prepare_backward_euler(0.0, 1.0, fields(&u, &pressure, &q)),
+        work_limited.prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q)),
         Err(Error::Resource(_))
     ));
     let mut malformed = u.clone();
     malformed[0][0] = f64::NAN;
     assert!(p
-        .prepare_backward_euler(0.0, 1.0, fields(&malformed, &pressure, &q))
+        .prepare_backward_euler(0.0, 1.0, fields(&p, &malformed, &pressure, &q))
         .is_err());
     assert!(p
-        .prepare_backward_euler(0.0, 1.0, fields(&u[1..], &pressure, &q))
+        .prepare_backward_euler(0.0, 1.0, fields(&p, &u[1..], &pressure, &q))
         .is_err());
     assert!(p
-        .prepare_backward_euler(0.0, 1.0, fields(&u, &pressure, &q[1..]))
+        .prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q[1..]))
         .is_err());
     let step = p
-        .prepare_backward_euler(0.0, 1.0, fields(&u, &pressure, &q))
+        .prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q))
         .unwrap();
     let cancellation = crate::progress::FeaCancellationToken::new();
     cancellation.cancel();
@@ -198,7 +204,7 @@ fn interval_admission_rejects_order_nonfinite_divergence_budget_and_cancellation
         });
     assert!(matches!(step.solve(), Err(Error::Cancelled)));
     assert!(matches!(
-        p.prepare_backward_euler(0.0, 1.0, fields(&u, &pressure, &q)),
+        p.prepare_backward_euler(0.0, 1.0, fields(&p, &u, &pressure, &q)),
         Err(Error::Cancelled)
     ));
 }

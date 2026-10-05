@@ -5,6 +5,7 @@ use crate::fixtures::{
 mod acoustic_incident_pressure;
 mod charge_density;
 mod magnetic_volume_current;
+mod prescribed_fluid;
 mod volume_velocity;
 
 use super::{

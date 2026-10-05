@@ -29,6 +29,7 @@ impl PressureReferencePlan {
         b: &[FaceBoundary],
         constraints: &[FluidConstraint],
         signals: &[PhysicalSignal],
+        sample: crate::excitation::ExcitationSamplePoint<'_>,
     ) -> Result<(Self, Vec<f64>), Error> {
         let mut neighbors = vec![Vec::new(); t.cells.len()];
         for f in &t.faces {
@@ -62,15 +63,12 @@ impl PressureReferencePlan {
             {
                 return Err(Error::Unsupported("unauthenticated pressure gauge signal"));
             }
-            let value = value
-                .study_constant(signals)
-                .ok_or(Error::Unsupported(
-                    "unresolved steady pressure gauge signal/frame",
-                ))?
-                .pascals;
-            if !value.is_finite() {
-                return Err(Error::Invalid("pressure gauge value"));
+            let value = crate::excitation::sample_prescribed_pressure(value, signals, sample)
+                .map_err(|e| Error::InputRealization(e.to_string()))?;
+            if value.imaginary != 0.0 {
+                return Err(Error::Unsupported("complex fluid gauge"));
             }
+            let value = value.real;
             let selected = boundary::select_faces(source, t, target)?;
             let mut by_component = std::collections::BTreeMap::<usize, Vec<usize>>::new();
             for i in selected {
