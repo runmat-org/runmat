@@ -359,7 +359,11 @@ pub fn prepare_semantic_state_publication(
         vec![AnalysisNumericalObjectKind::SemanticState],
         required_capabilities,
     )?;
-    let host = AnalysisHostWorkload::new(workload, preparation.source_host.artifact_access)?;
+    let host = AnalysisHostWorkload::new(
+        workload,
+        preparation.source_host.artifact_access,
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
+    )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedSemanticStatePublication {
         request,

@@ -181,15 +181,19 @@ pub fn prepare_structural_random_response_fanout(
                 &resource_plan,
             )?;
             numerical_inputs.push(resource_objects);
-            let host = task_host(
+            let host = task_host(crate::portable_task_support::PortableTaskHostPreparation {
                 study,
                 step,
                 execution_plan,
-                AnalysisWorkKind::SolveStructuralRandomResponseIntervals,
-                &numerical_inputs,
-                vec![AnalysisNumericalObjectKind::StructuralRandomResponseIntervalResult],
-                preparation.artifact_access.clone(),
-            )?;
+                work_kind: AnalysisWorkKind::SolveStructuralRandomResponseIntervals,
+                inputs: &numerical_inputs,
+                outputs: vec![AnalysisNumericalObjectKind::StructuralRandomResponseIntervalResult],
+                artifact_access: preparation.artifact_access.clone(),
+                output_policy: crate::AnalysisOutputPolicy::new(
+                    preparation.chunk_bytes,
+                    preparation.inventory_limits,
+                )?,
+            })?;
             let program = prepare_analysis_program(
                 &host,
                 preparation.program_revision.clone(),
@@ -393,19 +397,23 @@ pub fn prepare_structural_random_response_assembly(
         preparation.authored_study_digest,
         preparation.frozen_project_digest,
     )?;
-    let host = task_host(
+    let host = task_host(crate::portable_task_support::PortableTaskHostPreparation {
         study,
         step,
         execution_plan,
-        AnalysisWorkKind::AssembleStructuralRandomResponseResult,
-        &numerical_inputs,
-        vec![
+        work_kind: AnalysisWorkKind::AssembleStructuralRandomResponseResult,
+        inputs: &numerical_inputs,
+        outputs: vec![
             AnalysisNumericalObjectKind::SolverResult,
             AnalysisNumericalObjectKind::NumericalReceipt,
             AnalysisNumericalObjectKind::StatePublicationProfiles,
         ],
-        preparation.artifact_access,
-    )?;
+        artifact_access: preparation.artifact_access,
+        output_policy: crate::AnalysisOutputPolicy::new(
+            preparation.chunk_bytes,
+            preparation.inventory_limits,
+        )?,
+    })?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &numerical_inputs)?;
     Ok(PreparedStructuralRandomResponseAssemblyTask {
         workload: preparation.workload,

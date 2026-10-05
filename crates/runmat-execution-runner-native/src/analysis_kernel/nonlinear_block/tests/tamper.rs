@@ -94,6 +94,7 @@ fn worker_rejects_rehashed_understatements_before_numerical_acceptance() {
             )
             .unwrap(),
             task.host.artifact_access.clone(),
+            task.host.output_policy,
         )
         .unwrap();
         let error = super::super::super::NativeAnalysisKernel

@@ -33,6 +33,7 @@ use crate::{
 };
 
 pub struct StructuralFrequencyEntryPreparation {
+    pub output_policy: crate::AnalysisOutputPolicy,
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
     pub request: PreparedAnalysisObjects,
@@ -169,6 +170,10 @@ pub fn prepare_structural_frequency_fanout(
             )?;
             prepare_structural_frequency_entry_task_with_admitted_resource_plan(
                 StructuralFrequencyEntryPreparation {
+                    output_policy: crate::AnalysisOutputPolicy::new(
+                        preparation.chunk_bytes,
+                        preparation.inventory_limits,
+                    )?,
                     workload: preparation.workload.clone(),
                     mesh: preparation.mesh.clone(),
                     request,
@@ -355,7 +360,11 @@ fn prepare_structural_frequency_entry_task_with_admitted_resource_plan(
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
-    let host = AnalysisHostWorkload::new(analysis_workload, preparation.artifact_access)?;
+    let host = AnalysisHostWorkload::new(
+        analysis_workload,
+        preparation.artifact_access,
+        preparation.output_policy,
+    )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedStructuralFrequencyEntryTask {
         workload,
@@ -528,7 +537,11 @@ pub fn prepare_structural_frequency_result_task(
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
-    let host = AnalysisHostWorkload::new(analysis_workload, preparation.artifact_access)?;
+    let host = AnalysisHostWorkload::new(
+        analysis_workload,
+        preparation.artifact_access,
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
+    )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedStructuralFrequencyResultTask {
         request,

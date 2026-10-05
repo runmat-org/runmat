@@ -65,8 +65,10 @@ where
     S: CacheImport + CacheExport,
     K: AnalysisKernel + ?Sized,
 {
-    let output_policy = AnalysisOutputPolicy::new(chunk_bytes, limits)?;
     let host = AnalysisHostWorkload::from_program_request(request, store)?;
+    let output_policy = host.output_policy;
+    output_policy.require_within(AnalysisOutputPolicy::new(chunk_bytes, limits)?)?;
+    let limits = output_policy.inventory_limits();
     let roots = input_roots(request)?;
     let inputs = host
         .workload

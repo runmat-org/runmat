@@ -1,5 +1,6 @@
 //! Placement-neutral orchestration of an exact authored acoustic frequency plan.
 //! Each entry owns its numerical evidence; aggregation is a separately governed task.
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
 use crate::{
     import_acoustic_frequency_assembly, prepare_acoustic_frequency_assembly_task,
     AcousticFrequencyAssemblyPreparation, AnalysisBridgeError, AnalysisBridgeResult,
@@ -198,7 +199,7 @@ impl AcousticStudyCoordinator {
             .assembly_task
             .as_ref()
             .ok_or_else(|| invalid("acoustic assembly was not prepared"))?;
-        entry::validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
+        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
         let closure = AcousticStudyAssemblyClosure {
             workload: task.host.workload.clone(),
             response: response.clone(),

@@ -61,6 +61,7 @@ pub(super) fn reject_understated_decode(
         )
         .unwrap(),
         host.artifact_access.clone(),
+        host.output_policy,
     )
     .unwrap();
     assert!(super::super::super::super::NativeAnalysisKernel

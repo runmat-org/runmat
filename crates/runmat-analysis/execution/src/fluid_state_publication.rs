@@ -323,7 +323,11 @@ pub fn prepare_fluid_state_publication(
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
-    let host = AnalysisHostWorkload::new(workload, p.source_host.artifact_access)?;
+    let host = AnalysisHostWorkload::new(
+        workload,
+        p.source_host.artifact_access,
+        crate::AnalysisOutputPolicy::new(p.chunk_bytes, p.inventory_limits)?,
+    )?;
     let program = prepare_analysis_program(&host, p.program_revision, &inputs)?;
     Ok(PreparedSemanticStatePublication {
         request,

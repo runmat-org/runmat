@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult, AnalysisWorkloadRequest};
 
-pub const ANALYSIS_HOST_ABI: &str = "host-v1";
+pub const ANALYSIS_HOST_ABI: &str = "host-v2";
 pub const ANALYSIS_HOST_EXECUTION_MODE: &str = "analysis";
-pub const ANALYSIS_HOST_TARGET_PROFILE: &str = "portable-analysis-host-v1";
+pub const ANALYSIS_HOST_TARGET_PROFILE: &str = "portable-analysis-host-v2";
 const HOST_PROGRAM_BYTES: &[u8] = b"runmat-analysis-host\0";
-const HOST_PREFIX: &[u8] = b"runmat-analysis-host-invocation/v1\0";
+const HOST_PREFIX: &[u8] = b"runmat-analysis-host-invocation/v2\0";
 const HOST_DOMAIN: &str = "host-invocation";
 const HOST_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 pub const ANALYSIS_HOST_INVOCATION_MEDIA_TYPE: &str =
@@ -27,6 +27,7 @@ pub struct AnalysisHostWorkload {
     pub schema_version: u16,
     pub workload: AnalysisWorkloadRequest,
     pub artifact_access: ArtifactAccess,
+    pub output_policy: crate::AnalysisOutputPolicy,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -34,6 +35,7 @@ pub struct AnalysisHostWorkload {
 struct AnalysisHostInvocation {
     schema_version: u16,
     workload: AnalysisWorkloadRequest,
+    output_policy: crate::AnalysisOutputPolicy,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,24 +98,27 @@ impl AnalysisHostWorkload {
     pub fn new(
         workload: AnalysisWorkloadRequest,
         artifact_access: ArtifactAccess,
+        output_policy: crate::AnalysisOutputPolicy,
     ) -> AnalysisBridgeResult<Self> {
         let host = Self {
-            schema_version: 1,
+            schema_version: 2,
             workload,
             artifact_access,
+            output_policy,
         };
         host.validate()?;
         Ok(host)
     }
 
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
-        if self.schema_version != 1 {
+        if self.schema_version != 2 {
             return Err(AnalysisBridgeError::Invalid(
                 "unsupported analysis host workload schema".into(),
             ));
         }
         self.workload.validate()?;
         self.artifact_access.validate()?;
+        self.output_policy.validate()?;
         Ok(())
     }
 
@@ -125,6 +130,7 @@ impl AnalysisHostWorkload {
             &AnalysisHostInvocation {
                 schema_version: self.schema_version,
                 workload: self.workload.clone(),
+                output_policy: self.output_policy,
             },
             HOST_LIMITS,
         )?)
@@ -140,6 +146,7 @@ impl AnalysisHostWorkload {
             schema_version: program.schema_version,
             workload: program.workload,
             artifact_access,
+            output_policy: program.output_policy,
         };
         host.validate()?;
         Ok(host)

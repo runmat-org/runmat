@@ -1,6 +1,7 @@
 //! Original field task and terminal-tail composition; shared engines own artifacts and accuracy.
 use super::*;
-use crate::steady_study::{validate_accounting, SteadyStudySource, TerminalStatePublicationSource};
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
+use crate::steady_study::{SteadyStudySource, TerminalStatePublicationSource};
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SequenceIdentity},
     planning::resource::FeaResourcePlan,

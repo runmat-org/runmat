@@ -93,6 +93,11 @@ fn checkpoint_host(inputs: &[PreparedAnalysisObjects]) -> AnalysisHostWorkload {
             authorization_scope: "study:history".into(),
             encryption_context: digest("history-encryption"),
         },
+        runmat_analysis_execution::AnalysisOutputPolicy::new(
+            1024,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
     )
     .unwrap()
 }

@@ -106,6 +106,13 @@ impl FluidTransientBlockWorkload {
         checkpoint: &FluidTransientCheckpoint,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
+        self.require_output_prefix(checkpoint)?;
+        checkpoint.recover(&self.workload, mesh)
+    }
+    fn require_output_prefix(
+        &self,
+        checkpoint: &FluidTransientCheckpoint,
+    ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         let old = &self.predecessor.data;
         let new = &checkpoint.data;
@@ -129,7 +136,7 @@ impl FluidTransientBlockWorkload {
                 "fluid output differs from original predecessor or requested ordinals",
             ));
         }
-        checkpoint.recover(&self.workload, mesh)
+        Ok(())
     }
     pub fn execute(
         &self,
@@ -245,6 +252,17 @@ pub(super) fn recover(
     })
 }
 impl PreparedFluidTransientContinuation<'_> {
+    /// Verify a cold output with the already admitted original source. Preserve all
+    /// equation/history checks without recompiling properties and initial fields.
+    pub fn recover_output(
+        &self,
+        checkpoint: &FluidTransientCheckpoint,
+    ) -> AnalysisExecutionResult<()> {
+        self.request.require_output_prefix(checkpoint)?;
+        recover(&self.prepared, checkpoint)?;
+        Ok(())
+    }
+
     pub fn phase_resident_bytes_upper_bound(&self) -> AnalysisExecutionResult<u64> {
         let numerical = self
             .reservation()?

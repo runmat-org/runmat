@@ -314,6 +314,7 @@ fn native_rejects_source_closure_output_policy_and_understated_plan_before_solve
     let host = runmat_analysis_execution::AnalysisHostWorkload::new(
         request,
         task.host.artifact_access.clone(),
+        task.host.output_policy,
     )
     .unwrap();
     assert!(execute(AnalysisKernelInvocation {

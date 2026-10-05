@@ -598,6 +598,8 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
 
     assert!(
         prepare_structural_frequency_entry_task(StructuralFrequencyEntryPreparation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(256, limits)
+                .unwrap(),
             workload: workload_objects.clone(),
             mesh: mesh_objects.clone(),
             request: prepared.inputs[2].clone(),
@@ -628,6 +630,8 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
     .unwrap();
     assert!(
         prepare_structural_frequency_entry_task(StructuralFrequencyEntryPreparation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(256, limits)
+                .unwrap(),
             workload: workload_objects,
             mesh: mesh_objects,
             request: prepared.inputs[2].clone(),

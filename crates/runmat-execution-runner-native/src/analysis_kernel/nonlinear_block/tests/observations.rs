@@ -294,6 +294,7 @@ pub(super) fn reject_recovery_understatements(
             )
             .unwrap(),
             prepared.host.artifact_access.clone(),
+            prepared.host.output_policy,
         )
         .unwrap();
         assert!(

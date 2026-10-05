@@ -5,6 +5,11 @@ pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
 mod analysis_fluid;
+mod analysis_fluid_transient;
+pub use analysis_fluid_transient::{
+    execute_fluid_transient_block_locally, CompletedFluidTransientBlockExecution,
+    FluidTransientBlockExecutionPolicy,
+};
 mod analysis_nonlinear;
 pub use analysis_nonlinear::source::nonlinear_solid_study_completion_from_source;
 pub use analysis_nonlinear::{

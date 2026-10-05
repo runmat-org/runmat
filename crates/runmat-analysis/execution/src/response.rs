@@ -179,6 +179,11 @@ pub fn import_analysis_output_set(
             "analysis result inventory omits its output-set root".into(),
         ));
     }
+    if root.encoded_length == 0 || root.encoded_length > ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES {
+        return Err(AnalysisBridgeError::Invalid(
+            "analysis output-set root exceeds its schema bound".into(),
+        ));
+    }
     let bytes = source
         .read_verified(root.logical_digest)?
         .ok_or_else(|| AnalysisBridgeError::Invalid("analysis output set is absent".into()))?;

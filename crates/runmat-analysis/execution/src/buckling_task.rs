@@ -259,7 +259,11 @@ pub fn prepare_structural_buckling_task(
         ],
         required_capabilities,
     )?;
-    let host = AnalysisHostWorkload::new(request, preparation.artifact_access)?;
+    let host = AnalysisHostWorkload::new(
+        request,
+        preparation.artifact_access,
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
+    )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedStructuralBucklingTask {
         host,

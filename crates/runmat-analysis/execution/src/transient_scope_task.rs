@@ -121,13 +121,19 @@ pub fn prepare_structural_transient_scope_task(
     let mut inputs = numerical_inputs;
     inputs.push(resource_objects);
     let host = crate::portable_task_support::task_host(
-        study,
-        step,
-        execution_plan,
-        AnalysisWorkKind::PrepareStructuralTransientCheckpointScope,
-        &inputs,
-        vec![AnalysisNumericalObjectKind::StructuralTransientCheckpointScope],
-        preparation.artifact_access,
+        crate::portable_task_support::PortableTaskHostPreparation {
+            study,
+            step,
+            execution_plan,
+            work_kind: AnalysisWorkKind::PrepareStructuralTransientCheckpointScope,
+            inputs: &inputs,
+            outputs: vec![AnalysisNumericalObjectKind::StructuralTransientCheckpointScope],
+            artifact_access: preparation.artifact_access,
+            output_policy: crate::AnalysisOutputPolicy::new(
+                preparation.chunk_bytes,
+                preparation.inventory_limits,
+            )?,
+        },
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedStructuralTransientScopeTask {

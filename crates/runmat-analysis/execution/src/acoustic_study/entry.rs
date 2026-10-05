@@ -1,5 +1,6 @@
 //! Governed lifecycle of one explicitly keyed entry of an authored acoustic frequency plan.
 
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     planning::resource::FeaResourcePlan,
@@ -514,41 +515,6 @@ impl AcousticStudyEntryCoordinator {
             self.preparation.output_policy,
         )
     }
-}
-
-pub(super) fn validate_accounting(
-    host: &AnalysisHostWorkload,
-    plan: &FeaResourcePlan,
-    response: &ProgramExecutionResponse,
-    accounting: &AttemptResourceAccounting,
-) -> AnalysisBridgeResult<()> {
-    accounting
-        .validate()
-        .map_err(|error| invalid(error.to_string()))?;
-    let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = response else {
-        return Err(invalid(
-            "acoustic study requires externalized phase completion",
-        ));
-    };
-    let bytes = result_objects
-        .iter()
-        .try_fold(0_u64, |sum, object| sum.checked_add(object.encoded_length))
-        .ok_or_else(|| invalid("acoustic phase output byte count overflow"))?;
-    if bytes != accounting.resources.artifact_bytes
-        || !runmat_analysis_fea::planning::resource::allocation_matches_plan(
-            &accounting.resources.allocation,
-            &plan.request,
-        )
-        || !host
-            .workload
-            .generic_capabilities()?
-            .is_subset(&accounting.resources.allocation.required_capabilities)
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "acoustic phase accounting differs from its admitted request and output closure",
-        ));
-    }
-    Ok(())
 }
 
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {

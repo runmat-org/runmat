@@ -150,10 +150,10 @@ pub(super) async fn run() {
             memory,
         )
         .unwrap();
-        source.authenticate(&cold).unwrap();
+        source.authenticate(&cold, memory).unwrap();
         assert_eq!(cold.terminal_block.result.accepted_state, expected);
         let final_block = source
-            .materialize_block(&cold, cold.block_count - 1, 0)
+            .materialize_block(&cold, cold.block_count - 1, 0, memory)
             .unwrap();
         assert_eq!(final_block.accepted_state, expected);
         let stored =

@@ -21,6 +21,8 @@ use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutio
 use super::*;
 use crate::response::prepare_analysis_output_set;
 
+#[path = "tests/host_transport.rs"]
+mod host_transport;
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
 
@@ -252,7 +254,12 @@ fn object_closure_and_host_request_round_trip_without_inlining_payloads() {
         }]),
     )
     .unwrap();
-    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let host = AnalysisHostWorkload::new(
+        workload,
+        access(),
+        crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+    )
+    .unwrap();
     let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
     let request = invocation.request().clone();
     let mut store = MemoryObjects::default();
@@ -311,7 +318,12 @@ fn portable_program_packages_every_manifest_and_chunk_under_one_access_scope() {
         }]),
     )
     .unwrap();
-    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let host = AnalysisHostWorkload::new(
+        workload,
+        access(),
+        crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+    )
+    .unwrap();
     let prepared =
         prepare_analysis_program(&host, revision(), std::slice::from_ref(&input)).unwrap();
     assert_eq!(prepared.objects.len(), input.objects.len() + 1);
@@ -375,7 +387,12 @@ fn workload_rejects_identity_and_access_tampering() {
     assert!(workload.validate().is_err());
 
     workload.inputs[0].payload_digest = objects.manifest.payload_digest;
-    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let host = AnalysisHostWorkload::new(
+        workload,
+        access(),
+        crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+    )
+    .unwrap();
     let mut wrong_root = root;
     wrong_root.authorization_scope = "other-study".into();
     assert!(host
@@ -435,7 +452,12 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     )
     .unwrap();
     let capabilities = workload.generic_capabilities().unwrap();
-    let host = AnalysisHostWorkload::new(workload.clone(), access()).unwrap();
+    let host = AnalysisHostWorkload::new(
+        workload.clone(),
+        access(),
+        crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+    )
+    .unwrap();
     let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
     let program_roots = invocation
         .request()
@@ -522,7 +544,12 @@ fn analysis_task_retains_logical_dependencies_after_scheduler_replacement() {
     )
     .unwrap();
     let capabilities = workload.generic_capabilities().unwrap();
-    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let host = AnalysisHostWorkload::new(
+        workload,
+        access(),
+        crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+    )
+    .unwrap();
     let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
     let roots = invocation
         .request()
@@ -657,7 +684,12 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
             )
             .unwrap();
             let capabilities = workload.generic_capabilities().unwrap();
-            let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+            let host = AnalysisHostWorkload::new(
+                workload,
+                access(),
+                crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+            )
+            .unwrap();
             let invocation = host
                 .prepare_program_request(revision(), std::slice::from_ref(&root))
                 .unwrap();
@@ -1097,7 +1129,12 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
         }]),
     )
     .unwrap();
-    let host = AnalysisHostWorkload::new(workload, access).unwrap();
+    let host = AnalysisHostWorkload::new(
+        workload,
+        access,
+        crate::AnalysisOutputPolicy::new(6, ObjectInventoryLimits::default()).unwrap(),
+    )
+    .unwrap();
     let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
     invocation.write_to(&mut store).unwrap();
     let request = invocation.into_parts().0;

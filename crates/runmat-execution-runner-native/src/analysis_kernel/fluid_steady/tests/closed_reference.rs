@@ -1,5 +1,6 @@
 //! Closed physical walls and a distinct gauge through actual native admission.
 use super::*;
+use runmat_meshing_core::fixtures;
 
 pub(super) fn closed_task() -> (
     FluidSteadyWorkload,

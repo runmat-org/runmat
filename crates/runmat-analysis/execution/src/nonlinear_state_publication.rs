@@ -279,6 +279,7 @@ pub fn prepare_nonlinear_solid_state_publication(
             }]),
         )?,
         p.source_host.artifact_access,
+        p.output_policy,
     )?;
     let program = prepare_analysis_program(&host, p.program_revision, &inputs)?;
     Ok(PreparedSemanticStatePublication {

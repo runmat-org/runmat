@@ -166,6 +166,11 @@ fn run(
             authorization_scope: "magnetic-publication-test".into(),
             encryption_context: Digest::sha256(b"scope"),
         },
+        runmat_analysis_execution::AnalysisOutputPolicy::new(
+            1024,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
     )
     .unwrap();
     NativeAnalysisKernel.execute(AnalysisKernelInvocation {

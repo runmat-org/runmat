@@ -54,11 +54,42 @@ original history/chunk-policy equivalence exercise the actual native kernel's
 immutable invocation and resource path. This is native-kernel process evidence;
 it does not establish task-pool placement, retry fencing or remote execution.
 
-Remaining work includes shared scheduler attempt accounting and cancellation during
-execution, durable checkpoint/artifact import through fenced output sets, temporal
-receipts, original observations/field histories, mandatory space/time accuracy and
-atomic semantic publication. Selected activation, remaining shared boundary/source
-histories, full typed cell/face state transitions, independent vortex/cavity/backstep,
-conservative CHT/FSI, measured resources and all claimed backend/release gates remain.
-Original scientific failures and the default-control continuity failure remain open.
-No stage, production, accelerator, distributed or whole-release promotion.
+## Scheduled execution and fenced cold import
+
+The native block API submits the exact prepared closure and resource plan through
+`AnalysisTaskPool`. It returns the original checkpoint, immutable host/response and
+scheduler accounting for the successful attempt. Shared phase accounting verifies
+allocation/capabilities and observed output bytes. Workers and cold consumers use
+one source/admission owner. Cold import validates the exact closed output set,
+source/resource plan, admitted payload/transport inventory, checkpoint identity,
+original predecessor prefix and requested range, then rechecks the original equations.
+Cold verification reuses the admitted original source instead of recompiling
+properties and initial fields. It never reruns equilibrium or fills lost fields.
+
+Actual scheduled process conformance executes uninterrupted and split accelerating
+flow in three separate native sessions, retaining only immutable cold sources after
+termination. Every original interval is compared exactly across partition/chunking.
+Independent velocity and affine pressure references retain their original tolerances.
+A 10^12 Pa reference accompanies nonzero original fluctuations; the witness confirms
+that reported absolute pressure cannot reproduce the original fluctuation bits.
+Foreign interval outputs, excess output inventory and altered allocation/byte
+accounting reject. This is local scheduled execution and successful-attempt evidence,
+not a failed/retried-attempt ledger, remote execution or a completed study lifecycle.
+
+The witness exposed a shared transport defect: native placement substituted its
+own chunk policy for the policy used in task admission. The versioned host-v2
+invocation now carries an explicit validated chunk/inventory policy. Every analysis
+task preparation supplies it; worker settings are ceilings and cannot silently
+replace it. The descriptor/program identities bind that policy. Missing/invalid
+policy or old invocation versions reject, rather than falling back. Shared serial
+tests exercise cold policy retention and rejection before physical input reads.
+Output-set roots also reject their schema byte bound before any cache read.
+
+Remaining work includes cumulative failed/retried scheduler accounting, cancellation
+qualification, temporal receipts, original observations/field histories, mandatory
+space/time accuracy and atomic semantic publication. Selected activation, remaining
+shared boundary/source histories, full typed cell/face state transitions, independent
+vortex/cavity/backstep, conservative CHT/FSI, measured resources and all claimed
+backend/release gates remain. Original scientific failures and the default-control
+continuity failure remain open. No stage, production, accelerator, distributed or
+whole-release promotion.

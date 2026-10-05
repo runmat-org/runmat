@@ -1,5 +1,5 @@
 use super::*;
-use crate::steady_study::validate_accounting;
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
 
 impl NonlinearSolidStudyCoordinator {
     pub fn prepare_block(&mut self) -> AnalysisBridgeResult<&PreparedNonlinearSolidBlockTask> {

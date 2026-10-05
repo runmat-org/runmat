@@ -211,6 +211,7 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         )
         .unwrap(),
         artifact_access.clone(),
+        crate::AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap(),
     )
     .unwrap();
     let source_host = AnalysisHostWorkload::new(
@@ -227,6 +228,7 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         )
         .unwrap(),
         artifact_access.clone(),
+        crate::AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap(),
     )
     .unwrap();
     let imported_result = ImportedReducedObservation {

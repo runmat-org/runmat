@@ -325,7 +325,11 @@ pub fn prepare_observation_history_finalization_task(
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
-    let host = AnalysisHostWorkload::new(workload, source_host.artifact_access.clone())?;
+    let host = AnalysisHostWorkload::new(
+        workload,
+        source_host.artifact_access.clone(),
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
+    )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedObservationHistoryFinalizationTask {
         request: preparation.request,

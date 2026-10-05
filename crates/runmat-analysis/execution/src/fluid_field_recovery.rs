@@ -212,7 +212,8 @@ pub fn prepare_fluid_field_recovery(
         vec![AnalysisNumericalObjectKind::Field],
         p.source_host.workload.required_capabilities.clone(),
     )?;
-    let host = AnalysisHostWorkload::new(host_request, p.source_host.artifact_access)?;
+    let host =
+        AnalysisHostWorkload::new(host_request, p.source_host.artifact_access, p.output_policy)?;
     let program = prepare_analysis_program(&host, p.program_revision, &inputs)?;
     Ok(PreparedFluidFieldRecovery {
         request,

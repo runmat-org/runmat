@@ -16,15 +16,30 @@ use crate::{
     AnalysisWorkloadRequest, PreparedAnalysisObjects, ANALYSIS_HOST_ABI,
 };
 
+pub(crate) struct PortableTaskHostPreparation<'a> {
+    pub study: StudyIdentity,
+    pub step: StepIdentity,
+    pub execution_plan: ExecutionPlanIdentity,
+    pub work_kind: AnalysisWorkKind,
+    pub inputs: &'a [PreparedAnalysisObjects],
+    pub outputs: Vec<AnalysisNumericalObjectKind>,
+    pub artifact_access: ArtifactAccess,
+    pub output_policy: crate::AnalysisOutputPolicy,
+}
+
 pub(crate) fn task_host(
-    study: StudyIdentity,
-    step: StepIdentity,
-    execution_plan: ExecutionPlanIdentity,
-    work_kind: AnalysisWorkKind,
-    inputs: &[PreparedAnalysisObjects],
-    outputs: Vec<AnalysisNumericalObjectKind>,
-    artifact_access: ArtifactAccess,
+    preparation: PortableTaskHostPreparation<'_>,
 ) -> AnalysisBridgeResult<AnalysisHostWorkload> {
+    let PortableTaskHostPreparation {
+        study,
+        step,
+        execution_plan,
+        work_kind,
+        inputs,
+        outputs,
+        artifact_access,
+        output_policy,
+    } = preparation;
     let workload_inputs = inputs
         .iter()
         .map(|input| AnalysisWorkloadInput {
@@ -56,7 +71,7 @@ pub(crate) fn task_host(
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
-    AnalysisHostWorkload::new(request, artifact_access)
+    AnalysisHostWorkload::new(request, artifact_access, output_policy)
 }
 
 pub(crate) fn resource_plan_objects(

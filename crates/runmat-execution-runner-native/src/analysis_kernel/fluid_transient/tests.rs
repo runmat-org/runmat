@@ -5,9 +5,15 @@ use runmat_analysis_execution::{
     prepare_fluid_transient_task, AnalysisOutputPolicy, FluidTransientTaskPreparation,
     PreparedFluidTransientTask,
 };
-use runmat_analysis_fea::execution::{FluidTransientCheckpoint, FluidTransientWorkload};
+use runmat_analysis_fea::execution::{
+    AnalysisNumericalObjectKind, FluidTransientBlockWorkload, FluidTransientCheckpoint,
+    FluidTransientWorkload,
+};
+use runmat_analysis_fea::planning::resource::FeaResourceDemand;
+use runmat_execution::Digest;
 use runmat_execution::{ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use std::process::Command;
 fn fixture() -> (FluidTransientWorkload, SolverMeshArtifact) {
     let (steady, mesh, _) = super::super::fluid_steady::tests::task(true, 8192);

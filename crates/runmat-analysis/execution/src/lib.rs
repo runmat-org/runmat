@@ -21,15 +21,22 @@ mod fluid_steady_plan;
 mod fluid_steady_result;
 mod fluid_steady_task;
 mod fluid_transient_plan;
+mod fluid_transient_result;
 mod fluid_transient_task;
+mod phase_accounting;
 pub use fluid_transient_plan::{
-    prepare_fluid_transient_inputs, project_fluid_transient_checkpoint_output,
-    rederive_fluid_transient_resource_plan, require_fluid_transient_source_closure,
+    decode_fluid_transient_task_source, prepare_fluid_transient_inputs,
+    project_fluid_transient_checkpoint_output, rederive_fluid_transient_resource_plan,
+    require_fluid_transient_source_closure, DecodedFluidTransientTaskSource,
     PreparedFluidTransientInputs,
+};
+pub use fluid_transient_result::{
+    import_fluid_transient_checkpoint, ImportedFluidTransientCheckpoint,
 };
 pub use fluid_transient_task::{
     prepare_fluid_transient_task, FluidTransientTaskPreparation, PreparedFluidTransientTask,
 };
+pub use phase_accounting::validate_analysis_phase_accounting;
 mod nonlinear_block;
 mod nonlinear_study;
 mod study_closure;

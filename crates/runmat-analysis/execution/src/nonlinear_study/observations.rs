@@ -1,7 +1,7 @@
 //! Typed source adapter; shared engine owns sampled task/import/catalog mechanics.
 use super::*;
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
 pub(super) use crate::sampled_study_observations::SampledStudyObservations as NonlinearObservations;
-use crate::steady_study::validate_accounting;
 use crate::{
     ObservationPreparation, ObservationPublishedSource, ObservationWorkloadSource,
     PreparedObservationAssembly, PreparedObservationFanout, PreparedObservationReduction,

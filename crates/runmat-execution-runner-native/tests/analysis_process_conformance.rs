@@ -68,6 +68,8 @@ mod electrothermal;
 #[cfg(feature = "occt-native")]
 #[path = "analysis_process_conformance/fluid_authored.rs"]
 mod fluid_authored;
+#[path = "analysis_process_conformance/fluid_transient.rs"]
+mod fluid_transient;
 #[path = "analysis_process_conformance/magnetic.rs"]
 mod magnetic;
 #[cfg(feature = "occt-native")]
@@ -153,6 +155,10 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--fluid-transient-only") {
+        fluid_transient::run().await;
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--nonlinear-authored-only") {
         #[cfg(feature = "occt-native")]
         nonlinear_authored::run().await;

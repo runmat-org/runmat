@@ -189,15 +189,21 @@ pub fn prepare_structural_modal_response_spectrum_fanout(
                 &resource_plan,
             )?;
             numerical_inputs.push(resource_objects);
-            let host = task_host(
+            let host = task_host(crate::portable_task_support::PortableTaskHostPreparation {
                 study,
                 step,
                 execution_plan,
-                AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection,
-                &numerical_inputs,
-                vec![AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult],
-                preparation.artifact_access.clone(),
-            )?;
+                work_kind: AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection,
+                inputs: &numerical_inputs,
+                outputs: vec![
+                    AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult,
+                ],
+                artifact_access: preparation.artifact_access.clone(),
+                output_policy: crate::AnalysisOutputPolicy::new(
+                    preparation.chunk_bytes,
+                    preparation.inventory_limits,
+                )?,
+            })?;
             let program = prepare_analysis_program(
                 &host,
                 preparation.program_revision.clone(),
@@ -413,20 +419,24 @@ pub fn prepare_structural_modal_response_spectrum_assembly(
         preparation.authored_study_digest,
         preparation.frozen_project_digest,
     )?;
-    let host = task_host(
+    let host = task_host(crate::portable_task_support::PortableTaskHostPreparation {
         study,
         step,
         execution_plan,
-        AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult,
-        &numerical_inputs,
-        vec![
+        work_kind: AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult,
+        inputs: &numerical_inputs,
+        outputs: vec![
             AnalysisNumericalObjectKind::SolverResult,
             AnalysisNumericalObjectKind::NumericalReceipt,
             AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
             AnalysisNumericalObjectKind::StatePublicationProfiles,
         ],
-        preparation.artifact_access,
-    )?;
+        artifact_access: preparation.artifact_access,
+        output_policy: crate::AnalysisOutputPolicy::new(
+            preparation.chunk_bytes,
+            preparation.inventory_limits,
+        )?,
+    })?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &numerical_inputs)?;
     Ok(PreparedStructuralModalResponseSpectrumAssemblyTask {
         workload: preparation.workload,

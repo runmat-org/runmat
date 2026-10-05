@@ -101,6 +101,7 @@ fn test_host_for_input_references(
         )
         .unwrap(),
         source.artifact_access.clone(),
+        source.output_policy,
     )
     .unwrap()
 }

@@ -261,9 +261,12 @@ fn verify_original_publication(
             publication.host.workload.required_capabilities.clone(),
         )
         .unwrap();
-        let duplicate_host =
-            AnalysisHostWorkload::new(duplicate_workload, publication.host.artifact_access.clone())
-                .unwrap();
+        let duplicate_host = AnalysisHostWorkload::new(
+            duplicate_workload,
+            publication.host.artifact_access.clone(),
+            publication.host.output_policy,
+        )
+        .unwrap();
         let duplicate_program = prepare_analysis_program(
             &duplicate_host,
             task.program.request.recipe.program_revision.clone(),

@@ -42,6 +42,11 @@ fn original_full_history_cold_split_matches_unsplit_and_rejects_semantic_corrupt
         split.original_results().next().unwrap()
     ));
     assert!(request.recover_output(&unsplit, &mesh).is_err());
+    {
+        let prepared = request.prepare(&mesh).unwrap();
+        prepared.recover_output(&split).unwrap();
+        assert!(prepared.recover_output(&unsplit).is_err());
+    }
     assert_eq!(split.next_interval(), 3);
     assert_eq!(split.next_output_ordinal(), 3);
     assert_eq!(

@@ -2,9 +2,8 @@
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
-use crate::steady_study::{
-    validate_accounting, SteadyStudyPhase, SteadyStudySource, SteadyStudyTail,
-};
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
+use crate::steady_study::{SteadyStudyPhase, SteadyStudySource, SteadyStudyTail};
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::{

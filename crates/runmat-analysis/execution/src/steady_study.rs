@@ -1,5 +1,6 @@
 //! Shared placement-neutral terminal authority for fresh standalone physics studies.
 //! Solve adapters supply original authenticated sources; this engine never solves or recovers.
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
 use crate::{
     complete_result_publication_resource_usage, extend_resource_usage, import_accuracy,
     import_published_result, import_semantic_state_completion, prepare_accuracy,
@@ -402,41 +403,6 @@ impl SteadyStudyTail {
             self.source.output_policy,
         )
     }
-}
-
-pub(crate) fn validate_accounting(
-    host: &AnalysisHostWorkload,
-    plan: &FeaResourcePlan,
-    response: &ProgramExecutionResponse,
-    accounting: &AttemptResourceAccounting,
-) -> AnalysisBridgeResult<()> {
-    accounting
-        .validate()
-        .map_err(|error| invalid(error.to_string()))?;
-    let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = response else {
-        return Err(invalid(
-            "steady study requires externalized phase completion",
-        ));
-    };
-    let bytes = result_objects
-        .iter()
-        .try_fold(0_u64, |sum, object| sum.checked_add(object.encoded_length))
-        .ok_or_else(|| invalid("steady phase output byte count overflow"))?;
-    if bytes != accounting.resources.artifact_bytes
-        || !runmat_analysis_fea::planning::resource::allocation_matches_plan(
-            &accounting.resources.allocation,
-            &plan.request,
-        )
-        || !host
-            .workload
-            .generic_capabilities()?
-            .is_subset(&accounting.resources.allocation.required_capabilities)
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "steady phase accounting differs from its admitted request and output closure",
-        ));
-    }
-    Ok(())
 }
 
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {

@@ -132,6 +132,7 @@ pub fn prepare_observation_assembly(
         &inputs,
         vec![AnalysisNumericalObjectKind::Observation],
         BTreeSet::new(),
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
     Ok(PreparedObservationAssembly {

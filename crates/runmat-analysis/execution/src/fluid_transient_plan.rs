@@ -1,4 +1,5 @@
 //! Shared original source closures and exact transient worker resource rederivation.
+mod source;
 use crate::{
     prepare_analysis_objects, prepared_input_resource_facts,
     prepared_input_resource_facts_without_resource_plan, projected_output_set_resource_facts,
@@ -16,6 +17,7 @@ use runmat_analysis_fea::{
 use runmat_execution::Digest;
 use runmat_execution_artifact::ObjectNamespace;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+pub use source::{decode_fluid_transient_task_source, DecodedFluidTransientTaskSource};
 pub struct PreparedFluidTransientInputs {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,

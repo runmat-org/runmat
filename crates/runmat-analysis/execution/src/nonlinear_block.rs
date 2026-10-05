@@ -202,7 +202,7 @@ pub fn prepare_nonlinear_solid_block_task(
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
-    let host = AnalysisHostWorkload::new(request, p.artifact_access)?;
+    let host = AnalysisHostWorkload::new(request, p.artifact_access, p.output_policy)?;
     let program = prepare_analysis_program(&host, p.program_revision, &inputs)?;
     Ok(PreparedNonlinearSolidBlockTask {
         request: p.request,

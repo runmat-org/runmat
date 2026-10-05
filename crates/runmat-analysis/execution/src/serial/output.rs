@@ -6,13 +6,40 @@ use runmat_analysis_fea::execution::{
 use runmat_execution::Digest;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ObjectNamespace};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisOutputPolicy {
     chunk_bytes: usize,
     inventory_limits: ObjectInventoryLimits,
 }
 
 impl AnalysisOutputPolicy {
+    pub fn validate(self) -> AnalysisBridgeResult<()> {
+        if Self::new(self.chunk_bytes, self.inventory_limits)? != self {
+            return Err(AnalysisBridgeError::Invalid(
+                "noncanonical analysis output policy".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The invocation chooses transport; placement supplies only upper limits.
+    pub fn require_within(self, ceiling: Self) -> AnalysisBridgeResult<()> {
+        self.validate()?;
+        ceiling.validate()?;
+        let actual = self.inventory_limits;
+        let maximum = ceiling.inventory_limits;
+        if self.chunk_bytes > ceiling.chunk_bytes
+            || actual.max_objects > maximum.max_objects
+            || actual.max_object_bytes > maximum.max_object_bytes
+            || actual.max_total_bytes > maximum.max_total_bytes
+        {
+            return Err(AnalysisBridgeError::Invalid(
+                "analysis invocation transport exceeds worker limits".into(),
+            ));
+        }
+        Ok(())
+    }
     pub fn new(
         chunk_bytes: usize,
         inventory_limits: ObjectInventoryLimits,

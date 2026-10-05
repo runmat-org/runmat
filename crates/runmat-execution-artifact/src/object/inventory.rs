@@ -12,7 +12,8 @@ pub fn inventory_validation_scratch_bytes(object_count: usize) -> ArtifactResult
         .ok_or_else(|| ArtifactError::Limit("bundle name validation scratch overflow".into()))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectInventoryLimits {
     pub max_objects: usize,
     pub max_object_bytes: u64,

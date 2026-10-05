@@ -492,6 +492,7 @@ pub fn prepare_observation_reduction(
         &inputs,
         vec![AnalysisNumericalObjectKind::ObservationResult],
         BTreeSet::new(),
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision.clone(), &inputs)?;
     Ok(PreparedObservationReduction {
@@ -700,6 +701,7 @@ fn prepare_partition_workload(
                 }])
             }
         },
+        crate::AnalysisOutputPolicy::new(preparation.chunk_bytes, preparation.inventory_limits)?,
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision.clone(), &inputs)?;
     Ok(PreparedObservationPartition {
@@ -778,6 +780,7 @@ pub(crate) fn prepare_host_workload(
     inputs: &[PreparedAnalysisObjects],
     outputs: Vec<AnalysisNumericalObjectKind>,
     additional_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+    output_policy: crate::AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<AnalysisHostWorkload> {
     let workload_inputs = inputs
         .iter()
@@ -803,7 +806,7 @@ pub(crate) fn prepare_host_workload(
         outputs,
         required_capabilities,
     )?;
-    AnalysisHostWorkload::new(workload, source_host.artifact_access.clone())
+    AnalysisHostWorkload::new(workload, source_host.artifact_access.clone(), output_policy)
 }
 
 #[cfg(test)]

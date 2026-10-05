@@ -103,6 +103,7 @@ fn submit(
             w.required_capabilities.clone(),
         )?,
         p.host.artifact_access.clone(),
+        p.host.output_policy,
     )?;
     let program = prepare_analysis_program(&host, revision, inputs)?;
     let roots = program
