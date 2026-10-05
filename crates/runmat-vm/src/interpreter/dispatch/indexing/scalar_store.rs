@@ -1,7 +1,7 @@
 use super::{
     assign_object_scalar_indices, build_assignment_plan, build_index_plan, idx_write_linear,
     idx_write_slice, index_scalar_from_value, integer_scalar_tensor, map_slice_shape_error,
-    IntValue, RuntimeError, SliceSelector, Tensor, Value,
+    IntValue, RuntimeError, SliceSelector, Value,
 };
 
 pub(super) async fn dispatch(

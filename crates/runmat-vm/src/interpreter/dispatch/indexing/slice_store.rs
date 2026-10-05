@@ -3,7 +3,7 @@ use super::{
     build_index_plan, build_slice_selectors, build_sparse_assignment_plan, idx_write_slice,
     integer_scalar_tensor, logical_value_from_tensor, map_slice_plan_error, map_slice_shape_error,
     object_slice_selector, resolve_object_index_protocol, ObjectIndexOp, ObjectSubscript,
-    ObjectSubscriptPath, RuntimeError, Tensor, Value,
+    ObjectSubscriptPath, RuntimeError, Value,
 };
 
 pub(super) async fn dispatch(

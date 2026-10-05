@@ -4,7 +4,7 @@ use super::{
     invoke_resolved_object_index_path_method_in_context, logical_value_from_tensor,
     map_slice_shape_error, object_slice_selector, read_scalar_like_slice,
     resolve_object_index_protocol, resolve_single_sequence, ObjectIndexOp, ObjectSubscript,
-    ObjectSubscriptPath, RuntimeError, Tensor, Value,
+    ObjectSubscriptPath, RuntimeError, Value,
 };
 
 pub(super) async fn dispatch(
