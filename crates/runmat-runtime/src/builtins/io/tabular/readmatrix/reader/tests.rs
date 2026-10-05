@@ -267,6 +267,8 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
+        None,
     ))
     .expect("first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length in-place mutation");
@@ -276,6 +278,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
     ))
     .expect_err("second pass cannot publish unvalidated new bytes");
     assert!(error
@@ -291,6 +294,8 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
+        None,
     ))
     .expect("new first pass");
     std::fs::write(&file, b"x,2\n3,4\n").expect("same-length malformed mutation");
@@ -300,6 +305,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
     ))
     .expect_err("changed-source error precedes replay token error");
     assert!(error
@@ -317,6 +323,8 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
+        None,
+        None,
     ))
     .expect("out-of-range first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length mutation outside range");
@@ -326,6 +334,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
+        None,
     ))
     .expect_err("empty range still checks retained source before publication");
     assert!(error
