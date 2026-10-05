@@ -8,7 +8,7 @@ use runmat_value::{CellArray, Value};
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::RuntimeError;
 
-use super::{gather_if_needed_async_impl, value_contains_gpu};
+use super::gather_if_needed_async_impl;
 
 /// Gather resident descendants without cloning host cell payloads. Opaque
 /// aggregates still use the established borrowed gather until their owned
@@ -50,9 +50,16 @@ fn gather_owned<'a>(
                             .build()
                     })
             }
-            other if !value_contains_gpu(&other) => Ok(other),
-            resident => {
-                let gather = gather_if_needed_async_impl(&resident);
+            // These aggregate families can carry transient or resident
+            // descendants. The borrowed canonical walk owns their semantics
+            // until an exhaustive owned traversal is available.
+            aggregate @ (Value::GpuTensor(_)
+            | Value::Struct(_)
+            | Value::StructArray(_)
+            | Value::Object(_)
+            | Value::ObjectArray(_)
+            | Value::Closure(_)) => {
+                let gather = gather_if_needed_async_impl(&aggregate);
                 match budget.as_deref() {
                     Some(budget) => budget
                         .await_cancellable(gather)
@@ -61,6 +68,7 @@ fn gather_owned<'a>(
                     None => gather.await,
                 }
             }
+            other => Ok(other),
         }
     })
 }
@@ -78,7 +86,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
-    use runmat_value::{CharArray, IntValue};
+    use runmat_value::{CharArray, Closure, IntValue, ObjectInstance, StructValue};
     use std::cell::Cell;
     use std::error::Error;
     use std::future::Future;
@@ -138,6 +146,32 @@ mod tests {
         ] {
             let error = block_on(gather_if_needed_owned_async(input, None))
                 .expect_err("transient list may not pass scalar gather");
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:TransientSequenceBelowDispatch")
+            );
+        }
+    }
+
+    #[test]
+    fn host_aggregates_preserve_canonical_transient_descendant_rejection() {
+        let transient = || Value::OutputList(vec![Value::Num(1.0)]);
+        let mut structure = StructValue::new();
+        structure.insert("payload", transient());
+        let mut object = ObjectInstance::new("GatherFixture");
+        object.properties.insert("Payload".into(), transient());
+        let closure = Closure {
+            function_name: "f".into(),
+            bound_function: None,
+            captures: vec![transient()],
+        };
+        for input in [
+            Value::Struct(structure),
+            Value::Object(object),
+            Value::Closure(closure),
+        ] {
+            let error = block_on(gather_if_needed_owned_async(input, None))
+                .expect_err("aggregate child is transient");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:TransientSequenceBelowDispatch")
