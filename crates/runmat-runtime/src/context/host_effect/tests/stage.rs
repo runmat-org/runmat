@@ -186,6 +186,54 @@ fn staged_runtime(
 #[path = "stage/managed.rs"]
 mod managed;
 
+struct OwnedRevisionOnly;
+
+impl RuntimePlacementService for OwnedRevisionOnly {
+    fn whole_work_host_service_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        host_service: Digest,
+    ) -> Option<PlacementRevision> {
+        let digest = Digest::sha256(b"owned-only-placement");
+        Some(PlacementRevision {
+            program,
+            catalog: digest,
+            compiler: digest,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::HostService(
+                host_service,
+            ),
+            policy: digest,
+        })
+    }
+}
+
+#[test]
+fn finite_stage_requires_borrowed_revision_and_retires_offered_reservation() {
+    let (runtime, placement, _live, drops) = staged_runtime(
+        ResourceByteBound::Known(16),
+        ResourceByteBound::Known(16),
+        16,
+        64,
+    );
+    let owned_only = runtime.clone().with_service_ports(
+        runtime
+            .service_ports()
+            .clone()
+            .with_placement(Rc::new(OwnedRevisionOnly)),
+    );
+    let error = match admit_host_effect_stage(&owned_only, request(HostEffectOutput::ReturnedValue))
+    {
+        Ok(_) => panic!("owned-only placement cannot certify a finite staged call"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:InsufficientResourceEvidence")
+    );
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert_eq!(placement.selections.get(), 0);
+}
+
 #[test]
 fn stage_reserves_before_effect_and_final_selection_owns_one_probe_and_observation() {
     let (runtime, placement, _live, drops) = staged_runtime(
