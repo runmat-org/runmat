@@ -16413,6 +16413,38 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
+    let source = ExecutableSource::new(
+        "core-native-inputname@1",
+        "nativeInputname.m",
+        "function [first, second] = nativeInputname(alpha)\nfirst = probe(alpha);\nsecond = probe(alpha + 1);\nend\nfunction out = probe(value)\nout = inputname(1);\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile native caller inputname unit");
+    let result = block_on(session.invoke_executable(
+        &unit,
+        ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeInputname".into()),
+            arguments: vec![runmat_value::Value::Num(7.0)],
+            requested_outputs: 2,
+        },
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native caller inputname execution");
+    assert_output_values(
+        &result,
+        &[
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+            ),
+        ],
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_counts() {
     let source = ExecutableSource::new(
         "core-native-function-abi-test@1",
