@@ -163,7 +163,7 @@ impl RuntimePlacementService for Placement {
         self.probes.fetch_add(1, Ordering::SeqCst);
         Ok(RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
-                signature: request.signature.clone(),
+                signature: request.signature.to_owned(),
                 selected: candidate.selected(&request.signature.operation),
                 kind: WholeWorkDecisionKind::Unmeasured,
                 predicted_total_ns: None,

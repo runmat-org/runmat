@@ -36,13 +36,59 @@ pub struct PlacementSignature {
     pub revision: PlacementRevision,
 }
 
-impl PlacementSignature {
-    pub fn validate(&self) -> Result<(), &'static str> {
-        PlacementOperationId::new(&self.operation)?;
+/// Borrowed semantic revision for a managed invocation. Portable profile and
+/// wire representations continue to own `PlacementRevision`; this view
+/// serializes with the same field names/order without cloning a program's
+/// domain-contribution vector at each selection.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PlacementRevisionRef<'a> {
+    pub program: Option<&'a ProgramRevision>,
+    pub catalog: Digest,
+    pub compiler: Digest,
+    pub authority: PlacementExecutionAuthorityRevision,
+    pub policy: Digest,
+}
+
+impl<'a> From<&'a PlacementRevision> for PlacementRevisionRef<'a> {
+    fn from(revision: &'a PlacementRevision) -> Self {
+        Self {
+            program: revision.program.as_ref(),
+            catalog: revision.catalog,
+            compiler: revision.compiler,
+            authority: revision.authority,
+            policy: revision.policy,
+        }
+    }
+}
+
+/// Allocation-free signature view for one managed selection. It is not a
+/// second wire schema: its serialized bytes and permit digest must match the
+/// owned portable signature exactly.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PlacementSignatureRef<'a> {
+    pub region: Option<RegionId>,
+    pub operation: &'a str,
+    pub runtime_facts: Digest,
+    pub revision: PlacementRevisionRef<'a>,
+}
+
+impl<'a> From<&'a PlacementSignature> for PlacementSignatureRef<'a> {
+    fn from(signature: &'a PlacementSignature) -> Self {
+        Self {
+            region: signature.region,
+            operation: &signature.operation,
+            runtime_facts: signature.runtime_facts,
+            revision: (&signature.revision).into(),
+        }
+    }
+}
+
+impl PlacementSignatureRef<'_> {
+    pub fn validate(self) -> Result<(), &'static str> {
+        PlacementOperationId::new(self.operation)?;
         if self
             .revision
             .program
-            .as_ref()
             .is_some_and(|program| program.validate().is_err())
         {
             return Err("placement program revision is invalid");
@@ -50,25 +96,108 @@ impl PlacementSignature {
         Ok(())
     }
 
+    pub fn cache_key(self) -> Digest {
+        Digest::sha256_serialized(&self).expect("placement signature view serializes")
+    }
+
+    pub fn permit_identity(self) -> Result<PlacementPermitIdentity, crate::ContractError> {
+        Ok(PlacementPermitIdentity {
+            signature: self.cache_key(),
+            program: self
+                .revision
+                .program
+                .map(ProgramRevision::identity_digest)
+                .transpose()?,
+            authority: self.revision.authority,
+            policy: self.revision.policy,
+        })
+    }
+
+    pub fn to_owned(&self) -> PlacementSignature {
+        PlacementSignature {
+            region: self.region,
+            operation: self.operation.to_owned(),
+            runtime_facts: self.runtime_facts,
+            revision: PlacementRevision {
+                program: self.revision.program.cloned(),
+                catalog: self.revision.catalog,
+                compiler: self.revision.compiler,
+                authority: self.revision.authority,
+                policy: self.revision.policy,
+            },
+        }
+    }
+}
+
+impl PlacementSignature {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        PlacementSignatureRef::from(self).validate()
+    }
+
     pub fn cache_key(&self) -> Digest {
-        Digest::sha256_serialized(self).expect("placement signature serializes")
+        PlacementSignatureRef::from(self).cache_key()
     }
 
     /// Compact invalidation facts for an in-flight selection. The program
     /// revision uses its canonical identity rather than cloning its retained
     /// domain-contribution names into each observation registration.
     pub fn permit_identity(&self) -> Result<PlacementPermitIdentity, crate::ContractError> {
-        Ok(PlacementPermitIdentity {
-            signature: self.cache_key(),
-            program: self
-                .revision
-                .program
-                .as_ref()
-                .map(|revision| revision.identity_digest())
-                .transpose()?,
-            authority: self.revision.authority,
-            policy: self.revision.policy,
-        })
+        PlacementSignatureRef::from(self).permit_identity()
+    }
+}
+
+#[cfg(test)]
+mod borrowed_signature_tests {
+    use super::*;
+    use crate::{DomainContribution, ProgramEnvironment};
+
+    #[test]
+    fn borrowed_and_owned_signature_identity_share_exact_wire_bytes_with_program_domains() {
+        let program = ProgramRevision::new(
+            Digest::sha256(b"graph"),
+            Digest::sha256(b"source"),
+            ProgramEnvironment::new(
+                2,
+                2,
+                Digest::sha256(b"runtime"),
+                Digest::sha256(b"catalog"),
+                "runmat",
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .with_domain_contribution(
+            DomainContribution::new("filesystem", Digest::sha256(b"provider")).unwrap(),
+        )
+        .unwrap();
+        let owned = PlacementSignature {
+            region: Some(RegionId {
+                function: runmat_types::ProgramFunctionId(5),
+                ordinal: 7,
+            }),
+            operation: "readmatrix".into(),
+            runtime_facts: Digest::sha256(b"numeric-text"),
+            revision: PlacementRevision {
+                program: Some(program),
+                catalog: Digest::sha256(b"placement-catalog"),
+                compiler: Digest::sha256(b"placement-compiler"),
+                authority: PlacementExecutionAuthorityRevision::HostService(Digest::sha256(
+                    b"native-file",
+                )),
+                policy: Digest::sha256(b"policy"),
+            },
+        };
+        let borrowed = PlacementSignatureRef::from(&owned);
+        assert_eq!(
+            serde_json::to_vec(&borrowed).unwrap(),
+            serde_json::to_vec(&owned).unwrap()
+        );
+        assert_eq!(borrowed.cache_key(), owned.cache_key());
+        assert_eq!(
+            borrowed.permit_identity().unwrap(),
+            owned.permit_identity().unwrap()
+        );
+        assert_eq!(borrowed.to_owned(), owned);
     }
 }
 

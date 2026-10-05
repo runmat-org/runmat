@@ -324,13 +324,13 @@ impl PlacementSession {
 
     fn observed_candidate_duration_digest(
         &self,
-        signature: &PlacementSignature,
+        signature: runmat_execution::PlacementSignatureRef<'_>,
         candidate: Digest,
         kind: ExecutionCandidateKind,
         drain_pending: bool,
     ) -> CandidateObservationEvidence {
-        self.observed_candidate_duration_key_with_drain(
-            signature,
+        self.observed_candidate_duration_key_digest(
+            signature.cache_key(),
             FeedbackCandidateKey::Canonical(candidate),
             kind,
             drain_pending,
@@ -353,18 +353,35 @@ impl PlacementSession {
         kind: ExecutionCandidateKind,
         drain_pending: bool,
     ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key_digest(
+            signature.cache_key(),
+            candidate,
+            kind,
+            drain_pending,
+        )
+    }
+
+    fn observed_candidate_duration_key_digest(
+        &self,
+        signature: Digest,
+        candidate: FeedbackCandidateKey,
+        kind: ExecutionCandidateKind,
+        drain_pending: bool,
+    ) -> CandidateObservationEvidence {
         if drain_pending {
             self.drain_observations();
         }
         let state = self.state.borrow();
         if let FeedbackCandidateKey::Canonical(candidate_digest) = candidate {
-            if let Some(observation) = self.managed_feedback.as_ref().and_then(|pool| {
-                pool.observed(signature.cache_key(), candidate_digest, kind, state.tick)
-            }) {
+            if let Some(observation) = self
+                .managed_feedback
+                .as_ref()
+                .and_then(|pool| pool.observed(signature, candidate_digest, kind, state.tick))
+            {
                 return observation;
             }
         }
-        let key = (signature.cache_key(), candidate, kind);
+        let key = (signature, candidate, kind);
         state.feedback.get(&key).map_or(
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
             |series| evidence::from_series(series, state.tick),

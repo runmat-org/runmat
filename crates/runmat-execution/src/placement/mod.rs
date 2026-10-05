@@ -19,7 +19,8 @@ pub use cost::{
 pub use decision::{
     CompactSelectedExecutionCandidate, PlacementDecision, PlacementExecutionAuthorityRevision,
     PlacementFeedback, PlacementInvalidation, PlacementOperationId, PlacementPermitIdentity,
-    PlacementRevision, PlacementSignature, SelectedExecutionCandidate,
+    PlacementRevision, PlacementRevisionRef, PlacementSignature, PlacementSignatureRef,
+    SelectedExecutionCandidate,
 };
 pub use graph::{
     CandidatePeakLiveDemand, CandidateResourceDemand, PlacementGraph, PlacementGraphCandidate,

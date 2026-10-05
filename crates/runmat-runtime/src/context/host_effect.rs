@@ -331,7 +331,7 @@ fn select_host_effect_inner(
         let candidates = [candidate];
         SelectedHostEffect::Managed(service.select_whole_work_borrowed_managed(
             WholeWorkPlacementRequestRef {
-                signature: &signature,
+                signature: (&signature).into(),
                 constraint: WholeWorkConstraint::AnyLegal,
                 candidates: &candidates,
                 resources: &resources,

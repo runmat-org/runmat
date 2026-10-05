@@ -87,7 +87,7 @@ impl PlacementSession {
         let draft = self.select_whole_work_untracked(request, false)?;
         self.finish_whole_work_selection(
             draft,
-            (*request.signature).clone(),
+            request.signature.to_owned(),
             || (*request.resources).clone(),
             request.deterministic,
             request.require_transactional_results,
@@ -459,7 +459,7 @@ impl PlacementSession {
             return unmeasured_host(&admitted, operation);
         }
         let node = PlacementGraphNode {
-            identity: request.signature.operation.clone(),
+            identity: request.signature.operation.to_owned(),
             candidates: estimated
                 .into_iter()
                 .map(|(item, cost)| PlacementGraphCandidate {

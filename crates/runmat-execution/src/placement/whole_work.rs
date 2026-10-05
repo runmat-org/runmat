@@ -8,7 +8,7 @@ use super::{
     CandidateCostEvidence, CandidateExecutionLocation, CandidateOutputPresentation,
     CandidateOutputResidency, CandidatePreparationState, CandidateResourceDemand,
     ExecutionCandidateKind, PlacementGraphLimits, PlacementResourceSnapshot, PlacementSignature,
-    SelectedExecutionCandidate,
+    PlacementSignatureRef, SelectedExecutionCandidate,
 };
 use crate::{Digest, DigestStream};
 
@@ -179,7 +179,7 @@ impl WholeWorkPlacementRequest {
 
     pub fn as_ref(&self) -> WholeWorkPlacementRequestRef<'_> {
         WholeWorkPlacementRequestRef {
-            signature: &self.signature,
+            signature: (&self.signature).into(),
             constraint: self.constraint,
             candidates: &self.candidates,
             resources: &self.resources,
@@ -193,7 +193,7 @@ impl WholeWorkPlacementRequest {
 /// while the portable owned request remains the serialization/wire carrier.
 #[derive(Clone, Copy)]
 pub struct WholeWorkPlacementRequestRef<'a> {
-    pub signature: &'a PlacementSignature,
+    pub signature: PlacementSignatureRef<'a>,
     pub constraint: WholeWorkConstraint,
     pub candidates: &'a [WholeWorkCandidate],
     pub resources: &'a PlacementResourceSnapshot,
@@ -488,7 +488,7 @@ mod tests {
             require_transactional_results: false,
         };
         let single = WholeWorkPlacementRequestRef {
-            signature: &multi.signature,
+            signature: (&multi.signature).into(),
             constraint: multi.constraint,
             candidates: std::slice::from_ref(&multi.candidates[0]),
             resources: &multi.resources,

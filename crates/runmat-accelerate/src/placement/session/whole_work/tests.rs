@@ -19,7 +19,7 @@ use super::*;
 fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() {
     let multi = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
     let single = WholeWorkPlacementRequestRef {
-        signature: &multi.signature,
+        signature: (&multi.signature).into(),
         constraint: multi.constraint,
         candidates: std::slice::from_ref(&multi.candidates[0]),
         resources: &multi.resources,

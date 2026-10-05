@@ -121,7 +121,7 @@ impl RuntimePlacementService for Placement {
         self.probes.fetch_add(1, Ordering::SeqCst);
         Ok(RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
-                signature: request.signature.clone(),
+                signature: request.signature.to_owned(),
                 selected: candidate.selected(&request.signature.operation),
                 kind: WholeWorkDecisionKind::Unmeasured,
                 predicted_total_ns: None,
@@ -137,7 +137,7 @@ impl RuntimePlacementService for Placement {
         // Production consumes the borrowed view directly; this test-only
         // adapter reuses its existing staged placement oracle.
         self.select_whole_work(WholeWorkPlacementRequest {
-            signature: request.signature.clone(),
+            signature: request.signature.to_owned(),
             constraint: request.constraint,
             candidates: request.candidates.to_vec(),
             resources: request.resources.clone(),

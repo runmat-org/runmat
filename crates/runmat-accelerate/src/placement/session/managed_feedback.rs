@@ -4,7 +4,7 @@
 
 use runmat_execution::{
     Digest, ExecutionCandidateKind, PlacementInvalidation, PlacementPermitIdentity,
-    PlacementSignature,
+    PlacementSignature, PlacementSignatureRef,
 };
 use runmat_runtime::context::host_effect::{
     HostEffectAllocationError, ManagedHostEffectLedger, ManagedHostEffectStageReservation,
@@ -87,7 +87,7 @@ impl ManagedFeedbackPool {
     /// writer rejects insufficient configured capacity without a heap mirror.
     pub(super) fn ensure(
         &self,
-        signature: &PlacementSignature,
+        signature: PlacementSignatureRef<'_>,
         candidate: Digest,
         kind: ExecutionCandidateKind,
         seed: Option<evidence::FeedbackNumbers>,
@@ -297,7 +297,7 @@ mod tests {
         );
         assert!(charged > before_observations);
         let key = pool
-            .ensure(&signature, candidate, kind, None, &observations)
+            .ensure((&signature).into(), candidate, kind, None, &observations)
             .unwrap();
         let state = pool.state.borrow();
         assert_eq!(&state.signatures[..encoded.len()], encoded.as_slice());
@@ -325,7 +325,7 @@ mod tests {
         let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
         assert!(matches!(
             pool.ensure(
-                &signature,
+                (&signature).into(),
                 Digest::sha256(b"route"),
                 ExecutionCandidateKind::SharedRuntime,
                 None,
@@ -346,17 +346,17 @@ mod tests {
         let kind = ExecutionCandidateKind::SharedRuntime;
         let first_identity = first.permit_identity().unwrap();
         let active = observations.acquire(first_identity, candidate).unwrap();
-        pool.ensure(&first, candidate, kind, None, &observations)
+        pool.ensure((&first).into(), candidate, kind, None, &observations)
             .unwrap();
         let mut second = first.clone();
         second.operation = "other.readmatrix".into();
         assert!(matches!(
-            pool.ensure(&second, candidate, kind, None, &observations),
+            pool.ensure((&second).into(), candidate, kind, None, &observations),
             Err(HostEffectAllocationError::ExceedsCapacity)
         ));
         drop(active);
         let replacement = pool
-            .ensure(&second, candidate, kind, None, &observations)
+            .ensure((&second).into(), candidate, kind, None, &observations)
             .expect("abandoned zero-sample series can be replaced");
         assert_eq!(pool.state.borrow().slots[0].key, Some(replacement));
         assert_eq!(pool.profile_snapshot().len(), 0);
@@ -372,17 +372,17 @@ mod tests {
         let candidate = Digest::sha256(b"route");
         let kind = ExecutionCandidateKind::SharedRuntime;
         let original = pool
-            .ensure(&first, candidate, kind, None, &observations)
+            .ensure((&first).into(), candidate, kind, None, &observations)
             .unwrap();
         let mut oversized = first.clone();
         oversized.operation = "x".repeat(128);
         assert!(matches!(
-            pool.ensure(&oversized, candidate, kind, None, &observations),
+            pool.ensure((&oversized).into(), candidate, kind, None, &observations),
             Err(HostEffectAllocationError::ExceedsCapacity)
         ));
         assert!(pool.state.borrow().slots[0].key.is_none());
         let retry = pool
-            .ensure(&first, candidate, kind, None, &observations)
+            .ensure((&first).into(), candidate, kind, None, &observations)
             .unwrap();
         assert_eq!(retry, original);
         pool.record(retry, 23, true, 1).unwrap();
