@@ -1,5 +1,6 @@
 mod contract;
 mod documentation;
+pub use contract::MEMMAPFILE_SUBSREF_DESCRIPTOR;
 
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
@@ -11,7 +12,7 @@ pub const MEMMAPFILE_SUBSREF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalog
     },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,
-    descriptor: &contract::DESCRIPTOR,
+    descriptor: &MEMMAPFILE_SUBSREF_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(

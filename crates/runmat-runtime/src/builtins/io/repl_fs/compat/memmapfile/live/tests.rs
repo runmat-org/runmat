@@ -42,6 +42,25 @@ fn indexed_field(record: usize, field: &str, index: usize) -> Value {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn method_output_bounds_precede_path_parse_and_mapped_effects() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let invalid_path = Value::Num(42.0);
+    let reference =
+        futures::executor::block_on(subsref(None, Value::Num(0.0), invalid_path.clone()))
+            .unwrap_err();
+    assert_eq!(reference.identifier(), "RunMat:memmapfile:TooManyOutputs");
+    let assignment = futures::executor::block_on(subsasgn(
+        None,
+        Value::Num(0.0),
+        invalid_path,
+        Value::Num(1.0),
+    ))
+    .unwrap_err();
+    assert_eq!(assignment.identifier(), "RunMat:memmapfile:TooManyOutputs");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
     let _lock = vfs::provider_override_lock();
     #[cfg(target_arch = "wasm32")]

@@ -3,7 +3,10 @@
 
 use std::collections::HashMap;
 
-use runmat_builtins::MEMMAPFILE_CLASS;
+use runmat_builtins::{
+    MEMMAPFILE_CLASS, MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_SUBSASGN_DESCRIPTOR,
+    MEMMAPFILE_SUBSREF_DESCRIPTOR,
+};
 use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
 use runmat_value::{MemmapReceiverAuthority, Value};
@@ -84,6 +87,11 @@ pub async fn subsref(
     receiver: Value,
     subscript: Value,
 ) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &MEMMAPFILE_SUBSREF_DESCRIPTOR,
+        &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
+        SUBSREF,
+    )?;
     ensure_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     if path.steps().len() > 1 && member(&path.steps()[0])? == Property::Data {
@@ -110,6 +118,11 @@ pub async fn subsasgn(
     subscript: Value,
     rhs: Value,
 ) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &MEMMAPFILE_SUBSASGN_DESCRIPTOR,
+        &MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
+        SUBSASGN,
+    )?;
     ensure_class_registered();
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     if path.steps().len() > 1 && member(&path.steps()[0])? == Property::Data {

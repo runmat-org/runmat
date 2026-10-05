@@ -17,11 +17,12 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor 
     outputs: &OUTPUT,
 }];
 
-pub(super) const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+pub const MEMMAPFILE_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        super::super::MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS,
         super::super::method_contract::INVALID_SUBSCRIPT,
         super::super::method_contract::CANCELLED,
         super::super::method_contract::PROVIDER_ERROR,
