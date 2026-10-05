@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "table/overlay.rs"]
+mod overlay;
+
 #[derive(Debug, Clone)]
 pub(super) struct XlsTable {
     rows: usize,
@@ -139,40 +142,6 @@ impl XlsTable {
             }
         }
         Ok(Self { rows, cols, cells })
-    }
-
-    pub(super) fn overlay(&mut self, start: RangeStart, incoming: &XlsTable) -> BuiltinResult<()> {
-        let required_rows = start.row.checked_add(incoming.rows).ok_or_else(|| {
-            xlswrite_error_with(&XLSWRITE_ERROR_RANGE, "xlswrite: range row overflow")
-        })?;
-        let required_cols = start.col.checked_add(incoming.cols).ok_or_else(|| {
-            xlswrite_error_with(&XLSWRITE_ERROR_RANGE, "xlswrite: range column overflow")
-        })?;
-        checked_cell_count(required_rows, required_cols, "worksheet")?;
-        if required_rows > self.rows || required_cols > self.cols {
-            self.resize(required_rows.max(self.rows), required_cols.max(self.cols))?;
-        }
-        for row in 0..incoming.rows {
-            for col in 0..incoming.cols {
-                let dest = (start.row + row) * self.cols + start.col + col;
-                self.cells[dest] = incoming.cells[row * incoming.cols + col].clone();
-            }
-        }
-        Ok(())
-    }
-
-    fn resize(&mut self, rows: usize, cols: usize) -> BuiltinResult<()> {
-        checked_cell_count(rows, cols, "worksheet")?;
-        let mut resized = vec![CellValue::Empty; rows * cols];
-        for row in 0..self.rows {
-            for col in 0..self.cols {
-                resized[row * cols + col] = self.cells[row * self.cols + col].clone();
-            }
-        }
-        self.rows = rows;
-        self.cols = cols;
-        self.cells = resized;
-        Ok(())
     }
 
     async fn from_cell_array(cell: CellArray) -> BuiltinResult<Self> {

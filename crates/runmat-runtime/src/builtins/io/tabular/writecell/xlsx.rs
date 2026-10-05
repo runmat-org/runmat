@@ -1,5 +1,11 @@
 use super::*;
 
+pub(in crate::builtins::io::tabular) const SHEET_XML_HEADER: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+"#;
+pub(in crate::builtins::io::tabular) const SHEET_XML_FOOTER: &str = "  </sheetData>\n</worksheet>";
+
 pub(in crate::builtins::io::tabular) fn build_xlsx_workbook(
     table: &CellTable,
     sheet_name: &str,
@@ -104,12 +110,7 @@ pub(in crate::builtins::io::tabular) fn build_sheet_xml(
     table: &CellTable,
     start: RangeStart,
 ) -> String {
-    let mut xml = String::from(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData>
-"#,
-    );
+    let mut xml = String::from(SHEET_XML_HEADER);
     for row in 0..table.rows {
         let excel_row = start.row + row + 1;
         xml.push_str(&format!(r#"    <row r="{excel_row}">"#));
@@ -120,36 +121,61 @@ pub(in crate::builtins::io::tabular) fn build_sheet_xml(
                 continue;
             }
             let reference = cell_reference(start.row + row, start.col + col);
-            match cell {
-                CellValue::Empty => {}
-                CellValue::Number(value) => {
-                    xml.push_str(&format!(
-                        "      <c r=\"{reference}\"><v>{}</v></c>\n",
-                        format_numeric(*value)
-                    ));
-                }
-                CellValue::Integer(value) => {
-                    xml.push_str(&format!(
-                        "      <c r=\"{reference}\"><v>{}</v></c>\n",
-                        value.decimal_string()
-                    ));
-                }
-                CellValue::Boolean(value) => {
-                    xml.push_str(&format!(
-                        "      <c r=\"{reference}\" t=\"b\"><v>{}</v></c>\n",
-                        if *value { 1 } else { 0 }
-                    ));
-                }
-                CellValue::Text(text) => {
-                    xml.push_str(&format!(
-                        "      <c r=\"{reference}\" t=\"inlineStr\"><is><t>{}</t></is></c>\n",
-                        xml_text_escape(text)
-                    ));
-                }
-            }
+            append_sheet_cell_xml(&mut xml, &reference, cell);
         }
         xml.push_str("    </row>\n");
     }
-    xml.push_str("  </sheetData>\n</worksheet>");
+    xml.push_str(SHEET_XML_FOOTER);
     xml
+}
+
+pub(in crate::builtins::io::tabular) fn append_sheet_cell_xml(
+    xml: &mut String,
+    reference: &str,
+    cell: &CellValue,
+) {
+    match cell {
+        CellValue::Empty => {}
+        CellValue::Number(value) => xml.push_str(&format!(
+            "      <c r=\"{reference}\"><v>{}</v></c>\n",
+            format_numeric(*value)
+        )),
+        CellValue::Integer(value) => xml.push_str(&format!(
+            "      <c r=\"{reference}\"><v>{}</v></c>\n",
+            value.decimal_string()
+        )),
+        CellValue::Boolean(value) => xml.push_str(&format!(
+            "      <c r=\"{reference}\" t=\"b\"><v>{}</v></c>\n",
+            if *value { 1 } else { 0 }
+        )),
+        CellValue::Text(text) => {
+            append_sheet_text_start(xml, reference);
+            for character in text.chars() {
+                append_escaped_xml_text_character(xml, character);
+            }
+            append_sheet_text_end(xml);
+        }
+    }
+}
+
+pub(in crate::builtins::io::tabular) fn append_sheet_text_start(xml: &mut String, reference: &str) {
+    xml.push_str(&format!(
+        "      <c r=\"{reference}\" t=\"inlineStr\"><is><t>"
+    ));
+}
+
+pub(in crate::builtins::io::tabular) fn append_escaped_xml_text_character(
+    xml: &mut String,
+    character: char,
+) {
+    match character {
+        '&' => xml.push_str("&amp;"),
+        '<' => xml.push_str("&lt;"),
+        '>' => xml.push_str("&gt;"),
+        _ => xml.push(character),
+    }
+}
+
+pub(in crate::builtins::io::tabular) fn append_sheet_text_end(xml: &mut String) {
+    xml.push_str("</t></is></c>\n");
 }

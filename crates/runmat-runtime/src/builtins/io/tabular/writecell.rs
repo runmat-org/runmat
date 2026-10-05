@@ -319,7 +319,11 @@ use writer::*;
 
 #[path = "writecell/xlsx.rs"]
 mod xlsx;
-pub(super) use xlsx::{build_sheet_xml, build_xlsx_workbook, write_xlsx_part};
+pub(super) use xlsx::{
+    append_escaped_xml_text_character, append_sheet_cell_xml, append_sheet_text_end,
+    append_sheet_text_start, build_sheet_xml, build_xlsx_workbook, write_xlsx_part,
+    SHEET_XML_FOOTER, SHEET_XML_HEADER,
+};
 
 fn format_cell_for_text(cell: &CellValue, options: &WriteCellOptions, delimiter: &str) -> String {
     match cell {
@@ -475,7 +479,7 @@ fn sanitize_sheet_name(value: &str) -> String {
     name
 }
 
-fn cell_reference(row: usize, col: usize) -> String {
+pub(super) fn cell_reference(row: usize, col: usize) -> String {
     format!("{}{}", column_letters(col), row + 1)
 }
 
@@ -488,18 +492,6 @@ fn column_letters(mut col: usize) -> String {
         col = (col - 1) / 26;
     }
     letters.iter().rev().collect()
-}
-
-fn xml_text_escape(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            '&' => "&amp;".to_string(),
-            '<' => "&lt;".to_string(),
-            '>' => "&gt;".to_string(),
-            _ => ch.to_string(),
-        })
-        .collect()
 }
 
 pub(super) fn xml_attr_escape(value: &str) -> String {

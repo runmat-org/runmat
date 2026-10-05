@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "workbook/xml.rs"]
+mod xml;
+use xml::build_sheet_xml_cooperative;
+
 #[derive(Debug, Clone)]
 pub(super) struct XlsWorkbook {
     sheets: Vec<XlsSheet>,
@@ -16,16 +20,19 @@ impl XlsWorkbook {
         Self { sheets: Vec::new() }
     }
 
-    pub(super) fn overlay(
+    pub(super) async fn overlay(
         &mut self,
         request: &XlsWriteRequest,
         table: XlsTable,
+        cooperation: &mut TabularCooperation<'_>,
+        selected: &TabularFsPath,
     ) -> BuiltinResult<()> {
         validate_write_bounds(&table, request.range)?;
         let sheet_index = self.resolve_sheet_index(&request.sheet);
         self.sheets[sheet_index]
             .table
-            .overlay(request.range, &table)?;
+            .overlay(request.range, &table, cooperation, selected)
+            .await?;
         Ok(())
     }
 
@@ -81,11 +88,15 @@ impl XlsWorkbook {
         "Sheet".to_string()
     }
 
-    pub(super) fn to_xlsx_bytes(&self) -> BuiltinResult<Vec<u8>> {
+    pub(super) async fn to_xlsx_bytes(
+        self,
+        cooperation: &mut TabularCooperation<'_>,
+        selected: &TabularFsPath,
+    ) -> BuiltinResult<Vec<u8>> {
         let sheets = if self.sheets.is_empty() {
             vec![XlsSheet::empty("Sheet1")]
         } else {
-            self.sheets.clone()
+            self.sheets
         };
         let cursor = Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(cursor);
@@ -110,9 +121,9 @@ impl XlsWorkbook {
         writecell::write_xlsx_part(&mut zip, XLSWRITE_MARKER_PART, &marker_app_xml())
             .map_err(map_writecell_error)?;
 
-        for (index, sheet) in sheets.iter().enumerate() {
-            let cell_table = sheet.table.clone().into_cell_table()?;
-            let xml = writecell::build_sheet_xml(&cell_table, RangeStart::default());
+        for (index, sheet) in sheets.into_iter().enumerate() {
+            let cell_table = sheet.table.into_cell_table()?;
+            let xml = build_sheet_xml_cooperative(&cell_table, cooperation, selected).await?;
             if xml.len() > MAX_XLSWRITE_OUTPUT_BYTES {
                 return Err(xlswrite_error_with(
                     &XLSWRITE_ERROR_IO,
@@ -125,6 +136,14 @@ impl XlsWorkbook {
                 &xml,
             )
             .map_err(map_writecell_error)?;
+            cooperation.completed(1).await?;
+            selected.check().map_err(|source| {
+                xlswrite_error_with_source(
+                    &XLSWRITE_ERROR_IO,
+                    "xlswrite: captured filesystem authority was revoked",
+                    source,
+                )
+            })?;
         }
 
         let cursor = zip.finish().map_err(|err| {
