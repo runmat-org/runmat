@@ -2,6 +2,7 @@
 //! is frozen triangle-centroid samples; this is not authored CAD profile support.
 mod acceleration;
 mod authority;
+mod boundary_balances;
 mod fixture;
 mod linear_correction;
 mod pressure_reference;

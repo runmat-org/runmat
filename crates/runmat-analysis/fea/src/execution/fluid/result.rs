@@ -170,7 +170,7 @@ impl FluidSteadySolverResult {
         let d = &self.data;
         let problem = source.problem(workload)?;
         let source_workload = workload.identity()?;
-        if d.schema_version != 2
+        if d.schema_version != 3
             || d.source_workload != source_workload
             || d.producer != workload.producer_identity()?
             || d.mesh_digest != source.source.mesh_digest
@@ -208,7 +208,7 @@ pub(super) fn source_data<T>(
     let source_workload = workload.identity()?;
     let numerical_plan = plan_identity(source_workload, source, &reservation, numerical_input)?;
     Ok(FluidResultData {
-        schema_version: 2,
+        schema_version: 3,
         source_workload,
         producer: workload.producer_identity()?,
         mesh_digest: source.source.mesh_digest,

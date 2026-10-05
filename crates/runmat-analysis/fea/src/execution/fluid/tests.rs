@@ -460,6 +460,13 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
         vec!["original", "velocity_m_per_s", "0", "0"],
         vec!["original", "pressure_pa", "0"],
         vec!["original", "pressure_fluctuation_pa", "0"],
+        vec![
+            "original",
+            "residual",
+            "boundary_balances",
+            "0",
+            "volume_flow_rate_m3_per_s",
+        ],
         vec!["original", "face_volume_flux_m3_per_s", "0"],
         vec![
             "original",

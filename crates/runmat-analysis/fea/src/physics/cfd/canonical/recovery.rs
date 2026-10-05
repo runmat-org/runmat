@@ -9,6 +9,8 @@ use crate::algebra::spmv;
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidResidual {
     pub face_forces: super::flux_evidence::CanonicalFluidFaceForces,
+    /// Sorted exact authored boundary IDs, with original outward force/flow terms.
+    pub boundary_balances: Vec<super::CanonicalFluidBoundaryBalance>,
     pub cell_momentum_n: Vec<V>,
     /// Unrelaxed sparse-action residual, distinct from original face-flux balance.
     pub cell_algebraic_momentum_n: Vec<V>,
@@ -202,8 +204,10 @@ pub(super) fn evaluate(
         .map(|(r, s)| relative(norm(*r), *s))
         .collect();
     let global_momentum_relative = relative(norm(global_momentum), global_scale);
+    let boundary_balances = p.boundary_balance_plan.evaluate(p, q, &face_forces)?;
     Ok(CanonicalFluidResidual {
         face_forces,
+        boundary_balances,
         cell_momentum_n: independent_cells,
         cell_algebraic_momentum_n: rm,
         cell_momentum_relative,

@@ -6,6 +6,7 @@
 
 mod acceleration;
 mod boundary;
+mod boundary_balances;
 mod flux_evidence;
 mod forcing;
 mod geometry_ops;
@@ -28,6 +29,7 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub use boundary_balances::CanonicalFluidBoundaryBalance;
 pub use flux_evidence::CanonicalFluidFaceForces;
 pub use recovery::CanonicalFluidResidual;
 pub use resources::CanonicalFluidReservation;
@@ -125,6 +127,7 @@ pub struct CanonicalFluidProblem<'a> {
     density: f64,
     viscosity: f64,
     boundaries: Vec<boundary::FaceBoundary>,
+    boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
     policy: CanonicalFluidPolicy,
     reservation: CanonicalFluidReservation,
@@ -252,6 +255,7 @@ impl<'a> CanonicalFluidProblem<'a> {
         let body_force_n_per_m3 = forcing::compile(source, topology, excitations, signals)?;
         let boundaries =
             boundary::compile(source, topology, constraints, boundary_operators, signals)?;
+        let boundary_balance_plan = boundary_balances::BoundaryBalancePlan::derive(&boundaries);
         let pressure_reference_pa = boundary::pressure_references(topology, &boundaries)?;
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let numerical_input_identity = identity(
@@ -273,6 +277,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             density,
             viscosity,
             boundaries,
+            boundary_balance_plan,
             body_force_n_per_m3,
             policy,
             reservation,
@@ -281,6 +286,11 @@ impl<'a> CanonicalFluidProblem<'a> {
             pressure_reference_pa,
             pressure_stencils,
         })
+    }
+
+    /// Borrowed original metadata for exact shared result codec profiling.
+    pub(crate) fn boundary_balance_authorities(&self) -> impl Iterator<Item = &str> + Clone {
+        self.boundary_balance_plan.authorities(&self.boundaries)
     }
 
     pub fn reservation(&self) -> CanonicalFluidReservation {
@@ -301,7 +311,7 @@ impl<'a> CanonicalFluidProblem<'a> {
 
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(
-        b"runmat-canonical-fluid/v2\0",
+        b"runmat-canonical-fluid/v3\0",
         domain,
         value,
         runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32),

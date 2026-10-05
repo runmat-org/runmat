@@ -253,6 +253,23 @@ impl CanonicalFluidReservation {
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 16)?, 48)?)?;
+        // Exact index-pair plan (unstable in-place sort has no merge allocation),
+        // one descriptor per exterior face at most, and two coexisting report arrays
+        // during safeguarded recovery. IDs obey the existing256-byte authority limit.
+        // Doubled Vec/String payload allowance plus fixed headers.
+        bytes = add(
+            bytes,
+            add(
+                mul(
+                    f,
+                    32 * 2
+                        + 2 * (256
+                            + std::mem::size_of::<super::CanonicalFluidBoundaryBalance>() as u64)
+                            * 2,
+                )?,
+                4096,
+            )?,
+        )?;
         if p.fixed_point_acceleration.is_some() {
             // Two images/residuals, U/p/q proposal and shared coefficient workspace;
             // one additional complete physical residual/face-force evaluation.
@@ -290,6 +307,14 @@ impl CanonicalFluidReservation {
                     add(mul(f, 64)?, mul(n, 64)?)?,
                 )?,
             )?,
+        )?;
+        // Canonical authority ordering compares bounded256-byte IDs; two word-width
+        // comparison passes conservatively cover in-place sorting/traversal. Each
+        // outer step may evaluate ordinary and speculative original boundary terms.
+        work = add(work, mul(f, 2 * 256 * u64::from(usize::BITS))?)?;
+        work = add(
+            work,
+            mul(p.maximum_outer_iterations as u64, mul(f, 2 * 600)?)?,
         )?;
         if p.fixed_point_acceleration.is_some() {
             work = add(

@@ -36,8 +36,29 @@ struct FaceForcesProfile {
     pressure_traction_n: Repeated<[f64; 3]>,
     pressure_fluctuation_traction_n: Repeated<[f64; 3]>,
 }
+struct BoundaryProfiles<I>(I);
+impl<'a, I: Iterator<Item = &'a str> + Clone> Serialize for BoundaryProfiles<I> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.clone().map(|authority_id| {
+            crate::physics::cfd::canonical::CanonicalFluidBoundaryBalance {
+                authority_id: authority_id.to_owned(),
+                face_count: 0,
+                area_m2: 0.0,
+                volume_flow_rate_m3_per_s: 0.0,
+                mass_flow_rate_kg_per_s: 0.0,
+                advective_momentum_n: [0.0; 3],
+                viscous_traction_n: [0.0; 3],
+                pressure_traction_n: [0.0; 3],
+                pressure_fluctuation_traction_n: [0.0; 3],
+            }
+        }))
+    }
+}
+
 #[derive(Serialize)]
-struct ResidualProfile {
+#[serde(bound(serialize = "BoundaryProfiles<I>: Serialize"))]
+struct ResidualProfile<I> {
+    boundary_balances: BoundaryProfiles<I>,
     face_forces: FaceForcesProfile,
     cell_momentum_n: Repeated<[f64; 3]>,
     cell_algebraic_momentum_n: Repeated<[f64; 3]>,
@@ -52,7 +73,8 @@ struct ResidualProfile {
     flux_constitutive_relative: f64,
 }
 #[derive(Serialize)]
-struct OriginalProfile {
+#[serde(bound(serialize = "ResidualProfile<I>: Serialize"))]
+struct OriginalProfile<I> {
     numerical_input_identity: Digest,
     authored_authority_identity: Digest,
     velocity_m_per_s: Repeated<[f64; 3]>,
@@ -61,9 +83,9 @@ struct OriginalProfile {
     face_volume_flux_m3_per_s: Repeated<f64>,
     outer_iterations: usize,
     linear_iterations: u64,
-    residual: ResidualProfile,
+    residual: ResidualProfile<I>,
 }
-fn original_profile(cells: usize, faces: usize) -> OriginalProfile {
+fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalProfile<I> {
     OriginalProfile {
         numerical_input_identity: Digest::from_bytes([0; 32]),
         authored_authority_identity: Digest::from_bytes([0; 32]),
@@ -74,6 +96,7 @@ fn original_profile(cells: usize, faces: usize) -> OriginalProfile {
         outer_iterations: 0,
         linear_iterations: 0,
         residual: ResidualProfile {
+            boundary_balances: BoundaryProfiles(authorities),
             face_forces: FaceForcesProfile {
                 advective_momentum_n: vector(faces),
                 viscous_traction_n: vector(faces),
@@ -106,7 +129,11 @@ impl FluidSteadyWorkload {
         let source = self.prepare(mesh)?;
         let problem = source.problem(self)?;
         let reservation = problem.reservation();
-        let original = original_profile(source.topology.cells.len(), source.topology.faces.len());
+        let original = original_profile(
+            source.topology.cells.len(),
+            source.topology.faces.len(),
+            problem.boundary_balance_authorities(),
+        );
         let data = source_data(
             self,
             &source,
@@ -114,7 +141,8 @@ impl FluidSteadyWorkload {
             original.numerical_input_identity,
             original,
         )?;
-        profile_serialized(&FluidResultWire { data }, LIMITS).map_err(invalid)
+        let wire = FluidResultWire { data };
+        profile_serialized(&wire, LIMITS).map_err(invalid)
     }
 }
 
@@ -139,6 +167,20 @@ mod tests {
                 outer_iterations: 123,
                 linear_iterations: 1234567,
                 residual: CanonicalFluidResidual {
+                    boundary_balances: vec![
+                            crate::physics::cfd::canonical::CanonicalFluidBoundaryBalance {
+                                authority_id: "pressure_β".into(),
+                                face_count: u64::MAX,
+                                area_m2: f64::MAX,
+                                volume_flow_rate_m3_per_s: -f64::MAX,
+                                mass_flow_rate_kg_per_s: f64::MIN_POSITIVE,
+                                advective_momentum_n: v,
+                                viscous_traction_n: v,
+                                pressure_traction_n: v,
+                                pressure_fluctuation_traction_n: v,
+                            };
+                            faces
+                        ],
                     face_forces: CanonicalFluidFaceForces {
                         advective_momentum_n: vec![v; faces],
                         viscous_traction_n: vec![v; faces],
@@ -160,7 +202,11 @@ mod tests {
             };
             assert_eq!(
                 profile_serialized(&original, LIMITS).unwrap(),
-                profile_serialized(&original_profile(cells, faces), LIMITS).unwrap(),
+                profile_serialized(
+                    &original_profile(cells, faces, std::iter::repeat_n("pressure_β", faces)),
+                    LIMITS
+                )
+                .unwrap(),
             );
         }
     }

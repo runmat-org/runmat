@@ -267,6 +267,7 @@ mod tests {
             outer_iterations: 1,
             linear_iterations: 0,
             residual: CanonicalFluidResidual {
+                boundary_balances: vec![],
                 face_forces: CanonicalFluidFaceForces {
                     advective_momentum_n: vec![],
                     viscous_traction_n: vec![],
