@@ -22,19 +22,21 @@ pub(super) async fn read_spreadsheet(
     preflight_zip_workbook(&bytes)?;
     let cursor = Cursor::new(bytes);
     let mut workbook = open_workbook_auto_from_rs(cursor).map_err(|err| {
-        xlsread_error_with(
+        xlsread_error_with_source(
             &XLSREAD_ERROR_IO,
             format!(
                 "xlsread: unable to open spreadsheet '{}': {err}",
                 path.path().display()
             ),
+            err,
         )
     })?;
     let range = match &request.sheet {
         Some(SheetSelector::Name(name)) => workbook.worksheet_range(name).map_err(|err| {
-            xlsread_error_with(
+            xlsread_error_with_source(
                 &XLSREAD_ERROR_SHEET,
                 format!("xlsread: unable to read sheet '{name}': {err:?}"),
+                err,
             )
         })?,
         Some(SheetSelector::Index(index)) => workbook
@@ -46,18 +48,20 @@ pub(super) async fn read_spreadsheet(
                 )
             })?
             .map_err(|err| {
-                xlsread_error_with(
+                xlsread_error_with_source(
                     &XLSREAD_ERROR_SHEET,
                     format!("xlsread: unable to read sheet {}: {err:?}", index + 1),
+                    err,
                 )
             })?,
         None => workbook
             .worksheet_range_at(0)
             .ok_or_else(|| xlsread_error_with(&XLSREAD_ERROR_SHEET, "xlsread: no worksheets"))?
             .map_err(|err| {
-                xlsread_error_with(
+                xlsread_error_with_source(
                     &XLSREAD_ERROR_SHEET,
                     format!("xlsread: unable to read first sheet: {err:?}"),
+                    err,
                 )
             })?,
     };
@@ -122,18 +126,20 @@ pub(super) fn preflight_zip_workbook(bytes: &[u8]) -> BuiltinResult<()> {
     validate_zip_entry_count_from_raw(bytes)?;
     let cursor = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|err| {
-        xlsread_error_with(
+        xlsread_error_with_source(
             &XLSREAD_ERROR_IO,
             format!("xlsread: invalid ZIP workbook: {err}"),
+            err,
         )
     })?;
     validate_zip_entry_count(archive.len())?;
     let mut total = 0u64;
     for idx in 0..archive.len() {
         let entry = archive.by_index(idx).map_err(|err| {
-            xlsread_error_with(
+            xlsread_error_with_source(
                 &XLSREAD_ERROR_IO,
                 format!("xlsread: unable to inspect ZIP workbook entry {idx}: {err}"),
+                err,
             )
         })?;
         validate_zip_uncompressed_entry(entry.size(), &mut total)?;

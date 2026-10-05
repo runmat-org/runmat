@@ -177,12 +177,7 @@ fn raw_args_contain_option(args: &[Value], sought: ReadMatrixControl) -> bool {
 }
 
 fn raw_scalar_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(value) => Some(value.clone()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
-        _ => None,
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value)
 }
 
 async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
@@ -394,24 +389,19 @@ fn parse_separator_char(value: &Value, option_name: &str) -> BuiltinResult<char>
 }
 
 fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
-            } else {
-                Err(readmatrix_error_with(
-                    &READMATRIX_ERROR_OPTION_VALUE,
-                    format!("readmatrix: {context} must be a scalar string array"),
-                ))
-            }
-        }
-        _ => Err(readmatrix_error_with(
-            &READMATRIX_ERROR_OPTION_VALUE,
-            format!("readmatrix: expected {context} as a string scalar or character vector"),
-        )),
+    if let Some(text) = crate::builtins::common::validation::value_text_scalar_string(value) {
+        return Ok(text);
     }
+    if matches!(value, Value::StringArray(_)) {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_OPTION_VALUE,
+            format!("readmatrix: {context} must be a scalar string array"),
+        ));
+    }
+    Err(readmatrix_error_with(
+        &READMATRIX_ERROR_OPTION_VALUE,
+        format!("readmatrix: expected {context} as a string scalar or character vector"),
+    ))
 }
 
 fn value_to_usize(value: &Value, context: &str) -> BuiltinResult<usize> {

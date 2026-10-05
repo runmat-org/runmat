@@ -80,7 +80,7 @@ pub(super) fn tensor_to_gpu(
     tensor: Tensor,
     prototype: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<Value> {
-    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+    use runmat_accelerate_api::ProviderPrecision;
 
     let owner = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
         readmatrix_error_with(
@@ -124,9 +124,8 @@ pub(super) fn tensor_to_gpu(
                 runmat_accelerate_api::ProviderExecutionError::from_source(error),
             )
         })?;
-        return output
+        let output = output
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
-            .map(Value::GpuTensor)
             .map_err(|error| {
                 crate::runtime_error::with_provider_execution_source(
                     readmatrix_error_with(
@@ -135,7 +134,8 @@ pub(super) fn tensor_to_gpu(
                     ),
                     runmat_accelerate_api::ProviderExecutionError::from_source(error),
                 )
-            });
+            })?;
+        return checked_like_result(output, prototype, &tensor.shape);
     }
     let target_dtype = if let Some(integer) = expected_integer {
         integer_element_dtype(integer)
@@ -180,11 +180,27 @@ pub(super) fn tensor_to_gpu(
                 runmat_accelerate_api::ProviderExecutionError::from_source(error),
             )
         })?;
+    checked_like_result(uploaded, prototype, &expected_shape)
+}
+
+pub(super) fn checked_like_result(
+    uploaded: runmat_accelerate_api::GpuTensorHandle,
+    prototype: &runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+) -> BuiltinResult<Value> {
+    use runmat_accelerate_api::GpuTensorStorage;
+
+    let expected_owner = gpu_helpers::exact_provider_for_handle(prototype);
+    let expected_logical = runmat_accelerate_api::handle_is_logical(prototype);
+    let expected_integer = runmat_accelerate_api::handle_integer_type(prototype);
+    let expected_precision = runmat_accelerate_api::handle_precision(prototype);
     let valid = !uploaded.shares_allocation_with(prototype)
         && uploaded.device_id() == prototype.device_id()
         && uploaded.shape() == expected_shape
         && gpu_helpers::exact_provider_for_handle(&uploaded).is_some_and(|uploaded_owner| {
-            runmat_accelerate_api::same_provider_instance(uploaded_owner, owner)
+            expected_owner.is_some_and(|expected_owner| {
+                runmat_accelerate_api::same_provider_instance(uploaded_owner, expected_owner)
+            })
         })
         && runmat_accelerate_api::handle_storage(&uploaded) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(&uploaded) == expected_integer

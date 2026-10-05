@@ -43,6 +43,28 @@ fn resident_like_logical_upload_is_owned_and_preserves_nd_empty_shapes() {
         assert!(futures::executor::block_on(provider.download(&prototype)).is_ok());
     });
 }
+
+#[test]
+fn logical_like_rejects_wrong_shape_without_retiring_prototype() {
+    test_support::with_test_provider(|provider| {
+        let prototype = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1],
+                shape: &[1, 1],
+            })
+            .expect("prototype");
+        let invalid = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1],
+                shape: &[2, 1],
+            })
+            .expect("wrong-shaped provider result");
+        let error = super::output::checked_like_result(invalid, &prototype, &[1, 2])
+            .expect_err("logical Like must validate the returned shape");
+        assert_eq!(error.identifier(), READMATRIX_ERROR_OUTPUT_TYPE.identifier);
+        assert!(block_on(provider.download(&prototype)).is_ok());
+    });
+}
 use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
 fn unique_path(prefix: &str) -> PathBuf {

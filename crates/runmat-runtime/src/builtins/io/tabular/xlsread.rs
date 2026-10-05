@@ -332,15 +332,12 @@ fn numeric_sheet_index(value: f64) -> BuiltinResult<SheetSelector> {
 }
 
 fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(xlsread_error_with(
+    crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
+        xlsread_error_with(
             &XLSREAD_ERROR_INVALID_ARGUMENT,
             "xlsread: expected a string scalar or character vector",
-        )),
-    }
+        )
+    })
 }
 
 fn resolve_path(value: &Value, captured_home: Option<&Path>) -> BuiltinResult<PathBuf> {

@@ -170,6 +170,42 @@ fn known_invalid_late_control_rejects_without_opening_selected_file() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn paged_text_filename_and_option_reject_before_file_open() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let selected = selected();
+    let _restore = runmat_filesystem::replace_provider(selected.clone());
+    runmat_filesystem::set_current_dir(selected_dir()).expect("selected cwd");
+    let paged = Value::CharArray(
+        runmat_value::CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2])
+            .expect("paged character array"),
+    );
+    assert!(block_on(readmatrix_builtin(None, paged.clone(), Vec::new())).is_err());
+    assert!(block_on(readmatrix_builtin(
+        None,
+        Value::from("input.csv"),
+        vec![paged, Value::from(",")],
+    ))
+    .is_err());
+    assert_eq!(selected.opens.load(Ordering::SeqCst), 0);
+
+    let trailing = Value::CharArray(
+        runmat_value::CharArray::new_with_shape(
+            "input.csv".chars().collect(),
+            vec![1, "input.csv".len(), 1],
+        )
+        .expect("trailing singleton character vector"),
+    );
+    let Value::Tensor(result) = block_on(readmatrix_builtin(None, trailing, Vec::new()))
+        .expect("effective character row accepted")
+    else {
+        panic!("numeric matrix")
+    };
+    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(selected.opens.load(Ordering::SeqCst), 1);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn explicit_double_output_type_and_like_conflict_before_file_open() {
     let _lock = runmat_filesystem::provider_override_lock();
     let selected = selected();

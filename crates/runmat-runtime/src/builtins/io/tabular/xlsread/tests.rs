@@ -2,6 +2,59 @@ use super::*;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn text_controls_require_effective_scalar_shape() {
+    let paged = Value::CharArray(
+        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .expect("paged character array"),
+    );
+    assert!(value_to_string_scalar(&paged).is_err());
+    let nonscalar = Value::StringArray(
+        runmat_value::StringArray::new(vec!["x".into(), "y".into()], vec![1, 1, 2])
+            .expect("paged string array"),
+    );
+    assert!(value_to_string_scalar(&nonscalar).is_err());
+    let trailing = Value::CharArray(
+        runmat_value::CharArray::new_with_shape(vec!['x'], vec![1, 1, 1])
+            .expect("trailing singleton character row"),
+    );
+    assert_eq!(value_to_string_scalar(&trailing).unwrap(), "x");
+    let singleton = Value::StringArray(
+        runmat_value::StringArray::new(vec!["x".into()], vec![1, 1, 1])
+            .expect("trailing singleton string"),
+    );
+    assert_eq!(value_to_string_scalar(&singleton).unwrap(), "x");
+}
+
+#[test]
+fn workbook_and_sheet_codec_failures_retain_typed_sources() {
+    use std::error::Error;
+
+    let invalid = unique_path("xlsread_invalid_codec_source");
+    fs::write(&invalid, b"not a spreadsheet").expect("fixture");
+    let error = block_on(xlsread_builtin(
+        None,
+        Value::from(invalid.to_string_lossy().to_string()),
+        Vec::new(),
+    ))
+    .expect_err("invalid workbook");
+    assert_eq!(error.identifier(), XLSREAD_ERROR_IO.identifier);
+    assert!(error.source().is_some(), "retain the Calamine open error");
+    let _ = fs::remove_file(&invalid);
+
+    let workbook = unique_path("xlsread_missing_sheet_source");
+    write_minimal_xlsx(&workbook);
+    let error = block_on(xlsread_builtin(
+        None,
+        Value::from(workbook.to_string_lossy().to_string()),
+        vec![Value::from("Absent")],
+    ))
+    .expect_err("missing worksheet");
+    assert_eq!(error.identifier(), XLSREAD_ERROR_SHEET.identifier);
+    assert!(error.source().is_some(), "retain the Calamine sheet error");
+    let _ = fs::remove_file(&workbook);
+}
+
+#[test]
 fn typed_sheet_selector_does_not_clamp_uint64() {
     let selected = parse_sheet_selector(&Value::Int(IntValue::U64(u64::MAX)));
     match usize::try_from(u64::MAX)
