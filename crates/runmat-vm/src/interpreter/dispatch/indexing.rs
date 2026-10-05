@@ -885,6 +885,73 @@ pub async fn dispatch_indexing(
     sequence_register: &mut super::SequenceState,
 ) -> Result<bool, RuntimeError> {
     match instr {
+        crate::bytecode::Instr::Index(_)
+        | crate::bytecode::Instr::IndexCell { .. }
+        | crate::bytecode::Instr::IndexCellExpand { .. }
+        | crate::bytecode::Instr::IndexCellList { .. }
+        | crate::bytecode::Instr::StoreIndexCell { .. }
+        | crate::bytecode::Instr::StoreIndexCellDelete { .. } => {
+            Box::pin(dispatch_scalar_read_and_cell(
+                instr,
+                stack,
+                vars,
+                function_registry,
+                pc,
+                runtime,
+                sequence_register,
+            ))
+            .await
+        }
+        crate::bytecode::Instr::StoreIndex(_) | crate::bytecode::Instr::StoreIndexDelete(_) => {
+            Box::pin(dispatch_scalar_store(
+                instr,
+                stack,
+                vars,
+                function_registry,
+                pc,
+                runtime,
+                sequence_register,
+            ))
+            .await
+        }
+        crate::bytecode::Instr::IndexSlice(..) => {
+            Box::pin(dispatch_slice_read(
+                instr,
+                stack,
+                vars,
+                function_registry,
+                pc,
+                runtime,
+                sequence_register,
+            ))
+            .await
+        }
+        crate::bytecode::Instr::StoreSlice(..) | crate::bytecode::Instr::StoreSliceDelete(..) => {
+            Box::pin(dispatch_slice_store(
+                instr,
+                stack,
+                vars,
+                function_registry,
+                pc,
+                runtime,
+                sequence_register,
+            ))
+            .await
+        }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_scalar_read_and_cell(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    vars: &mut [Value],
+    function_registry: &crate::bytecode::FunctionRegistry,
+    _pc: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    sequence_register: &mut super::SequenceState,
+) -> Result<bool, RuntimeError> {
+    match instr {
         crate::bytecode::Instr::Index(num_indices) => {
             let mut raw_indices = Vec::with_capacity(*num_indices);
             for _ in 0..*num_indices {
@@ -981,6 +1048,20 @@ pub async fn dispatch_indexing(
             .await?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_scalar_store(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    _vars: &mut [Value],
+    _function_registry: &crate::bytecode::FunctionRegistry,
+    pc: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    _sequence_register: &mut super::SequenceState,
+) -> Result<bool, RuntimeError> {
+    match instr {
         crate::bytecode::Instr::StoreIndex(num_indices)
         | crate::bytecode::Instr::StoreIndexDelete(num_indices) => {
             let delete = matches!(instr, crate::bytecode::Instr::StoreIndexDelete(_));
@@ -1188,6 +1269,20 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_slice_read(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    _vars: &mut [Value],
+    function_registry: &crate::bytecode::FunctionRegistry,
+    _pc: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    _sequence_register: &mut super::SequenceState,
+) -> Result<bool, RuntimeError> {
+    match instr {
         crate::bytecode::Instr::IndexSlice(dims, numeric_count, colon_mask, end_mask) => {
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
@@ -1406,6 +1501,20 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_slice_store(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    _vars: &mut [Value],
+    _function_registry: &crate::bytecode::FunctionRegistry,
+    _pc: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    _sequence_register: &mut super::SequenceState,
+) -> Result<bool, RuntimeError> {
+    match instr {
         crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask)
         | crate::bytecode::Instr::StoreSliceDelete(dims, numeric_count, colon_mask, end_mask) => {
             let delete = matches!(instr, crate::bytecode::Instr::StoreSliceDelete(_, _, _, _));

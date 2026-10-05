@@ -63,18 +63,79 @@ pub async fn dispatch_object(
     sequence_register: &mut super::SequenceState,
     context: ObjectDispatchContext<'_>,
 ) -> Result<bool, RuntimeError> {
-    let ObjectDispatchContext {
-        vars,
-        runtime,
-        current_function_name,
-        bytecode,
-        call_counts,
-    } = context;
-    let caller_function_name = if current_function_name.is_empty() {
-        None
-    } else {
-        Some(current_function_name)
-    };
+    match instr {
+        crate::bytecode::Instr::BeginSubscriptEndReceiver { .. }
+        | crate::bytecode::Instr::LoadSubscriptEnd { .. }
+        | crate::bytecode::Instr::FinishSubscriptEndReceiver { .. }
+        | crate::bytecode::Instr::FinishDottedInvokeReceiver { .. }
+        | crate::bytecode::Instr::ReadSubscriptPath { .. }
+        | crate::bytecode::Instr::CaptureSubscriptPath { .. } => {
+            Box::pin(dispatch_object_subscript(
+                instr,
+                stack,
+                sequence_register,
+                context,
+            ))
+            .await
+        }
+        crate::bytecode::Instr::LoadMember(_)
+        | crate::bytecode::Instr::LoadMemberOrInit(_)
+        | crate::bytecode::Instr::LoadMemberDynamic
+        | crate::bytecode::Instr::LoadMemberDynamicOrInit
+        | crate::bytecode::Instr::LoadMemberSequence { .. }
+        | crate::bytecode::Instr::LoadMemberDynamicSequence { .. }
+        | crate::bytecode::Instr::MemberSequenceCardinality
+        | crate::bytecode::Instr::LoadMemberSequenceUsingOutputSlot { .. }
+        | crate::bytecode::Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. } => {
+            Box::pin(dispatch_object_read(
+                instr,
+                stack,
+                sequence_register,
+                context,
+            ))
+            .await
+        }
+        crate::bytecode::Instr::CaptureCallOutputSequence
+        | crate::bytecode::Instr::CaptureScalarSequence
+        | crate::bytecode::Instr::CaptureMemberSequence { .. }
+        | crate::bytecode::Instr::CaptureMemberDynamicSequence { .. }
+        | crate::bytecode::Instr::CaptureCellContentsSequence { .. }
+        | crate::bytecode::Instr::CaptureReturnedOutputsSequence { .. } => {
+            Box::pin(dispatch_object_capture(
+                instr,
+                stack,
+                sequence_register,
+                context,
+            ))
+            .await
+        }
+        crate::bytecode::Instr::StoreMember(_)
+        | crate::bytecode::Instr::StoreMemberOrInit(_)
+        | crate::bytecode::Instr::StoreMemberDynamic
+        | crate::bytecode::Instr::StoreMemberDynamicOrInit
+        | crate::bytecode::Instr::StoreMemberSequence(_)
+        | crate::bytecode::Instr::StoreMemberDynamicSequence => {
+            Box::pin(dispatch_object_write(
+                instr,
+                stack,
+                sequence_register,
+                context,
+            ))
+            .await
+        }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_object_subscript(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    sequence_register: &mut super::SequenceState,
+    context: ObjectDispatchContext<'_>,
+) -> Result<bool, RuntimeError> {
+    let runtime = context.runtime;
+    let bytecode = context.bytecode;
+    let call_counts = context.call_counts;
     match instr {
         crate::bytecode::Instr::BeginSubscriptEndReceiver { prefix } => {
             let operand_count = prefix
@@ -204,6 +265,21 @@ pub async fn dispatch_object(
             sequence_register.capture(*sequence_slot, stack, values)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_object_read(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    sequence_register: &mut super::SequenceState,
+    context: ObjectDispatchContext<'_>,
+) -> Result<bool, RuntimeError> {
+    let runtime = context.runtime;
+    let vars = context.vars;
+    let caller_function_name =
+        (!context.current_function_name.is_empty()).then_some(context.current_function_name);
+    match instr {
         crate::bytecode::Instr::LoadMember(field) => {
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
@@ -385,6 +461,18 @@ pub async fn dispatch_object(
             write_sequence_register(stack, sequence_register, values)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_object_capture(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    sequence_register: &mut super::SequenceState,
+    context: ObjectDispatchContext<'_>,
+) -> Result<bool, RuntimeError> {
+    let runtime = context.runtime;
+    match instr {
         crate::bytecode::Instr::CaptureCallOutputSequence => {
             sequence_register.capture_call_outputs()?;
             Ok(true)
@@ -491,6 +579,20 @@ pub async fn dispatch_object(
             sequence_register.capture(*sequence_slot, stack, values)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+async fn dispatch_object_write(
+    instr: &crate::bytecode::Instr,
+    stack: &mut Vec<Value>,
+    sequence_register: &mut super::SequenceState,
+    context: ObjectDispatchContext<'_>,
+) -> Result<bool, RuntimeError> {
+    let runtime = context.runtime;
+    let caller_function_name =
+        (!context.current_function_name.is_empty()).then_some(context.current_function_name);
+    match instr {
         crate::bytecode::Instr::StoreMember(field) => {
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
