@@ -129,7 +129,7 @@ impl ManagedFeedbackPool {
         let start = index * state.bytes_per_series;
         let end = start + state.bytes_per_series;
         let mut writer = BoundedWriter::new(&mut state.signatures[start..end]);
-        serde_json::to_writer(&mut writer, signature)
+        serde_json::to_writer(&mut writer, &signature)
             .map_err(|_| HostEffectAllocationError::ExceedsCapacity)?;
         let length = writer.written;
         if !self.ledger.snapshot().current {
