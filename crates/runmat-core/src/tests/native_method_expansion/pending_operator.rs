@@ -119,7 +119,7 @@ fn pending_native_rhs_operator_resumes_without_replay() {
             calls.clone(),
             vec![(
                 Some(gate),
-                Ok(crate::execution::InputResponse::Line(String::new())),
+                Ok(crate::execution::InputResponse::Line("1".into())),
             )],
         );
         let control = InvocationControl::default().force_generic_native();
@@ -143,12 +143,9 @@ fn pending_native_rhs_operator_resumes_once_and_drop_releases_its_future() {
             vec![
                 (
                     Some(gate),
-                    Ok(crate::execution::InputResponse::Line(String::new())),
+                    Ok(crate::execution::InputResponse::Line("1".into())),
                 ),
-                (
-                    None,
-                    Ok(crate::execution::InputResponse::Line(String::new())),
-                ),
+                (None, Ok(crate::execution::InputResponse::Line("1".into()))),
             ],
         );
         let control = InvocationControl::default().force_generic_native();
@@ -176,7 +173,7 @@ fn pending_native_rhs_operator_cancellation_retires_its_future() {
             calls.clone(),
             vec![(
                 Some(gate),
-                Ok(crate::execution::InputResponse::Line(String::new())),
+                Ok(crate::execution::InputResponse::Line("1".into())),
             )],
         );
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
@@ -209,10 +206,7 @@ fn caught_late_operator_error_retires_site_before_next_operator() {
             calls.clone(),
             vec![
                 (Some(gate), Err("late operator input failure".into())),
-                (
-                    None,
-                    Ok(crate::execution::InputResponse::Line(String::new())),
-                ),
+                (None, Ok(crate::execution::InputResponse::Line("1".into()))),
             ],
         );
         let control = InvocationControl::default().force_generic_native();
