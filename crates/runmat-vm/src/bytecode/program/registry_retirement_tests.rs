@@ -100,14 +100,21 @@ fn leased_old_body_survives_name_republication_without_becoming_name_visible() {
 }
 
 #[test]
-fn reused_numeric_id_never_executes_retired_body() {
+fn reused_numeric_id_keeps_old_lease_on_old_body() {
     let mut registry = registry();
     let lease = runmat_value::FunctionDefinitionOwner::issue(
         &registry.get(FunctionId(1)).unwrap().definition_owner,
         1,
     );
     registry.insert_replacing_name(function(1, "first", 7));
-    assert!(registry.get_owned(FunctionId(1), &lease).is_none());
+    let new_body = registry.get(FunctionId(1)).unwrap();
+    let old_body = registry.get_owned(FunctionId(1), &lease).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(
+        &new_body.definition_owner,
+        &old_body.definition_owner
+    ));
+    assert_eq!(old_body.source_id, Some(SourceId(5)));
+    assert_eq!(new_body.source_id, Some(SourceId(7)));
 }
 
 #[test]

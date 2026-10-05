@@ -295,11 +295,13 @@ impl FunctionRegistry {
             return None;
         }
         if let Some(current) = self.functions.get(&function) {
-            // Reusing a number for another definition invalidates old bound
-            // calls; nested static calls in that old body would otherwise be
-            // ambiguous. Core assigns monotonic numbers for this reason.
-            return lease.matches(&current.definition_owner).then_some(current);
+            if lease.matches(&current.definition_owner) {
+                return Some(current);
+            }
         }
+        // A reused session number is not authority for the new body. The
+        // bound lease selects its retained immutable body; owned_view also
+        // overlays every leased static callee before that body runs.
         self.retired
             .get(&function)?
             .iter()
