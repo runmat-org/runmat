@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::{
-    CandidateCostUnavailable, CandidateObservationEvidence, Digest, EstimateSource,
+    CandidateCostUnavailable, CandidateObservationEvidence, Digest, DigestStream, EstimateSource,
     ExecutionCandidateKind, ExecutionCostComponents, PlacementDecision, PlacementFeedback,
     PlacementInvalidation, PlacementPlanRequest, PlacementSignature, SelectedExecutionCandidate,
 };
@@ -21,6 +21,13 @@ mod authority_tests;
 
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 3;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
+
+fn feedback_candidate_key(candidate: &str) -> Digest {
+    let mut identity = DigestStream::new();
+    identity.update(b"runmat.placement.feedback-candidate.v1\0");
+    identity.update(candidate.as_bytes());
+    identity.finish()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExplorationMode {
@@ -159,7 +166,7 @@ struct CachedDecision {
 struct PlacementSessionState {
     tick: u64,
     decisions: BTreeMap<Digest, CachedDecision>,
-    feedback: BTreeMap<(Digest, String, ExecutionCandidateKind), PlacementFeedbackSeries>,
+    feedback: BTreeMap<(Digest, Digest, ExecutionCandidateKind), PlacementFeedbackSeries>,
 }
 
 pub struct PlacementSession {
@@ -279,7 +286,11 @@ impl PlacementSession {
     ) -> CandidateObservationEvidence {
         self.drain_observations();
         let state = self.state.borrow();
-        let key = (signature.cache_key(), candidate.to_owned(), kind);
+        let key = (
+            signature.cache_key(),
+            feedback_candidate_key(candidate),
+            kind,
+        );
         state.feedback.get(&key).map_or(
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
             |series| evidence::from_series(series, state.tick),
@@ -300,7 +311,11 @@ impl PlacementSession {
         let mut state = self.state.borrow_mut();
         let observation_tick = state.tick;
         let signature_key = feedback.signature.cache_key();
-        let key = (signature_key, feedback.candidate.clone(), feedback.kind);
+        let key = (
+            signature_key,
+            feedback_candidate_key(&feedback.candidate),
+            feedback.kind,
+        );
         let series = state
             .feedback
             .entry(key)
@@ -454,7 +469,7 @@ impl PlacementSession {
             series.latest_tick = restored_tick;
             let key = (
                 series.signature.cache_key(),
-                series.candidate.clone(),
+                feedback_candidate_key(&series.candidate),
                 series.kind,
             );
             if restored.insert(key, series).is_some() {
@@ -597,13 +612,13 @@ fn apply_feedback_evidence(
     request: &mut PlacementPlanRequest,
     signature_key: Digest,
     tick: u64,
-    feedback: &BTreeMap<(Digest, String, ExecutionCandidateKind), PlacementFeedbackSeries>,
+    feedback: &BTreeMap<(Digest, Digest, ExecutionCandidateKind), PlacementFeedbackSeries>,
 ) {
     for node in &mut request.graph.nodes {
         node.candidates.retain_mut(|candidate| {
             let key = (
                 signature_key,
-                candidate.descriptor.identity.clone(),
+                feedback_candidate_key(&candidate.descriptor.identity),
                 candidate.descriptor.kind,
             );
             let Some(series) = feedback.get(&key) else {
@@ -749,7 +764,7 @@ fn evict_oldest_feedback(state: &mut PlacementSessionState, limit: usize) {
             .feedback
             .iter()
             .min_by_key(|(_, series)| series.latest_tick)
-            .map(|(key, _)| key.clone())
+            .map(|(key, _)| *key)
         else {
             break;
         };
@@ -790,6 +805,44 @@ mod tests {
                 policy: digest("policy"),
             },
         }
+    }
+
+    #[test]
+    fn typed_feedback_key_preserves_exact_profile_candidate_text() {
+        let session = PlacementSession::default();
+        let signature = signature("feedback");
+        let candidate = "candidate-λ";
+        session
+            .observe(PlacementFeedback {
+                signature: signature.clone(),
+                candidate: candidate.into(),
+                kind: ExecutionCandidateKind::SharedRuntime,
+                total_elapsed_ns: 17,
+                succeeded: true,
+            })
+            .expect("record candidate");
+        assert!(matches!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            CandidateObservationEvidence::Unavailable(
+                CandidateCostUnavailable::InsufficientObservations {
+                    successful: 1,
+                    failed: 0
+                }
+            )
+        ));
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                "candidate-other",
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
+        );
+        assert_eq!(session.profile_snapshot().feedback[0].candidate, candidate);
     }
 
     fn candidate(
