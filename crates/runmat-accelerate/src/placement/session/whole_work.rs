@@ -45,7 +45,7 @@ fn lock_probes(
 
 struct Admitted<'a> {
     candidate: &'a WholeWorkCandidate,
-    selected: SelectedExecutionCandidate,
+    identity: Digest,
     cost: CandidateCostEvidence,
     observation: CandidateObservationEvidence,
 }
@@ -177,11 +177,11 @@ impl PlacementSession {
                     matches!(reason, ResourceAdmissionError::InsufficientEvidence { .. });
                 continue;
             }
-            let selected = candidate.selected(&request.signature.operation);
-            let observed = self.observed_candidate_duration(
+            let identity = candidate.identity_digest();
+            let observed = self.observed_candidate_duration_digest(
                 request.signature,
-                &selected.candidate,
-                selected.kind,
+                identity,
+                candidate.kind,
             );
             if matches!(
                 observed,
@@ -214,7 +214,7 @@ impl PlacementSession {
             };
             admitted.push(Admitted {
                 candidate,
-                selected,
+                identity,
                 cost,
                 observation: observed,
             });
@@ -242,16 +242,15 @@ impl PlacementSession {
                 .iter()
                 .filter(|item| matches!(item.cost, CandidateCostEvidence::Estimated(_)))
                 .min_by_key(|item| match item.cost {
-                    CandidateCostEvidence::Estimated(estimate) => (
-                        estimate.checked_risk_adjusted_ns(),
-                        &item.selected.candidate,
-                    ),
+                    CandidateCostEvidence::Estimated(estimate) => {
+                        (estimate.checked_risk_adjusted_ns(), &item.identity)
+                    }
                     CandidateCostEvidence::Unavailable(_) => unreachable!(),
                 })
                 .or_else(|| admitted.first())
                 .expect("nonempty admitted whole-work candidates");
             return Ok(SelectionDraft::Direct {
-                selected: item.selected.clone(),
+                selected: item.candidate.selected(&request.signature.operation),
                 kind: if matches!(
                     request.constraint,
                     WholeWorkConstraint::ProviderRequired { .. }
@@ -274,12 +273,12 @@ impl PlacementSession {
                 let item = &admitted[index];
                 let key = (
                     request.signature.cache_key(),
-                    item.candidate.identity_digest(),
-                    item.selected.kind,
+                    item.identity,
+                    item.candidate.kind,
                 );
                 lock_probes(&self.whole_work_probes).insert(key);
                 return Ok(SelectionDraft::Direct {
-                    selected: item.selected.clone(),
+                    selected: item.candidate.selected(&request.signature.operation),
                     kind: WholeWorkDecisionKind::Exploratory,
                     predicted_total_ns: None,
                     probe: Some(Box::new(ProbeLease {
@@ -298,7 +297,7 @@ impl PlacementSession {
             })
             .collect();
         if estimated.is_empty() {
-            return unmeasured_host(&admitted);
+            return unmeasured_host(&admitted, &request.signature.operation);
         }
         // A measured host route is required before the ordinary numeric graph
         // can compare it with provider candidates. Unmeasured host routes are
@@ -307,7 +306,7 @@ impl PlacementSession {
             .iter()
             .any(|(item, _)| !item.candidate.kind.is_provider())
         {
-            return unmeasured_host(&admitted);
+            return unmeasured_host(&admitted, &request.signature.operation);
         }
         let node = PlacementGraphNode {
             identity: request.signature.operation.clone(),
@@ -315,9 +314,9 @@ impl PlacementSession {
                 .into_iter()
                 .map(|(item, cost)| PlacementGraphCandidate {
                     descriptor: ExecutionCandidateDescriptor {
-                        identity: item.selected.candidate.clone(),
+                        identity: item.identity.to_string(),
                         region: request.signature.region,
-                        kind: item.selected.kind,
+                        kind: item.candidate.kind,
                         execution_location: item.candidate.execution_location,
                         preparation: item.candidate.preparation,
                         cost,
@@ -339,13 +338,16 @@ impl PlacementSession {
     }
 }
 
-fn unmeasured_host(admitted: &[Admitted<'_>]) -> Result<SelectionDraft, PlacementPlanError> {
+fn unmeasured_host(
+    admitted: &[Admitted<'_>],
+    operation: &str,
+) -> Result<SelectionDraft, PlacementPlanError> {
     let item = admitted
         .iter()
         .find(|item| !item.candidate.kind.is_provider())
         .ok_or_else(no_legal_candidate)?;
     Ok(SelectionDraft::Direct {
-        selected: item.selected.clone(),
+        selected: item.candidate.selected(operation),
         kind: WholeWorkDecisionKind::Unmeasured,
         predicted_total_ns: None,
         probe: None,
@@ -364,11 +366,7 @@ fn exploration_candidate(
             && (!item.candidate.kind.is_provider()
                 || !request.require_transactional_results
                 || item.candidate.transactional_results)
-            && !active.contains(&(
-                signature,
-                item.candidate.identity_digest(),
-                item.selected.kind,
-            ))
+            && !active.contains(&(signature, item.identity, item.candidate.kind))
     };
     let host = admitted
         .iter()

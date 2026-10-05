@@ -22,11 +22,20 @@ mod authority_tests;
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 3;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
 
-fn feedback_candidate_key(candidate: &str) -> Digest {
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum FeedbackCandidateKey {
+    Canonical(Digest),
+    Text(Digest),
+}
+
+fn feedback_candidate_key(candidate: &str) -> FeedbackCandidateKey {
+    if let Ok(identity) = candidate.parse::<Digest>() {
+        return FeedbackCandidateKey::Canonical(identity);
+    }
     let mut identity = DigestStream::new();
     identity.update(b"runmat.placement.feedback-candidate.v1\0");
     identity.update(candidate.as_bytes());
-    identity.finish()
+    FeedbackCandidateKey::Text(identity.finish())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -166,7 +175,8 @@ struct CachedDecision {
 struct PlacementSessionState {
     tick: u64,
     decisions: BTreeMap<Digest, CachedDecision>,
-    feedback: BTreeMap<(Digest, Digest, ExecutionCandidateKind), PlacementFeedbackSeries>,
+    feedback:
+        BTreeMap<(Digest, FeedbackCandidateKey, ExecutionCandidateKind), PlacementFeedbackSeries>,
 }
 
 pub struct PlacementSession {
@@ -284,13 +294,31 @@ impl PlacementSession {
         candidate: &str,
         kind: ExecutionCandidateKind,
     ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key(signature, feedback_candidate_key(candidate), kind)
+    }
+
+    fn observed_candidate_duration_digest(
+        &self,
+        signature: &PlacementSignature,
+        candidate: Digest,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
+        self.observed_candidate_duration_key(
+            signature,
+            FeedbackCandidateKey::Canonical(candidate),
+            kind,
+        )
+    }
+
+    fn observed_candidate_duration_key(
+        &self,
+        signature: &PlacementSignature,
+        candidate: FeedbackCandidateKey,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
         self.drain_observations();
         let state = self.state.borrow();
-        let key = (
-            signature.cache_key(),
-            feedback_candidate_key(candidate),
-            kind,
-        );
+        let key = (signature.cache_key(), candidate, kind);
         state.feedback.get(&key).map_or(
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
             |series| evidence::from_series(series, state.tick),
@@ -612,7 +640,10 @@ fn apply_feedback_evidence(
     request: &mut PlacementPlanRequest,
     signature_key: Digest,
     tick: u64,
-    feedback: &BTreeMap<(Digest, Digest, ExecutionCandidateKind), PlacementFeedbackSeries>,
+    feedback: &BTreeMap<
+        (Digest, FeedbackCandidateKey, ExecutionCandidateKind),
+        PlacementFeedbackSeries,
+    >,
 ) {
     for node in &mut request.graph.nodes {
         node.candidates.retain_mut(|candidate| {
@@ -843,6 +874,34 @@ mod tests {
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
         );
         assert_eq!(session.profile_snapshot().feedback[0].candidate, candidate);
+    }
+
+    #[test]
+    fn canonical_candidate_digest_uses_the_same_observation_key_without_text() {
+        let session = PlacementSession::default();
+        let signature = signature("whole-work");
+        let candidate = digest("typed-route");
+        session
+            .observe(PlacementFeedback {
+                signature: signature.clone(),
+                candidate: candidate.to_string(),
+                kind: ExecutionCandidateKind::SharedRuntime,
+                total_elapsed_ns: 31,
+                succeeded: true,
+            })
+            .expect("record canonical candidate");
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                &candidate.to_string(),
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            session.observed_candidate_duration_digest(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+        );
     }
 
     fn candidate(
