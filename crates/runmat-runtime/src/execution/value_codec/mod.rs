@@ -592,6 +592,27 @@ mod tests {
         assert_eq!(original.context.phase.as_deref(), Some("execution"));
         assert_eq!(original.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert_eq!(decoded.stack, ["origin"]);
+
+        let retained = decoded.clone();
+        let reraised = crate::runtime_error::error_from_exception(decoded);
+        let recaught = Value::MException(crate::runtime_error::exception_from_error(reraised));
+        let repeated_payload = encode_inline_value(&recaught)
+            .expect("shared source-less original remains portable after rethrow and recatch");
+        let repeated = decode_inline_value(&repeated_payload).expect("repeated exception decode");
+        let Value::MException(repeated) = repeated else {
+            panic!("expected repeated exception");
+        };
+        let repeated_original = repeated.original().expect("typed repeated provenance");
+        assert_eq!(repeated_original.context.call_frames[0].source_id, Some(11));
+        assert_eq!(
+            repeated_original.context.phase.as_deref(),
+            Some("execution")
+        );
+        assert_eq!(
+            repeated_original.gpu_gather_retry,
+            crate::GpuGatherRetry::Never
+        );
+        assert!(retained.original().is_some());
     }
 
     #[test]

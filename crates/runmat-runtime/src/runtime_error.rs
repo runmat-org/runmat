@@ -88,12 +88,13 @@ pub fn exception_from_error(
 /// caught from execution. User-constructed exceptions retain their public
 /// identifier, message, and stack without inventing an opaque source.
 pub fn error_from_exception(exception: runmat_value::MException) -> RuntimeError {
-    if let Some(original) = exception.original() {
-        return RuntimeError::from_shared_original(std::sync::Arc::clone(original));
+    let (identifier, message, stack, original) = exception.into_parts();
+    if let Some(original) = original {
+        return RuntimeError::from_shared_original(original);
     }
-    build_runtime_error(exception.message)
-        .with_identifier(exception.identifier)
-        .with_call_stack(exception.stack)
+    build_runtime_error(message)
+        .with_identifier(identifier)
+        .with_call_stack(stack)
         .build()
 }
 
@@ -205,6 +206,7 @@ mod tests {
             .build();
         let caught = exception_from_error(original);
         assert_eq!(caught.stack, ["origin"]);
+        let other_owner = caught.clone();
         let reraised = error_from_exception(caught);
         assert_eq!(reraised.identifier(), Some("RunMat:diagnostics:Inner"));
         assert_eq!(reraised.context.call_frames[0].source_id, Some(7));
@@ -220,5 +222,16 @@ mod tests {
             .downcast_ref::<runmat_async::SharedRuntimeErrorSource>()
             .expect("exact original runtime error owner");
         assert!(shared.original().source().unwrap().is::<std::io::Error>());
+        assert!(other_owner.original().is_some());
+    }
+
+    #[test]
+    fn uniquely_owned_rethrow_recovers_exact_original_without_wrapper() {
+        let original = build_runtime_error("inner failure")
+            .with_identifier("RunMat:diagnostics:Inner")
+            .with_source(std::io::Error::other("distinctive original cause"))
+            .build();
+        let reraised = error_from_exception(exception_from_error(original));
+        assert!(reraised.source().unwrap().is::<std::io::Error>());
     }
 }

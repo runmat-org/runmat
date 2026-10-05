@@ -37,6 +37,18 @@ impl MException {
     pub fn original(&self) -> Option<&Arc<runmat_async::RuntimeError>> {
         self.original.as_ref()
     }
+
+    /// Consume the exception without cloning the owner of its caught error.
+    pub fn into_parts(
+        self,
+    ) -> (
+        String,
+        String,
+        Vec<String>,
+        Option<Arc<runmat_async::RuntimeError>>,
+    ) {
+        (self.identifier, self.message, self.stack, self.original)
+    }
 }
 
 impl PartialEq for MException {

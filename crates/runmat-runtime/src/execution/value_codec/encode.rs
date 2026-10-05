@@ -201,7 +201,7 @@ fn encode(
         }
         Value::MException(value) => {
             let runtime = if let Some(original) = value.original() {
-                if original.source.is_some() {
+                if has_opaque_exception_source(original) {
                     return Err(ValueCodecError::unsupported(
                         path,
                         "caught exception has a live opaque cause and cannot be transferred or stored",
@@ -233,6 +233,18 @@ fn encode(
         )),
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
+}
+
+/// A shared rethrow owner is still portable when its actual original is
+/// source-less. Do not mistake the owning wrapper for an opaque host cause.
+fn has_opaque_exception_source(error: &crate::RuntimeError) -> bool {
+    match error.source.as_deref() {
+        None => false,
+        Some(source) => match source.downcast_ref::<runmat_async::SharedRuntimeErrorSource>() {
+            Some(shared) => has_opaque_exception_source(shared.original()),
+            None => true,
+        },
+    }
 }
 
 fn encode_integer_scalar(value: &IntValue) -> InlineValue {
