@@ -148,3 +148,97 @@ fn valid_resident_data_still_reaches_the_existing_download_route() {
     );
     assert_eq!(allocation.probe.retirements(), 0);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn host_known_invalid_data_precedes_resident_cell_download_and_fs_admission() {
+    let _accel = crate::builtins::common::test_support::accel_test_lock();
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = Box::leak(Box::new(PendingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let allocation = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident cell member");
+    let mut invalid = StructValue::new();
+    invalid.insert("x", Value::Num(1.0));
+    let resident_then_invalid = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::GpuTensor(allocation.handle.clone()),
+                Value::Struct(invalid.clone()),
+            ],
+            1,
+            2,
+        )
+        .expect("cell fixture"),
+    );
+    let evidence = Arc::new(LifecycleEvidence::default());
+    with_lifecycle(
+        LifecycleBehavior::Pending(evidence),
+        0,
+        |memory, evidence| {
+            for data in [Value::Struct(invalid), resident_then_invalid] {
+                let mut call = Box::pin(xlswrite_builtin(
+                    None,
+                    Value::from("out.xlsx"),
+                    data,
+                    vec![Value::from("Sheet1"), Value::from("A1")],
+                ));
+                let Poll::Ready(Err(error)) = poll_once(call.as_mut()) else {
+                    panic!("known-invalid data must reject before resident download")
+                };
+                assert_eq!(error.identifier(), XLSWRITE_ERROR_DATA.identifier);
+                assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+                assert_eq!(evidence.resource_probes.load(Ordering::SeqCst), 0);
+                assert_eq!(evidence.begins.load(Ordering::SeqCst), 0);
+                assert!(memory
+                    .read_project_path(std::path::Path::new("/publication/out.xlsx"))
+                    .is_err());
+            }
+        },
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn admitted_resident_cell_member_still_enters_download() {
+    let _accel = crate::builtins::common::test_support::accel_test_lock();
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let provider = Box::leak(Box::new(PendingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let allocation = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident cell member");
+    let data = Value::Cell(
+        CellArray::new(vec![Value::GpuTensor(allocation.handle.clone())], 1, 1)
+            .expect("cell fixture"),
+    );
+    let evidence = Arc::new(LifecycleEvidence::default());
+    with_lifecycle(
+        LifecycleBehavior::Pending(evidence),
+        0,
+        |_memory, evidence| {
+            let mut call = Box::pin(xlswrite_builtin(
+                None,
+                Value::from("out.xlsx"),
+                data,
+                vec![Value::from("Sheet1"), Value::from("A1")],
+            ));
+            assert!(poll_once(call.as_mut()).is_pending());
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+            drop(call);
+            assert_eq!(evidence.begins.load(Ordering::SeqCst), 0);
+            assert!(evidence.resource_probes.load(Ordering::SeqCst) > 0);
+        },
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+}
