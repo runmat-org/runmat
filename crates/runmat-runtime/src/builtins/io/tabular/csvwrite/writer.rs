@@ -179,7 +179,7 @@ async fn write_csv_bytes(
     Ok(())
 }
 
-fn format_complex(re: f64, im: f64) -> String {
+pub(super) fn format_complex(re: f64, im: f64) -> String {
     let real = format_numeric(re);
     let imag = format_numeric(im.abs());
     if im.is_sign_negative() {
@@ -224,7 +224,7 @@ pub(super) fn format_numeric(value: f64) -> String {
     trimmed
 }
 
-fn format_tensor_value(tensor: &Tensor, idx: usize) -> String {
+pub(super) fn format_tensor_value(tensor: &Tensor, idx: usize) -> String {
     let value = tensor
         .numeric_value_at(idx)
         .expect("index within authoritative numeric storage");

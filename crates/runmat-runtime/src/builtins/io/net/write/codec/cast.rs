@@ -1,4 +1,5 @@
 use super::{ByteOrder, WriteElement};
+use runmat_value::IntValue;
 
 pub(in super::super) fn integer_raw(value: &WriteElement) -> Option<i128> {
     match value {

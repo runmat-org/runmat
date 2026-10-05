@@ -65,7 +65,7 @@ fn apply_option(options: &mut WriteMatrixOptions, name: &str, value: &Value) -> 
     Ok(())
 }
 
-fn option_name_from_value(value: &Value) -> BuiltinResult<String> {
+pub(super) fn option_name_from_value(value: &Value) -> BuiltinResult<String> {
     value_to_string_scalar(value, "option name")
 }
 
@@ -209,7 +209,7 @@ fn parse_file_type(value: &Value) -> BuiltinResult<FileType> {
     }
 }
 
-fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
+pub(super) fn value_to_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
     crate::builtins::common::validation::value_text_scalar_string(value).ok_or_else(|| {
         writematrix_error_with(
             &WRITEMATRIX_ERROR_OPTION,

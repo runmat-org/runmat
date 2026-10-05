@@ -212,7 +212,7 @@ async fn read_file_bytes(
     Ok(bytes)
 }
 
-fn validate_encoding_label(label: &str) -> BuiltinResult<()> {
+pub(super) fn validate_encoding_label(label: &str) -> BuiltinResult<()> {
     let label = label.trim();
     if label.eq_ignore_ascii_case("auto") || label.eq_ignore_ascii_case("unicode") {
         return Ok(());

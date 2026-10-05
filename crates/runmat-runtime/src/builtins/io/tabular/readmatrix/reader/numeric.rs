@@ -1,3 +1,4 @@
+use super::super::output::integer_element_dtype;
 use super::*;
 
 pub(super) fn parse_numeric_token(

@@ -666,7 +666,6 @@ enum OutputTemplate {
     Like(Value),
 }
 
-#[derive(Clone)]
 mod range;
 #[cfg(test)]
 use range::parse_range_numeric;
@@ -678,9 +677,11 @@ use output::finalize_output;
 use output::{finalize_like, tensor_to_gpu};
 
 mod reader;
+use range::normalize_missing_token;
 #[cfg(test)]
 use reader::parse_integer_numeric_token;
 use reader::read_numeric_matrix;
+use reader::validate_encoding_label;
 
 fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {

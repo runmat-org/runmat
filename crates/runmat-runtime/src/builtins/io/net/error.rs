@@ -1,6 +1,7 @@
 //! Preserve transport and provider causes behind the public network diagnostics.
 
-use crate::{build_runtime_error, GpuGatherRetry, RuntimeError, RuntimeErrorSourceBound};
+use crate::runtime_error::RuntimeErrorSourceBound;
+use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 use runmat_builtins::BuiltinErrorDescriptor;
 
 pub(super) fn with_source(

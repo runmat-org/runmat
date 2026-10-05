@@ -1,5 +1,3 @@
-use super::*;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ParsedNumber {
     pub(super) re: f64,

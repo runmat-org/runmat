@@ -29,7 +29,7 @@ impl RangeSpec {
     }
 }
 
-fn normalize_missing_token(token: &str) -> String {
+pub(super) fn normalize_missing_token(token: &str) -> String {
     token.trim().to_ascii_lowercase()
 }
 

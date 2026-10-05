@@ -215,7 +215,9 @@ pub(super) fn checked_like_result(
     Ok(Value::GpuTensor(uploaded))
 }
 
-fn integer_element_dtype(integer: runmat_accelerate_api::IntegerElementType) -> NumericDType {
+pub(super) fn integer_element_dtype(
+    integer: runmat_accelerate_api::IntegerElementType,
+) -> NumericDType {
     use runmat_accelerate_api::IntegerElementType;
     match integer {
         IntegerElementType::I8 => NumericDType::I8,
