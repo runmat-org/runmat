@@ -57,6 +57,38 @@ fn integer_charge(payload_and_shape: usize) -> usize {
 }
 
 #[test]
+fn failed_release_metadata_allocation_refunds_the_retained_claim() {
+    let quota = permit(32);
+    let reservation = quota.reserve_exact_claim(32).expect("owned claim");
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 32);
+    // SAFETY: null never transfers a block into the release owner.
+    let failed = unsafe {
+        RustExactRelease::try_new_with(Layout::new::<f64>(), reservation, |_| std::ptr::null_mut())
+    };
+    assert!(matches!(
+        failed,
+        Err(ExactHostNumericAllocationError::AllocationFailed)
+    ));
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    let next = quota.reserve_exact_claim(32).expect("refunded capacity");
+    drop(next);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn exact_float_provenance_uses_static_allocator_identity() {
+    let quota = permit(floating_charge(std::mem::size_of::<f64>()));
+    let allocation = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
+    let ExactAllocation::Floating(owner) = &allocation.allocation else {
+        panic!("floating class must retain an adopted float owner");
+    };
+    assert!(matches!(
+        &owner.provenance().allocator,
+        Cow::Borrowed("runmat.exact-host-numeric.v1")
+    ));
+}
+
+#[test]
 fn canonical_requested_bytes_equal_the_retained_charge_for_every_numeric_class() {
     let classes = [
         (NumericDType::I8, 1),

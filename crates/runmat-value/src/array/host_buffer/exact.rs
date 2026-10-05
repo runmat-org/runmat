@@ -21,9 +21,13 @@ impl<T> ExactShared<T> {
     }
 
     pub(super) fn try_new(value: T) -> Result<Self, T> {
+        let allocate = |layout| {
+            // SAFETY: the exact layout is released by the final Box owner.
+            unsafe { std::alloc::alloc(layout) }
+        };
         // SAFETY: `alloc` returns either null or a fresh pointer with the
         // exact requested global-allocator layout.
-        unsafe { Self::try_new_with(value, |layout| std::alloc::alloc(layout)) }
+        unsafe { Self::try_new_with(value, allocate) }
     }
 
     /// # Safety

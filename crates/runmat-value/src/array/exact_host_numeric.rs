@@ -9,6 +9,7 @@ use crate::IntegerStorage;
 use crate::NumericDType;
 use crate::NumericScalar;
 use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
+use std::borrow::Cow;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
@@ -79,6 +80,44 @@ pub trait ExactHostAllocationPermit: fmt::Debug + Send + Sync {
 struct RustExactRelease {
     layout: Layout,
     _reservation: ExactHostAllocationClaim,
+}
+
+impl RustExactRelease {
+    fn try_new(
+        layout: Layout,
+        reservation: ExactHostAllocationClaim,
+    ) -> Result<Box<Self>, ExactHostNumericAllocationError> {
+        let allocate = |layout| {
+            // SAFETY: the exact global-allocator block is released by Box.
+            unsafe { alloc(layout) }
+        };
+        // SAFETY: `alloc` returns a unique block of exactly the requested
+        // layout or null; Box takes sole ownership after initialization.
+        unsafe { Self::try_new_with(layout, reservation, allocate) }
+    }
+
+    /// # Safety
+    /// A non-null allocator result must be a fresh, uniquely owned global
+    /// allocation with exactly the supplied layout and alignment.
+    unsafe fn try_new_with(
+        layout: Layout,
+        reservation: ExactHostAllocationClaim,
+        allocate: impl FnOnce(Layout) -> *mut u8,
+    ) -> Result<Box<Self>, ExactHostNumericAllocationError> {
+        let pointer = allocate(Layout::new::<Self>()).cast::<Self>();
+        if pointer.is_null() {
+            return Err(ExactHostNumericAllocationError::AllocationFailed);
+        }
+        // SAFETY: the pointer uniquely owns one exact-layout block and the
+        // initialized release value transfers directly into Box ownership.
+        unsafe {
+            pointer.write(Self {
+                layout,
+                _reservation: reservation,
+            });
+            Ok(Box::from_raw(pointer))
+        }
+    }
 }
 
 impl HostAllocationRelease for RustExactRelease {
@@ -257,15 +296,12 @@ impl ExactHostNumericAllocation {
             });
         }
         let provenance = HostAllocationProvenance {
-            allocator: "runmat.exact-host-numeric.v1".into(),
+            allocator: Cow::Borrowed("runmat.exact-host-numeric.v1"),
             byte_length: layout.size(),
             capacity_bytes: layout.size(),
             alignment: layout.align(),
         };
-        let release = Box::new(RustExactRelease {
-            layout,
-            _reservation: reservation,
-        });
+        let release = RustExactRelease::try_new(layout, reservation)?;
         let pointer = if layout.size() == 0 {
             match dtype {
                 NumericDType::F32 => NonNull::<f32>::dangling().cast(),
