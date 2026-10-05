@@ -1358,13 +1358,16 @@ mod tests {
     use std::sync::Arc;
 
     fn bound(id: usize) -> Value {
-        Value::BoundFunctionHandle {
-            name: format!("objective_{id}"),
-            function: id,
-            authority: runmat_value::BoundFunctionAuthority::unavailable(id),
-            source_role: runmat_types::FunctionSourceRole::Unknown,
-            source_file: None,
-        }
+        crate::user_functions::test_support::exact_local_value(
+            &format!("objective_{id}"),
+            crate::user_functions::test_support::exact_portable_binding(id, "fminunc fixture"),
+        )
+    }
+
+    fn bound_forwarder(id: usize) -> crate::user_functions::BoundFunctionInvokerGuard {
+        crate::user_functions::test_support::install_bound_forwarder(
+            crate::user_functions::test_support::exact_portable_binding(id, "fminunc fixture"),
+        )
     }
 
     fn tensor(data: Vec<f64>) -> Value {
@@ -1389,6 +1392,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_quadratic_reaches_vector_minimum() {
+        let _bound = bound_forwarder(101);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -1416,6 +1420,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_rosenbrock_converges_from_standard_start() {
+        let _bound = bound_forwarder(102);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -1435,6 +1440,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_handles_high_dimensional_smooth_objective() {
+        let _bound = bound_forwarder(103);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -1464,6 +1470,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_uses_objective_gradient_and_returns_six_outputs() {
+        let _bound = bound_forwarder(104);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 2);
@@ -1544,6 +1551,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_rejects_invalid_gradient_length() {
+        let _bound = bound_forwarder(105);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, requested_outputs| {
                 assert_eq!(requested_outputs, 2);
@@ -1570,6 +1578,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_scalar_input_returns_scalar() {
+        let _bound = bound_forwarder(106);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -1602,6 +1611,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_rejects_budget_too_small_for_finite_difference_gradient() {
+        let _bound = bound_forwarder(108);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, _requested_outputs| {
                 Box::pin(async { panic!("budget check should happen before invoking objective") })

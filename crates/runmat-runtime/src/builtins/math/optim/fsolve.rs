@@ -692,6 +692,11 @@ mod tests {
 
     #[test]
     fn fsolve_returns_stationary_non_root_with_solver_status() {
+        let binding = crate::user_functions::test_support::exact_portable_binding(
+            44,
+            "fsolve stationary fixture",
+        );
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
@@ -705,13 +710,7 @@ mod tests {
         )));
         let _outputs = crate::output_count::push_output_count(Some(3));
         let result = block_on(fsolve_builtin(
-            Value::BoundFunctionHandle {
-                name: "no_real_root".into(),
-                function: 44,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(44),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            crate::user_functions::test_support::exact_local_value("no_real_root", binding),
             Value::Num(0.0),
             Vec::new(),
         ))
@@ -854,6 +853,11 @@ mod tests {
 
     #[test]
     fn fsolve_accepts_semantic_function_handle_callback() {
+        let binding = crate::user_functions::test_support::exact_portable_binding(
+            43,
+            "fsolve callback fixture",
+        );
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 43);
@@ -866,13 +870,7 @@ mod tests {
             },
         )));
         let root = block_on(fsolve_builtin(
-            Value::BoundFunctionHandle {
-                name: "system_function".into(),
-                function: 43,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(43),
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+            crate::user_functions::test_support::exact_local_value("system_function", binding),
             Value::Num(1.0),
             Vec::new(),
         ))
