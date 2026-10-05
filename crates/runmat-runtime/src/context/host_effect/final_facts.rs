@@ -2,11 +2,12 @@
 //! shared placement only verifies the carrier matches its typed workload.
 
 use super::*;
-use runmat_builtins::AudioDecodeResourceFacts;
+use runmat_builtins::{AudioDecodeResourceFacts, ReadMatrixTextResourceFacts};
 
 #[derive(Clone, Copy)]
 pub enum HostEffectFinalFacts<'a> {
     AudioDecode(&'a AudioDecodeResourceFacts),
+    ReadMatrixText(&'a ReadMatrixTextResourceFacts),
     #[cfg(test)]
     TestOnly(Digest),
 }
@@ -15,6 +16,7 @@ impl HostEffectFinalFacts<'_> {
     pub(super) fn validate_for(self, request: &HostEffectRequest<'_>) -> BuiltinResult<()> {
         let compatible = match (self, request.workload) {
             (Self::AudioDecode(_), HostEffectWorkload::AudioDecode { .. }) => true,
+            (Self::ReadMatrixText(_), HostEffectWorkload::ReadMatrixText { .. }) => true,
             #[cfg(test)]
             (Self::TestOnly(_), _) => true,
             _ => false,
@@ -32,6 +34,9 @@ impl HostEffectFinalFacts<'_> {
             Self::AudioDecode(facts) => {
                 Digest::sha256(serde_json::to_vec(facts).expect("typed WAVE facts serialize"))
             }
+            Self::ReadMatrixText(facts) => Digest::sha256(
+                serde_json::to_vec(facts).expect("typed numeric-text facts serialize"),
+            ),
             #[cfg(test)]
             Self::TestOnly(digest) => digest,
         }

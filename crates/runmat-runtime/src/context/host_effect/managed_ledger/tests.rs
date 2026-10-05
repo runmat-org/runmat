@@ -38,6 +38,34 @@ fn two_temporary_claims_share_one_precharged_envelope() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn one_opened_source_promotes_the_same_stage_without_recharging_temporary_claims() {
+    let ledger = ManagedHostEffectLedger::new(8);
+    let stage = ledger.reserve_stage(4).expect("pre-open chunk envelope");
+    let header = temp(&stage, 4).expect("pre-open header");
+    assert_eq!(
+        temp(&stage, 1).err(),
+        Some(HostEffectAllocationError::ExceedsStageEnvelope)
+    );
+    stage
+        .promote_scan_envelope(8)
+        .expect("retained source extent");
+    assert_eq!(stage.reserved_bytes(), 8);
+    let parsed = temp(&stage, 4).expect("post-open parser workspace");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 8);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 8);
+    assert_eq!(
+        stage.promote_scan_envelope(9),
+        Err(HostEffectAllocationError::ExceedsCapacity)
+    );
+    assert_eq!(stage.reserved_bytes(), 8);
+    drop(header);
+    drop(parsed);
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn retained_output_adds_global_charge_during_stage_overlap() {
     let ledger = ManagedHostEffectLedger::new(12);
     let stage = ledger.reserve_stage(8).expect("stage");

@@ -162,6 +162,43 @@ fn request(output: HostEffectOutput) -> HostEffectRequest<'static> {
     }
 }
 
+#[test]
+fn numeric_text_final_facts_require_matching_typed_workload_and_digest() {
+    let facts = runmat_builtins::ReadMatrixTextResourceFacts {
+        opened_extent: 8,
+        source_resource_revision: [7; 32],
+        rows: 2,
+        columns: 2,
+        result_class: runmat_builtins::ReadMatrixResultClass::Numeric(
+            runmat_types::NumericClass::Double,
+        ),
+    };
+    let domain_facts = Digest::sha256(serde_json::to_vec(&facts).expect("typed facts"));
+    let matching = HostEffectRequest {
+        operation: "readmatrix",
+        workload: HostEffectWorkload::ReadMatrixText {
+            source: Path::new("/numbers.csv"),
+            controls: Digest::sha256(b"validated options"),
+            output: HostEffectOutput::ReturnedValue,
+        },
+        domain_facts,
+        filesystem: fixture_fs(),
+    };
+    HostEffectFinalFacts::ReadMatrixText(&facts)
+        .validate_for(&matching)
+        .expect("same opened-source facts");
+    let wrong_digest = HostEffectRequest {
+        domain_facts: Digest::sha256(b"different source"),
+        ..matching
+    };
+    assert!(HostEffectFinalFacts::ReadMatrixText(&facts)
+        .validate_for(&wrong_digest)
+        .is_err());
+    assert!(HostEffectFinalFacts::ReadMatrixText(&facts)
+        .validate_for(&request(HostEffectOutput::ReturnedValue))
+        .is_err());
+}
+
 fn runtime_context(
     placement: Rc<Placement>,
     evidence: Option<HostEffectResourceEvidence>,

@@ -1,6 +1,7 @@
 //! Exact filesystem authority for one tabular invocation.
 
 use std::io;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,6 +13,29 @@ pub(super) struct TabularFsPath {
     provider: Arc<dyn FsProvider>,
     path: PathBuf,
     lease: Option<CapturedFsResourceLease>,
+}
+
+pub(super) enum TabularReadSource {
+    Bounded(fs::FsBoundedInput),
+    Ordinary(fs::File),
+}
+
+impl TabularReadSource {
+    pub(super) fn opened_extent(&self) -> Option<u64> {
+        match self {
+            Self::Bounded(source) => Some(source.opened_extent()),
+            Self::Ordinary(_) => None,
+        }
+    }
+}
+
+impl Read for TabularReadSource {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Bounded(source) => source.read(buffer),
+            Self::Ordinary(source) => source.read(buffer),
+        }
+    }
 }
 
 pub(super) struct TabularFsOwner {
@@ -77,6 +101,30 @@ impl TabularFsOwner {
 }
 
 impl TabularFsPath {
+    /// Open one direct-read source on the captured provider. A finite route
+    /// requires the opened handle's resource revision to match the captured
+    /// pre-open lease; ordinary file opening is not a finite substitute.
+    pub(super) async fn open_bounded_input(&self) -> io::Result<Option<fs::FsBoundedInput>> {
+        self.check()?;
+        let opened = self.provider.open_bounded_input(&self.path).await?;
+        self.check()?;
+        if let Some(source) = opened.as_ref() {
+            let captured = self.lease.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "opened tabular source has no captured resource authority",
+                )
+            })?;
+            if !source.is_valid() || source.resource_revision() != captured.contract().revision {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "opened tabular source changed resource authority",
+                ));
+            }
+        }
+        Ok(opened)
+    }
+
     pub(super) fn begin_staged_replace(&self) -> io::Result<Option<Box<dyn FsStagedOutput>>> {
         self.check()?;
         let staged = self.provider.begin_staged_replace(&self.path)?;
@@ -109,6 +157,13 @@ impl TabularFsPath {
         Ok(file)
     }
 
+    pub(super) async fn open_read_preferred(&self) -> io::Result<TabularReadSource> {
+        if let Some(source) = self.open_bounded_input().await? {
+            return Ok(TabularReadSource::Bounded(source));
+        }
+        self.open_read().await.map(TabularReadSource::Ordinary)
+    }
+
     pub(super) async fn open_with(&self, options: &OpenOptions) -> io::Result<fs::File> {
         self.check()?;
         let file = options
@@ -138,6 +193,39 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use std::io::Read;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_selected_source_retains_real_opened_extent_for_same_stage_promotion() {
+        use crate::context::host_effect::{HostEffectStageReservation, ManagedHostEffectLedger};
+
+        let directory = tempfile::tempdir().expect("isolated native fixture");
+        let source_path = directory.path().join("numbers.csv");
+        std::fs::write(&source_path, b"1,2\n3,4\n").expect("fixture payload");
+        let provider: Arc<dyn FsProvider> = Arc::new(fs::NativeFsProvider);
+        let selected = TabularFsPath {
+            lease: fs::capture_resource_lease(provider.clone()),
+            provider,
+            path: source_path,
+        };
+        let ledger = ManagedHostEffectLedger::new(8);
+        let stage = ledger.reserve_stage(4).expect("pre-open prefix envelope");
+        let mut source = block_on(selected.open_bounded_input())
+            .expect("original native owner")
+            .expect("direct opened source");
+        assert_eq!(source.opened_extent(), 8);
+        stage
+            .promote_scan_envelope(source.opened_extent())
+            .expect("same authority promotes after opened extent");
+        let mut content = [0; 8];
+        source
+            .read_exact(&mut content)
+            .expect("direct bounded read");
+        assert_eq!(&content, b"1,2\n3,4\n");
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 8);
+        drop(stage);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
 
     fn selected_directory() -> &'static str {
         "/tabular-selected"

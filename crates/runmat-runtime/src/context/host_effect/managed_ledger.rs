@@ -7,7 +7,10 @@ use super::{
 };
 use runmat_value::{ExactHostAllocationReservation, ExactHostNumericAllocationError};
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ManagedHostEffectLedgerSnapshot {
@@ -81,7 +84,7 @@ impl ManagedHostEffectLedger {
         Ok(Arc::new(ManagedHostEffectStageReservation {
             inner: Arc::new(StageInner {
                 ledger: self.state.clone(),
-                reserved_bytes,
+                reserved_bytes: AtomicU64::new(reserved_bytes),
                 temporary: Mutex::new(TemporaryState { live_bytes: 0 }),
             }),
         }))
@@ -94,14 +97,14 @@ struct TemporaryState {
 
 struct StageInner {
     ledger: Arc<Mutex<LedgerState>>,
-    reserved_bytes: u64,
+    reserved_bytes: AtomicU64,
     temporary: Mutex<TemporaryState>,
 }
 
 impl Drop for StageInner {
     fn drop(&mut self) {
         let mut state = self.ledger.lock().expect("host ledger lock");
-        state.snapshot.live_reserved_bytes -= self.reserved_bytes;
+        state.snapshot.live_reserved_bytes -= self.reserved_bytes.load(Ordering::Acquire);
     }
 }
 
@@ -146,7 +149,39 @@ impl ManagedHostEffectStageReservation {
 
 impl HostEffectStageReservation for ManagedHostEffectStageReservation {
     fn reserved_bytes(&self) -> u64 {
-        self.inner.reserved_bytes
+        self.inner.reserved_bytes.load(Ordering::Acquire)
+    }
+
+    fn promote_scan_envelope(
+        &self,
+        new_reserved_bytes: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        // The same lock order as temporary claims keeps their envelope and
+        // the global precharge in one observable state.
+        let temporary = self.inner.temporary.lock().expect("temporary ledger lock");
+        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
+        if !ledger.snapshot.current {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let old = self.inner.reserved_bytes.load(Ordering::Acquire);
+        if new_reserved_bytes < old || new_reserved_bytes < temporary.live_bytes {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        let delta = new_reserved_bytes - old;
+        let next = ledger
+            .snapshot
+            .live_reserved_bytes
+            .checked_add(delta)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        if next > ledger.snapshot.capacity_bytes {
+            return Err(HostEffectAllocationError::ExceedsCapacity);
+        }
+        ledger.snapshot.live_reserved_bytes = next;
+        ledger.snapshot.peak_reserved_bytes = ledger.snapshot.peak_reserved_bytes.max(next);
+        self.inner
+            .reserved_bytes
+            .store(new_reserved_bytes, Ordering::Release);
+        Ok(())
     }
 
     fn capacity_bytes(&self) -> u64 {
@@ -173,7 +208,7 @@ impl HostEffectStageReservation for ManagedHostEffectStageReservation {
             .live_bytes
             .checked_add(bytes)
             .ok_or(HostEffectAllocationError::Overflow)?;
-        if next > self.inner.reserved_bytes {
+        if next > self.inner.reserved_bytes.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::ExceedsStageEnvelope);
         }
         let claimed = ledger

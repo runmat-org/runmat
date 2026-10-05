@@ -58,6 +58,15 @@ pub trait HostEffectStageReservation: Send + Sync {
     /// Capacity of the same managed-allocation ledger used for the scan and
     /// every exact output reservation. This is not a process-RSS certificate.
     fn capacity_bytes(&self) -> u64;
+    /// Atomically increase the same scan precharge after an opened source has
+    /// supplied a retained extent. No new placement selection or authority
+    /// may be substituted. Implementers without promotion fail closed.
+    fn promote_scan_envelope(
+        &self,
+        _new_reserved_bytes: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        Err(HostEffectAllocationError::Unavailable)
+    }
     /// Draw a temporary allocation from the already precharged scan peak.
     /// Implementers must not add these bytes again to global live capacity.
     fn reserve_live_exact(
@@ -228,6 +237,33 @@ impl HostEffectStagePermit {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
         Ok(claim)
+    }
+
+    pub fn promote_scan_envelope(
+        &self,
+        new_reserved_bytes: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        if !self.active_epoch.load(Ordering::Acquire)
+            || !self
+                .cancellation
+                .same_generation(&self.runtime.cancellation())
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        if self.cancellation.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        self.reservation.promote_scan_envelope(new_reserved_bytes)?;
+        if self.cancellation.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        Ok(())
     }
 
     pub(super) fn output_permit(

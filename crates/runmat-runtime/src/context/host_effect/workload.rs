@@ -1,6 +1,7 @@
 //! Typed host-effect identity shared with resource evidence and placement.
 
 use runmat_builtins::AudioReadDataType;
+use runmat_execution::Digest;
 use std::path::Path;
 
 mod dataset;
@@ -72,6 +73,11 @@ pub enum HostEffectWorkload<'a> {
         range: Option<AudioFrameRange>,
         datatype: AudioReadDataType,
         output: AudioDecodeOutput,
+    },
+    ReadMatrixText {
+        source: &'a Path,
+        controls: Digest,
+        output: HostEffectOutput,
     },
     DatasetPath {
         operation: DatasetPathOperation,
@@ -161,6 +167,13 @@ struct MatHandleFacts<'a> {
     controls: &'a [MatHandleControl],
 }
 
+#[derive(serde::Serialize)]
+struct ReadMatrixTextWorkloadFacts<'a> {
+    source: &'a [u8],
+    controls: Digest,
+    output: HostEffectOutput,
+}
+
 impl HostEffectWorkload<'_> {
     /// An absent control digest is not a fabricated reusable identity.
     pub fn identity_complete(self) -> bool {
@@ -192,6 +205,7 @@ impl HostEffectWorkload<'_> {
         match self {
             Self::ArchiveExtract { output, .. }
             | Self::AudioMetadata { output, .. }
+            | Self::ReadMatrixText { output, .. }
             | Self::DatasetPath { output, .. } => output,
             Self::DatasetHandle { output, .. } => output,
             Self::AudioDecode { output, .. } => output.host_effect_output(),
@@ -243,6 +257,16 @@ impl HostEffectWorkload<'_> {
                 output,
             })
             .expect("typed audio decode facts serialize"),
+            Self::ReadMatrixText {
+                source,
+                controls,
+                output,
+            } => serde_json::to_vec(&ReadMatrixTextWorkloadFacts {
+                source: source.as_os_str().as_encoded_bytes(),
+                controls,
+                output,
+            })
+            .expect("typed numeric-text workload serializes"),
             Self::DatasetPath {
                 operation,
                 source,

@@ -154,7 +154,7 @@ async fn read_file_bytes(
     cooperation: &mut TabularCooperation<'_>,
     path: &TabularFsPath,
 ) -> BuiltinResult<Vec<u8>> {
-    let file = await_io(runtime, BUILTIN_NAME, path.open_read())
+    let file = await_io(runtime, BUILTIN_NAME, path.open_read_preferred())
         .await?
         .map_err(|err| {
             readmatrix_error_with_source(
@@ -174,6 +174,17 @@ async fn read_file_bytes(
             source,
         )
     })?;
+    if file
+        .opened_extent()
+        .is_some_and(|extent| extent > MAX_READMATRIX_TEXT_BYTES)
+    {
+        return Err(readmatrix_error_with(
+            &READMATRIX_ERROR_IO_READ,
+            format!(
+                "readmatrix: file exceeds maximum supported text size of {MAX_READMATRIX_TEXT_BYTES} bytes"
+            ),
+        ));
+    }
     let mut limited = file.take(MAX_READMATRIX_TEXT_BYTES + 1);
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 64 * 1024];
