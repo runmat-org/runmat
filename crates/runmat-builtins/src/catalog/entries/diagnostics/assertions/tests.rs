@@ -51,6 +51,15 @@ fn assertion_inference_tracks_arity_condition_and_output_count() {
         .diagnostics
         .is_empty());
 
+    let string_condition = request(
+        vec![ValueFact::scalar(ValueKindFact::String)],
+        RequestedOutputCount::Zero,
+    );
+    assert!(inference::infer(&string_condition, &ASSERT_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ASSERT-CONDITION"));
+
     let missing = request(vec![], RequestedOutputCount::Zero);
     assert!(!inference::infer(&missing, &ASSERT_CATALOG_ENTRY)
         .diagnostics
@@ -63,4 +72,53 @@ fn assertion_inference_tracks_arity_condition_and_output_count() {
     assert!(!inference::infer(&requested, &ASSERT_CATALOG_ENTRY)
         .diagnostics
         .is_empty());
+}
+
+#[test]
+fn assertion_failure_payload_inference_uses_only_known_false_condition() {
+    let mut request = request(
+        vec![
+            ValueFact::scalar(ValueKindFact::Logical),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Real,
+            })),
+        ],
+        RequestedOutputCount::Zero,
+    );
+    request.arguments[3].shape = runmat_types::ShapeFact::from(vec![Some(1), Some(2)]);
+    request.literals.literal_args = vec![
+        LiteralValue::Bool(false),
+        LiteralValue::String("bad.segment:9bad".into()),
+        LiteralValue::String("failure %d".into()),
+        LiteralValue::Unknown,
+    ];
+    let failed = inference::infer(&request, &ASSERT_CATALOG_ENTRY);
+    assert!(failed
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ASSERT-IDENTIFIER"));
+    assert!(failed
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ASSERT-REPLACEMENT"));
+
+    request.literals.literal_args[0] = LiteralValue::Bool(true);
+    assert!(inference::infer(&request, &ASSERT_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+
+    request.literals.literal_args[0] = LiteralValue::Unknown;
+    assert!(inference::infer(&request, &ASSERT_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+
+    request.literals.literal_args[0] = LiteralValue::Bool(false);
+    request.arguments[2] = ValueFact::scalar(ValueKindFact::Logical);
+    assert!(inference::infer(&request, &ASSERT_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-ASSERT-MESSAGE"));
 }
