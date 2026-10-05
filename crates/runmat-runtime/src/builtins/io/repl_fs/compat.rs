@@ -929,8 +929,13 @@ mod tests {
     #[test]
     fn memmapfile_decodes_named_typed_format() {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let _provider_guard = vfs::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_memmapfile_test.bin");
-        std::fs::write(&path, [1u8, 0, 2, 0]).unwrap();
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(
+            std::env::temp_dir(),
+        ));
+        provider.write_project_path(&path, &[1u8, 0, 2, 0]).unwrap();
+        let _selected_provider = vfs::replace_provider(provider);
         let shape = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
         let fmt = Value::Cell(
             CellArray::new(
@@ -960,7 +965,6 @@ mod tests {
             samples.integer_storage(),
             Some(&IntegerStorage::U16(vec![1, 2]))
         );
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]

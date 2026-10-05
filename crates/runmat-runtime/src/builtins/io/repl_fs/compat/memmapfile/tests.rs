@@ -174,6 +174,7 @@ fn selected_file_read_failure_retains_provider_cause() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn wide_repeat_property_is_exact_without_a_large_file() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     use runmat_value::IntValue;
     use std::sync::Arc;
 
