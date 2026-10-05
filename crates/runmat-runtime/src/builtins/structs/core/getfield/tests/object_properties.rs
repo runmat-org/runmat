@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn public_getfield_dependent_getter_uses_selected_session() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
