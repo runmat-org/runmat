@@ -95,6 +95,22 @@ pub struct ExactHostTensor2dAllocation {
 }
 
 impl ExactHostTensor2dAllocation {
+    /// Physical bytes requested for the initial retained tensor owner. This
+    /// is the same calculation used by `new`; later COW is a separate call.
+    pub fn requested_bytes(
+        dtype: NumericDType,
+        rows: usize,
+        columns: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        let count = rows
+            .checked_mul(columns)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let shape_bytes = Layout::array::<usize>(2)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
+            .size();
+        ExactHostNumericAllocation::requested_bytes_with_shape(dtype, count, shape_bytes)
+    }
+
     pub fn new(
         dtype: NumericDType,
         rows: usize,
@@ -156,6 +172,44 @@ enum ExactAllocation {
 }
 
 impl ExactHostNumericAllocation {
+    pub fn requested_bytes(
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        Self::requested_bytes_with_shape(dtype, len, 0)
+    }
+
+    fn requested_bytes_with_shape(
+        dtype: NumericDType,
+        len: usize,
+        shape_bytes: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        let layout = Self::payload_layout(dtype, len)?;
+        let release_bytes = if dtype.integer_class().is_some() {
+            0
+        } else {
+            Layout::new::<RustExactRelease>().size()
+        };
+        layout
+            .size()
+            .checked_add(shape_bytes)
+            .and_then(|bytes| bytes.checked_add(release_bytes))
+            .and_then(|bytes| bytes.checked_add(HostNumericBuffer::exact_metadata_bytes()))
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    fn payload_layout(
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<Layout, ExactHostNumericAllocationError> {
+        match dtype {
+            NumericDType::F32 => Layout::array::<f32>(len),
+            NumericDType::F64 => Layout::array::<f64>(len),
+            _ => integer_layout(dtype, len),
+        }
+        .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
     pub fn new(
         dtype: NumericDType,
         len: usize,
@@ -170,25 +224,8 @@ impl ExactHostNumericAllocation {
         shape_bytes: usize,
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<Self, ExactHostNumericAllocationError> {
-        let layout = match dtype {
-            NumericDType::F32 => Layout::array::<f32>(len),
-            NumericDType::F64 => Layout::array::<f64>(len),
-            _ => integer_layout(dtype, len),
-        }
-        .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
-        let charged = layout
-            .size()
-            .checked_add(shape_bytes)
-            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-        let release_bytes = if dtype.integer_class().is_some() {
-            0
-        } else {
-            Layout::new::<RustExactRelease>().size()
-        };
-        let charged = charged
-            .checked_add(release_bytes)
-            .and_then(|bytes| bytes.checked_add(HostNumericBuffer::exact_metadata_bytes()))
-            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let layout = Self::payload_layout(dtype, len)?;
+        let charged = Self::requested_bytes_with_shape(dtype, len, shape_bytes)?;
         let reservation = permit.reserve_exact(charged)?;
         if dtype.integer_class().is_some() {
             return Ok(Self {

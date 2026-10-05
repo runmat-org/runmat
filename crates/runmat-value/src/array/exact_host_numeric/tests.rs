@@ -57,6 +57,48 @@ fn integer_charge(payload_and_shape: usize) -> usize {
 }
 
 #[test]
+fn canonical_requested_bytes_equal_the_retained_charge_for_every_numeric_class() {
+    let classes = [
+        (NumericDType::I8, 1),
+        (NumericDType::U8, 1),
+        (NumericDType::I16, 2),
+        (NumericDType::U16, 2),
+        (NumericDType::I32, 4),
+        (NumericDType::U32, 4),
+        (NumericDType::I64, 8),
+        (NumericDType::U64, 8),
+        (NumericDType::F32, 4),
+        (NumericDType::F64, 8),
+    ];
+    for (dtype, width) in classes {
+        let requested = ExactHostTensor2dAllocation::requested_bytes(dtype, 2, 3).unwrap();
+        let release = if dtype.integer_class().is_some() {
+            0
+        } else {
+            std::mem::size_of::<RustExactRelease>()
+        };
+        assert_eq!(
+            requested,
+            6 * width
+                + 2 * std::mem::size_of::<usize>()
+                + release
+                + HostNumericBuffer::exact_metadata_bytes()
+        );
+        let quota = permit(requested);
+        let output = ExactHostTensor2dAllocation::new(dtype, 2, 3, &quota).unwrap();
+        assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+        let retained = output.into_tensor().unwrap();
+        assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+        drop(retained);
+        assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    }
+    assert_eq!(
+        ExactHostTensor2dAllocation::requested_bytes(NumericDType::F32, usize::MAX, 2),
+        Err(ExactHostNumericAllocationError::LayoutOverflow)
+    );
+}
+
+#[test]
 fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
     let shape_bytes = 2 * std::mem::size_of::<usize>();
     let denied = permit(integer_charge(16 + shape_bytes) - 1);
