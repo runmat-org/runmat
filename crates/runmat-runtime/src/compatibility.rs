@@ -73,6 +73,28 @@ pub fn ensure_builtin_extension_enabled(
     extension: &BuiltinExtensionDescriptor,
     context: &str,
 ) -> Result<(), RuntimeError> {
+    ensure_builtin_extension_enabled_with_policy(extension, context, runmat_extensions_enabled())
+}
+
+/// Admit a RunMat-only form against the explicit invocation policy, without
+/// consulting the transitional thread-local compatibility bridge.
+pub fn ensure_builtin_extension_enabled_in_context(
+    runtime: &crate::context::RuntimeContext,
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+) -> Result<(), RuntimeError> {
+    ensure_builtin_extension_enabled_with_policy(
+        extension,
+        context,
+        runtime.runmat_extensions_enabled(),
+    )
+}
+
+fn ensure_builtin_extension_enabled_with_policy(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+    enabled: bool,
+) -> Result<(), RuntimeError> {
     // Profile selection is not a rejected-call gate. A misplaced descriptor
     // must fail in either profile, including the otherwise permissive one.
     if extension.mode != BuiltinExtensionMode::RunMatOnly
@@ -86,7 +108,7 @@ pub fn ensure_builtin_extension_enabled(
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build());
     }
-    reject_unavailable_extension(extension, context)
+    reject_unavailable_extension_with_policy(extension, context, enabled)
 }
 
 /// Admit a catalog-declared public feature once the central compatibility
@@ -126,7 +148,15 @@ fn reject_unavailable_extension(
     extension: &BuiltinExtensionDescriptor,
     context: &str,
 ) -> Result<(), RuntimeError> {
-    if runmat_extensions_enabled() {
+    reject_unavailable_extension_with_policy(extension, context, runmat_extensions_enabled())
+}
+
+fn reject_unavailable_extension_with_policy(
+    extension: &BuiltinExtensionDescriptor,
+    context: &str,
+    enabled: bool,
+) -> Result<(), RuntimeError> {
+    if enabled {
         return Ok(());
     }
     let mut builder = build_runtime_error(format!(
