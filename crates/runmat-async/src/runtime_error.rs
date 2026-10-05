@@ -138,7 +138,7 @@ impl RuntimeError {
             Ok(error) => error,
             Err(original) => Self {
                 message: original.message.clone(),
-                span: original.span.clone(),
+                span: original.span,
                 source: Some(Box::new(SharedRuntimeErrorSource {
                     original: original.clone(),
                 })),
