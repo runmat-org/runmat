@@ -41,3 +41,40 @@ fn definitely_noncallable_input_is_rejected_statically() {
             .is_empty());
     }
 }
+
+#[test]
+fn known_callable_on_device_or_remote_is_rejected_without_rejecting_unknown_residency() {
+    let mut callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: Default::default(),
+        parameters: Vec::new(),
+        parameters_complete: false,
+        outputs: Vec::new(),
+        outputs_complete: false,
+        variadic_inputs: true,
+        variadic_outputs: true,
+        captures: Vec::new(),
+        captures_complete: false,
+    }));
+    let mut request = CallRequest {
+        arguments: vec![callable.clone()],
+        literals: LiteralContext::new(vec![]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    for residency in [
+        ResidencyFact::Device { provider: None },
+        ResidencyFact::Remote { pool: None },
+    ] {
+        callable.residency = residency;
+        request.arguments[0] = callable.clone();
+        assert!(inference::infer(&request, &FUNCTIONS_CATALOG_ENTRY)
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-FUNCTIONS-RESIDENCY"));
+    }
+    callable.residency = ResidencyFact::Unknown;
+    request.arguments[0] = callable;
+    assert!(inference::infer(&request, &FUNCTIONS_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+}

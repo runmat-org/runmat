@@ -13,6 +13,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(input) = request.arguments.first() {
+        if matches!(
+            input.residency,
+            ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
+        ) {
+            diagnostics.push(argument_error(
+                "RM-FUNCTIONS-RESIDENCY",
+                "function handle must be host-resident",
+                0,
+            ));
+        }
         if !matches!(
             input.kind,
             ValueKindFact::Callable(_) | ValueKindFact::Unknown

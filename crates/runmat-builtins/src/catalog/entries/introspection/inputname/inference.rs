@@ -12,6 +12,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(index) = request.arguments.first() {
+        if matches!(
+            index.residency,
+            ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
+        ) {
+            diagnostics.push(argument_error(
+                "RM-INPUTNAME-RESIDENCY",
+                "argument index must be host-resident",
+                0,
+            ));
+        }
         if !matches!(
             index.kind,
             ValueKindFact::Numeric(_) | ValueKindFact::Unknown
