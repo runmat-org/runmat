@@ -128,8 +128,22 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
         tensor.as_f64_slice().unwrap()[0].to_bits(),
         (-0.0_f64).to_bits()
     );
+    assert_eq!(tensor.as_f64_slice().unwrap()[1], f64::INFINITY);
     drop(tensor);
     assert_eq!(float_quota.retained.load(Ordering::SeqCst), 0);
+
+    let single_quota = permit(4 + 2 * std::mem::size_of::<usize>());
+    let mut singles = ExactHostTensor2dAllocation::new(NumericDType::F32, 1, 1, &single_quota)
+        .expect("exact single owner");
+    let single_pointer = singles.as_f32_slice_mut().unwrap().as_ptr();
+    singles
+        .set_value(0, crate::NumericScalar::F32(-0.25))
+        .unwrap();
+    let tensor = singles.into_tensor().unwrap();
+    assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), single_pointer);
+    assert_eq!(tensor.as_f32_slice().unwrap(), &[-0.25]);
+    drop(tensor);
+    assert_eq!(single_quota.retained.load(Ordering::SeqCst), 0);
 
     let integer_quota = permit(16 + 2 * std::mem::size_of::<usize>());
     let mut integers = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &integer_quota)
@@ -143,6 +157,9 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
         .unwrap();
     assert!(integers
         .set_value(0, crate::NumericScalar::F64(1.0))
+        .is_err());
+    assert!(integers
+        .set_value(1, crate::NumericScalar::I64(-1))
         .is_err());
     let tensor = integers.into_tensor().unwrap();
     assert_eq!(
