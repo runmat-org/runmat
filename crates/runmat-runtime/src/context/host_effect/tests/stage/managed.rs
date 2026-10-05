@@ -1,5 +1,4 @@
 use super::*;
-use runmat_value::ExactHostAllocationPermit;
 
 struct ManagedResources {
     ledger: ManagedHostEffectLedger,
