@@ -242,15 +242,49 @@ pub struct ExceptionValue {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(from = "CallableValueWire")]
 pub struct CallableValue {
     pub owner_identity: String,
     pub qualified_name: String,
     pub callable_digest: Digest,
-    /// Required V2 callable identity fields. Historical V1 callables lack
-    /// these fields and cannot be restored with an invented function role.
+    /// Required callable identity fields. Historical payloads cannot be
+    /// restored with invented function provenance.
     pub form: CallableForm,
     pub source_role: runmat_types::FunctionSourceRole,
+    /// Original registered display path, if the callable was created from a file-backed source.
+    pub source_file: Option<String>,
     pub captures: Vec<ValuePayload>,
+}
+
+// An Option field in a Serde-derived struct otherwise accepts an absent key.
+// The wire newtype requires source_file to be present, including explicit null.
+#[derive(Deserialize)]
+struct CallableValueWire {
+    owner_identity: String,
+    qualified_name: String,
+    callable_digest: Digest,
+    form: CallableForm,
+    source_role: runmat_types::FunctionSourceRole,
+    source_file: RequiredNullableString,
+    captures: Vec<ValuePayload>,
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct RequiredNullableString(Option<String>);
+
+impl From<CallableValueWire> for CallableValue {
+    fn from(value: CallableValueWire) -> Self {
+        Self {
+            owner_identity: value.owner_identity,
+            qualified_name: value.qualified_name,
+            callable_digest: value.callable_digest,
+            form: value.form,
+            source_role: value.source_role,
+            source_file: value.source_file.0,
+            captures: value.captures,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -266,8 +300,9 @@ impl CallableValue {
         qualified_name: &str,
         form: CallableForm,
         source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<&str>,
     ) -> Digest {
-        let mut identity = b"runmat-callable-v2\0".to_vec();
+        let mut identity = b"runmat-callable-v3\0".to_vec();
         identity.extend_from_slice(owner_identity.as_bytes());
         identity.push(0);
         identity.extend_from_slice(qualified_name.as_bytes());
@@ -277,6 +312,14 @@ impl CallableValue {
             CallableForm::Closure => 1,
         });
         identity.push(source_role as u8);
+        match source_file {
+            Some(file) => {
+                identity.push(1);
+                identity.extend_from_slice(&(file.len() as u64).to_be_bytes());
+                identity.extend_from_slice(file.as_bytes());
+            }
+            None => identity.push(0),
+        }
         Digest::sha256(identity)
     }
 
@@ -293,6 +336,7 @@ impl CallableValue {
                 &self.qualified_name,
                 self.form,
                 self.source_role,
+                self.source_file.as_deref(),
             )
         {
             return Err(ContractError::invalid(

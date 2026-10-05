@@ -507,6 +507,7 @@ fn prepare_callable(
             name,
             function,
             source_role,
+            source_file,
         } => {
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
@@ -514,6 +515,7 @@ fn prepare_callable(
                     name: normalized,
                     function,
                     source_role,
+                    source_file,
                 },
                 num_outputs,
             })
@@ -525,6 +527,7 @@ fn prepare_callable(
                         &closure.function_name,
                     ) {
                         closure.bound_function = Some(function);
+                        closure.source_file = crate::user_functions::source_file_for(function);
                         if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
                             closure.source_role =
                                 crate::user_functions::source_function_for(function)
@@ -780,6 +783,7 @@ pub(crate) mod tests {
                 name: "__timeit_helper_counter_default".into(),
                 function: 188,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -807,6 +811,7 @@ pub(crate) mod tests {
                 name: "function_target".into(),
                 function: 612,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Some(3),
         )
@@ -833,6 +838,7 @@ pub(crate) mod tests {
                 name: "__timeit_helper_counter_default".into(),
                 function: 87,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -856,6 +862,7 @@ pub(crate) mod tests {
                 name: "__timeit_helper_counter_default".into(),
                 function: 88,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -877,6 +884,7 @@ pub(crate) mod tests {
                 name: "pkg.callback".into(),
                 function: 86,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
         assert_eq!(callable.num_outputs, Some(2));
@@ -889,6 +897,7 @@ pub(crate) mod tests {
                 name: "function_target".into(),
                 function: 41,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Some(1),
         )
@@ -899,6 +908,7 @@ pub(crate) mod tests {
                 name: "function_target".into(),
                 function: 41,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
         assert_eq!(callable.num_outputs, Some(1));
@@ -915,6 +925,7 @@ pub(crate) mod tests {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             }),
             None,
@@ -926,6 +937,7 @@ pub(crate) mod tests {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: Some(89),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -938,6 +950,7 @@ pub(crate) mod tests {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             }),
             None,
@@ -949,6 +962,7 @@ pub(crate) mod tests {
                 function_name: "__timeit_helper_counter_default".into(),
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             })
         );

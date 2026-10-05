@@ -45,6 +45,7 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
             name: "fixture".into(),
             function: 42,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         }],
         1,
     ))

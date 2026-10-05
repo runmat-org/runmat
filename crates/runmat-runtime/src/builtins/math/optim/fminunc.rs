@@ -1362,6 +1362,7 @@ mod tests {
             name: format!("objective_{id}"),
             function: id,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         }
     }
 

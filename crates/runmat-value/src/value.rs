@@ -52,6 +52,7 @@ pub enum Value {
         name: String,
         function: usize,
         source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<String>,
     },
     Closure(Closure),
     ClassRef(runmat_types::ClassIdentity),

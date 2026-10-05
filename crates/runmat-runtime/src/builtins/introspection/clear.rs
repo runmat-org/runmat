@@ -391,6 +391,7 @@ mod tests {
                     name: "cleanup".into(),
                     function: 11,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 },
             ),
         )

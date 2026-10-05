@@ -735,9 +735,11 @@ mod tests {
                     name,
                     runmat_execution::value::CallableForm::Handle,
                     runmat_types::FunctionSourceRole::Unknown,
+                    None,
                 ),
                 form: runmat_execution::value::CallableForm::Handle,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: Vec::new(),
             },
         )))

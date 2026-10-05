@@ -16449,6 +16449,47 @@ fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn forced_native_caller_preserves_inputname_through_cold_and_warm_file_load() {
+    let _guard = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(temp.path());
+    std::fs::write(
+        temp.path().join("externalProbe.m"),
+        "function out = externalProbe(value)\nout = inputname(1);\nend\n",
+    )
+    .expect("write external function");
+    let source = ExecutableSource::new(
+        "core-native-cold-inputname@1",
+        temp.path().join("nativeColdInputname.m").to_string_lossy(),
+        "function [first, second] = nativeColdInputname(alpha)\nfirst = externalProbe(alpha);\nsecond = externalProbe(alpha + 1);\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile cold-load native caller");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeColdInputname".into()),
+        arguments: vec![runmat_value::Value::Num(7.0)],
+        requested_outputs: 2,
+    };
+    let expected = [
+        runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+        runmat_value::Value::CharArray(
+            runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+        ),
+    ];
+    for _ in 0..2 {
+        let actual = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native cold/warm file invocation");
+        assert_output_values(&actual, &expected);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_counts() {
     let source = ExecutableSource::new(
         "core-native-function-abi-test@1",

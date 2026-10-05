@@ -981,6 +981,7 @@ mod tests {
                 name: "residual".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             vec![tensor(vec![0.0, 0.0], vec![2, 1])],
         ))
@@ -1014,6 +1015,7 @@ mod tests {
                 name: "bounded".into(),
                 function: 2,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             vec![
                 Value::Num(0.0),
@@ -1050,6 +1052,7 @@ mod tests {
                 name: "empty_options".into(),
                 function: 22,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             vec![Value::Num(0.0), empty.clone(), empty.clone(), empty],
         ))
@@ -1079,6 +1082,7 @@ mod tests {
                 name: "partial_bounds".into(),
                 function: 23,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             vec![tensor(vec![0.0, 0.0], vec![2, 1]), empty, Value::Num(1.0)],
         ))
@@ -1114,6 +1118,7 @@ mod tests {
                 name: "multi".into(),
                 function: 3,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             vec![
                 tensor(vec![0.0, 0.0], vec![1, 2]),
@@ -1172,6 +1177,7 @@ mod tests {
                 name: "problem".into(),
                 function: 4,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
         );
         problem.insert("x0", tensor(vec![0.0, 0.0], vec![2, 1]));

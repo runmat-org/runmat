@@ -207,6 +207,7 @@ mod tests {
                 function_name: "callback".into(),
                 bound_function: None,
                 source_role: Default::default(),
+                source_file: None,
                 captures: vec![Value::OutputList(vec![handle, listener])],
             });
 

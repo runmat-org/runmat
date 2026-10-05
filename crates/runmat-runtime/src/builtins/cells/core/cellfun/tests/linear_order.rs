@@ -28,6 +28,7 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
                     name: "position".into(),
                     function: 821,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 },
                 vec![
                     Value::Cell(
@@ -103,6 +104,7 @@ fn handler_context_refers_to_the_original_column_major_element() {
                     name: "position_handler".into(),
                     function: 822,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 },
             ],
         )

@@ -1032,17 +1032,20 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
                 name: an,
                 function: af,
                 source_role: ar,
+                source_file: ap,
             },
             Value::BoundFunctionHandle {
                 name: bn,
                 function: bf,
                 source_role: br,
+                source_file: bp,
             },
-        ) => an == bn && af == bf && ar == br,
+        ) => an == bn && af == bf && ar == br && ap == bp,
         (Value::Closure(a), Value::Closure(b)) => {
             a.function_name == b.function_name
                 && a.bound_function == b.bound_function
                 && a.source_role == b.source_role
+                && a.source_file == b.source_file
                 && values_equal_for_cache(&a.captures, &b.captures)
         }
         (Value::MException(a), Value::MException(b)) => a == b,
@@ -1382,6 +1385,7 @@ mod tests {
             name: "step".into(),
             function: 42,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         }))
         .expect("memoized function")
     }
@@ -1421,6 +1425,7 @@ mod tests {
             name: "step".into(),
             function: 42,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
         let enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");

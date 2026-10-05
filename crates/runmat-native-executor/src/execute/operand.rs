@@ -392,6 +392,9 @@ pub(super) fn evaluate_operand(
                             name,
                             function: function.0 as usize,
                             source_role: target.source_role,
+                            source_file: runmat_runtime::user_functions::source_file_for(
+                                function.0 as usize,
+                            ),
                         }
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(

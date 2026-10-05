@@ -734,6 +734,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
                     crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
                 {
                     closure.bound_function = Some(function);
+                    closure.source_file = crate::user_functions::source_file_for(function);
                     if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
                         closure.source_role = crate::user_functions::source_function_for(function)
                             .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
@@ -1871,6 +1872,7 @@ mod tests {
             function_name: "function_target".into(),
             bound_function: Some(42),
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: Vec::new(),
         });
 
@@ -1893,6 +1895,7 @@ mod tests {
             name: "function_target".into(),
             function: 43,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
@@ -1907,6 +1910,7 @@ mod tests {
             name: "function_target".into(),
             function: 9043,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
 
         let err = block_on(feval_builtin(handle, vec![Value::Num(3.0)])).expect_err(
@@ -1996,6 +2000,7 @@ mod tests {
             function_name: "resolved_target".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         });
 
@@ -2016,6 +2021,7 @@ mod tests {
             function_name: "sin".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: Vec::new(),
         });
 
@@ -2209,6 +2215,7 @@ mod tests {
                 name: "resolved_target".into(),
                 function: 145,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -2328,6 +2335,7 @@ mod tests {
                 name: "resolved_target".into(),
                 function: 445,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -2396,6 +2404,7 @@ mod tests {
                 name: "pkg.resolved_target".into(),
                 function: 446,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -2628,6 +2637,7 @@ mod tests {
                     name: "local_fn".into(),
                     function: 44,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 }
             )
             .expect("func2str"),
@@ -2639,6 +2649,7 @@ mod tests {
                     function_name: "captured_fn".into(),
                     bound_function: None,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                     captures: Vec::new(),
                 })
             )
@@ -3028,6 +3039,7 @@ mod tests {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![
                 base.clone(),
                 Value::String("deal".to_string()),
@@ -3061,6 +3073,7 @@ mod tests {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![
                 base.clone(),
                 Value::String("  deal  ".to_string()),
@@ -3090,6 +3103,7 @@ mod tests {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![
                 Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 Value::Num(1.0),
@@ -3623,6 +3637,7 @@ mod tests {
                 function_name: "event_callback".into(),
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             });
             let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
@@ -3638,6 +3653,7 @@ mod tests {
                     bound_function: Some(65),
                     source_role: _,
                     captures,
+                    ..
                 }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
             ));
         });
@@ -3664,6 +3680,7 @@ mod tests {
                 name: "event_callback".into(),
                 function: 44,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             };
 
             block_on(addlistener_builtin(
@@ -3736,6 +3753,7 @@ mod tests {
             name: "function_target".into(),
             function: 46,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(5.0)]))
@@ -3764,6 +3782,7 @@ mod tests {
             name: "function_target".into(),
             function: 47,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(6.0)]))
@@ -3781,6 +3800,7 @@ mod tests {
             function_name: "function_target".into(),
             bound_function: Some(9044),
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(1.0)],
         });
 

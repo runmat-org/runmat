@@ -870,6 +870,7 @@ mod tests {
                 name: "decay".into(),
                 function: 42,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -888,6 +889,7 @@ mod tests {
                 name: "pkg.decay".into(),
                 function: 43,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -916,6 +918,7 @@ mod tests {
                 name: "decay".into(),
                 function: 45,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -933,6 +936,7 @@ mod tests {
                 name: "decay".into(),
                 function: 145,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -952,6 +956,7 @@ mod tests {
                 name: "pkg.decay".into(),
                 function: 46,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -971,6 +976,7 @@ mod tests {
                 name: "pkg.decay".into(),
                 function: 146,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -989,6 +995,7 @@ mod tests {
                 name: "decay".into(),
                 function: 47,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -1007,6 +1014,7 @@ mod tests {
                 name: "decay".into(),
                 function: 147,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -1021,6 +1029,7 @@ mod tests {
             function_name: "decay".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);
@@ -1030,6 +1039,7 @@ mod tests {
                 function_name: "decay".into(),
                 bound_function: Some(48),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -1041,6 +1051,7 @@ mod tests {
             function_name: "decay".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);

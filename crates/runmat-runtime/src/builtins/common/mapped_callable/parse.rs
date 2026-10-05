@@ -15,11 +15,16 @@ impl MappedCallable {
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
             Value::FunctionHandle(name) => Self::parse_text(&name),
             Value::ExternalFunctionHandle(name) => Ok(Self::resolve_name(name)),
-            Value::BoundFunctionHandle { name, function, .. } => Ok(Self::Closure(Closure {
+            Value::BoundFunctionHandle {
+                name,
+                function,
+                source_role,
+                source_file,
+            } => Ok(Self::Closure(Closure {
                 function_name: name,
                 bound_function: Some(function),
-                source_role: user_functions::source_function_for(function)
-                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
+                source_role,
+                source_file,
                 captures: Vec::new(),
             })),
             Value::Closure(closure) => Ok(Self::bind_closure(closure)),
@@ -48,6 +53,7 @@ impl MappedCallable {
                 bound_function: Some(function),
                 source_role: user_functions::source_function_for(function)
                     .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
+                source_file: user_functions::source_file_for(function),
                 captures: Vec::new(),
             });
         }
@@ -70,6 +76,11 @@ impl MappedCallable {
                     .bound_function
                     .and_then(user_functions::source_function_for)
                     .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
+            }
+            if closure.source_file.is_none() {
+                closure.source_file = closure
+                    .bound_function
+                    .and_then(user_functions::source_file_for);
             }
         }
         Self::Closure(closure)

@@ -1310,6 +1310,7 @@ pub async fn dispatch_instruction(
                 name: name.clone(),
                 function: function.0,
                 source_role: *source_role,
+                source_file: runmat_runtime::user_functions::source_file_for(function.0),
             });
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

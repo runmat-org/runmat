@@ -135,12 +135,14 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 &o.class_name,
                 &runmat_types::MethodName::from(method_name),
             ) {
+                let bound_function = crate::user_functions::resolve_semantic_function_by_name(
+                    &resolved.function_name,
+                );
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
-                    bound_function: crate::user_functions::resolve_semantic_function_by_name(
-                        &resolved.function_name,
-                    ),
+                    bound_function,
                     source_role: runmat_types::FunctionSourceRole::Method,
+                    source_file: bound_function.and_then(crate::user_functions::source_file_for),
                     captures: vec![Value::Object(o)],
                 }));
             }
@@ -148,6 +150,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Method,
+                source_file: None,
                 captures: vec![
                     Value::Object(o),
                     Value::String(method_name.to_string()),
@@ -161,12 +164,14 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 &h.class_name,
                 &runmat_types::MethodName::from(method_name),
             ) {
+                let bound_function = crate::user_functions::resolve_semantic_function_by_name(
+                    &resolved.function_name,
+                );
                 return Ok(Value::Closure(runmat_value::Closure {
                     function_name: resolved.function_name.clone(),
-                    bound_function: crate::user_functions::resolve_semantic_function_by_name(
-                        &resolved.function_name,
-                    ),
+                    bound_function,
                     source_role: runmat_types::FunctionSourceRole::Method,
+                    source_file: bound_function.and_then(crate::user_functions::source_file_for),
                     captures: vec![Value::HandleObject(h)],
                 }));
             }
@@ -174,6 +179,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 function_name: crate::CALL_BOUND_METHOD_BUILTIN_NAME.to_string(),
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Method,
+                source_file: None,
                 captures: vec![
                     Value::HandleObject(h),
                     Value::String(method_name.to_string()),

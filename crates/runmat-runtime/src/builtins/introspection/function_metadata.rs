@@ -44,13 +44,6 @@ fn role_kind(role: runmat_types::FunctionSourceRole) -> Option<FunctionHandleKin
     })
 }
 
-fn source_file(function: usize) -> Option<String> {
-    let info = crate::user_functions::source_function_for(function)?;
-    crate::source_context::source_info(info.source_id)
-        .and_then(|source| source.fullpath_name)
-        .map(|path| path.to_string())
-}
-
 pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
     match handle {
         Value::FunctionHandle(name)
@@ -62,19 +55,17 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
         )),
         Value::BoundFunctionHandle {
             name,
-            function,
+            function: _,
             source_role,
+            source_file,
         } => {
             let kind = role_kind(source_role).unwrap_or(FunctionHandleKind::Unknown);
-            let file = source_file(function).unwrap_or_default();
+            let file = source_file.unwrap_or_default();
             Ok(metadata_struct(name, kind, file))
         }
         Value::Closure(closure) => {
             let kind = role_kind(closure.source_role).unwrap_or(FunctionHandleKind::Unknown);
-            let file = closure
-                .bound_function
-                .and_then(source_file)
-                .unwrap_or_default();
+            let file = closure.source_file.unwrap_or_default();
             Ok(metadata_struct(closure.function_name, kind, file))
         }
         _ => Err(crate::runtime_descriptor_error(
@@ -181,6 +172,7 @@ mod tests {
             function_name: "@anon0".into(),
             bound_function: Some(1),
             source_role: runmat_types::FunctionSourceRole::Anonymous,
+            source_file: None,
             captures: Vec::new(),
         }))
         .expect("functions succeeds");
@@ -248,6 +240,7 @@ mod tests {
                 name: "legacy_role_missing".into(),
                 function: 3,
                 source_role: stored_role,
+                source_file: Some("/tmp/metadata_file.m".into()),
             })
             .expect("file provenance independent of role");
             assert_eq!(field(&value, "type"), &Value::String(expected_type.into()));
@@ -264,6 +257,7 @@ mod tests {
             function_name: "plain_display_name".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Anonymous,
+            source_file: None,
             captures: Vec::new(),
         }))
         .expect("anonymous metadata");
@@ -275,6 +269,7 @@ mod tests {
             function_name: "@anon_display_is_not_authority".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: Vec::new(),
         }))
         .expect("unknown metadata");
@@ -283,11 +278,55 @@ mod tests {
             name: "display_name".into(),
             function: usize::MAX,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         })
         .expect("unregistered bound handle has unknown source role");
         assert_eq!(
             field(&unknown_bound, "type"),
             &Value::String("unknown".into())
+        );
+    }
+
+    #[test]
+    fn transferred_handle_does_not_rebind_file_from_reused_numeric_function_id() {
+        let handle = {
+            let source_id = runmat_types::SourceId(41);
+            let _source = crate::source_context::replace_source_catalog_with_fullpaths(vec![(
+                source_id,
+                "origin".into(),
+                Some("/origin/origin.m".into()),
+                "function origin; end".into(),
+            )]);
+            let _catalog = crate::user_functions::install_source_function_catalog(Some(
+                std::sync::Arc::new(vec![crate::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: "origin".into(),
+                    function: 9,
+                    role: runmat_types::FunctionSourceRole::Primary,
+                }]),
+            ));
+            crate::user_functions::bound_function_handle("origin".into(), 9)
+        };
+        let source_id = runmat_types::SourceId(42);
+        let _source = crate::source_context::replace_source_catalog_with_fullpaths(vec![(
+            source_id,
+            "unrelated".into(),
+            Some("/destination/unrelated.m".into()),
+            "function unrelated; end".into(),
+        )]);
+        let _catalog = crate::user_functions::install_source_function_catalog(Some(
+            std::sync::Arc::new(vec![crate::user_functions::SourceFunctionInfo {
+                source_id,
+                name: "unrelated".into(),
+                function: 9,
+                role: runmat_types::FunctionSourceRole::Local,
+            }]),
+        ));
+        let info = dispatch_functions(handle).expect("metadata reads original binding");
+        assert_eq!(field(&info, "type"), &Value::String("simple".into()));
+        assert_eq!(
+            field(&info, "file"),
+            &Value::String("/origin/origin.m".into())
         );
     }
 }

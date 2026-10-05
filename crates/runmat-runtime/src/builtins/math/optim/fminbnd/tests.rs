@@ -62,6 +62,7 @@ fn excessive_requested_outputs_fail_before_callback_evaluation() {
             name: "unobserved".into(),
             function: 7_710,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         Value::Num(0.0),
         Value::Num(5.0),

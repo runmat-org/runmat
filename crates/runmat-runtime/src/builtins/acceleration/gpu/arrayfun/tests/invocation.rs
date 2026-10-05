@@ -114,6 +114,7 @@ fn arrayfun_error_handler_recovers() {
         function_name: "arrayfun_error_handler_fixture".into(),
         bound_function: Some(991),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
         captures: vec![Value::Num(42.0)],
     });
     let result = call(

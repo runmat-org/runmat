@@ -20,6 +20,7 @@ fn bound_callback_uses_semantic_identity() {
         function_name: "cellfun_bound_fixture".into(),
         bound_function: Some(417),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
         captures: vec![Value::Num(10.0)],
     });
     let result = call(
@@ -71,6 +72,7 @@ fn error_handler_receives_callback_failure() {
         function_name: "cellfun_handler_fixture".into(),
         bound_function: Some(419),
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
         captures: vec![Value::Num(7.0)],
     });
     let result = call(
@@ -129,6 +131,7 @@ fn requested_output_count_is_forwarded_and_collected_independently() {
                 name: "multiple".into(),
                 function: 191,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             vec![cell(vec![Value::Num(1.), Value::Num(2.)], &[1, 2])],
         )

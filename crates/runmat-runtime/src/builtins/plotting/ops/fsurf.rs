@@ -1032,15 +1032,18 @@ pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionR
             name,
             function,
             source_role,
+            source_file,
         } => FunctionSurfaceFunctionRef::BoundFunctionHandle {
             name: name.clone(),
             function: *function,
             source_role: *source_role,
+            source_file: source_file.clone(),
         },
         Value::Closure(closure) => FunctionSurfaceFunctionRef::ClosureSummary {
             function_name: closure.function_name.clone(),
             bound_function: closure.bound_function,
             source_role: closure.source_role,
+            source_file: closure.source_file.clone(),
         },
         _ => FunctionSurfaceFunctionRef::FunctionHandle("<invalid>".into()),
     }
@@ -1103,6 +1106,7 @@ mod tests {
             name: "surface".into(),
             function: 1,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
         let domain = Value::Tensor(
             runmat_value::Tensor::new_integer(
@@ -1141,6 +1145,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::String(" MeshDensity ".into()),
             Value::Int(IntValue::U8(35)),
@@ -1156,6 +1161,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::String("FaceAlpha".into()),
             Value::Int(IntValue::U8(1)),
@@ -1227,6 +1233,7 @@ mod tests {
             name: "surface".into(),
             function: 1,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -1269,6 +1276,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             0.0,
             0.0,
@@ -1347,6 +1355,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
@@ -1413,16 +1422,19 @@ mod tests {
                 name: "x".into(),
                 function: 11,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::BoundFunctionHandle {
                 name: "y".into(),
                 function: 12,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::BoundFunctionHandle {
                 name: "z".into(),
                 function: 13,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, 2.0, 4.0], vec![1, 4]).unwrap(),
@@ -1464,6 +1476,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
@@ -1492,6 +1505,7 @@ mod tests {
                 name: "surface".into(),
                 function: 1,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
             Value::String("MeshDensity".into()),
             Value::Num(1.0),

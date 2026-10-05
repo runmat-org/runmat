@@ -21,6 +21,7 @@ fn captured(handle: GpuTensorHandle) -> Value {
         function_name: "worker".into(),
         bound_function: None,
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
         captures: vec![Value::GpuTensor(handle)],
     })
 }

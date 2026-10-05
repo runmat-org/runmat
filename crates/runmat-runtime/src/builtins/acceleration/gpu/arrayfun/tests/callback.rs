@@ -39,6 +39,7 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
         name: "arrayfun_target".into(),
         function: 78,
         source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
     };
 
     let result = call(handle, vec![Value::Tensor(tensor)]).expect("semantic arrayfun");

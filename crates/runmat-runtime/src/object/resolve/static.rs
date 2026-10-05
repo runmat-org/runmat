@@ -42,6 +42,7 @@ pub fn load_static_member(
             function_name: m.function_name,
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Method,
+            source_file: None,
             captures: vec![],
         }))
     } else if crate::class_registry::class_has_enumeration_member(cls, field) {
@@ -61,6 +62,7 @@ pub fn load_static_member(
                 function_name: qualified,
                 bound_function: None,
                 source_role: runmat_types::FunctionSourceRole::Method,
+                source_file: None,
                 captures: vec![],
             }))
         } else {

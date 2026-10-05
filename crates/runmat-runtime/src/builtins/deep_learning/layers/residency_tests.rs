@@ -108,6 +108,7 @@ fn initializer_closure_captures_keep_their_resident_lease_without_invocation() {
             function_name: "not_invoked_during_construction".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::GpuTensor(source.clone())],
         });
         provider.reset_telemetry();

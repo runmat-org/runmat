@@ -247,6 +247,7 @@ mod tests {
             function_name: "f".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![transient()],
         };
         for input in [

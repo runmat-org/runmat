@@ -420,6 +420,7 @@ mod tests {
             function_name: "worker".into(),
             bound_function: Some(7),
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(2.0)],
         });
         assert_eq!(
@@ -440,6 +441,7 @@ mod tests {
             function_name: "display_is_not_authority".into(),
             bound_function: Some(9),
             source_role: runmat_types::FunctionSourceRole::Anonymous,
+            source_file: Some("/origin/worker.m".into()),
             captures: Vec::new(),
         });
         assert_eq!(
@@ -456,6 +458,15 @@ mod tests {
         };
         callable.source_role = runmat_types::FunctionSourceRole::Local;
         assert!(decode_inline_value(&tampered_role).is_err());
+        let mut tampered_file = encode_inline_value(&empty_anonymous).unwrap();
+        let ValuePayload::Inline(ref mut inline) = tampered_file else {
+            unreachable!("runtime encoding is inline");
+        };
+        let InlineValue::Callable(callable) = inline.as_mut() else {
+            unreachable!("closure encoding is callable");
+        };
+        callable.source_file = Some("/destination/unrelated.m".into());
+        assert!(decode_inline_value(&tampered_file).is_err());
         let mut tampered_form = encode_inline_value(&empty_anonymous).unwrap();
         let ValuePayload::Inline(ref mut inline) = tampered_form else {
             unreachable!("runtime encoding is inline");
@@ -469,6 +480,7 @@ mod tests {
             name: "local_display".into(),
             function: 11,
             source_role: runmat_types::FunctionSourceRole::Local,
+            source_file: Some("/origin/local.m".into()),
         };
         assert_eq!(
             decode_inline_value(&encode_inline_value(&local_handle).unwrap()).unwrap(),

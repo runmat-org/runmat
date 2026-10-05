@@ -302,6 +302,7 @@ mod tests {
                     name: "constant_rhs".into(),
                     function: 905,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 },
                 Value::GpuTensor(automatic),
                 Value::Num(1.0),

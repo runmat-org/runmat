@@ -457,6 +457,7 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
             function_name: value.qualified_name.clone(),
             bound_function,
             source_role: value.source_role,
+            source_file: value.source_file.clone(),
             captures,
         }));
     }
@@ -468,6 +469,7 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
             name: value.qualified_name.clone(),
             function: bound_function.expect("checked above"),
             source_role: value.source_role,
+            source_file: value.source_file.clone(),
         }),
         _ => Err(ValueCodecError::unsupported(
             path,

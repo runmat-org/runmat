@@ -341,6 +341,7 @@ pub(crate) mod tests {
             function_name: "anon".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![],
         });
         assert_eq!(class_name_for_value(&closure), "function_handle");

@@ -26,6 +26,7 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
             name: info.name,
             function: info.function,
             source_role: info.role,
+            source_file: crate::user_functions::source_file_for(info.function),
         })
         .collect::<Vec<_>>();
     let len = handles.len();
@@ -108,7 +109,7 @@ mod tests {
         assert_eq!(cell.data.len(), 1);
         assert!(matches!(
             &cell.data[0],
-            Value::BoundFunctionHandle { name, function, source_role }
+            Value::BoundFunctionHandle { name, function, source_role, .. }
                 if name == "first"
                     && *function == 10
                     && *source_role == runmat_types::FunctionSourceRole::Local

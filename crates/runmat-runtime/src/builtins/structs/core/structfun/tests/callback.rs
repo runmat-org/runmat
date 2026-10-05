@@ -21,6 +21,7 @@ fn discarded_outputs_still_invoke_each_callback_once() {
             name: "effect_only".into(),
             function: 92,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         numbers(),
         Vec::new(),
@@ -53,6 +54,7 @@ fn passes_requested_output_count_to_bound_callbacks() {
             name: "two_outputs".into(),
             function: 91,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         numbers(),
         Vec::new(),
@@ -124,6 +126,7 @@ fn error_handler_receives_the_original_callback_identity() {
             name: "fails".into(),
             function: 101,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         structure,
         vec![
@@ -132,6 +135,7 @@ fn error_handler_receives_the_original_callback_identity() {
                 name: "recovers".into(),
                 function: 102,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
         ],
     )

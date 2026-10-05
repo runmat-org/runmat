@@ -110,7 +110,17 @@ pub fn bound_function_handle(name: String, function: usize) -> Value {
         name,
         function,
         source_role,
+        source_file: source_file_for(function),
     }
+}
+
+/// Capture the registered display path at value creation, never by a later
+/// numeric function-ID lookup after the value crosses a session boundary.
+pub fn source_file_for(function: usize) -> Option<String> {
+    let info = source_function_for(function)?;
+    crate::source_context::source_info(info.source_id)
+        .and_then(|source| source.fullpath_name)
+        .map(|path| path.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -675,7 +685,7 @@ pub async fn try_call_semantic_descriptor(
             args.clone(),
             requested_outputs,
             DynamicFunctionLoadPhase::BeforeSemantic,
-            None,
+            function_input_callsite.clone(),
         )
         .await
         {

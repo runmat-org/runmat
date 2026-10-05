@@ -178,6 +178,7 @@ fn encode(
             name,
             CallableForm::Handle,
             runmat_types::FunctionSourceRole::Unknown,
+            None,
             Vec::new(),
         ),
         Value::ExternalFunctionHandle(name) => callable(
@@ -185,6 +186,7 @@ fn encode(
             name,
             CallableForm::Handle,
             runmat_types::FunctionSourceRole::Unknown,
+            None,
             Vec::new(),
         ),
         Value::MethodFunctionHandle(name) => callable(
@@ -192,17 +194,20 @@ fn encode(
             name,
             CallableForm::Handle,
             runmat_types::FunctionSourceRole::Method,
+            None,
             Vec::new(),
         ),
         Value::BoundFunctionHandle {
             name,
             function,
             source_role,
+            source_file,
         } => callable(
             &format!("bound:{function}"),
             name,
             CallableForm::Handle,
             *source_role,
+            source_file.as_deref(),
             Vec::new(),
         ),
         Value::Closure(closure) => {
@@ -221,6 +226,7 @@ fn encode(
                 &closure.function_name,
                 CallableForm::Closure,
                 closure.source_role,
+                closure.source_file.as_deref(),
                 captures,
             )
         }
@@ -430,6 +436,7 @@ fn callable(
     qualified_name: &str,
     form: CallableForm,
     source_role: runmat_types::FunctionSourceRole,
+    source_file: Option<&str>,
     captures: Vec<ValuePayload>,
 ) -> InlineValue {
     InlineValue::Callable(CallableValue {
@@ -440,9 +447,11 @@ fn callable(
             qualified_name,
             form,
             source_role,
+            source_file,
         ),
         form,
         source_role,
+        source_file: source_file.map(ToString::to_string),
         captures,
     })
 }

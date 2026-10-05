@@ -700,11 +700,13 @@ pub enum FunctionSurfaceFunctionRef {
         name: String,
         function: usize,
         source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<String>,
     },
     ClosureSummary {
         function_name: String,
         bound_function: Option<usize>,
         source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<String>,
     },
 }
 

@@ -473,6 +473,7 @@ mod tests {
                     function_name: "f".into(),
                     bound_function: None,
                     source_role: Default::default(),
+                    source_file: None,
                     captures: vec![listener],
                 }),
             );

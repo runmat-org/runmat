@@ -133,6 +133,7 @@ mod tests {
             name: name.into(),
             function,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         })
         .collect();
         let input = Value::Cell(CellArray::new(handles, 1, 5).unwrap());

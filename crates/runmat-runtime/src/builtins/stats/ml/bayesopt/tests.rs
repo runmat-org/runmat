@@ -279,6 +279,7 @@ fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
             name: "objective".into(),
             function: 1,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable_cell(vec![
             variable("x", vec![-1.0, 1.0], None),
@@ -336,6 +337,7 @@ fn bayesopt_honors_x_constraint_function() {
             name: "objective".into(),
             function: 1,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable("x", vec![-1.0, 1.0], None),
         vec![
@@ -346,6 +348,7 @@ fn bayesopt_honors_x_constraint_function() {
                 name: "constraint".into(),
                 function: 2,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
         ],
     ))
@@ -379,6 +382,7 @@ fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
             name: "objective".into(),
             function: 3,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable_cell(vec![
             variable("n", vec![1.0, 3.0], Some("integer")),
@@ -429,6 +433,7 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
             name: "objective".into(),
             function: 10,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable_with_range(
             "x",
@@ -449,6 +454,7 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
                 name: "constraint".into(),
                 function: 11,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
         ],
     ))

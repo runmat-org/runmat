@@ -99,6 +99,7 @@ fn pagefun_mtimes_semantic_function_handle() {
             name: "mtimes".into(),
             function: 17,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         Value::Tensor(lhs),
         vec![Value::Tensor(rhs)],

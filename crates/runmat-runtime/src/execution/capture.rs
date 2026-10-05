@@ -238,6 +238,7 @@ mod tests {
             function_name: "capture_target".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::OutputList(Vec::new())],
         });
         let error = validate_spawn_capture(&closure).expect_err("transient closure must fail");
@@ -263,6 +264,7 @@ mod tests {
             function_name: "worker".into(),
             bound_function: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![gpu(&reject_provider().owner)],
         });
         assert_eq!(
