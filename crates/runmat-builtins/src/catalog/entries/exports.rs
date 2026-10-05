@@ -29,4 +29,5 @@ pub use super::strings::*;
 pub use super::structs::*;
 pub use super::table::*;
 pub use super::testing::*;
+pub use super::timing::*;
 pub use super::value_distribution::*;
