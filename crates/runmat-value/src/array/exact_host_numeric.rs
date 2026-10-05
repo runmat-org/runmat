@@ -3,11 +3,13 @@
 
 use super::{
     AdoptedHostAllocation, HostAllocationProvenance, HostAllocationRelease, HostNumericBuffer,
+    Tensor,
 };
 use crate::IntegerStorage;
 use crate::NumericDType;
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -80,6 +82,70 @@ pub struct ExactHostNumericAllocation {
     len: usize,
 }
 
+/// One exact numeric payload plus an exact two-element retained tensor shape.
+/// A single reservation covers both allocations before either is created.
+/// This does not certify the remaining fixed tensor/Arc metadata overhead.
+pub struct ExactHostTensor2dAllocation {
+    numeric: ExactHostNumericAllocation,
+    shape: [usize; 2],
+}
+
+impl ExactHostTensor2dAllocation {
+    pub fn new(
+        dtype: NumericDType,
+        rows: usize,
+        columns: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let count = rows
+            .checked_mul(columns)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let shape_bytes = Layout::array::<usize>(2)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
+            .size();
+        Ok(Self {
+            numeric: ExactHostNumericAllocation::new_with_reserved_shape(
+                dtype,
+                count,
+                shape_bytes,
+                permit,
+            )?,
+            shape: [rows, columns],
+        })
+    }
+
+    pub fn into_tensor(self) -> Result<Tensor, ExactHostNumericAllocationError> {
+        let layout = Layout::array::<usize>(2)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
+        // SAFETY: the exact two-element layout is nonzero and aligned for
+        // usize. `Vec::from_raw_parts` takes the only owner with capacity two.
+        let pointer = NonNull::new(unsafe { alloc(layout) })
+            .ok_or(ExactHostNumericAllocationError::AllocationFailed)?
+            .cast::<usize>();
+        unsafe {
+            pointer.as_ptr().write(self.shape[0]);
+            pointer.as_ptr().add(1).write(self.shape[1]);
+        }
+        let shape = unsafe { Vec::from_raw_parts(pointer.as_ptr(), 2, 2) };
+        Tensor::from_host_buffer(self.numeric.into_host_buffer(), shape)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
+    }
+}
+
+impl Deref for ExactHostTensor2dAllocation {
+    type Target = ExactHostNumericAllocation;
+
+    fn deref(&self) -> &Self::Target {
+        &self.numeric
+    }
+}
+
+impl DerefMut for ExactHostTensor2dAllocation {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.numeric
+    }
+}
+
 enum ExactAllocation {
     Floating(AdoptedHostAllocation),
     Integer(ExactIntegerStorage),
@@ -91,13 +157,26 @@ impl ExactHostNumericAllocation {
         len: usize,
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<Self, ExactHostNumericAllocationError> {
+        Self::new_with_reserved_shape(dtype, len, 0, permit)
+    }
+
+    fn new_with_reserved_shape(
+        dtype: NumericDType,
+        len: usize,
+        shape_bytes: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
         let layout = match dtype {
             NumericDType::F32 => Layout::array::<f32>(len),
             NumericDType::F64 => Layout::array::<f64>(len),
             _ => integer_layout(dtype, len),
         }
         .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
-        let reservation = permit.reserve_exact(layout.size())?;
+        let charged = layout
+            .size()
+            .checked_add(shape_bytes)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let reservation = permit.reserve_exact(charged)?;
         if dtype.integer_class().is_some() {
             return Ok(Self {
                 allocation: ExactAllocation::Integer(allocate_integer(

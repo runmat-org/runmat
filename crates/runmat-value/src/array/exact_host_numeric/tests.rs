@@ -47,6 +47,69 @@ fn permit(limit: usize) -> Permit {
 }
 
 #[test]
+fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
+    let shape_bytes = 2 * std::mem::size_of::<usize>();
+    let denied = permit(16 + shape_bytes - 1);
+    assert!(matches!(
+        ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &denied),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
+
+    let quota = permit(16 + shape_bytes);
+    let mut allocation = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &quota).unwrap();
+    allocation
+        .as_u64_slice_mut()
+        .unwrap()
+        .copy_from_slice(&[9_007_199_254_740_993, u64::MAX]);
+    let original = allocation.as_u64_slice_mut().unwrap().as_ptr();
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 16 + shape_bytes);
+    let tensor = allocation.into_tensor().expect("exact geometry");
+    assert_eq!(tensor.shape, [1, 2]);
+    assert_eq!(tensor.shape.capacity(), 2);
+    assert_eq!(
+        tensor.integer_storage(),
+        Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
+    );
+    assert_eq!(
+        unsafe { tensor.host_buffer().foreign_data_pointer() }.cast::<u64>(),
+        original
+    );
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 16 + shape_bytes);
+    drop(tensor);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn exact_two_dimensional_shape_rejects_count_overflow_without_a_claim() {
+    let quota = permit(usize::MAX);
+    assert!(matches!(
+        ExactHostTensor2dAllocation::new(NumericDType::F32, usize::MAX, 2, &quota),
+        Err(ExactHostNumericAllocationError::LayoutOverflow)
+    ));
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
+    let total = 3 * std::mem::size_of::<f32>() + 2 * std::mem::size_of::<usize>();
+    let quota = permit(total);
+    let mut allocation = ExactHostTensor2dAllocation::new(NumericDType::F32, 3, 1, &quota).unwrap();
+    allocation
+        .as_f32_slice_mut()
+        .unwrap()
+        .copy_from_slice(&[0.25, -0.5, 1.5]);
+    let original = allocation.as_f32_slice_mut().unwrap().as_ptr();
+    let tensor = allocation.into_tensor().expect("exact shape");
+    assert_eq!(tensor.shape.as_slice(), [3, 1]);
+    assert_eq!(tensor.as_f32_slice(), Some([0.25, -0.5, 1.5].as_slice()));
+    assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), original);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), total);
+    drop(tensor);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn exact_float32_allocation_moves_into_tensor_without_payload_copy() {
     let permit = permit(12);
     let mut owned = ExactHostNumericAllocation::new(NumericDType::F32, 3, &permit).unwrap();
