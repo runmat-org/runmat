@@ -48,7 +48,10 @@ fn method_output_bounds_precede_path_parse_and_mapped_effects() {
     let reference =
         futures::executor::block_on(subsref(None, Value::Num(0.0), invalid_path.clone()))
             .unwrap_err();
-    assert_eq!(reference.identifier(), "RunMat:memmapfile:TooManyOutputs");
+    assert_eq!(
+        reference.identifier(),
+        Some("RunMat:memmapfile:TooManyOutputs")
+    );
     let assignment = futures::executor::block_on(subsasgn(
         None,
         Value::Num(0.0),
@@ -56,7 +59,10 @@ fn method_output_bounds_precede_path_parse_and_mapped_effects() {
         Value::Num(1.0),
     ))
     .unwrap_err();
-    assert_eq!(assignment.identifier(), "RunMat:memmapfile:TooManyOutputs");
+    assert_eq!(
+        assignment.identifier(),
+        Some("RunMat:memmapfile:TooManyOutputs")
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
