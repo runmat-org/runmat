@@ -36,6 +36,8 @@ pub enum FluidConstraintKind {
     },
     Periodic(PeriodicConstraint),
     /// Gauge only; does not supply a physical outlet traction condition.
+    /// The area-weighted reconstructed pressure trace on selected boundary faces,
+    /// separately for each reached closed component, equals the prescribed value.
     PressureReference {
         target: RegionTarget,
         value: PrescribedValue<Pressure>,

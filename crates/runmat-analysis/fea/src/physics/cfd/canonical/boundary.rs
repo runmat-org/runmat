@@ -1,8 +1,5 @@
 use super::CanonicalFluidError as Error;
-use crate::{
-    algebra::connected_components,
-    topology::{AnalysisProjection, FiniteVolumeTopology},
-};
+use crate::topology::{AnalysisProjection, FiniteVolumeTopology};
 use runmat_analysis_core::{
     AnalysisBoundary, BoundaryOperator, EntityDimension, ExpectedTopology, FluidConstraint,
     FluidConstraintKind, PhysicalSignal, RegionTarget, SignalProvenance,
@@ -35,7 +32,7 @@ pub(super) fn compile(
         .map(|c| c.constraint_id.as_str())
         .chain(operators.iter().map(|b| b.boundary_id.as_str()))
     {
-        if id.trim() != id || id.chars().any(char::is_control) || !ids.insert(id) {
+        if id.is_empty() || id.trim() != id || id.chars().any(char::is_control) || !ids.insert(id) {
             return Err(Error::Invalid("duplicate or malformed fluid authority ID"));
         }
     }
@@ -73,11 +70,8 @@ pub(super) fn compile(
                     moving_wall: false,
                 },
             ),
-            FluidConstraintKind::PressureReference { .. } => {
-                return Err(Error::Unsupported(
-                    "closed-component pressure gauge requires shared cell nullspace evidence",
-                ))
-            }
+            // Gauge authority is compiled separately; it supplies no face law.
+            FluidConstraintKind::PressureReference { .. } => continue,
             _ => {
                 return Err(Error::Unsupported(
                     "slip, symmetry or periodic fluid boundary",
@@ -115,7 +109,6 @@ pub(super) fn compile(
             return Err(Error::Invalid("incomplete exterior boundary coverage"));
         }
     }
-    pressure_references(t, &out)?;
     Ok(out)
 }
 
@@ -126,11 +119,6 @@ fn bind(
     target: &RegionTarget,
     law: FaceBoundary,
 ) -> Result<(), Error> {
-    if target.entity_dimension != EntityDimension::Face
-        || target.expected_topology != ExpectedTopology::BoundaryFace
-    {
-        return Err(Error::Invalid("fluid boundary target kind"));
-    }
     let finite = match &law {
         FaceBoundary::Velocity { value, .. } => value.iter().all(|x| x.is_finite()),
         FaceBoundary::PressureOutlet { pressure, .. } => pressure.is_finite(),
@@ -139,29 +127,8 @@ fn bind(
     if !finite {
         return Err(Error::Invalid("boundary value"));
     }
-    if target.resolved_entities().is_empty() {
-        return Err(Error::Invalid(
-            "fluid boundary requires exact resolved entity authority",
-        ));
-    }
-    target
-        .validate_resolution()
-        .map_err(|_| Error::Invalid("fluid boundary resolved entity authority"))?;
-    let mut matched = 0usize;
-    let mut covered = vec![false; target.resolved_entities().len()];
-    for (i, f) in t.faces.iter().enumerate() {
-        let Some(b) = f.boundary_source else { continue };
-        let original = &source.boundary_faces[b.projection_boundary_index];
-        if !original
-            .provenance
-            .iter()
-            .any(|e| target.matches_persistent_entity(e))
-        {
-            continue;
-        }
-        if f.neighbor.is_some() {
-            return Err(Error::Invalid("fluid boundary selects interior interface"));
-        }
+    for i in select_faces(source, t, target)? {
+        let f = &t.faces[i];
         if let FaceBoundary::Velocity {
             value,
             moving_wall: true,
@@ -176,53 +143,56 @@ fn bind(
                 ));
             }
         }
+        if !matches!(out[i], FaceBoundary::Interior) {
+            return Err(Error::Invalid("overlapping fluid boundary authorities"));
+        }
+        out[i] = law.clone();
+    }
+    Ok(())
+}
+
+pub(super) fn select_faces(
+    source: &AnalysisProjection,
+    t: &FiniteVolumeTopology,
+    target: &RegionTarget,
+) -> Result<Vec<usize>, Error> {
+    if target.entity_dimension != EntityDimension::Face
+        || target.expected_topology != ExpectedTopology::BoundaryFace
+    {
+        return Err(Error::Invalid("fluid boundary target kind"));
+    }
+    if target.resolved_entities().is_empty() {
+        return Err(Error::Invalid(
+            "fluid boundary requires exact resolved entity authority",
+        ));
+    }
+    target
+        .validate_resolution()
+        .map_err(|_| Error::Invalid("fluid boundary resolved entity authority"))?;
+    let mut covered = vec![false; target.resolved_entities().len()];
+    let mut matched = Vec::new();
+    for (i, f) in t.faces.iter().enumerate() {
+        let Some(b) = f.boundary_source else { continue };
+        let original = &source.boundary_faces[b.projection_boundary_index];
+        if !original
+            .provenance
+            .iter()
+            .any(|e| target.matches_persistent_entity(e))
+        {
+            continue;
+        }
+        if f.neighbor.is_some() {
+            return Err(Error::Invalid("fluid boundary selects interior interface"));
+        }
         for entity in &original.provenance {
             if let Ok(j) = target.resolved_entities().binary_search(entity) {
                 covered[j] = true;
             }
         }
-        if !matches!(out[i], FaceBoundary::Interior) {
-            return Err(Error::Invalid("overlapping fluid boundary authorities"));
-        }
-        out[i] = law.clone();
-        matched += 1;
+        matched.push(i);
     }
-    if matched == 0 || covered.iter().any(|seen| !*seen) {
+    if matched.is_empty() || covered.iter().any(|seen| !*seen) {
         return Err(Error::Invalid("empty fluid boundary target"));
     }
-    Ok(())
-}
-
-pub(super) fn pressure_references(
-    t: &FiniteVolumeTopology,
-    boundaries: &[FaceBoundary],
-) -> Result<Vec<f64>, Error> {
-    let mut neighbors = vec![Vec::new(); t.cells.len()];
-    for f in &t.faces {
-        if let Some(n) = f.neighbor {
-            neighbors[f.owner].push(n);
-            neighbors[n].push(f.owner);
-        }
-    }
-    let components = connected_components(&neighbors)
-        .map_err(|_| Error::Invalid("pressure reference adjacency"))?;
-    let mut labels = vec![0; t.cells.len()];
-    for (label, component) in components.iter().enumerate() {
-        for &c in component {
-            labels[c] = label;
-        }
-    }
-    // One traversal, independent of the number of disconnected components.
-    // First canonical outlet remains the deterministic component reference.
-    let mut outlets = vec![None; components.len()];
-    for (i, face) in t.faces.iter().enumerate() {
-        if let FaceBoundary::PressureOutlet { pressure, .. } = boundaries[i] {
-            outlets[labels[face.owner]].get_or_insert(pressure);
-        }
-    }
-    let outlets = outlets
-        .into_iter()
-        .map(|p| p.ok_or(Error::Unsupported("physical outlet reference required")))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(labels.into_iter().map(|label| outlets[label]).collect())
+    Ok(matched)
 }

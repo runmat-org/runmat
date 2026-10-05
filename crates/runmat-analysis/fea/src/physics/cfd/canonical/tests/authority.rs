@@ -60,12 +60,64 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
             pressure: i as f64,
         })
         .collect::<Vec<_>>();
-    let references = boundary::pressure_references(&topology, &boundaries).unwrap();
+    let (_, references) = super::super::pressure_reference::PressureReferencePlan::derive(
+        &fixture.source,
+        &topology,
+        &boundaries,
+        &[],
+        &[],
+    )
+    .unwrap();
     assert_eq!(references, (0..count).map(|i| i as f64).collect::<Vec<_>>());
     let mut missing = boundaries;
     missing[count - 1] = boundary::FaceBoundary::Interior;
-    assert!(boundary::pressure_references(&topology, &missing).is_err());
+    assert!(
+        super::super::pressure_reference::PressureReferencePlan::derive(
+            &fixture.source,
+            &topology,
+            &missing,
+            &[],
+            &[]
+        )
+        .is_err()
+    );
 
+    // One authored gauge reaches all disconnected components without supplying
+    // physical face laws. Connectivity-only inventory, not a physical mesh.
+    let original = &fixture.source.boundary_faces[topology.faces[0]
+        .boundary_source
+        .unwrap()
+        .projection_boundary_index];
+    let mut target = runmat_analysis_core::RegionTarget::boundary("original-gauge-inventory");
+    target
+        .bind_resolved_entities(original.provenance.clone())
+        .unwrap();
+    let gauge = runmat_analysis_core::FluidConstraint {
+        constraint_id: "shared-component-gauge".into(),
+        kind: runmat_analysis_core::FluidConstraintKind::PressureReference {
+            target,
+            value: runmat_analysis_core::PrescribedValue::Constant(
+                runmat_analysis_core::Pressure::new(101325.0),
+            ),
+        },
+    };
+    let walls = vec![
+        boundary::FaceBoundary::Velocity {
+            authority_id: "wall".into(),
+            value: [0.0; 3],
+            moving_wall: false
+        };
+        count
+    ];
+    let (_, closed) = super::super::pressure_reference::PressureReferencePlan::derive(
+        &fixture.source,
+        &topology,
+        &walls,
+        &[gauge],
+        &[],
+    )
+    .unwrap();
+    assert_eq!(closed, vec![101325.0; count]);
     let geometry = |cells| crate::topology::FiniteVolumeReservation {
         cell_count: cells,
         face_incidence_count: cells * 4,

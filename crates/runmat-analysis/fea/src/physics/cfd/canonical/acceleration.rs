@@ -58,9 +58,15 @@ pub(super) fn consider(
         }
         Err(error) => return Err(Error::Operator(error.to_string())),
     };
-    let Some(candidate) = candidate else {
+    let Some(mut candidate) = candidate else {
         return Ok(original);
     };
+    if p.pressure_reference_plan
+        .normalize(p, &mut candidate.image)
+        .is_err()
+    {
+        return Ok(original);
+    }
     let gamma = candidate.coefficient;
     let velocity = current
         .velocity

@@ -16,6 +16,7 @@ use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::fixtures;
 
 mod chain;
+mod closed_reference;
 mod pressure_state;
 
 fn task(

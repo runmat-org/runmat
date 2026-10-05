@@ -3,6 +3,7 @@
 mod acceleration;
 mod authority;
 mod boundary_balances;
+mod closed_reference;
 mod fixture;
 mod linear_correction;
 mod pressure_reference;

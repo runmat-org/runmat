@@ -15,6 +15,7 @@ mod linear;
 mod momentum;
 mod pressure;
 mod pressure_gradient;
+mod pressure_reference;
 mod reconstruction;
 mod recovery;
 mod resources;
@@ -86,7 +87,7 @@ pub struct CanonicalFluidResult {
     pub authored_authority_identity: Digest,
     /// Metres per second, in source-bound canonical cell order.
     pub velocity_m_per_s: Vec<[f64; 3]>,
-    /// Original governing pressure relative to the source-bound component outlet.
+    /// Original governing pressure relative to the source-bound component outlet or gauge.
     /// This is retained independently of the rounded absolute-pressure projection.
     pub pressure_fluctuation_pa: Vec<f64>,
     /// Physical pressure in pascals, NOT kinematic pressure.
@@ -109,6 +110,8 @@ pub enum CanonicalFluidError {
     Resource(&'static str),
     #[error("canonical fluid sparse operator failed: {0}")]
     Operator(String),
+    #[error("canonical fluid execution cancelled")]
+    Cancelled,
     #[error("canonical fluid iteration did not converge")]
     NotConverged,
     #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}")]
@@ -136,6 +139,7 @@ pub struct CanonicalFluidProblem<'a> {
     numerical_input_identity: Digest,
     authored_authority_identity: Digest,
     pressure_reference_pa: Vec<f64>,
+    pressure_reference_plan: pressure_reference::PressureReferencePlan,
     pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
     velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
 }
@@ -259,11 +263,18 @@ impl<'a> CanonicalFluidProblem<'a> {
         let boundaries =
             boundary::compile(source, topology, constraints, boundary_operators, signals)?;
         let boundary_balance_plan = boundary_balances::BoundaryBalancePlan::derive(&boundaries);
-        let pressure_reference_pa = boundary::pressure_references(topology, &boundaries)?;
+        let (pressure_reference_plan, pressure_reference_pa) =
+            pressure_reference::PressureReferencePlan::derive(
+                source,
+                topology,
+                &boundaries,
+                constraints,
+                signals,
+            )?;
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let numerical_input_identity = identity(
-            "fea-fluid-numerical-input/v4",
+            "fea-fluid-numerical-input/v5",
             &(
                 topology.mesh_digest,
                 topology.projection_digest,
@@ -273,6 +284,7 @@ impl<'a> CanonicalFluidProblem<'a> {
                 &boundaries,
                 &body_force_n_per_m3,
                 &pressure_reference_pa,
+                &pressure_reference_plan,
                 policy,
             ),
         )?;
@@ -288,6 +300,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             numerical_input_identity,
             authored_authority_identity,
             pressure_reference_pa,
+            pressure_reference_plan,
             pressure_stencils,
             velocity_stencils,
         })

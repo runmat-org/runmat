@@ -12,7 +12,7 @@ pub struct CanonicalFluidFaceForces {
     pub viscous_traction_n: Vec<V>,
     /// −p_f S, physical pressure Pa × area m², force exerted on owner fluid.
     pub pressure_traction_n: Vec<V>,
-    /// Pressure fluctuation relative to a genuine per-component outlet, for
+    /// Pressure fluctuation relative to the authored component outlet or gauge, for
     /// gauge-independent convergence scaling, NOT a substituted physical pressure.
     pub pressure_fluctuation_traction_n: Vec<V>,
 }

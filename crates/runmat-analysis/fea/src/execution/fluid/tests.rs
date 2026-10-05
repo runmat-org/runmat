@@ -604,3 +604,5 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
     };
     assert!(wrong.validate().is_err());
 }
+
+mod closed_reference;

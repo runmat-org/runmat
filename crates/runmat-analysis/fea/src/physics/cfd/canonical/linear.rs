@@ -111,10 +111,13 @@ pub(super) fn solve(
                 Err(Error::Invalid("nonfinite Krylov dot"))
             }
         },
-        || false,
+        crate::is_fea_cancelled,
     )?
     .ok_or(Error::NotConverged)?;
-    if !result.converged || result.cancelled || result.breakdown {
+    if result.cancelled {
+        return Err(Error::Cancelled);
+    }
+    if !result.converged || result.breakdown {
         return Err(Error::NotConverged);
     }
     let correction = preconditioner

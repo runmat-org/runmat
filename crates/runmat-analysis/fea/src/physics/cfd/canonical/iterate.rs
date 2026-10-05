@@ -4,6 +4,9 @@ use super::{
 };
 
 pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResult, Error> {
+    if crate::is_fea_cancelled() {
+        return Err(Error::Cancelled);
+    }
     let n = p.topology.cells.len();
     let mut u = vec![[0.0; 3]; n];
     let mut pressure_fluctuation = vec![0.0; n];
@@ -12,6 +15,9 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
     let mut last = [f64::INFINITY; 5];
     let mut acceleration_history = None;
     for iteration in 1..=p.policy.maximum_outer_iterations {
+        if crate::is_fea_cancelled() {
+            return Err(Error::Cancelled);
+        }
         let m = momentum::assemble(
             p,
             &u,
@@ -55,6 +61,8 @@ pub(super) fn solve(p: &CanonicalFluidProblem<'_>) -> Result<CanonicalFluidResul
                 pressure_defect.push(delta);
             }
         }
+        p.pressure_reference_plan
+            .normalize(p, &mut pressure_fluctuation)?;
         let gp = pressure_gradient(p, &pressure_fluctuation)?;
         let force = pressure_force(p, &pressure_fluctuation, &gp)?;
         u = (0..n)

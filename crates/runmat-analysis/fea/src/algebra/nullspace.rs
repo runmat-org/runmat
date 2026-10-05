@@ -19,6 +19,8 @@ mod components;
 mod mixed_structural;
 mod rigid_body;
 mod scalar;
+mod scalar_gauge;
+pub(crate) use scalar_gauge::prepare_scalar_component_gauges;
 mod solid;
 mod solid_components;
 mod structural_frame;
@@ -97,6 +99,8 @@ pub enum NullspaceEvidenceError {
     DimensionMismatch,
     #[error("a connected component retains an uneliminated null mode")]
     UnderconstrainedComponent,
+    #[error("the original component source is incompatible with its constant null mode")]
+    IncompatibleConstantModeSource,
     #[error("a reference point cannot be assigned to one structural component")]
     AmbiguousReferencePoint,
     #[error(

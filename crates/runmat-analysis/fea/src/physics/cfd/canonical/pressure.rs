@@ -107,9 +107,28 @@ pub(super) fn solve(
         let gp = pressure_gradient(p, &pressure)?;
         let mut a = linear::assembler(p, "incompressible-pressure-rhie-chow")?;
         let mut b = vec![0.0; pressure.len()];
+        let mut source_scale = vec![0.0; pressure.len()];
         for (i, f) in p.topology.faces.iter().enumerate() {
             let (alpha, tangent, w) = face_geometry(p, f)?;
             let d = rf[i] * alpha;
+            let face_gradient = if let Some(n) = f.neighbor {
+                interpolate(gp[f.owner], gp[n], w)
+            } else {
+                gp[f.owner]
+            };
+            // Bound source-construction rounding against the actual face terms,
+            // not the cancellation-small assembled RHS. This does not repair b.
+            let scale = qh[i].abs()
+                + rf[i].abs()
+                    * face_gradient
+                        .iter()
+                        .zip(tangent)
+                        .map(|(g, t)| g.abs() * t.abs())
+                        .sum::<f64>();
+            source_scale[f.owner] += scale;
+            if let Some(n) = f.neighbor {
+                source_scale[n] += scale;
+            }
             if let Some(n) = f.neighbor {
                 a.add(f.owner, f.owner, d);
                 a.add(f.owner, n, -d);
@@ -132,7 +151,23 @@ pub(super) fn solve(
             }
         }
         let a = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
-        let (next, count) = linear::solve(p, &a, &b, &pressure)?;
+        let roots = p.pressure_reference_plan.roots();
+        let (mut next, count) = if roots.is_empty() {
+            linear::solve(p, &a, &b, &pressure)?
+        } else {
+            let (prepared, rhs) = crate::algebra::prepare_scalar_component_gauges(
+                &a,
+                &b,
+                &roots,
+                &source_scale
+                    .iter()
+                    .map(|s| 64.0 * f64::EPSILON * s)
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|e| Error::Operator(e.to_string()))?;
+            linear::solve(p, &prepared, &rhs, &pressure)?
+        };
+        p.pressure_reference_plan.normalize(p, &mut next)?;
         pressure = next;
         linear_iterations += count;
     }

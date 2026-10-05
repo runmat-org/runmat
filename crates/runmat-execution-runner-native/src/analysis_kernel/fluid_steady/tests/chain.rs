@@ -29,8 +29,11 @@ mod publication;
 
 #[test]
 fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
-    for nonzero in [false, true] {
-        let (workload, mesh, task) = task(nonzero, 8192);
+    for (workload, mesh, task) in [
+        task(false, 8192),
+        task(true, 8192),
+        super::closed_reference::closed_task(),
+    ] {
         let policy = task.output_policy;
         let limits = policy.inventory_limits();
         let directory = tempfile::tempdir().unwrap();

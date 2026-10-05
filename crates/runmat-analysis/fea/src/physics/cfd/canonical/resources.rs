@@ -265,6 +265,9 @@ impl CanonicalFluidReservation {
                 48,
             )?,
         )?;
+        // Gauge selection/component arrays, original and reduced scalar systems,
+        // compatibility traversal and mean-trace normalization coexist with GMRES.
+        bytes = add(bytes, add(mul(n, 512)?, mul(f, 64)?)?)?;
         // Exact index-pair plan (unstable in-place sort has no merge allocation),
         // one descriptor per exterior face at most, and two coexisting report arrays
         // during safeguarded recovery. IDs obey the existing256-byte authority limit.
@@ -317,6 +320,18 @@ impl CanonicalFluidReservation {
                 mul(
                     p.maximum_authority_items as u64,
                     add(mul(f, 64)?, mul(n, 64)?)?,
+                )?,
+            )?,
+        )?;
+        // Every nonorthogonal pressure pass reconstructs original fields,
+        // assembles/reduces the graph and normalizes the authored gauge.
+        work = add(
+            work,
+            mul(
+                p.maximum_outer_iterations as u64,
+                mul(
+                    p.maximum_nonorthogonal_iterations as u64,
+                    add(mul(f, 1000)?, mul(n, 10000)?)?,
                 )?,
             )?,
         )?;

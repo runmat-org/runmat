@@ -71,6 +71,8 @@ pub(super) fn recover(
     {
         return Err(Error::Invalid("retained original pressure projection"));
     }
+    p.pressure_reference_plan
+        .validate(p, &original.pressure_fluctuation_pa)?;
     let r = evaluate(
         p,
         &original.velocity_m_per_s,

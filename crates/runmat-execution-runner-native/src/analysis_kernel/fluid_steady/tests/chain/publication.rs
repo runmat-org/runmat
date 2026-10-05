@@ -50,7 +50,19 @@ fn observation() -> ObservationRequest {
 
 #[test]
 fn original_native_fluid_observation_complete_state_and_accuracy_cold_chain() {
-    let (mut workload, mesh, original) = task(true, 8192);
+    for (workload, mesh, original) in [
+        task(true, 8192),
+        super::super::closed_reference::closed_task(),
+    ] {
+        verify_original_publication(workload, mesh, original);
+    }
+}
+
+fn verify_original_publication(
+    mut workload: FluidSteadyWorkload,
+    mesh: SolverMeshArtifact,
+    original: PreparedFluidSteadyTask,
+) {
     workload.model.sequence.steps[0].observations = vec![observation()];
     workload.model.sequence.steps[0].accuracy.criteria = [
         (
