@@ -271,12 +271,42 @@ const RETHROW_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
+pub const RETHROW_ERROR_NO_ACTIVE_CATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RETHROW.NO_ACTIVE_CATCH",
+    identifier: Some("RunMat:rethrow:NoActiveCatch"),
+    when: "The RunMat shorthand is invoked outside a lexical catch block.",
+    message: "rethrow(): no active lexical catch exception",
+};
+pub const RETHROW_ERROR_INVALID_ARITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RETHROW.INVALID_ARITY",
+    identifier: Some("RunMat:rethrow:InvalidArity"),
+    when: "More than one argument is supplied.",
+    message: "rethrow accepts zero or one argument",
+};
+const RETHROW_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [RETHROW_ERROR_NO_ACTIVE_CATCH, RETHROW_ERROR_INVALID_ARITY];
+
 pub const RETHROW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &RETHROW_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: &RETHROW_ERRORS,
 };
+
+pub const RETHROW_ACTIVE_CATCH_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rethrow-active-catch-shorthand",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rethrow() without an explicit MException is a RunMat catch-block extension",
+    error_identifier: Some("RunMat:compatibility:RethrowActiveCatchExtension"),
+};
+pub const RETHROW_TEXT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "rethrow-text-input",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "rethrow(text) is a RunMat extension; MATLAB requires an MException",
+    error_identifier: Some("RunMat:compatibility:RethrowTextExtension"),
+};
+pub const RETHROW_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [RETHROW_ACTIVE_CATCH_EXTENSION, RETHROW_TEXT_EXTENSION];
 
 pub const RETHROW_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,

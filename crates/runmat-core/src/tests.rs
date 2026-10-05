@@ -16884,6 +16884,41 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn forced_generic_native_rethrow_shorthand_preserves_lexical_catch() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    session.set_compat_mode(runmat_parser::CompatMode::RunMat);
+    let source = ExecutableSource::new(
+        "core-native-rethrow@1",
+        "nativeRethrow.m",
+        "function id = nativeRethrow()\ntry\ntry\nvalues = [1, 2];\nvalue = values(3);\ncatch\ncallbackRethrow();\nend\ncatch outer\nid = outer.identifier;\nend\nend\nfunction id = callbackRethrow()\nrethrow();\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeRethrow".into()),
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let established = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .expect("VM rethrow shorthand");
+    let native = block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native rethrow shorthand");
+    assert_eq!(native, established);
+    assert_single_output(
+        &native,
+        runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     session.set_compat_mode(runmat_parser::CompatMode::RunMat);

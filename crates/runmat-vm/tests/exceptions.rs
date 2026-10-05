@@ -38,6 +38,41 @@ fn nested_try_catch_rethrow() {
 }
 
 #[test]
+fn rethrow_shorthand_uses_only_the_current_lexical_catch() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("try; try; error('RunMat:outer','outer'); catch; try; error('RunMat:inner','inner'); catch; inner_id = 'RunMat:inner'; end; rethrow(); end; catch final; observed = final.identifier; end").unwrap();
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, runmat_value::Value::String(id) if id == "RunMat:outer")));
+}
+
+#[test]
+fn rethrow_shorthand_rejects_stale_catch_after_exit() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let err = execute_source("try; error('RunMat:prior','prior'); catch; end; rethrow();")
+        .expect_err("catch authority must end at lexical exit");
+    assert_eq!(err.identifier(), Some("RunMat:rethrow:NoActiveCatch"));
+}
+
+#[test]
+fn indirect_rethrow_shorthand_preserves_original_exception() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("try; try; error('RunMat:indirect','original'); catch; feval('rethrow'); end; catch observed; id = observed.identifier; end").unwrap();
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, runmat_value::Value::String(id) if id == "RunMat:indirect")));
+}
+
+#[test]
+fn handle_rethrow_shorthand_inherits_current_catch() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let vars = execute_source("try; try; error('RunMat:handle','original'); catch; callback = @rethrow; callback(); end; catch observed; id = observed.identifier; end").unwrap();
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, runmat_value::Value::String(id) if id == "RunMat:handle")));
+}
+
+#[test]
 fn catch_and_multi_assign_propagation() {
     // Ensure catch-bound exception can be read and subsequent assignments proceed
     let vars = execute_source(

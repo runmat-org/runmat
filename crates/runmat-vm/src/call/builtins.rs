@@ -187,20 +187,6 @@ pub fn is_vm_dynamic_workspace_builtin(name: &str) -> bool {
     VmDynamicWorkspaceBuiltin::classify(name).is_some()
 }
 
-#[derive(Clone, Copy)]
-enum VmIntrinsicExceptionBuiltin {
-    Rethrow,
-}
-
-impl VmIntrinsicExceptionBuiltin {
-    fn classify(name: &str) -> Option<Self> {
-        match name {
-            "rethrow" => Some(Self::Rethrow),
-            _ => None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod dispatch_tests;
 
@@ -1223,24 +1209,11 @@ pub async fn resolve_imported_builtin(
     Ok(ImportedBuiltinResolution::NotFound)
 }
 
-pub fn rethrow_without_explicit_exception(
-    name: &str,
-    args: &[Value],
-    last_exception: Option<&runmat_value::MException>,
-) -> Option<RuntimeError> {
-    match VmIntrinsicExceptionBuiltin::classify(name) {
-        Some(VmIntrinsicExceptionBuiltin::Rethrow) if args.is_empty() => last_exception
-            .cloned()
-            .map(runmat_runtime::runtime_error::error_from_exception),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
-        parse_finite_arity_bound, push_dynamic_eval_options, rethrow_without_explicit_exception,
+        parse_finite_arity_bound, push_dynamic_eval_options,
     };
     use runmat_parser::CompatMode;
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
@@ -1309,21 +1282,6 @@ mod tests {
 
         let mixed_empty = imported_builtin_qualified_name(&["PkgF".into(), "".into()], Some("foo"));
         assert_eq!(mixed_empty, None);
-    }
-
-    #[test]
-    fn rethrow_preserves_last_exception_identifier() {
-        let err = rethrow_without_explicit_exception(
-            "rethrow",
-            &[],
-            Some(&runmat_value::MException::new(
-                "RunMat:Original".into(),
-                "boom".into(),
-            )),
-        )
-        .expect("rethrow should preserve prior exception");
-        assert_eq!(err.identifier(), Some("RunMat:Original"));
-        assert_eq!(err.message(), "boom");
     }
 
     #[test]
