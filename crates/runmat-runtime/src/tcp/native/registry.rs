@@ -85,10 +85,12 @@ impl ForeignResourceRelease for Release {
             return;
         }
         if let Some(registry) = self.0.upgrade() {
-            if let Ok(mut registry) = registry.lock() {
-                if let Some(record) = registry.records.remove(&key.handle) {
-                    record.resource.close();
-                }
+            let removed = registry
+                .lock()
+                .ok()
+                .and_then(|mut state| state.records.remove(&key.handle));
+            if let Some(record) = removed {
+                record.resource.close();
             }
         }
     }
@@ -220,23 +222,35 @@ pub(super) fn close(
     issuer: &RuntimeTcpIssuer,
     reference: &ForeignRef,
 ) -> Result<bool, TcpTransportError> {
-    let mut state = registry.lock().map_err(|_| unavailable())?;
-    let record = state.records.get(&reference.handle).ok_or_else(invalid)?;
-    if !admitted(record, issuer, reference) {
-        return Err(invalid());
-    }
-    let server = matches!(&record.resource, Resource::Server(_));
-    if let Some(record) = state.records.remove(&reference.handle) {
-        record.resource.close();
-    }
-    if server {
-        state.records.retain(|_, record| {
-            let retain = record.parent_server != Some(reference.handle);
-            if !retain {
-                record.resource.close();
+    let removed = {
+        let mut state = registry.lock().map_err(|_| unavailable())?;
+        let record = state.records.get(&reference.handle).ok_or_else(invalid)?;
+        if !admitted(record, issuer, reference) {
+            return Err(invalid());
+        }
+        let server = matches!(&record.resource, Resource::Server(_));
+        let mut removed = Vec::new();
+        if let Some(record) = state.records.remove(&reference.handle) {
+            removed.push(record);
+        }
+        if server {
+            let children: Vec<u64> = state
+                .records
+                .iter()
+                .filter_map(|(id, record)| {
+                    (record.parent_server == Some(reference.handle)).then_some(*id)
+                })
+                .collect();
+            for child in children {
+                if let Some(record) = state.records.remove(&child) {
+                    removed.push(record);
+                }
             }
-            retain
-        });
+        }
+        removed
+    };
+    for record in removed {
+        record.resource.close();
     }
     Ok(true)
 }
@@ -246,31 +260,42 @@ pub(super) fn close_scope(
     issuer: &RuntimeTcpIssuer,
     scope: RuntimeTcpCloseScope,
 ) -> Result<usize, TcpTransportError> {
-    let mut state = registry.lock().map_err(|_| unavailable())?;
-    let before = state.records.len();
-    state.records.retain(|_, record| {
-        if !record.issuer.admits(issuer) {
-            return true;
-        }
-        let retain = !matches!(
-            (scope, &record.resource),
-            (RuntimeTcpCloseScope::All, _)
-                | (RuntimeTcpCloseScope::Clients, Resource::Client(_))
-                | (RuntimeTcpCloseScope::Servers, Resource::Server(_))
-        );
-        if !retain {
-            record.resource.close();
-        }
-        retain
-    });
-    Ok(before - state.records.len())
+    let removed = {
+        let mut state = registry.lock().map_err(|_| unavailable())?;
+        let selected: Vec<u64> = state
+            .records
+            .iter()
+            .filter_map(|(id, record)| {
+                (record.issuer.admits(issuer)
+                    && matches!(
+                        (scope, &record.resource),
+                        (RuntimeTcpCloseScope::All, _)
+                            | (RuntimeTcpCloseScope::Clients, Resource::Client(_))
+                            | (RuntimeTcpCloseScope::Servers, Resource::Server(_))
+                    ))
+                .then_some(*id)
+            })
+            .collect();
+        selected
+            .into_iter()
+            .filter_map(|id| state.records.remove(&id))
+            .collect::<Vec<_>>()
+    };
+    let count = removed.len();
+    for record in removed {
+        record.resource.close();
+    }
+    Ok(count)
 }
 
 pub(super) fn shutdown_all(registry: &Arc<Mutex<Registry>>) {
-    if let Ok(mut registry) = registry.lock() {
-        for record in registry.records.values() {
+    let removed = registry
+        .lock()
+        .ok()
+        .map(|mut state| std::mem::take(&mut state.records));
+    if let Some(removed) = removed {
+        for record in removed.into_values() {
             record.resource.close();
         }
-        registry.records.clear();
     }
 }

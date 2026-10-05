@@ -1,6 +1,23 @@
 use super::*;
 use crate::context::{RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpConnect};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+struct LockCheckingWaker {
+    registry: std::sync::Arc<std::sync::Mutex<Registry>>,
+    unlocked: AtomicBool,
+}
+
+impl std::task::Wake for LockCheckingWaker {
+    fn wake(self: std::sync::Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &std::sync::Arc<Self>) {
+        self.unlocked
+            .store(self.registry.try_lock().is_ok(), Ordering::SeqCst);
+    }
+}
 
 fn service() -> (tokio::runtime::Runtime, NativeTcpService) {
     let driver = tokio::runtime::Builder::new_multi_thread()
@@ -254,4 +271,37 @@ fn status_observes_peer_eof_without_consuming_socket_bytes() {
         .expect("EOF observed")
     });
     assert_eq!(status.bytes_available, 0);
+}
+
+#[test]
+fn closing_a_server_wakes_pending_accept_without_registry_lock() {
+    use std::future::Future;
+
+    let (_driver, service) = service();
+    let issuer = RuntimeTcpIssuer::Process;
+    let server = futures::executor::block_on(service.bind(
+        issuer.clone(),
+        RuntimeTcpBind {
+            address: "127.0.0.1".into(),
+            port: 0,
+            io_timeout: None,
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("bind");
+    let retained = registry::server(&service.registry, &issuer, &server.authority)
+        .expect("same issuer owns server");
+    let mut receiver = retained.closed.subscribe();
+    let mut changed = Box::pin(receiver.changed());
+    let probe = std::sync::Arc::new(LockCheckingWaker {
+        registry: std::sync::Arc::clone(&service.registry),
+        unlocked: AtomicBool::new(false),
+    });
+    let waker = std::task::Waker::from(std::sync::Arc::clone(&probe));
+    assert!(changed
+        .as_mut()
+        .poll(&mut std::task::Context::from_waker(&waker))
+        .is_pending());
+    assert!(registry::close(&service.registry, &issuer, &server.authority).expect("close"));
+    assert!(probe.unlocked.load(Ordering::SeqCst));
 }
