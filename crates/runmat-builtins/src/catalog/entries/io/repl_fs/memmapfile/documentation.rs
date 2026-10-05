@@ -1,6 +1,6 @@
 use crate::*;
 
-const SAMPLE: &[BuiltinFilesystemEntry] = &[BuiltinFilesystemEntry::File {
+pub(super) const SAMPLE: &[BuiltinFilesystemEntry] = &[BuiltinFilesystemEntry::File {
     relative_path: "samples.bin",
     content: BuiltinFixtureContent::Bytes(&[1, 0, 2, 0]),
 }];

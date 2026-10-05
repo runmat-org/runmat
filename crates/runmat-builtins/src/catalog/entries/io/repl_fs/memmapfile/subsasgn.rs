@@ -1,0 +1,54 @@
+mod contract;
+mod documentation;
+
+use crate::*;
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
+
+pub const MEMMAPFILE_SUBSASGN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    identity: BuiltinCatalogIdentity {
+        name: "memmapfile.subsasgn",
+    },
+    category: "io/repl_fs",
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &contract::DESCRIPTOR,
+    contract: BuiltinContractDeclaration {
+        maturity: BuiltinContractMaturity::Incomplete,
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
+            super::method_inference::subsasgn,
+        )),
+        compatibility: BuiltinCompatibility::RunMat,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        purity: BuiltinPurity::Impure,
+        semantic_kind: BuiltinSemanticKind::Filesystem,
+        workspace_effect: None,
+        environment_effect: None,
+        effects: &[
+            EffectKind::FilesystemRead,
+            EffectKind::FilesystemWrite,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+            EffectKind::Unknown,
+        ],
+        capabilities: &[CapabilityRequirement::Filesystem],
+    },
+    placement: BuiltinPlacementContract {
+        preparation: BuiltinOperandPreparation::RuntimeOwned,
+        portability: BuiltinPortability::NativeAndWasm,
+        accelerator: BuiltinAcceleratorPolicy::Forbidden,
+        residency: BuiltinResidencyPolicy::Host,
+        fusion: BuiltinFusionPolicy::Boundary,
+        distributed: BuiltinDistributedPolicy::Unsupported,
+    },
+    link: BuiltinLinkContract {
+        reachability: BuiltinReachability::Always,
+        policy: BuiltinLinkPolicy::PortableRuntime,
+        execution_stack: ExecutionStackRequirement::Any,
+        artifact_dependencies: &[],
+    },
+    bindings: &REQUIRED_DEFAULT_BINDING,
+    extensions: &[],
+    integer_capabilities: &contract::INTEGER_CAPABILITIES,
+    integer_audit: None,
+    suppress_auto_output: false,
+};

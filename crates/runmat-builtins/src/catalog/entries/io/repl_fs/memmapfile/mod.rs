@@ -2,6 +2,10 @@ mod contract;
 mod documentation;
 mod entry;
 mod inference;
+mod method_contract;
+mod method_inference;
+mod subsasgn;
+mod subsref;
 
 pub use contract::{
     MEMMAPFILE_CLASS, MEMMAPFILE_DESCRIPTOR, MEMMAPFILE_ERROR_INVALID_CALL,
@@ -12,3 +16,5 @@ pub use contract::{
     MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
 };
 pub use entry::MEMMAPFILE_CATALOG_ENTRY;
+pub use subsasgn::MEMMAPFILE_SUBSASGN_CATALOG_ENTRY;
+pub use subsref::MEMMAPFILE_SUBSREF_CATALOG_ENTRY;
