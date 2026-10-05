@@ -8,11 +8,17 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
+#[cfg(test)]
+#[path = "user_functions/test_support.rs"]
+pub mod test_support;
+
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>>>>;
 pub type DynamicFunctionLoadFuture =
     Pin<Box<dyn Future<Output = Option<Result<ValueSequence, RuntimeError>>>>>;
 pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
+pub type BoundFunctionInvoker =
+    dyn Fn(runmat_value::BoundFunctionBinding, &[Value], usize) -> UserFunctionFuture;
 #[derive(Debug, Clone)]
 pub struct ExternalFunctionCall {
     pub function: usize,
@@ -26,6 +32,10 @@ pub type LexicalFunctionFuture =
 pub type LexicalFunctionInvoker =
     dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
+/// The selected executable registry provides exact facts for values created
+/// inside the current call. It is separate from the published portable-origin
+/// catalog, so retired local bodies never become name/transfer authority.
+pub type ExecutionSourceResolver = dyn Fn(usize) -> Option<SourceFunctionInfo>;
 
 /// The point in callable resolution at which a session-backed loader runs.
 ///
@@ -81,9 +91,20 @@ pub struct SourceFunctionInfo {
     pub role: runmat_types::FunctionSourceRole,
     /// Immutable source-program binding, not the session-local numeric ID.
     pub binding_origin: Option<runmat_execution::FunctionBindingOrigin>,
+    /// Opaque identity of the actual executable definition, not just its
+    /// name or session-local number.
+    pub definition_owners: Option<Vec<(usize, Arc<runmat_value::FunctionDefinitionOwner>)>>,
 }
 
 pub fn source_function_for(function: usize) -> Option<SourceFunctionInfo> {
+    let execution_resolver = if let Some(state) = active_state() {
+        state.call.borrow().execution_source_resolver.clone()
+    } else {
+        EXECUTION_SOURCE_RESOLVER.with(|slot| slot.borrow().clone())
+    };
+    if let Some(resolver) = execution_resolver {
+        return resolver(function);
+    }
     if let Some(state) = active_state() {
         return state
             .call
@@ -131,8 +152,60 @@ pub fn bound_function_handle(name: String, function: usize) -> Value {
     Value::BoundFunctionHandle {
         name,
         function,
+        authority: bound_function_authority_for(function),
         source_role,
         source_file: source_file_for(function),
+    }
+}
+
+/// Issue local execution authority from the exact published definition. A
+/// portable-only catalog can issue an immutable origin, but a missing catalog
+/// never fabricates authority from a display name or numeric function ID.
+pub fn bound_function_authority_for(function: usize) -> runmat_value::BoundFunctionAuthority {
+    use runmat_value::{BoundFunctionAuthority, FunctionDefinitionOwner, LocalExport};
+
+    let info = source_function_for(function);
+    if let Some(owners) = info
+        .as_ref()
+        .and_then(|info| info.definition_owners.as_ref())
+    {
+        let Some(((root_function, owner), dependencies)) = owners.split_first() else {
+            return dead_bound_authority(function);
+        };
+        if *root_function != function {
+            return dead_bound_authority(function);
+        }
+        let export = info
+            .as_ref()
+            .and_then(|info| info.binding_origin)
+            .map_or(LocalExport::Ephemeral, LocalExport::Exact);
+        let issuer = active_state().map_or_else(std::sync::Weak::new, |state| {
+            Arc::downgrade(&state.session_lease)
+        });
+        return BoundFunctionAuthority::local(
+            issuer,
+            FunctionDefinitionOwner::issue(owner, function),
+            dependencies
+                .iter()
+                .map(|(id, owner)| FunctionDefinitionOwner::issue(owner, *id))
+                .collect(),
+            export,
+        );
+    }
+    if let Some(origin) = info.and_then(|info| info.binding_origin) {
+        return BoundFunctionAuthority::portable(origin);
+    }
+    dead_bound_authority(function)
+}
+
+fn dead_bound_authority(function: usize) -> runmat_value::BoundFunctionAuthority {
+    runmat_value::BoundFunctionAuthority::unavailable(function)
+}
+
+pub fn bound_function_binding_for(function: usize) -> runmat_value::BoundFunctionBinding {
+    runmat_value::BoundFunctionBinding {
+        function,
+        authority: bound_function_authority_for(function),
     }
 }
 
@@ -148,6 +221,7 @@ pub fn source_file_for(function: usize) -> Option<String> {
 #[derive(Debug, Clone)]
 pub struct CallableRequest {
     identity: CallableIdentity,
+    bound: Option<runmat_value::BoundFunctionBinding>,
     fallback_policy: CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
@@ -158,6 +232,22 @@ impl CallableRequest {
     pub fn semantic(function: usize, args: Vec<Value>, requested_outputs: usize) -> Self {
         Self {
             identity: CallableIdentity::BoundFunction(runmat_types::FunctionId(function)),
+            bound: None,
+            fallback_policy: CallableFallbackPolicy::None,
+            args,
+            requested_outputs,
+            function_input_callsite: None,
+        }
+    }
+
+    pub fn bound(
+        binding: runmat_value::BoundFunctionBinding,
+        args: Vec<Value>,
+        requested_outputs: usize,
+    ) -> Self {
+        Self {
+            identity: CallableIdentity::BoundFunction(runmat_types::FunctionId(binding.function)),
+            bound: Some(binding),
             fallback_policy: CallableFallbackPolicy::None,
             args,
             requested_outputs,
@@ -173,6 +263,7 @@ impl CallableRequest {
     ) -> Self {
         Self {
             identity,
+            bound: None,
             fallback_policy,
             args,
             requested_outputs,
@@ -192,6 +283,8 @@ impl CallableRequest {
 runmat_thread_local! {
     static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Rc<FunctionInvoker>>> =
         const { RefCell::new(None) };
+    static BOUND_FUNCTION_INVOKER: RefCell<Option<Rc<BoundFunctionInvoker>>> =
+        const { RefCell::new(None) };
     static EXTERNAL_FUNCTION_INVOKER: RefCell<Option<Rc<ExternalFunctionInvoker>>> =
         const { RefCell::new(None) };
     static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Rc<LexicalFunctionInvoker>>> =
@@ -200,12 +293,19 @@ runmat_thread_local! {
         const { RefCell::new(None) };
     static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
         const { RefCell::new(None) };
+    static EXECUTION_SOURCE_RESOLVER: RefCell<Option<Rc<ExecutionSourceResolver>>> =
+        const { RefCell::new(None) };
     static ACTIVE_SEMANTIC_FUNCTION_STACK: RefCell<Vec<usize>> =
         const { RefCell::new(Vec::new()) };
 }
 
 pub struct FunctionInvokerGuard {
     previous: Option<Rc<FunctionInvoker>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
+
+pub struct BoundFunctionInvokerGuard {
+    previous: Option<Rc<BoundFunctionInvoker>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
@@ -229,6 +329,11 @@ pub struct SourceFunctionCatalogGuard {
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
+pub struct ExecutionSourceResolverGuard {
+    previous: Option<Rc<ExecutionSourceResolver>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
+
 pub struct ActiveSemanticFunctionGuard {
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
@@ -240,6 +345,19 @@ impl Drop for FunctionInvokerGuard {
             state.call.borrow_mut().semantic_invoker = previous;
         } else {
             SEMANTIC_FUNCTION_INVOKER.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
+    }
+}
+
+impl Drop for BoundFunctionInvokerGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().bound_invoker = previous;
+        } else {
+            BOUND_FUNCTION_INVOKER.with(|slot| {
                 *slot.borrow_mut() = previous;
             });
         }
@@ -298,6 +416,17 @@ impl Drop for SourceFunctionCatalogGuard {
     }
 }
 
+impl Drop for ExecutionSourceResolverGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().execution_source_resolver = previous;
+        } else {
+            EXECUTION_SOURCE_RESOLVER.with(|slot| *slot.borrow_mut() = previous);
+        }
+    }
+}
+
 impl Drop for ActiveSemanticFunctionGuard {
     fn drop(&mut self) {
         if let Some(state) = &self.state {
@@ -324,6 +453,26 @@ pub fn install_local_semantic_function_invoker(
     invoker: Rc<FunctionInvoker>,
 ) -> FunctionInvokerGuard {
     replace_semantic_function_invoker(Some(invoker))
+}
+
+/// Installs the exact-definition route. The ordinary numeric invoker never
+/// receives a bound value and cannot confer authority on one.
+pub fn install_local_bound_function_invoker(
+    invoker: Rc<BoundFunctionInvoker>,
+) -> BoundFunctionInvokerGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(&mut state.call.borrow_mut().bound_invoker, Some(invoker));
+        return BoundFunctionInvokerGuard {
+            previous,
+            state: Some(state),
+        };
+    }
+    let previous = BOUND_FUNCTION_INVOKER
+        .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), Some(invoker)));
+    BoundFunctionInvokerGuard {
+        previous,
+        state: None,
+    }
 }
 
 pub fn clear_semantic_function_invoker() -> FunctionInvokerGuard {
@@ -446,6 +595,27 @@ pub fn install_source_function_catalog(
     }
 }
 
+pub fn install_execution_source_resolver(
+    resolver: Option<Rc<ExecutionSourceResolver>>,
+) -> ExecutionSourceResolverGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(
+            &mut state.call.borrow_mut().execution_source_resolver,
+            resolver,
+        );
+        return ExecutionSourceResolverGuard {
+            previous,
+            state: Some(state),
+        };
+    }
+    let previous =
+        EXECUTION_SOURCE_RESOLVER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
+    ExecutionSourceResolverGuard {
+        previous,
+        state: None,
+    }
+}
+
 pub fn push_active_semantic_function(function: usize) -> ActiveSemanticFunctionGuard {
     if let Some(state) = active_state() {
         state.call.borrow_mut().active_functions.push(function);
@@ -462,6 +632,13 @@ pub fn current_semantic_function_invoker() -> Option<Rc<FunctionInvoker>> {
         return state.call.borrow().semantic_invoker.clone();
     }
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
+}
+
+pub fn current_bound_function_invoker() -> Option<Rc<BoundFunctionInvoker>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().bound_invoker.clone();
+    }
+    BOUND_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_external_function_invoker() -> Option<Rc<ExternalFunctionInvoker>> {
@@ -505,6 +682,7 @@ pub fn inherit_legacy_call_environment(context: &crate::context::RuntimeContext)
     call.lexical_invoker = LEXICAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
     call.semantic_resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone());
     call.source_functions = SOURCE_FUNCTION_CATALOG.with(|slot| slot.borrow().clone());
+    call.execution_source_resolver = EXECUTION_SOURCE_RESOLVER.with(|slot| slot.borrow().clone());
     call.active_functions = ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().clone());
 }
 
@@ -527,6 +705,25 @@ pub async fn try_call_semantic_function(
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
     Some(invoker(function, args, requested_outputs).await)
+}
+
+pub async fn try_call_bound_function(
+    binding: runmat_value::BoundFunctionBinding,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Option<Result<ValueSequence, RuntimeError>> {
+    if matches!(
+        &binding.authority,
+        runmat_value::BoundFunctionAuthority::Local { .. }
+    ) && !binding.authority.admits_local(&current_session_lease())
+    {
+        return Some(Err(crate::runtime_error::semantic_error(
+            "UnavailableBoundFunction",
+            "bound function belongs to another or ended session",
+        )));
+    }
+    let invoker = current_bound_function_invoker()?;
+    Some(invoker(binding, args, requested_outputs).await)
 }
 
 pub async fn try_call_external_function(
@@ -635,17 +832,31 @@ fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
     crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
 }
 
+pub(crate) fn current_session_lease() -> std::sync::Weak<()> {
+    active_state().map_or_else(std::sync::Weak::new, |state| {
+        Arc::downgrade(&state.session_lease)
+    })
+}
+
 pub async fn try_call_semantic_descriptor(
     request: CallableRequest,
 ) -> Option<Result<ValueSequence, RuntimeError>> {
     let CallableRequest {
         identity,
+        bound,
         fallback_policy,
         args,
         requested_outputs,
         function_input_callsite,
     } = request;
     if let CallableIdentity::BoundFunction(function) = identity {
+        if let Some(binding) = bound {
+            return crate::callsite::with_function_input_callsite(
+                function_input_callsite,
+                try_call_bound_function(binding, &args, requested_outputs),
+            )
+            .await;
+        }
         return crate::callsite::with_function_input_callsite(
             function_input_callsite,
             try_call_semantic_function(function.0, &args, requested_outputs),
