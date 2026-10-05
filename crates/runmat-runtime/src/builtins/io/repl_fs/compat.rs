@@ -931,9 +931,7 @@ mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let _provider_guard = vfs::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_memmapfile_test.bin");
-        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(
-            std::env::temp_dir(),
-        ));
+        let provider = Arc::new(vfs::MemoryFsProvider::with_current_dir(std::env::temp_dir()));
         provider.write_project_path(&path, &[1u8, 0, 2, 0]).unwrap();
         let _selected_provider = vfs::replace_provider(provider);
         let shape = Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
