@@ -122,7 +122,7 @@ impl ForeignResourceRelease for Release {
     }
 }
 
-pub(super) fn issue(
+pub(in crate::builtins::io::repl_fs::compat) fn issue(
     runtime: Option<&RuntimeContext>,
     backing: CapturedMappedBacking,
 ) -> Result<ForeignRef, crate::RuntimeError> {

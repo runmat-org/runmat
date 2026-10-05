@@ -5,7 +5,6 @@ use super::super::{member, Property};
 use super::plan::plan;
 use super::{checkpoint, empty_value, mapped_error, receiver, scalar_bytes};
 use crate::context::RuntimeContext;
-use crate::execution::CpuCooperationBudget;
 use crate::object::indexing::ObjectSubscriptPath;
 use crate::BuiltinResult;
 use runmat_builtins::{MEMMAPFILE_ERROR_READ_FAILED, MEMMAPFILE_ERROR_WRITE_FAILED};
@@ -15,7 +14,7 @@ use std::io::{self, ErrorKind};
 
 const CHUNK: usize = 4096;
 
-pub(super) async fn read(
+pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn read(
     runtime: Option<&RuntimeContext>,
     receiver_value: Value,
     path: ObjectSubscriptPath,
@@ -121,7 +120,7 @@ pub(super) async fn read(
     Ok(value)
 }
 
-pub(super) async fn write(
+pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
     runtime: Option<&RuntimeContext>,
     receiver_value: Value,
     path: ObjectSubscriptPath,

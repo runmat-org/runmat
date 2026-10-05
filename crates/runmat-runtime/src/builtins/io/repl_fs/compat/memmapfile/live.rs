@@ -25,7 +25,7 @@ const SUBSASGN: &str = "memmapfile.subsasgn";
 static CLASS: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(MEMMAPFILE_CLASS);
 
-pub(super) fn ensure_class_registered() {
+pub(in crate::builtins::io::repl_fs::compat) fn ensure_class_registered() {
     CLASS.ensure(|| {
         let mut properties = HashMap::new();
         for name in ["Filename", "Writable", "Offset", "Format", "Repeat", "Data"] {

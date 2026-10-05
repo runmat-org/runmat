@@ -69,7 +69,8 @@ pub(super) async fn plan(
             .first()
             .is_some_and(|step| step.kind() == ObjectIndexKind::Paren)
         {
-            let planning = index_plan(&[records, 1], &steps[0], assignment);
+            let shape = [records, 1];
+            let planning = index_plan(&shape, &steps[0], assignment);
             let planned = if let Some(budget) = budget {
                 budget
                     .await_cancellable(planning)
