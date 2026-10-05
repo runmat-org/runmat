@@ -15,27 +15,18 @@ pub(super) fn owners(
 ) -> Option<Vec<(FunctionId, Arc<FunctionDefinitionOwner>)>> {
     let mut visited = HashSet::new();
     let mut owners = Vec::new();
-    collect(registry, function, &mut visited, &mut owners)?;
-    Some(owners)
-}
-
-fn collect(
-    registry: &FunctionRegistry,
-    function: FunctionId,
-    visited: &mut HashSet<FunctionId>,
-    owners: &mut Vec<(FunctionId, Arc<FunctionDefinitionOwner>)>,
-) -> Option<()> {
-    if !visited.insert(function) {
-        return Some(());
-    }
-    let body = registry.get(function)?;
-    owners.push((function, Arc::clone(&body.definition_owner)));
-    for instruction in &body.instructions {
-        for dependency in static_dependencies(instruction) {
-            collect(registry, dependency, visited, owners)?;
+    let mut pending = vec![function];
+    while let Some(function) = pending.pop() {
+        if !visited.insert(function) {
+            continue;
+        }
+        let body = registry.get(function)?;
+        owners.push((function, Arc::clone(&body.definition_owner)));
+        for instruction in &body.instructions {
+            visit_static_dependencies(instruction, |dependency| pending.push(dependency));
         }
     }
-    Some(())
+    Some(owners)
 }
 
 fn identity_dependency(identity: &CallableIdentity) -> Option<FunctionId> {
@@ -51,20 +42,24 @@ fn identity_dependency(identity: &CallableIdentity) -> Option<FunctionId> {
     }
 }
 
-fn subscript_dependencies(steps: &[BytecodeSubscriptStep], output: &mut Vec<FunctionId>) {
+fn visit_subscript_dependencies(
+    steps: &[BytecodeSubscriptStep],
+    mut visit: impl FnMut(FunctionId),
+) {
     for step in steps {
         if let BytecodeSubscriptStep::DottedInvoke {
             semantic_fallback: Some(identity),
             ..
         } = step
         {
-            output.extend(identity_dependency(identity));
+            if let Some(dependency) = identity_dependency(identity) {
+                visit(dependency);
+            }
         }
     }
 }
 
-fn static_dependencies(instruction: &Instr) -> Vec<FunctionId> {
-    let mut output = Vec::new();
+fn visit_static_dependencies(instruction: &Instr, mut visit: impl FnMut(FunctionId)) {
     match instruction {
         Instr::CreateSemanticClosure(function, ..)
         | Instr::CreateBoundFunctionHandle(function, ..)
@@ -77,7 +72,7 @@ fn static_dependencies(instruction: &Instr) -> Vec<FunctionId> {
         | Instr::CallSemanticNestedFunctionMulti { function, .. }
         | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
         | Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
-            output.push(*function);
+            visit(*function);
         }
         Instr::CallFunctionMulti { identity, .. }
         | Instr::CallFunctionMultiUsingOutputSlot { identity, .. }
@@ -88,17 +83,18 @@ fn static_dependencies(instruction: &Instr) -> Vec<FunctionId> {
         | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { identity, .. }
         | Instr::CallMethodOrMemberIndexMulti { identity, .. }
         | Instr::CallMethodOrMemberIndexExpandMultiOutput { identity, .. } => {
-            output.extend(identity_dependency(identity));
+            if let Some(dependency) = identity_dependency(identity) {
+                visit(dependency);
+            }
         }
         Instr::ReadSubscriptPath { steps, .. } | Instr::CaptureSubscriptPath { steps, .. } => {
-            subscript_dependencies(steps, &mut output);
+            visit_subscript_dependencies(steps, &mut visit);
         }
         Instr::BeginSubscriptEndReceiver { prefix } => {
-            subscript_dependencies(prefix, &mut output);
+            visit_subscript_dependencies(prefix, &mut visit);
         }
         _ => {}
     }
-    output
 }
 
 #[cfg(test)]
@@ -153,5 +149,35 @@ mod tests {
         assert!(registry
             .definition_dependency_owners(FunctionId(1))
             .is_none());
+    }
+
+    #[test]
+    fn long_dependency_chain_and_cycle_are_bounded_by_the_worklist() {
+        const COUNT: usize = 4096;
+        let functions = (0..COUNT)
+            .map(|index| {
+                let dependency = (index + 1) % COUNT;
+                (
+                    FunctionId(index),
+                    FunctionBytecode {
+                        function: FunctionId(index),
+                        instructions: vec![Instr::CallSemanticFunctionMulti(
+                            FunctionId(dependency),
+                            0,
+                            1,
+                        )],
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        let registry = FunctionRegistry::new(functions);
+        assert_eq!(
+            registry
+                .definition_dependency_owners(FunctionId(0))
+                .unwrap()
+                .len(),
+            COUNT
+        );
     }
 }
