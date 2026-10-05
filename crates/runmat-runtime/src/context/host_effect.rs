@@ -35,7 +35,7 @@ pub use managed_ledger::{
 };
 pub use stage::{
     admit_host_effect_stage, select_host_effect_after_stage, try_admit_host_effect_stage,
-    HostEffectAllocationError, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
+    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
     HostEffectOutputHeadroom, HostEffectStageAdmission, HostEffectStageEvidence,
     HostEffectStagePermit, HostEffectStageReservation,
 };

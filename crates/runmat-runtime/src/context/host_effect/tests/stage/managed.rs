@@ -303,24 +303,29 @@ fn selected_receipt(runtime: &RuntimeContext) -> HostEffectReceipt {
 
 #[test]
 fn exact_byte_owner_uses_public_stage_permit_and_retains_charge_until_drop() {
-    let ledger = ManagedHostEffectLedger::new(8);
-    let (runtime, _) = managed_runtime(&ledger, 8);
+    let ledger = ManagedHostEffectLedger::new(64);
+    let (runtime, _) = managed_runtime(&ledger, 64);
     let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
         .expect("precharged stage");
+    let metadata = stage.live_claim_metadata_bytes();
+    let total = 8 + metadata as u64;
+    stage
+        .promote_scan_envelope(total)
+        .expect("claim metadata envelope");
     let view = stage.reservation();
     let mut bytes = stage
         .allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, 8)
         .expect("exact stage-owned bytes");
     bytes.append(b"12345678").expect("within admitted capacity");
     assert_eq!(bytes.as_bytes(), b"12345678");
-    assert_eq!(ledger.snapshot().live_claimed_bytes, 8);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, total);
     drop(stage);
     assert!(!view.is_current());
     assert!(matches!(
         view.reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 1),
         Err(HostEffectAllocationError::InvalidInvocation)
     ));
-    assert_eq!(ledger.snapshot().live_reserved_bytes, 8);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, total);
     drop(bytes);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
@@ -328,12 +333,17 @@ fn exact_byte_owner_uses_public_stage_permit_and_retains_charge_until_drop() {
 
 #[test]
 fn exact_byte_stage_admission_rejects_cancelled_and_revoked_authority() {
-    let ledger = ManagedHostEffectLedger::new(8);
-    let (runtime, _) = managed_runtime(&ledger, 8);
+    let ledger = ManagedHostEffectLedger::new(64);
+    let (runtime, _) = managed_runtime(&ledger, 64);
     let cancellation = CancellationSource::new();
     let runtime = runtime.with_cancellation_token(cancellation.token());
     let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
         .expect("precharged stage");
+    let metadata = stage.live_claim_metadata_bytes() as u64;
+    let total = 8 + metadata;
+    stage
+        .promote_scan_envelope(total)
+        .expect("claim metadata envelope");
     let bytes = stage
         .allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, 4)
         .expect("live exact bytes");
@@ -342,15 +352,18 @@ fn exact_byte_stage_admission_rejects_cancelled_and_revoked_authority() {
         stage.allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, 1),
         Err(HostEffectAllocationError::Cancelled)
     ));
-    assert_eq!(ledger.snapshot().live_claimed_bytes, 4);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 4 + metadata);
     drop(stage);
     drop(bytes);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 
-    let revoked_ledger = ManagedHostEffectLedger::new(8);
-    let (runtime, _) = managed_runtime(&revoked_ledger, 8);
+    let revoked_ledger = ManagedHostEffectLedger::new(64);
+    let (runtime, _) = managed_runtime(&revoked_ledger, 64);
     let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
         .expect("second precharged stage");
+    stage
+        .promote_scan_envelope(total)
+        .expect("claim metadata envelope");
     let bytes = stage
         .allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, 4)
         .expect("second live exact bytes");
@@ -359,7 +372,7 @@ fn exact_byte_stage_admission_rejects_cancelled_and_revoked_authority() {
         stage.allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, 1),
         Err(HostEffectAllocationError::Revoked)
     ));
-    assert_eq!(revoked_ledger.snapshot().live_claimed_bytes, 4);
+    assert_eq!(revoked_ledger.snapshot().live_claimed_bytes, 4 + metadata);
     drop(stage);
     drop(bytes);
     assert_eq!(revoked_ledger.snapshot().live_reserved_bytes, 0);
@@ -372,9 +385,14 @@ fn finished_receipt_closes_exact_byte_stage_view_without_releasing_live_buffer()
     let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
         .expect("precharged stage");
     let view = stage.reservation();
-    let bytes = stage
-        .allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, 4)
-        .expect("live exact bytes");
+    let claim = stage
+        .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 4)
+        .expect("legacy shared temporary claim");
+    let bytes = super::super::super::ExactHostEffectBytes::new(
+        4,
+        super::super::super::HostEffectLiveAllocationClaim::Shared(claim),
+    )
+    .expect("live exact bytes");
     let receipt = select_host_effect_after_stage(
         &runtime,
         request(HostEffectOutput::ReturnedValue),

@@ -54,7 +54,12 @@ pub(super) async fn read_default_staged(
     // source line, the first 32 sampled lines, and one quoted-field scratch.
     // Each holds at most bytes from this opened extent. The sample owner is
     // dropped before replay; replay needs only line and field scratch.
-    let scan_buffers = extent.checked_mul(3).ok_or_else(matrix_overflow)?;
+    let claim_bytes =
+        u64::try_from(stage.live_claim_metadata_bytes()).map_err(|_| matrix_overflow())?;
+    let scan_buffers = extent
+        .checked_add(claim_bytes)
+        .and_then(|bytes| bytes.checked_mul(3))
+        .ok_or_else(matrix_overflow)?;
     let promoted = stage
         .reserved_bytes()
         .checked_add(scan_buffers)

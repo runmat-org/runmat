@@ -139,6 +139,24 @@ impl HostEffectStageReservation for PooledStageSlot {
         self.reservation.reserve_live_exact(kind, bytes)
     }
 
+    fn reserve_live_exact_claim(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        let _mutation = self.mutation.lock().expect("managed stage slot lock");
+        if !self.live_reservation.load(Ordering::Acquire)
+            || !self.active_epoch.load(Ordering::Acquire)
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        self.reservation.reserve_live_exact_claim(kind, bytes)
+    }
+
+    fn live_claim_metadata_bytes(&self) -> usize {
+        self.reservation.live_claim_metadata_bytes()
+    }
+
     fn reserve_output_headroom(
         &self,
         bytes: u64,

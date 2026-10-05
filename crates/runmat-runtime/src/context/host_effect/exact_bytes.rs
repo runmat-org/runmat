@@ -1,7 +1,9 @@
 //! Exact-capacity, stage-charged temporary bytes. This is an allocation owner,
 //! not a workload peak certificate or a replacement for pre-open admission.
 
-use super::{HostEffectAllocationError, HostEffectLiveAllocationReservation};
+use super::{
+    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationReservation,
+};
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -10,7 +12,7 @@ pub struct ExactHostEffectBytes {
     pointer: NonNull<u8>,
     length: usize,
     capacity: usize,
-    _claim: Arc<dyn HostEffectLiveAllocationReservation>,
+    _claim: HostEffectLiveAllocationClaim,
 }
 
 impl ExactHostEffectBytes {
@@ -19,12 +21,16 @@ impl ExactHostEffectBytes {
         #[derive(Debug)]
         struct TestClaim;
         impl HostEffectLiveAllocationReservation for TestClaim {}
-        Self::new(capacity, Arc::new(TestClaim)).expect("test exact byte buffer")
+        Self::new(
+            capacity,
+            HostEffectLiveAllocationClaim::Shared(Arc::new(TestClaim)),
+        )
+        .expect("test exact byte buffer")
     }
 
     pub(super) fn new(
         capacity: usize,
-        claim: Arc<dyn HostEffectLiveAllocationReservation>,
+        claim: HostEffectLiveAllocationClaim,
     ) -> Result<Self, HostEffectAllocationError> {
         Self::new_with(capacity, claim, |layout| {
             // SAFETY: the checked layout and matching release remain owned by
@@ -35,7 +41,7 @@ impl ExactHostEffectBytes {
 
     fn new_with(
         capacity: usize,
-        claim: Arc<dyn HostEffectLiveAllocationReservation>,
+        claim: HostEffectLiveAllocationClaim,
         allocate: impl FnOnce(Layout) -> *mut u8,
     ) -> Result<Self, HostEffectAllocationError> {
         let layout =
@@ -133,7 +139,8 @@ mod tests {
         let claim = stage
             .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 8)
             .expect("exact claim");
-        let mut buffer = ExactHostEffectBytes::new(8, claim).expect("exact allocation");
+        let mut buffer = ExactHostEffectBytes::new(8, HostEffectLiveAllocationClaim::Shared(claim))
+            .expect("exact allocation");
         assert_eq!(buffer.capacity(), 8);
         assert_eq!(ledger.snapshot().live_claimed_bytes, 8);
         buffer.append(b"ab").expect("first append");
@@ -160,7 +167,9 @@ mod tests {
         #[derive(Debug)]
         struct Claim;
         impl HostEffectLiveAllocationReservation for Claim {}
-        let mut empty = ExactHostEffectBytes::new(0, Arc::new(Claim)).expect("empty owner");
+        let mut empty =
+            ExactHostEffectBytes::new(0, HostEffectLiveAllocationClaim::Shared(Arc::new(Claim)))
+                .expect("empty owner");
         empty.append(b"").expect("empty append");
         assert_eq!(empty.as_bytes(), b"");
         assert_eq!(
@@ -168,7 +177,10 @@ mod tests {
             Err(HostEffectAllocationError::ExceedsStageEnvelope)
         );
         assert!(matches!(
-            ExactHostEffectBytes::new(usize::MAX, Arc::new(Claim)),
+            ExactHostEffectBytes::new(
+                usize::MAX,
+                HostEffectLiveAllocationClaim::Shared(Arc::new(Claim))
+            ),
             Err(HostEffectAllocationError::Overflow)
         ));
     }
@@ -181,7 +193,9 @@ mod tests {
             .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 4)
             .expect("claim");
         assert!(matches!(
-            ExactHostEffectBytes::new_with(4, claim, |_| std::ptr::null_mut()),
+            ExactHostEffectBytes::new_with(4, HostEffectLiveAllocationClaim::Shared(claim), |_| {
+                std::ptr::null_mut()
+            }),
             Err(HostEffectAllocationError::AllocationFailed)
         ));
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);

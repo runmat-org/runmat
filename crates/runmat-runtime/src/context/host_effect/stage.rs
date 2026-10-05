@@ -45,6 +45,12 @@ impl std::error::Error for HostEffectAllocationError {}
 /// The exact claim owner is held through the buffer's actual lifetime.
 pub trait HostEffectLiveAllocationReservation: std::fmt::Debug + Send + Sync {}
 
+#[derive(Debug)]
+pub enum HostEffectLiveAllocationClaim {
+    Shared(Arc<dyn HostEffectLiveAllocationReservation>),
+    Owned(Box<dyn HostEffectLiveAllocationReservation>),
+}
+
 /// Owns output capacity selected for one whole call. An exact returned-value
 /// allocation transfers its bytes out of this precharge into its own lifetime.
 pub trait HostEffectOutputHeadroom: std::fmt::Debug + Send + Sync {
@@ -95,6 +101,17 @@ pub trait HostEffectStageReservation: Send + Sync {
         _bytes: usize,
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
         Err(HostEffectAllocationError::Unavailable)
+    }
+    fn reserve_live_exact_claim(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        self.reserve_live_exact(kind, bytes)
+            .map(HostEffectLiveAllocationClaim::Shared)
+    }
+    fn live_claim_metadata_bytes(&self) -> usize {
+        0
     }
     /// Atomically precharge selected output headroom before the receipt is
     /// returned. Exact allocations consume this headroom without a second
@@ -269,8 +286,12 @@ impl HostEffectStagePermit {
         kind: HostEffectLiveAllocationKind,
         capacity: usize,
     ) -> Result<super::ExactHostEffectBytes, HostEffectAllocationError> {
-        let claim = self.reserve_live_exact(kind, capacity)?;
+        let claim = self.reserve_live_exact_claim(kind, capacity)?;
         super::ExactHostEffectBytes::new(capacity, claim)
+    }
+
+    pub fn live_claim_metadata_bytes(&self) -> usize {
+        self.reservation.live_claim_metadata_bytes()
     }
 
     pub fn filesystem(&self) -> &Arc<dyn runmat_filesystem::FsProvider> {
@@ -315,6 +336,45 @@ impl HostEffectStagePermit {
             return Err(HostEffectAllocationError::Revoked);
         }
         let claim = self.reservation.reserve_live_exact(kind, bytes)?;
+        if self.cancellation.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        if !self.active_epoch.load(Ordering::Acquire) {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        Ok(claim)
+    }
+
+    fn reserve_live_exact_claim(
+        &self,
+        kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        if !self.active_epoch.load(Ordering::Acquire) {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        if !self
+            .cancellation
+            .same_generation(&self.runtime.cancellation())
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        if self.cancellation.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.reservation.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let claim = self.reservation.reserve_live_exact_claim(kind, bytes)?;
         if self.cancellation.is_cancelled() {
             return Err(HostEffectAllocationError::Cancelled);
         }

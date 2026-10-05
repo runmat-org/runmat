@@ -2,8 +2,8 @@
 //! A host adapter must still certify and install its complete-call bounds.
 
 use super::{
-    HostEffectAllocationError, HostEffectLiveAllocationKind, HostEffectLiveAllocationReservation,
-    HostEffectOutputHeadroom, HostEffectStageReservation,
+    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind,
+    HostEffectLiveAllocationReservation, HostEffectOutputHeadroom, HostEffectStageReservation,
 };
 use runmat_value::{ExactHostAllocationReservation, ExactHostNumericAllocationError};
 use std::fmt;
@@ -141,6 +141,41 @@ pub struct ManagedHostEffectStageReservation {
 }
 
 impl ManagedHostEffectStageReservation {
+    fn claim_temporary(
+        &self,
+        bytes: usize,
+        metadata_bytes: usize,
+    ) -> Result<TemporaryClaim, HostEffectAllocationError> {
+        let bytes = bytes
+            .checked_add(metadata_bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        let bytes = u64::try_from(bytes).map_err(|_| HostEffectAllocationError::Overflow)?;
+        let mut temporary = self.inner.temporary.lock().expect("temporary ledger lock");
+        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
+        if !ledger.snapshot.current {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let next = temporary
+            .live_bytes
+            .checked_add(bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        if next > self.inner.reserved_bytes.load(Ordering::Acquire) {
+            return Err(HostEffectAllocationError::ExceedsStageEnvelope);
+        }
+        let claimed = ledger
+            .snapshot
+            .live_claimed_bytes
+            .checked_add(bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        temporary.live_bytes = next;
+        ledger.snapshot.live_claimed_bytes = claimed;
+        ledger.snapshot.peak_claimed_bytes = ledger.snapshot.peak_claimed_bytes.max(claimed);
+        Ok(TemporaryClaim {
+            stage: self.inner.clone(),
+            bytes,
+        })
+    }
+
     fn retire_pooled_invocation(&self) {
         let mut temporary = self.inner.temporary.lock().expect("temporary ledger lock");
         let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
@@ -237,31 +272,21 @@ impl HostEffectStageReservation for ManagedHostEffectStageReservation {
         _kind: HostEffectLiveAllocationKind,
         bytes: usize,
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
-        let bytes = u64::try_from(bytes).map_err(|_| HostEffectAllocationError::Overflow)?;
-        let mut temporary = self.inner.temporary.lock().expect("temporary ledger lock");
-        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
-        if !ledger.snapshot.current {
-            return Err(HostEffectAllocationError::Revoked);
-        }
-        let next = temporary
-            .live_bytes
-            .checked_add(bytes)
-            .ok_or(HostEffectAllocationError::Overflow)?;
-        if next > self.inner.reserved_bytes.load(Ordering::Acquire) {
-            return Err(HostEffectAllocationError::ExceedsStageEnvelope);
-        }
-        let claimed = ledger
-            .snapshot
-            .live_claimed_bytes
-            .checked_add(bytes)
-            .ok_or(HostEffectAllocationError::Overflow)?;
-        temporary.live_bytes = next;
-        ledger.snapshot.live_claimed_bytes = claimed;
-        ledger.snapshot.peak_claimed_bytes = ledger.snapshot.peak_claimed_bytes.max(claimed);
-        Ok(Arc::new(TemporaryClaim {
-            stage: self.inner.clone(),
-            bytes,
-        }))
+        Ok(Arc::new(self.claim_temporary(bytes, 0)?))
+    }
+
+    fn reserve_live_exact_claim(
+        &self,
+        _kind: HostEffectLiveAllocationKind,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        Ok(HostEffectLiveAllocationClaim::Owned(Box::new(
+            self.claim_temporary(bytes, std::mem::size_of::<TemporaryClaim>())?,
+        )))
+    }
+
+    fn live_claim_metadata_bytes(&self) -> usize {
+        std::mem::size_of::<TemporaryClaim>()
     }
 
     fn reserve_output_headroom(
