@@ -5,7 +5,12 @@ use runmat_execution::{
     ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
     WholeWorkObservation, WholeWorkObservationOutcome,
 };
+use runmat_runtime::context::RuntimePlacementFeedbackSource;
 use runmat_runtime::context::RuntimePlacementService;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use super::*;
 
@@ -81,6 +86,70 @@ fn managed_selection_uses_one_precharged_slot_and_fences_late_invalidation() {
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 
+struct CountedReadyFeedback {
+    signature: PlacementSignature,
+    polls: Arc<AtomicUsize>,
+}
+
+impl RuntimePlacementFeedbackSource for CountedReadyFeedback {
+    fn signature(&self) -> &PlacementSignature {
+        &self.signature
+    }
+
+    fn take_ready(&mut self) -> Option<PlacementFeedback> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        Some(PlacementFeedback {
+            signature: self.signature.clone(),
+            candidate: "unrelated-provider".into(),
+            kind: ExecutionCandidateKind::ProviderOperation,
+            total_elapsed_ns: 11,
+            succeeded: true,
+        })
+    }
+}
+
+#[test]
+fn managed_selection_does_not_drain_unrelated_dynamic_feedback() {
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+
+    let ledger = ManagedHostEffectLedger::new(16 * 1024);
+    let session = PlacementSession::new_with_managed_observations(
+        PlacementSessionConfig::default(),
+        &ledger,
+        super::super::ManagedPlacementCapacity {
+            in_flight_slots: 1,
+            feedback_series: 1,
+            signature_bytes_per_series: 1024,
+        },
+    )
+    .expect("managed backing");
+    let route = request(vec![candidate(ExecutionCandidateKind::SharedRuntime)]);
+    let polls = Arc::new(AtomicUsize::new(0));
+    assert!(RuntimePlacementService::defer_feedback(
+        &session,
+        Box::new(CountedReadyFeedback {
+            signature: route.signature.clone(),
+            polls: polls.clone(),
+        }),
+    )
+    .is_ok());
+    let error = session
+        .select_whole_work_borrowed_managed(route.as_ref())
+        .err()
+        .expect("pending dynamic work is not accounted by managed route");
+    assert_eq!(error.code, "RunMat:Placement:InsufficientResourceEvidence");
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+    assert!(session.pending.has_sources());
+
+    RuntimePlacementService::drain_feedback(&session);
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+    let selected = session
+        .select_whole_work_borrowed_managed(route.as_ref())
+        .expect("managed selection after explicit ordinary drain");
+    drop(selected);
+    assert_eq!(session.state.borrow().feedback.len(), 1);
+}
+
 #[test]
 fn managed_completion_uses_preallocated_series_and_preserves_portable_profile() {
     use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
@@ -114,6 +183,7 @@ fn managed_completion_uses_preallocated_series_and_preserves_portable_profile() 
         &route.signature,
         candidate_digest,
         ExecutionCandidateKind::SharedRuntime,
+        true,
     );
     assert!(matches!(
         observed,

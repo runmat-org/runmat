@@ -15,6 +15,10 @@ pub(super) struct PendingFeedback {
 }
 
 impl PendingFeedback {
+    pub(super) fn has_sources(&self) -> bool {
+        self.draining.get() || !self.sources.borrow().is_empty()
+    }
+
     pub(super) fn push(
         &self,
         source: Box<dyn RuntimePlacementFeedbackSource>,

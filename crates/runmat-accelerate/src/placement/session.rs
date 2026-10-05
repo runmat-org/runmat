@@ -327,11 +327,13 @@ impl PlacementSession {
         signature: &PlacementSignature,
         candidate: Digest,
         kind: ExecutionCandidateKind,
+        drain_pending: bool,
     ) -> CandidateObservationEvidence {
-        self.observed_candidate_duration_key(
+        self.observed_candidate_duration_key_with_drain(
             signature,
             FeedbackCandidateKey::Canonical(candidate),
             kind,
+            drain_pending,
         )
     }
 
@@ -341,7 +343,19 @@ impl PlacementSession {
         candidate: FeedbackCandidateKey,
         kind: ExecutionCandidateKind,
     ) -> CandidateObservationEvidence {
-        self.drain_observations();
+        self.observed_candidate_duration_key_with_drain(signature, candidate, kind, true)
+    }
+
+    fn observed_candidate_duration_key_with_drain(
+        &self,
+        signature: &PlacementSignature,
+        candidate: FeedbackCandidateKey,
+        kind: ExecutionCandidateKind,
+        drain_pending: bool,
+    ) -> CandidateObservationEvidence {
+        if drain_pending {
+            self.drain_observations();
+        }
         let state = self.state.borrow();
         if let FeedbackCandidateKey::Canonical(candidate_digest) = candidate {
             if let Some(observation) = self.managed_feedback.as_ref().and_then(|pool| {
@@ -1026,7 +1040,8 @@ mod tests {
             session.observed_candidate_duration_digest(
                 &signature,
                 candidate,
-                ExecutionCandidateKind::SharedRuntime
+                ExecutionCandidateKind::SharedRuntime,
+                true,
             ),
         );
     }

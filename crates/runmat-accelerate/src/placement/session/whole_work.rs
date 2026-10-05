@@ -247,7 +247,16 @@ impl PlacementSession {
                 message: "placement cancelled before dispatch".into(),
             });
         }
-        self.drain_observations();
+        if managed {
+            if self.pending.has_sources() {
+                return Err(PlacementPlanError {
+                    code: "RunMat:Placement:InsufficientResourceEvidence",
+                    message: "pending ordinary placement feedback requires explicit drain before managed selection".into(),
+                });
+            }
+        } else {
+            self.drain_observations();
+        }
         let mut admitted: SmallVec<[Admitted<'_>; 1]> = SmallVec::new();
         let mut insufficient_resource_evidence = false;
         for candidate in request.candidates {
@@ -273,6 +282,7 @@ impl PlacementSession {
                 request.signature,
                 identity,
                 candidate.kind,
+                !managed,
             );
             if matches!(
                 observed,
