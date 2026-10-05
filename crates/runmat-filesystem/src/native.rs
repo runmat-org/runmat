@@ -15,7 +15,7 @@ use std::sync::Arc;
 use url::Url;
 
 #[path = "native/staged.rs"]
-mod staged;
+pub(crate) mod staged;
 #[path = "native/mapped.rs"]
 mod mapped;
 

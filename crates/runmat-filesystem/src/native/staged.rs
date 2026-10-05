@@ -8,7 +8,7 @@ use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub(super) fn begin(destination: &Path) -> io::Result<Box<dyn FsStagedOutput>> {
+pub(crate) fn begin(destination: &Path) -> io::Result<Box<dyn FsStagedOutput>> {
     if !destination.is_absolute() {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,

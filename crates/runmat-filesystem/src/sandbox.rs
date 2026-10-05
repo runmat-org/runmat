@@ -20,6 +20,10 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "sandbox/staged.rs"]
+mod staged;
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Filesystem provider that sandboxes all operations under a fixed root directory.
 ///
 /// Incoming paths (absolute or relative) are normalized and resolved relative to the sandbox root.
@@ -98,6 +102,23 @@ impl FsProvider for SandboxFsProvider {
 
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
+    }
+
+    fn begin_staged_replace(
+        &self,
+        destination: &Path,
+    ) -> io::Result<Option<Box<dyn crate::FsStagedOutput>>> {
+        // Sandbox paths are virtual-rooted (`/reports/out.csv`), including on
+        // Windows where that spelling has a root but no drive prefix.
+        if !destination.has_root() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sandbox staged destination must be an absolute virtual path",
+            ));
+        }
+        let resolved = self.resolve(destination);
+        let authorized = staged::authorized_destination(&self.root, &resolved)?;
+        crate::native::staged::begin(&authorized).map(Some)
     }
 
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn crate::FileHandle>> {
@@ -314,6 +335,8 @@ mod tests {
     use super::SandboxFsProvider;
     use crate::FsProvider;
     use futures::executor;
+    use std::fs;
+    use std::io::ErrorKind;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -356,5 +379,135 @@ mod tests {
         let canonical = executor::block_on(provider.canonicalize(Path::new("./data/./file.bin")))
             .expect("canonicalize");
         assert_eq!(virtual_path(&canonical), "/data/file.bin");
+    }
+
+    #[test]
+    fn staged_replacement_aborts_and_then_publishes_only_inside_captured_root() {
+        let selected = tempdir().expect("selected root");
+        let other = tempdir().expect("other root");
+        let provider = SandboxFsProvider::new(selected.path().to_path_buf()).expect("sandbox");
+        let other_provider = SandboxFsProvider::new(other.path().to_path_buf()).expect("other");
+        let virtual_destination = Path::new("/reports/output.csv");
+        executor::block_on(provider.write(virtual_destination, b"original"))
+            .expect("existing destination");
+        executor::block_on(other_provider.write(virtual_destination, b"other"))
+            .expect("other destination");
+
+        let mut abandoned = provider
+            .begin_staged_replace(virtual_destination)
+            .expect("acquire")
+            .expect("sandbox stage");
+        assert_eq!(
+            executor::block_on(abandoned.write_chunk(b"aborted")).unwrap(),
+            7
+        );
+        drop(abandoned);
+        assert_eq!(
+            executor::block_on(provider.read(virtual_destination)).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            fs::read_dir(selected.path().join("reports"))
+                .expect("stage parent")
+                .count(),
+            1,
+            "abandoned stage leaves only the original destination"
+        );
+
+        let mut stage = provider
+            .begin_staged_replace(virtual_destination)
+            .expect("acquire")
+            .expect("sandbox stage");
+        assert_eq!(
+            executor::block_on(stage.write_chunk(b"replacement")).unwrap(),
+            11
+        );
+        executor::block_on(stage.publish()).expect("publish");
+        assert_eq!(
+            executor::block_on(provider.read(virtual_destination)).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(
+            executor::block_on(other_provider.read(virtual_destination)).unwrap(),
+            b"other",
+            "stage retains its selected sandbox root"
+        );
+    }
+
+    #[test]
+    fn staged_replacement_rejects_root_and_failed_publication_preserves_target() {
+        let root = tempdir().expect("root");
+        let provider = SandboxFsProvider::new(root.path().to_path_buf()).expect("sandbox");
+        assert_eq!(
+            provider
+                .begin_staged_replace(Path::new("/"))
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            provider
+                .begin_staged_replace(Path::new("relative.csv"))
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        executor::block_on(provider.create_dir(Path::new("/directory-target")))
+            .expect("directory target");
+        let mut stage = provider
+            .begin_staged_replace(Path::new("/directory-target"))
+            .expect("stage")
+            .expect("sandbox capability");
+        executor::block_on(stage.write_chunk(b"replacement")).expect("write");
+        assert!(executor::block_on(stage.publish()).is_err());
+        assert!(root.path().join("directory-target").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_replacement_rejects_existing_symlink_escape_without_touching_target() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("root");
+        let outside = tempdir().expect("outside");
+        fs::write(outside.path().join("output.csv"), b"outside").expect("outside sentinel");
+        symlink(outside.path(), root.path().join("escape")).expect("symlink fixture");
+        let provider = SandboxFsProvider::new(root.path().to_path_buf()).expect("sandbox");
+        let error = provider
+            .begin_staged_replace(Path::new("/escape/output.csv"))
+            .err()
+            .expect("escape rejected");
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+        assert_eq!(
+            fs::read(outside.path().join("output.csv")).unwrap(),
+            b"outside"
+        );
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_replacement_replaces_destination_symlink_not_external_target() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("root");
+        let outside = tempdir().expect("outside");
+        let external = outside.path().join("target.csv");
+        fs::write(&external, b"external sentinel").expect("outside sentinel");
+        symlink(&external, root.path().join("linked.csv")).expect("destination symlink");
+        let provider = SandboxFsProvider::new(root.path().to_path_buf()).expect("sandbox");
+        let mut stage = provider
+            .begin_staged_replace(Path::new("/linked.csv"))
+            .expect("stage")
+            .expect("sandbox capability");
+        executor::block_on(stage.write_chunk(b"replacement")).expect("write");
+        executor::block_on(stage.publish()).expect("publish replaces the link entry");
+        assert_eq!(
+            fs::read(root.path().join("linked.csv")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(fs::read(external).unwrap(), b"external sentinel");
     }
 }
