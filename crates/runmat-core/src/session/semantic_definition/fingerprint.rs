@@ -13,6 +13,7 @@ pub(crate) fn fingerprint(
         class_method_owner,
         private_owner_scope,
         source_id,
+        source_role,
         capabilities,
         instructions,
         instr_spans,
@@ -52,6 +53,7 @@ pub(crate) fn fingerprint(
     append!(class_method_owner);
     append!(private_owner_scope);
     append!(source_id);
+    append!(source_role);
     append!(capabilities);
     append!(instructions);
     append!(instr_spans);

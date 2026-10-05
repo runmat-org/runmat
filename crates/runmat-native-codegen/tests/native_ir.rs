@@ -145,6 +145,7 @@ fn function(statements: Vec<MirStmt>) -> MirAssembly {
         enclosing_class: None,
         class_method_owner: None,
         kind: FunctionKind::SyntheticEntrypoint,
+        source_role: runmat_types::FunctionSourceRole::Synthetic,
         argument_validations: Vec::new(),
         captures: Vec::new(),
         modifiers: FunctionModifiers::default(),

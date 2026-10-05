@@ -32,6 +32,34 @@ pub struct HirAssembly {
     pub entrypoints: Vec<HirEntrypoint>,
 }
 
+impl HirAssembly {
+    /// Classify from the typed source unit and function graph, not a display
+    /// name or the spelling of a source path.
+    pub fn function_source_role(&self, function: &HirFunction) -> runmat_types::FunctionSourceRole {
+        use runmat_types::FunctionSourceRole as Role;
+        match &function.kind {
+            FunctionKind::Anonymous => Role::Anonymous,
+            FunctionKind::SyntheticEntrypoint => Role::Synthetic,
+            FunctionKind::ClassMethod { .. } => Role::Method,
+            FunctionKind::Named if function.parent.is_some() => Role::Nested,
+            FunctionKind::Named => {
+                let Some(module) = self.modules.get(function.module.0) else {
+                    return Role::Unknown;
+                };
+                if matches!(module.source_unit, SourceUnitKind::FunctionFile)
+                    && module.top_level_functions.first() == Some(&function.id)
+                {
+                    Role::Primary
+                } else if module.top_level_functions.contains(&function.id) {
+                    Role::Local
+                } else {
+                    Role::Unknown
+                }
+            }
+        }
+    }
+}
+
 /// Source unit metadata plus references to module-owned semantic items.
 ///
 /// Top-level functions, classes, and synthetic script entry functions live in

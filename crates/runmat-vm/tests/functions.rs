@@ -2241,6 +2241,31 @@ fn localfunctions_returns_callable_local_function_handles() {
 }
 
 #[test]
+fn compiler_classifies_function_file_primary_and_local_without_name_rules() {
+    let source = "function handles = metadata_file()\nhandles = localfunctions();\nend\nfunction y = child_local(x)\ny = x + 1;\nend\n";
+    let parsed = runmat_parser::parse(source).expect("function file parses");
+    let lowered = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::empty())
+        .expect("function file lowers");
+    let roles = lowered
+        .assembly
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.0.as_str(),
+                lowered.assembly.function_source_role(function),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(roles.iter().any(|(name, role)| *name == "metadata_file"
+        && *role == runmat_types::FunctionSourceRole::Primary));
+    assert!(roles
+        .iter()
+        .any(|(name, role)| *name == "child_local"
+            && *role == runmat_types::FunctionSourceRole::Local));
+}
+
+#[test]
 fn missing_fixed_input_can_be_guarded_with_nargin() {
     let program = r#"
         r = f(1, 2);

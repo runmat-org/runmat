@@ -235,6 +235,7 @@ pub(super) fn lower_function(
         id: function,
         source: metadata.source,
         name: metadata.name.0.clone(),
+        source_role: metadata.source_role,
         class_method_owner: metadata.class_method_owner.clone(),
         capabilities,
         abi,

@@ -102,6 +102,7 @@ fn omitted_input_state() -> HostState {
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "omitted_input".into(),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {

@@ -11,7 +11,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             0,
         ));
     }
-    let element = ValueFact::unknown(DynamicReason::RuntimeValue);
+    let element = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: Default::default(),
+        parameters: Vec::new(),
+        parameters_complete: false,
+        outputs: Vec::new(),
+        outputs_complete: false,
+        variadic_inputs: true,
+        variadic_outputs: true,
+        captures: Vec::new(),
+        captures_complete: false,
+    }));
     let output = ValueFact::proven(
         ValueKindFact::Cell(CellFact {
             element: Box::new(element),

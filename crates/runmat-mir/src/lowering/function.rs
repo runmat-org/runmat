@@ -48,6 +48,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
                 enclosing_class: function.enclosing_class,
                 class_method_owner,
                 kind: function.kind.clone(),
+                source_role: hir.function_source_role(function),
                 argument_validations: function.argument_validations.clone(),
                 captures: function.captures.clone(),
                 modifiers: function.modifiers.clone(),

@@ -13,7 +13,10 @@ fn source_dependent_result_is_cell_row_and_arguments_reject() {
         result.outputs[0].shape,
         ShapeFact::from(vec![Some(1), None])
     );
-    assert!(matches!(result.outputs[0].kind, ValueKindFact::Cell(_)));
+    let ValueKindFact::Cell(cell) = &result.outputs[0].kind else {
+        panic!("cell output")
+    };
+    assert!(matches!(cell.element.kind, ValueKindFact::Callable(_)));
     request
         .arguments
         .push(ValueFact::scalar(ValueKindFact::Logical));

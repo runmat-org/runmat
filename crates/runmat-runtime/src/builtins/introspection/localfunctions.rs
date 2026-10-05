@@ -1,14 +1,6 @@
 use runmat_builtins::LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS;
 use runmat_value::{CellArray, Value};
 
-fn is_supported_local_function_name(name: &str) -> bool {
-    let trimmed = name.trim();
-    !trimmed.is_empty()
-        && !trimmed.starts_with("@anon")
-        && !trimmed.starts_with("anonymous#")
-        && !trimmed.contains('.')
-}
-
 pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(crate::runtime_descriptor_error(
@@ -29,7 +21,7 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
     };
     let handles = crate::user_functions::source_functions_for(source_id)
         .into_iter()
-        .filter(|info| is_supported_local_function_name(&info.name))
+        .filter(|info| info.role == runmat_types::FunctionSourceRole::Local)
         .map(|info| Value::BoundFunctionHandle {
             name: info.name,
             function: info.function,
@@ -84,18 +76,27 @@ mod tests {
             crate::user_functions::install_source_function_catalog(Some(Arc::new(vec![
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(3),
+                    name: "main".into(),
+                    function: 9,
+                    role: runmat_types::FunctionSourceRole::Primary,
+                },
+                crate::user_functions::SourceFunctionInfo {
+                    source_id: SourceId(3),
                     name: "first".into(),
                     function: 10,
+                    role: runmat_types::FunctionSourceRole::Local,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(3),
                     name: "@anon0".into(),
                     function: 11,
+                    role: runmat_types::FunctionSourceRole::Anonymous,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(4),
                     name: "other".into(),
                     function: 12,
+                    role: runmat_types::FunctionSourceRole::Local,
                 },
             ])));
 

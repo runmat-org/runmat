@@ -190,6 +190,7 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
                 enclosing_class: None,
                 class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
+                source_role: runmat_types::FunctionSourceRole::Synthetic,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
                 modifiers: FunctionModifiers::default(),

@@ -9,8 +9,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["localfunctions", "inputname"],
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-            "Named, external, method, and bound handles report their name and `simple` type. Anonymous closures report `anonymous`; other closures report `scopedfunction`. The current implementation reports an empty `file` field because source-file provenance is not retained on these value variants.",
-            "All three fields are RunMat string scalars. MATLAB's metadata can include additional fields and file paths; this implementation does not claim that broader representation.",
+            "Named and external handles report their name and `simple` type. Source-bound handles use compiler-owned primary/local/nested/anonymous role metadata, and return the registered source path when available. An unbound closure without typed compiler provenance reports `unknown` rather than guessing its role from its display name.",
+            "All three fields are RunMat string scalars. MATLAB's metadata can include additional fields and closure workspace details; those are not currently represented.",
             "Non-handle inputs raise `RunMat:FunctionsHandleUnsupported` before resident-provider access.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[

@@ -18,6 +18,7 @@ pub struct MirFunctionMetadata {
     pub enclosing_class: Option<ClassId>,
     pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     pub kind: FunctionKind,
+    pub source_role: runmat_types::FunctionSourceRole,
     pub argument_validations: Vec<FunctionArgumentValidation>,
     pub captures: Vec<CapturedBinding>,
     pub modifiers: FunctionModifiers,

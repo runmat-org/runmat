@@ -15,6 +15,7 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "observation".into(),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {

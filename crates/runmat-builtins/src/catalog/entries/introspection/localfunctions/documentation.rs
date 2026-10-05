@@ -18,7 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["functions", "inputname"],
     sections: &[
         BuiltinDocumentationSection { heading: "Current source", paragraphs: &[
-            "The runtime queries its source-scoped function catalog, retaining named local handles and excluding anonymous, empty, and dotted names. It does not scan arbitrary files or execute a handle.",
+            "The runtime queries compiler-owned source-function roles, retaining only `Local` handles and excluding the primary function, nested functions, anonymous functions, methods, and synthetic entrypoints. It does not scan arbitrary files or execute a handle.",
             "The result is a cell row in the runtime catalog's current order. MATLAB does not promise handle order; do not rely on a particular ordering across source/catalog changes.",
             "Input arguments are not accepted and raise `RunMat:TooManyInputs`. The current runtime does not separately identify script, function-file, nested, and command-line contexts with MATLAB's full semantics.",
         ] },

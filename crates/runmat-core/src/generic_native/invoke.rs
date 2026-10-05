@@ -261,6 +261,7 @@ pub(crate) async fn invoke(
                     source_id,
                     name: function.display_name.clone(),
                     function: function.function.0,
+                    role: function.source_role,
                 })
         })
         .collect::<Vec<_>>();

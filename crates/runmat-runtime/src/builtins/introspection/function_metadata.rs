@@ -6,6 +6,8 @@ enum FunctionHandleKind {
     Simple,
     Anonymous,
     Scoped,
+    Nested,
+    Unknown,
 }
 
 impl FunctionHandleKind {
@@ -14,6 +16,8 @@ impl FunctionHandleKind {
             Self::Simple => "simple",
             Self::Anonymous => "anonymous",
             Self::Scoped => "scopedfunction",
+            Self::Nested => "nested",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -26,6 +30,24 @@ fn metadata_struct(function: String, kind: FunctionHandleKind, file: String) -> 
     Value::Struct(info)
 }
 
+fn source_metadata(function: usize) -> Option<(FunctionHandleKind, String)> {
+    let info = crate::user_functions::source_function_for(function)?;
+    let kind =
+        match info.role {
+            runmat_types::FunctionSourceRole::Primary
+            | runmat_types::FunctionSourceRole::Method => FunctionHandleKind::Simple,
+            runmat_types::FunctionSourceRole::Local => FunctionHandleKind::Scoped,
+            runmat_types::FunctionSourceRole::Nested => FunctionHandleKind::Nested,
+            runmat_types::FunctionSourceRole::Anonymous => FunctionHandleKind::Anonymous,
+            runmat_types::FunctionSourceRole::Unknown
+            | runmat_types::FunctionSourceRole::Synthetic => return None,
+        };
+    let file = crate::source_context::source_info(info.source_id)
+        .and_then(|source| source.fullpath_name)
+        .map_or_else(String::new, |path| path.to_string());
+    Some((kind, file))
+}
+
 pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
     match handle {
         Value::FunctionHandle(name)
@@ -35,20 +57,17 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
             FunctionHandleKind::Simple,
             String::new(),
         )),
-        Value::BoundFunctionHandle { name, .. } => Ok(metadata_struct(
-            name,
-            FunctionHandleKind::Simple,
-            String::new(),
-        )),
+        Value::BoundFunctionHandle { name, function } => {
+            let (kind, file) =
+                source_metadata(function).unwrap_or((FunctionHandleKind::Simple, String::new()));
+            Ok(metadata_struct(name, kind, file))
+        }
         Value::Closure(closure) => {
-            let kind = if closure.function_name.starts_with("@anon")
-                || closure.function_name.starts_with("anonymous#")
-            {
-                FunctionHandleKind::Anonymous
-            } else {
-                FunctionHandleKind::Scoped
-            };
-            Ok(metadata_struct(closure.function_name, kind, String::new()))
+            let (kind, file) = closure
+                .bound_function
+                .and_then(source_metadata)
+                .unwrap_or((FunctionHandleKind::Unknown, String::new()));
+            Ok(metadata_struct(closure.function_name, kind, file))
         }
         _ => Err(crate::runtime_descriptor_error(
             "functions",
@@ -142,9 +161,17 @@ mod tests {
 
     #[test]
     fn functions_reports_anonymous_closure_metadata() {
+        let _catalog = crate::user_functions::install_source_function_catalog(Some(
+            std::sync::Arc::new(vec![crate::user_functions::SourceFunctionInfo {
+                source_id: runmat_types::SourceId(5),
+                name: "@anon0".into(),
+                function: 1,
+                role: runmat_types::FunctionSourceRole::Anonymous,
+            }]),
+        ));
         let value = dispatch_functions(Value::Closure(runmat_value::Closure {
             function_name: "@anon0".into(),
-            bound_function: None,
+            bound_function: Some(1),
             captures: Vec::new(),
         }))
         .expect("functions succeeds");
@@ -156,5 +183,47 @@ mod tests {
             field(&value, "type"),
             &Value::String("anonymous".to_string())
         );
+    }
+
+    #[test]
+    fn bound_function_uses_typed_role_and_registered_fullpath() {
+        let source_id = runmat_types::SourceId(6);
+        let _source = crate::source_context::replace_source_catalog_with_fullpaths(vec![(
+            source_id,
+            "metadata_file".into(),
+            Some("/tmp/metadata_file.m".into()),
+            "function metadata_file; end".into(),
+        )]);
+        let _catalog = crate::user_functions::install_source_function_catalog(Some(
+            std::sync::Arc::new(vec![
+                crate::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: "metadata_file".into(),
+                    function: 1,
+                    role: runmat_types::FunctionSourceRole::Primary,
+                },
+                crate::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: "child_local".into(),
+                    function: 2,
+                    role: runmat_types::FunctionSourceRole::Local,
+                },
+            ]),
+        ));
+        for (name, function, kind) in [
+            ("metadata_file", 1, "simple"),
+            ("child_local", 2, "scopedfunction"),
+        ] {
+            let value = dispatch_functions(Value::BoundFunctionHandle {
+                name: name.into(),
+                function,
+            })
+            .expect("metadata");
+            assert_eq!(field(&value, "type"), &Value::String(kind.into()));
+            assert_eq!(
+                field(&value, "file"),
+                &Value::String("/tmp/metadata_file.m".into())
+            );
+        }
     }
 }

@@ -175,6 +175,7 @@ impl ProgramInvocationGuards {
                     source_id: runmat_types::SourceId(function.source.0 as usize),
                     name: function.name.clone(),
                     function: function.function.0 as usize,
+                    role: function.role,
                 },
             )
             .collect::<Vec<_>>();

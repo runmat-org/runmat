@@ -77,6 +77,27 @@ pub struct SourceFunctionInfo {
     pub source_id: SourceId,
     pub name: String,
     pub function: usize,
+    pub role: runmat_types::FunctionSourceRole,
+}
+
+pub fn source_function_for(function: usize) -> Option<SourceFunctionInfo> {
+    if let Some(state) = active_state() {
+        return state
+            .call
+            .borrow()
+            .source_functions
+            .as_ref()?
+            .iter()
+            .find(|info| info.function == function)
+            .cloned();
+    }
+    SOURCE_FUNCTION_CATALOG.with(|slot| {
+        slot.borrow()
+            .as_ref()?
+            .iter()
+            .find(|info| info.function == function)
+            .cloned()
+    })
 }
 
 #[derive(Debug, Clone)]
