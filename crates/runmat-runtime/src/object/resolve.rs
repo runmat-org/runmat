@@ -308,14 +308,16 @@ async fn load_scalar_member_with_context(
                 }?;
                 return require_single_sequence(outputs);
             }
-            crate::builtins::structs::core::getfield::get_member_value(
+            crate::builtins::structs::core::getfield::get_member_value_in_context(
+                context,
                 Value::HandleObject(handle),
                 &field,
             )
             .await
         }
         Value::Listener(listener) => {
-            crate::builtins::structs::core::getfield::get_member_value(
+            crate::builtins::structs::core::getfield::get_member_value_in_context(
+                context,
                 Value::Listener(listener),
                 &field,
             )
@@ -327,13 +329,15 @@ async fn load_scalar_member_with_context(
             if !is_possible_graphics_handle_value(&base) {
                 return Err(mex("LoadMember", "LoadMember on non-object"));
             }
-            load_graphics_member(base, &field).await.map_err(|err| {
-                if is_invalid_graphics_handle_error(&err) {
-                    mex("LoadMember", "LoadMember on non-object")
-                } else {
-                    err
-                }
-            })
+            load_graphics_member(context, base, &field)
+                .await
+                .map_err(|err| {
+                    if is_invalid_graphics_handle_error(&err) {
+                        mex("LoadMember", "LoadMember on non-object")
+                    } else {
+                        err
+                    }
+                })
         }
         Value::Struct(st) => {
             if let Some(v) = st.fields.get(&field) {
@@ -481,6 +485,30 @@ where
     .await
 }
 
+pub async fn store_member_in_context<OnWrite>(
+    context: &crate::context::RuntimeContext,
+    base: Value,
+    field: String,
+    rhs: Value,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    store_member_with_context(
+        Some(context),
+        base,
+        field,
+        rhs,
+        allow_init,
+        caller_function_name,
+        on_write,
+    )
+    .await
+}
+
 async fn store_member_with_context<OnWrite>(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
@@ -604,7 +632,7 @@ where
             if !is_possible_graphics_handle_value(&base) {
                 return Err(mex("StoreMember", "StoreMember on non-object"));
             }
-            store_graphics_member(base, &field, rhs)
+            store_graphics_member(context, base, &field, rhs)
                 .await
                 .map_err(|err| {
                     if is_invalid_graphics_handle_error(&err) {
@@ -849,20 +877,49 @@ pub async fn store_member_dynamic_traced(
     .await
 }
 
-async fn load_graphics_member(base: Value, field: &str) -> Result<Value, RuntimeError> {
-    crate::call_builtin_async("get", &[base, Value::String(field.to_string())]).await
+pub async fn store_member_dynamic_traced_in_context(
+    context: &crate::context::RuntimeContext,
+    base: Value,
+    name: String,
+    rhs: Value,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
+    store_member_with_context(
+        Some(context),
+        base,
+        name,
+        rhs,
+        allow_init,
+        caller_function_name,
+        runmat_gc::gc_record_write,
+    )
+    .await
+}
+
+async fn load_graphics_member(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: &str,
+) -> Result<Value, RuntimeError> {
+    let arguments = [base, Value::String(field.to_string())];
+    match context {
+        Some(context) => crate::call_builtin_async_in_context(context, "get", &arguments).await,
+        None => crate::call_builtin_async("get", &arguments).await,
+    }
 }
 
 async fn store_graphics_member(
+    context: Option<&crate::context::RuntimeContext>,
     base: Value,
     field: &str,
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
-    crate::call_builtin_async(
-        "set",
-        &[base.clone(), Value::String(field.to_string()), rhs],
-    )
-    .await?;
+    let arguments = [base.clone(), Value::String(field.to_string()), rhs];
+    match context {
+        Some(context) => crate::call_builtin_async_in_context(context, "set", &arguments).await?,
+        None => crate::call_builtin_async("set", &arguments).await?,
+    };
     Ok(base)
 }
 

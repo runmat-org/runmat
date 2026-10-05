@@ -11,6 +11,7 @@ use runmat_value::{HandleRef, ObjectInstance, StructValue, Value};
 
 #[async_recursion::async_recursion(?Send)]
 pub(super) async fn get_field_value(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     name: &str,
     enforce_public_builtin_extension: bool,
@@ -28,9 +29,9 @@ pub(super) async fn get_field_value(
     }
     match value {
         Value::Struct(st) => get_struct_field(&st, name),
-        Value::Object(obj) => get_object_field(&obj, name).await,
+        Value::Object(obj) => get_object_field(runtime, &obj, name).await,
         Value::HandleObject(handle) => {
-            get_handle_field(&handle, name, enforce_public_builtin_extension).await
+            get_handle_field(runtime, &handle, name, enforce_public_builtin_extension).await
         }
         Value::Listener(listener) => super::special::listener_field(&listener, name),
         Value::MException(ex) => super::special::exception_field(&ex, name),
@@ -62,7 +63,11 @@ fn get_struct_field(struct_value: &StructValue, name: &str) -> BuiltinResult<Val
     })
 }
 
-async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
+async fn get_object_field(
+    runtime: Option<&crate::context::RuntimeContext>,
+    obj: &ObjectInstance,
+    name: &str,
+) -> BuiltinResult<Value> {
     if let Some((prop, _owner)) =
         crate::class_registry::lookup_property(&obj.class_name, &name.into())
     {
@@ -83,7 +88,14 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
         }
         if prop.is_dependent {
             let getter = object_property_getter_name(name);
-            match call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
+            let receiver = [Value::Object(obj.clone())];
+            let result = match runtime {
+                Some(runtime) => {
+                    crate::call_builtin_async_in_context(runtime, &getter, &receiver).await
+                }
+                None => call_builtin_async(&getter, &receiver).await,
+            };
+            match result {
                 Ok(value) => return Ok(value),
                 Err(err) if !errors::is_undefined_function(&err) => {
                     return Err(errors::remap(err, None));
@@ -130,6 +142,7 @@ fn private_access(message: impl Into<String>) -> crate::RuntimeError {
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_handle_field(
+    runtime: Option<&crate::context::RuntimeContext>,
     handle: &HandleRef,
     name: &str,
     enforce_public_builtin_extension: bool,
@@ -146,5 +159,5 @@ async fn get_handle_field(
             &GETFIELD_ERROR_INVALID_HANDLE,
         )
     })?;
-    get_field_value(target, name, enforce_public_builtin_extension).await
+    get_field_value(runtime, target, name, enforce_public_builtin_extension).await
 }

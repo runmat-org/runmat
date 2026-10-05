@@ -139,7 +139,8 @@ pub async fn matfile_subsref(
         .as_ref()
         .map(|selected| selected.resource_liveness_lease());
     let read_runtime = runtime.clone();
-    let result = crate::object::protocol::execute_owned_subsref(
+    let result = crate::object::protocol::execute_owned_subsref_with_context(
+        runtime.as_ref(),
         obj,
         path,
         move |obj, step| async move {
@@ -222,8 +223,10 @@ pub async fn matfile_subsasgn(
         .as_ref()
         .map(|selected| selected.resource_liveness_lease());
     let read_runtime = runtime.clone();
+    let write_runtime = runtime.clone();
     let read_liveness = liveness.clone();
-    let result = crate::object::protocol::execute_owned_subsasgn(
+    let result = crate::object::protocol::execute_owned_subsasgn_with_context(
+        runtime.as_ref(),
         obj,
         path,
         vec![rhs],
@@ -238,7 +241,7 @@ pub async fn matfile_subsasgn(
             let rhs = values
                 .pop()
                 .ok_or_else(|| matfile_error("matfile assignment value is missing"))?;
-            matfile_write_step(runtime.as_ref(), obj, step, rhs, liveness).await
+            matfile_write_step(write_runtime.as_ref(), obj, step, rhs, liveness).await
         },
         None,
     )

@@ -27,8 +27,21 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn read(
         // A detached, read-only receiver has an explicit snapshot authority.
         // Keep its ordinary indexed-read contract without claiming a live map.
         let suffix = ObjectSubscriptPath::new(path.steps()[1..].to_vec())?;
-        return crate::object::protocol::read_subscript_path((**snapshot).clone(), suffix, None)
-            .await;
+        return match runtime {
+            Some(runtime) => {
+                crate::object::protocol::read_subscript_path_in_context(
+                    runtime,
+                    (**snapshot).clone(),
+                    suffix,
+                    None,
+                )
+                .await
+            }
+            None => {
+                crate::object::protocol::read_subscript_path((**snapshot).clone(), suffix, None)
+                    .await
+            }
+        };
     }
     let mut budget = runtime.map(RuntimeContext::cpu_cooperation);
     checkpoint(&mut budget, 0).await?;

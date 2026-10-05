@@ -10,6 +10,7 @@ use runmat_builtins::{
 use runmat_value::Value;
 
 pub(super) async fn getfield(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     rest: Vec<Value>,
     enforce_public_builtin_extension: bool,
@@ -20,20 +21,27 @@ pub(super) async fn getfield(
     let parsed = arguments::parse(rest)?;
     let mut current = base;
     if let Some(index) = parsed.leading_index {
-        current = apply_indices(current, &index, true).await?;
+        current = apply_indices(runtime, current, &index, true).await?;
     }
     let field_count = parsed.fields.len();
     for (field_index, step) in parsed.fields.into_iter().enumerate() {
-        current =
-            object::get_field_value(current, &step.name, enforce_public_builtin_extension).await?;
+        current = object::get_field_value(
+            runtime,
+            current,
+            &step.name,
+            enforce_public_builtin_extension,
+        )
+        .await?;
         if let Some(index) = step.index {
-            current = apply_indices(current, &index, field_index + 1 < field_count).await?;
+            current =
+                apply_indices(runtime, current, &index, field_index + 1 < field_count).await?;
         }
     }
     Ok(current)
 }
 
 async fn apply_indices(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     selector: &IndexSelector,
     require_scalar_traversal: bool,
@@ -50,9 +58,18 @@ async fn apply_indices(
                 &GETFIELD_INDEXED_RESIDENT_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            gather_if_needed_async(&Value::GpuTensor(handle))
-                .await
-                .map_err(|flow| errors::remap(flow, Some("getfield: ")))?
+            let resident = Value::GpuTensor(handle);
+            let gathered = match runtime {
+                Some(runtime) => {
+                    let budget = runtime.cpu_cooperation();
+                    budget
+                        .await_cancellable(gather_if_needed_async(&resident))
+                        .await
+                        .map_err(|error| error.into_runtime_error())?
+                }
+                None => gather_if_needed_async(&resident).await,
+            };
+            gathered.map_err(|flow| errors::remap(flow, Some("getfield: ")))?
         }
         other => other,
     };
@@ -73,5 +90,13 @@ async fn apply_indices(
 /// for the public getfield object extension. Class and handle dot syntax is a
 /// language operation, not a call to that extension.
 pub(crate) async fn get_member_value(value: Value, name: &str) -> BuiltinResult<Value> {
-    object::get_field_value(value, name, false).await
+    get_member_value_in_context(None, value, name).await
+}
+
+pub(crate) async fn get_member_value_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    name: &str,
+) -> BuiltinResult<Value> {
+    object::get_field_value(runtime, value, name, false).await
 }

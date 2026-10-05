@@ -103,10 +103,14 @@ pub async fn subsref(
     if path.steps().len() > 1 && member(&path.steps()[0])? == Property::Data {
         return ranges::read(runtime.as_ref(), receiver, path).await;
     }
-    crate::object::protocol::execute_owned_subsref(
+    let read_runtime = runtime.clone();
+    crate::object::protocol::execute_owned_subsref_with_context(
+        runtime.as_ref(),
         receiver,
         path,
-        move |receiver, step| async move { read_first(runtime.as_ref(), receiver, step).await },
+        move |receiver, step| async move {
+            read_first(read_runtime.as_ref(), receiver, step).await
+        },
         None,
     )
     .await
@@ -143,14 +147,16 @@ pub async fn subsasgn(
         return ranges::write(runtime.as_ref(), receiver, path, rhs).await;
     }
     let read_runtime = runtime.clone();
-    crate::object::protocol::execute_owned_subsasgn(
+    let write_runtime = runtime.clone();
+    crate::object::protocol::execute_owned_subsasgn_with_context(
+        runtime.as_ref(),
         receiver,
         path,
         vec![rhs],
         move |receiver, step| async move { read_first(read_runtime.as_ref(), receiver, step).await },
         move |receiver, step, values| async move {
             let [value] = <[Value; 1]>::try_from(values).map_err(|_| format_error("memmapfile: assignment requires one value"))?;
-            write_first(runtime.as_ref(), receiver, step, value).await
+            write_first(write_runtime.as_ref(), receiver, step, value).await
         },
         None,
     )

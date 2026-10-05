@@ -43,7 +43,8 @@ pub(super) fn evaluate(
             && !matches!(arguments[0], Value::Object(_) | Value::HandleObject(_))
             && matches!(arguments[1], Value::Object(_) | Value::HandleObject(_))
         {
-            return runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered(
+            return runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered_in_context(
+                &runtime,
                 arguments[0].clone(),
                 arguments[1].clone(),
                 name.display_name(),

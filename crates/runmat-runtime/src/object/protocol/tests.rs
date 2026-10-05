@@ -101,6 +101,82 @@ fn semantic_fallback_failure_does_not_replay_the_invocation() {
 }
 
 #[test]
+fn owned_path_suffix_uses_selected_session_after_first_step() {
+    let wrong = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _wrong_activation = wrong.enter();
+    let selected = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let expected_session = selected.session_lease();
+    let selected_setup = selected.enter();
+    let _resolver =
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+            (name == "OwnedSuffixSession.subsref").then_some(943)
+        })));
+    let class = runmat_types::ClassIdentity::from("OwnedSuffixSession");
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        name: class.clone(),
+        parent: None,
+        properties: Default::default(),
+        methods: std::collections::HashMap::from([(
+            runmat_types::MethodName::from("subsref"),
+            crate::class_registry::RuntimeMethod {
+                name: "subsref".into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: runmat_types::MemberAccess::Public,
+                function_name: "OwnedSuffixSession.subsref".into(),
+                implicit_class_argument: None,
+            },
+        )]),
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |function, _arguments, requested| {
+            assert_eq!(function, 943);
+            assert_eq!(requested, 1);
+            let active = crate::context::legacy::active().expect("selected suffix scope");
+            assert!(std::sync::Weak::ptr_eq(
+                &active.session_lease(),
+                &expected_session
+            ));
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                ValueSequence::single(Value::Num(7.0))
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            })
+        },
+    )));
+    drop(selected_setup);
+    let path = ObjectSubscriptPath::new(vec![
+        ObjectSubscript::member("child"),
+        ObjectSubscript::member("p"),
+    ])
+    .expect("owned nested path");
+    let child = Value::Object(runmat_value::ObjectInstance::new(class));
+    let result = block_on(execute_owned_subsref_in_context(
+        &selected,
+        Value::Struct(StructValue::new()),
+        path,
+        move |_base, first| async move {
+            assert_eq!(
+                first.kind(),
+                crate::object::indexing::ObjectIndexKind::Member
+            );
+            Ok(child)
+        },
+        None,
+    ))
+    .expect("owned suffix read");
+    assert_eq!(result, Value::Num(7.0));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn object_array_without_member_keeps_whole_array_receiver_for_semantic_fallback() {
     let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),

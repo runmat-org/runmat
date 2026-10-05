@@ -16,7 +16,10 @@ mod dotted_invoke;
 mod owned;
 mod request;
 use default_indexing::{assign_default_steps, read_default_step, read_default_step_sequence};
-pub use owned::{execute_owned_subsasgn, execute_owned_subsref};
+pub use owned::{
+    execute_owned_subsasgn, execute_owned_subsasgn_in_context, execute_owned_subsasgn_with_context,
+    execute_owned_subsref, execute_owned_subsref_in_context, execute_owned_subsref_with_context,
+};
 pub use request::SubscriptReadRequest;
 
 pub fn read_subscript_path<'a>(
@@ -29,6 +32,22 @@ pub fn read_subscript_path<'a>(
         let request = SubscriptReadRequest::require_single(access);
         let sequence =
             read_subscript_path_sequence(None, base, path, request, caller_function_name).await?;
+        resolve_single(sequence)
+    })
+}
+
+pub fn read_subscript_path_in_context<'a>(
+    runtime: &'a RuntimeContext,
+    base: Value,
+    path: ObjectSubscriptPath,
+    caller_function_name: Option<&'a str>,
+) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+    let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
+    Box::pin(async move {
+        let request = SubscriptReadRequest::require_single(access);
+        let sequence =
+            read_subscript_path_sequence(Some(runtime), base, path, request, caller_function_name)
+                .await?;
         resolve_single(sequence)
     })
 }

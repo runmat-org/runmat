@@ -234,7 +234,7 @@ async fn call_member_index_on_object_like(
         ));
     }
 
-    call_getfield_with_indices(receiver, name, args, requested_outputs)
+    call_getfield_with_indices_with_context(runtime, receiver, name, args, requested_outputs)
         .await
         .and_then(|value| {
             runmat_value::ValueSequence::single(value)
@@ -243,6 +243,44 @@ async fn call_member_index_on_object_like(
 }
 
 pub async fn call_rhs_operator_method_ordered_with_outputs(
+    lhs: Value,
+    rhs: Value,
+    name: String,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_rhs_operator_method_ordered_with_context(
+        None,
+        lhs,
+        rhs,
+        name,
+        requested_outputs,
+        caller_function_name,
+    )
+    .await
+}
+
+pub async fn call_rhs_operator_method_ordered_with_outputs_in_context(
+    runtime: &crate::context::RuntimeContext,
+    lhs: Value,
+    rhs: Value,
+    name: String,
+    requested_outputs: usize,
+    caller_function_name: Option<&str>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    call_rhs_operator_method_ordered_with_context(
+        Some(runtime),
+        lhs,
+        rhs,
+        name,
+        requested_outputs,
+        caller_function_name,
+    )
+    .await
+}
+
+async fn call_rhs_operator_method_ordered_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     lhs: Value,
     rhs: Value,
     name: String,
@@ -280,7 +318,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
             ));
         }
         return call_identity_with_policy(
-            None,
+            runtime,
             bound.callable,
             method_args,
             requested_outputs,
@@ -291,7 +329,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
 
     let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
     call_identity_with_policy(
-        None,
+        runtime,
         qualified_identity,
         method_args,
         requested_outputs,
@@ -306,6 +344,16 @@ pub async fn call_getfield_with_indices(
     indices: Vec<Value>,
     _requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
+    call_getfield_with_indices_with_context(None, base, field, indices, _requested_outputs).await
+}
+
+async fn call_getfield_with_indices_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: String,
+    indices: Vec<Value>,
+    _requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
     let mut getfield_args = Vec::with_capacity(2);
     getfield_args.push(Value::String(field));
     if !indices.is_empty() {
@@ -313,7 +361,12 @@ pub async fn call_getfield_with_indices(
         let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
         getfield_args.push(Value::Cell(idx_cell));
     }
-    crate::builtins::structs::core::getfield::getfield_internal(base, getfield_args).await
+    crate::builtins::structs::core::getfield::getfield_internal_with_context(
+        runtime,
+        base,
+        getfield_args,
+    )
+    .await
 }
 
 pub async fn call_object_operator_method(
@@ -334,6 +387,26 @@ pub async fn call_object_operator_method(
     )
 }
 
+pub async fn call_object_operator_method_in_context(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    method: &str,
+    arg: Value,
+) -> Result<Value, RuntimeError> {
+    require_single(
+        call_method_or_member_index_with_outputs_in_context(
+            runtime,
+            base,
+            CallableIdentity::Method(MethodId(method.to_string())),
+            vec![arg],
+            1,
+            None,
+            CallableFallbackPolicy::ObjectDispatch,
+        )
+        .await?,
+    )
+}
+
 pub async fn call_rhs_object_operator_method_ordered(
     lhs: Value,
     rhs: Value,
@@ -342,6 +415,25 @@ pub async fn call_rhs_object_operator_method_ordered(
     require_single(
         call_rhs_operator_method_ordered_with_outputs(lhs, rhs, method.to_string(), 1, None)
             .await?,
+    )
+}
+
+pub async fn call_rhs_object_operator_method_ordered_in_context(
+    runtime: &crate::context::RuntimeContext,
+    lhs: Value,
+    rhs: Value,
+    method: &str,
+) -> Result<Value, RuntimeError> {
+    require_single(
+        call_rhs_operator_method_ordered_with_outputs_in_context(
+            runtime,
+            lhs,
+            rhs,
+            method.to_string(),
+            1,
+            None,
+        )
+        .await?,
     )
 }
 
@@ -750,7 +842,7 @@ async fn call_method_or_member_index_with_fallback_with_context(
                 )
                 .await;
             }
-            call_getfield_with_indices(other, name, args, requested_outputs)
+            call_getfield_with_indices_with_context(runtime, other, name, args, requested_outputs)
                 .await
                 .and_then(|value| {
                     runmat_value::ValueSequence::single(value)

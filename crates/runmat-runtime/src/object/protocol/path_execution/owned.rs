@@ -16,6 +16,35 @@ where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<Value, RuntimeError>>,
 {
+    execute_owned_subsref_with_context(None, base, path, read_first, caller_function_name).await
+}
+
+pub async fn execute_owned_subsref_in_context<Read, ReadFuture>(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    path: ObjectSubscriptPath,
+    read_first: Read,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError>
+where
+    Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
+    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+{
+    execute_owned_subsref_with_context(Some(runtime), base, path, read_first, caller_function_name)
+        .await
+}
+
+pub async fn execute_owned_subsref_with_context<Read, ReadFuture>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    path: ObjectSubscriptPath,
+    read_first: Read,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError>
+where
+    Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
+    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+{
     let mut steps = path.into_steps().into_iter();
     let first = steps.next().ok_or_else(empty_path_error)?;
     let value = read_first(base, first).await?;
@@ -23,16 +52,72 @@ where
     if remaining.is_empty() {
         Ok(value)
     } else {
-        super::read_subscript_path(
-            value,
-            ObjectSubscriptPath::new(remaining)?,
-            caller_function_name,
-        )
-        .await
+        let suffix = ObjectSubscriptPath::new(remaining)?;
+        match runtime {
+            Some(runtime) => {
+                super::read_subscript_path_in_context(runtime, value, suffix, caller_function_name)
+                    .await
+            }
+            None => super::read_subscript_path(value, suffix, caller_function_name).await,
+        }
     }
 }
 
 pub async fn execute_owned_subsasgn<Read, ReadFuture, Write, WriteFuture>(
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+    read_first: Read,
+    write_first: Write,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError>
+where
+    Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
+    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
+    WriteFuture: Future<Output = Result<Value, RuntimeError>>,
+{
+    execute_owned_subsasgn_with_context(
+        None,
+        base,
+        path,
+        values,
+        read_first,
+        write_first,
+        caller_function_name,
+    )
+    .await
+}
+
+pub async fn execute_owned_subsasgn_in_context<Read, ReadFuture, Write, WriteFuture>(
+    runtime: &crate::context::RuntimeContext,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+    read_first: Read,
+    write_first: Write,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError>
+where
+    Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
+    ReadFuture: Future<Output = Result<Value, RuntimeError>>,
+    Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
+    WriteFuture: Future<Output = Result<Value, RuntimeError>>,
+{
+    execute_owned_subsasgn_with_context(
+        Some(runtime),
+        base,
+        path,
+        values,
+        read_first,
+        write_first,
+        caller_function_name,
+    )
+    .await
+}
+
+pub async fn execute_owned_subsasgn_with_context<Read, ReadFuture, Write, WriteFuture>(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
@@ -53,13 +138,20 @@ where
         return write_first(base, first, values).await;
     }
     let child = read_first(base.clone(), first.clone()).await?;
-    let updated = super::assign_subscript_path(
-        child,
-        ObjectSubscriptPath::new(remaining)?,
-        values,
-        caller_function_name,
-    )
-    .await?;
+    let suffix = ObjectSubscriptPath::new(remaining)?;
+    let updated = match runtime {
+        Some(runtime) => {
+            super::assign_subscript_path_in_context(
+                runtime,
+                child,
+                suffix,
+                values,
+                caller_function_name,
+            )
+            .await?
+        }
+        None => super::assign_subscript_path(child, suffix, values, caller_function_name).await?,
+    };
     write_first(base, first, vec![updated]).await
 }
 

@@ -502,7 +502,8 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let value = obj_resolve::store_member_traced(
+            let value = obj_resolve::store_member_traced_in_context(
+                runtime,
                 base,
                 field.0.clone(),
                 rhs,
@@ -524,7 +525,8 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let value = obj_resolve::store_member_traced(
+            let value = obj_resolve::store_member_traced_in_context(
+                runtime,
                 base,
                 field.0.clone(),
                 rhs,
@@ -551,7 +553,8 @@ pub async fn dispatch_object(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic_traced(
+            let value = obj_resolve::store_member_dynamic_traced_in_context(
+                runtime,
                 base,
                 name,
                 rhs,
@@ -578,7 +581,8 @@ pub async fn dispatch_object(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic_traced(
+            let value = obj_resolve::store_member_dynamic_traced_in_context(
+                runtime,
                 base,
                 name,
                 rhs,
@@ -596,7 +600,8 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let updated = obj_resolve::store_member_sequence_traced(
+            let updated = obj_resolve::store_member_sequence_traced_in_context(
+                runtime,
                 base,
                 field.0.clone(),
                 values,
@@ -618,9 +623,14 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
-            let updated =
-                obj_resolve::store_member_sequence_traced(base, name, values, caller_function_name)
-                    .await?;
+            let updated = obj_resolve::store_member_sequence_traced_in_context(
+                runtime,
+                base,
+                name,
+                values,
+                caller_function_name,
+            )
+            .await?;
             stack.push(updated);
             Ok(true)
         }

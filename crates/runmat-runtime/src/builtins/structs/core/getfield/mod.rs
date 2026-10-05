@@ -35,12 +35,28 @@ async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult
         "getfield",
     )?;
 
-    execution::getfield(base, rest, true).await
+    execution::getfield(None, base, rest, true).await
 }
 
 pub(crate) async fn getfield_internal(
     base: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    execution::getfield(base, rest, false).await
+    execution::getfield(None, base, rest, false).await
+}
+
+pub(crate) async fn getfield_internal_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    execution::getfield(runtime, base, rest, false).await
+}
+
+pub(crate) async fn get_member_value_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    name: &str,
+) -> crate::BuiltinResult<Value> {
+    execution::get_member_value_in_context(runtime, value, name).await
 }

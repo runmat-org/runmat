@@ -140,14 +140,18 @@ impl MexHostServices for RuntimeMexHostServices {
         name: &str,
         value: Value,
     ) -> Result<Value, MexDiagnostic> {
-        pollster::block_on(self.runtime.scope(crate::object::resolve::store_member(
-            object,
-            name.to_string(),
-            value,
-            false,
-            None,
-            |_, _| {},
-        )))
+        pollster::block_on(
+            self.runtime
+                .scope(crate::object::resolve::store_member_in_context(
+                    &self.runtime,
+                    object,
+                    name.to_string(),
+                    value,
+                    false,
+                    None,
+                    |_, _| {},
+                )),
+        )
         .map_err(runtime_diagnostic)
     }
 

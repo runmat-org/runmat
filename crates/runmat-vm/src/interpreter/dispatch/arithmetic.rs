@@ -7,19 +7,30 @@ use crate::ops::comparison as comparison_ops;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
-async fn call_operator_method(obj: Value, method: &str, arg: Value) -> Result<Value, RuntimeError> {
+async fn call_operator_method_in_context(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    obj: Value,
+    method: &str,
+    arg: Value,
+) -> Result<Value, RuntimeError> {
     let _roots = crate::call::root_values([&obj, &arg])?;
-    runmat_runtime::object::dispatch::call_object_operator_method(obj, method, arg).await
+    runmat_runtime::object::dispatch::call_object_operator_method_in_context(
+        runtime, obj, method, arg,
+    )
+    .await
 }
 
-async fn call_right_operator_method_ordered(
+async fn call_right_operator_method_ordered_in_context(
+    runtime: &runmat_runtime::context::RuntimeContext,
     lhs: Value,
     rhs: Value,
     method: &str,
 ) -> Result<Value, RuntimeError> {
     let _roots = crate::call::root_values([&lhs, &rhs])?;
-    runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered(lhs, rhs, method)
-        .await
+    runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered_in_context(
+        runtime, lhs, rhs, method,
+    )
+    .await
 }
 
 pub async fn dispatch_arithmetic(
@@ -27,6 +38,10 @@ pub async fn dispatch_arithmetic(
     stack: &mut Vec<Value>,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<bool, RuntimeError> {
+    let call_operator_method =
+        |obj, method, arg| call_operator_method_in_context(runtime, obj, method, arg);
+    let call_right_operator_method_ordered =
+        |lhs, rhs, method| call_right_operator_method_ordered_in_context(runtime, lhs, rhs, method);
     match instr {
         crate::bytecode::Instr::Add => {
             arithmetic_ops::add(

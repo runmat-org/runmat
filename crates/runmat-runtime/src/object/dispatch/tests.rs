@@ -70,3 +70,161 @@ fn rhs_operator_callee_failures_are_not_retried_or_reordered() {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
+
+#[test]
+fn rhs_operator_uses_selected_session_not_unrelated_ambient_session() {
+    let wrong = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _wrong_activation = wrong.enter();
+    let selected = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let expected_session = selected.session_lease();
+    let selected_setup = selected.enter();
+    let _resolver =
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+            (name == "SelectedSessionRhs.plus").then_some(940)
+        })));
+    let class = ClassIdentity::from("SelectedSessionRhs");
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        name: class.clone(),
+        parent: None,
+        properties: Default::default(),
+        methods: std::collections::HashMap::from([(
+            runmat_types::MethodName::from("plus"),
+            crate::class_registry::RuntimeMethod {
+                name: "plus".into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: runmat_types::MemberAccess::Public,
+                function_name: "SelectedSessionRhs.plus".into(),
+                implicit_class_argument: None,
+            },
+        )]),
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed_calls = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |function, args, requested_outputs| {
+            assert_eq!(function, 940);
+            assert_eq!(requested_outputs, 1);
+            assert!(matches!(args, [Value::Num(2.0), Value::Object(_)]));
+            let active = crate::context::legacy::active().expect("selected callback scope");
+            assert!(std::sync::Weak::ptr_eq(
+                &active.session_lease(),
+                &expected_session
+            ));
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                crate::sequence::ValueSequence::single(Value::Num(12.0))
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            })
+        },
+    )));
+    drop(selected_setup);
+    let rhs = Value::Object(runmat_value::ObjectInstance::new(class));
+    let value = block_on(call_rhs_object_operator_method_ordered_in_context(
+        &selected,
+        Value::Num(2.0),
+        rhs,
+        "plus",
+    ))
+    .expect("selected session RHS overload");
+    assert_eq!(value, Value::Num(12.0));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(std::sync::Weak::ptr_eq(
+        &crate::context::legacy::active()
+            .expect("wrong outer scope restored")
+            .session_lease(),
+        &wrong.session_lease()
+    ));
+}
+
+#[test]
+fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session() {
+    let wrong = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _wrong_activation = wrong.enter();
+    let selected = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let expected_session = selected.session_lease();
+    let selected_setup = selected.enter();
+    let _resolver =
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+            (name == "SelectedSessionProperty.set.p").then_some(941)
+        })));
+    let class = ClassIdentity::from("SelectedSessionProperty");
+    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        name: class.clone(),
+        parent: None,
+        properties: std::collections::HashMap::from([(
+            runmat_types::MemberName::from("p"),
+            crate::class_registry::RuntimeProperty {
+                name: "p".into(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: true,
+                get_access: runmat_types::MemberAccess::Public,
+                set_access: runmat_types::MemberAccess::Public,
+                default_value: None,
+            },
+        )]),
+        methods: std::collections::HashMap::from([(
+            runmat_types::MethodName::from("set.p"),
+            crate::class_registry::RuntimeMethod {
+                name: "set.p".into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: runmat_types::MemberAccess::Public,
+                function_name: "SelectedSessionProperty.set.p".into(),
+                implicit_class_argument: None,
+            },
+        )]),
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed_calls = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |function, args, requested_outputs| {
+            assert_eq!(function, 941);
+            assert_eq!(requested_outputs, 1);
+            let [Value::Object(original), Value::Num(9.0)] = args else {
+                panic!("dependent setter receiver and value")
+            };
+            let active = crate::context::legacy::active().expect("selected setter scope");
+            assert!(std::sync::Weak::ptr_eq(
+                &active.session_lease(),
+                &expected_session
+            ));
+            observed_calls.fetch_add(1, Ordering::SeqCst);
+            let mut replacement = original.clone();
+            replacement
+                .properties
+                .insert("p_backing".into(), Value::Num(9.0));
+            Box::pin(async move {
+                crate::sequence::ValueSequence::single(Value::Object(replacement))
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            })
+        },
+    )));
+    drop(selected_setup);
+    let original = Value::Object(runmat_value::ObjectInstance::new(class));
+    let updated = block_on(crate::object::resolve::store_member_traced_in_context(
+        &selected,
+        original,
+        "p".into(),
+        Value::Num(9.0),
+        false,
+        None,
+    ))
+    .expect("selected dependent setter");
+    let Value::Object(updated) = updated else {
+        panic!("dependent setter returns replacement object")
+    };
+    assert_eq!(updated.properties.get("p_backing"), Some(&Value::Num(9.0)));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
