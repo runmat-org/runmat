@@ -36,7 +36,7 @@ impl Drop for ManagedHostEffectStageSlot {
 struct PooledStageSlot {
     reservation: ManagedHostEffectStageReservation,
     mutation: Mutex<()>,
-    active: AtomicBool,
+    active_epoch: Arc<AtomicBool>,
     generation: AtomicU64,
     retired: AtomicBool,
 }
@@ -56,7 +56,7 @@ impl ManagedHostEffectStagePool {
                 reservation: Arc::try_unwrap(reservation)
                     .unwrap_or_else(|_| unreachable!("new zero-byte reservation has one owner")),
                 mutation: Mutex::new(()),
-                active: AtomicBool::new(false),
+                active_epoch: Arc::new(AtomicBool::new(false)),
                 generation: AtomicU64::new(0),
                 retired: AtomicBool::new(false),
             }));
@@ -74,10 +74,11 @@ impl ManagedHostEffectStagePool {
         let _admission = self.admission.lock().expect("managed stage pool lock");
         for slot in &self.slots {
             let _mutation = slot.mutation.lock().expect("managed stage slot lock");
-            if slot.active.load(Ordering::Acquire)
+            if slot.active_epoch.load(Ordering::Acquire)
                 || slot.retired.load(Ordering::Acquire)
                 || Arc::strong_count(slot) != 1
                 || Arc::weak_count(slot) != 0
+                || Arc::strong_count(&slot.active_epoch) != 1
                 || slot.reservation.reserved_bytes() != 0
             {
                 continue;
@@ -88,7 +89,7 @@ impl ManagedHostEffectStagePool {
             };
             slot.reservation.promote_scan_envelope(bytes)?;
             slot.generation.store(generation, Ordering::Release);
-            slot.active.store(true, Ordering::Release);
+            slot.active_epoch.store(true, Ordering::Release);
             return Ok(ManagedHostEffectStageSlot {
                 reservation: Some(Arc::clone(slot) as Arc<dyn HostEffectStageReservation>),
                 generation,
@@ -113,7 +114,7 @@ impl HostEffectStageReservation for PooledStageSlot {
 
     fn promote_scan_envelope(&self, bytes: u64) -> Result<(), HostEffectAllocationError> {
         let _mutation = self.mutation.lock().expect("managed stage slot lock");
-        if !self.active.load(Ordering::Acquire) {
+        if !self.active_epoch.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
         self.reservation.promote_scan_envelope(bytes)
@@ -125,7 +126,7 @@ impl HostEffectStageReservation for PooledStageSlot {
         bytes: usize,
     ) -> Result<Arc<dyn HostEffectLiveAllocationReservation>, HostEffectAllocationError> {
         let _mutation = self.mutation.lock().expect("managed stage slot lock");
-        if !self.active.load(Ordering::Acquire) {
+        if !self.active_epoch.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
         self.reservation.reserve_live_exact(kind, bytes)
@@ -136,23 +137,27 @@ impl HostEffectStageReservation for PooledStageSlot {
         bytes: u64,
     ) -> Result<Arc<dyn HostEffectOutputHeadroom>, HostEffectAllocationError> {
         let _mutation = self.mutation.lock().expect("managed stage slot lock");
-        if !self.active.load(Ordering::Acquire) {
+        if !self.active_epoch.load(Ordering::Acquire) {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
         self.reservation.reserve_output_headroom(bytes)
     }
 
     fn is_current(&self) -> bool {
-        self.active.load(Ordering::Acquire) && self.reservation.is_current()
+        self.active_epoch.load(Ordering::Acquire) && self.reservation.is_current()
     }
 
     fn slot_generation(&self) -> Option<u64> {
         Some(self.generation.load(Ordering::Acquire))
     }
 
+    fn invocation_epoch(&self) -> Option<Arc<AtomicBool>> {
+        Some(self.active_epoch.clone())
+    }
+
     fn retire_invocation(&self) {
         let _mutation = self.mutation.lock().expect("managed stage slot lock");
-        if self.active.swap(false, Ordering::AcqRel) {
+        if self.active_epoch.swap(false, Ordering::AcqRel) {
             self.reservation.retire_pooled_invocation();
         }
     }
@@ -190,6 +195,26 @@ mod tests {
         next.reservation().retire_invocation();
         drop(next);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[test]
+    fn old_invocation_epoch_cannot_be_reactivated_by_slot_reuse() {
+        let ledger = ManagedHostEffectLedger::new(16);
+        let pool = ManagedHostEffectStagePool::new(&ledger, 1).unwrap();
+        let first = pool.acquire(8).unwrap();
+        let old_epoch = first.reservation().invocation_epoch().unwrap();
+        assert!(old_epoch.load(Ordering::Acquire));
+        first.reservation().retire_invocation();
+        drop(first);
+        assert!(!old_epoch.load(Ordering::Acquire));
+        assert!(matches!(
+            pool.acquire(8),
+            Err(HostEffectAllocationError::ExceedsCapacity)
+        ));
+        drop(old_epoch);
+        let second = pool.acquire(8).unwrap();
+        assert_eq!(second.generation, 2);
+        second.reservation().retire_invocation();
     }
 
     #[test]

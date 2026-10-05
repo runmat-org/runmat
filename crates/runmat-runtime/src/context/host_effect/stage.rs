@@ -111,6 +111,10 @@ pub trait HostEffectStageReservation: Send + Sync {
         None
     }
 
+    fn invocation_epoch(&self) -> Option<Arc<AtomicBool>> {
+        None
+    }
+
     /// A pooled owner may retire its generation when the unique invocation
     /// permit drops. Dynamic reservations already release through Arc Drop.
     fn retire_invocation(&self) {}
@@ -606,6 +610,10 @@ pub fn try_admit_host_effect_stage(
         return Err(stale_resource());
     }
     let slot_generation = admission.reservation.slot_generation();
+    let active_epoch = admission
+        .reservation
+        .invocation_epoch()
+        .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
     let permit = HostEffectStagePermit {
         cancellation: runtime.cancellation(),
         runtime: runtime.clone(),
@@ -615,7 +623,7 @@ pub fn try_admit_host_effect_stage(
         revision,
         reservation: admission.reservation,
         slot_generation,
-        active_epoch: Arc::new(AtomicBool::new(true)),
+        active_epoch,
         session_generation_owner,
         session_generation,
         started: Instant::now(),
