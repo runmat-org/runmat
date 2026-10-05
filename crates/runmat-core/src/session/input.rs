@@ -100,7 +100,9 @@ impl RunMatSession {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_runtime::interaction::{current_async_handler, read_line_async, wait_for_key_async};
+    use runmat_runtime::interaction::{
+        replace_async_handler, request_line_async, wait_for_key_async, InteractionResponse,
+    };
 
     #[test]
     fn session_input_adapter_preserves_requests_events_and_restores_context() {
@@ -121,17 +123,23 @@ mod tests {
             });
             let runtime = session.runtime_context.clone();
             block_on(runtime.scope(async {
-                assert!(current_async_handler().is_none());
+                let _previous = replace_async_handler(Some(Arc::new(|_| {
+                    Box::pin(async { Ok(InteractionResponse::Line("previous".into())) })
+                })));
                 let (guard, events) = session.install_execution_input();
-                assert_eq!(read_line_async("line: ", false).await.unwrap(), "value");
+                assert_eq!(request_line_async("line: ", false).await.unwrap(), "value");
                 wait_for_key_async("key: ").await.unwrap();
                 let events = events.lock().unwrap();
                 assert_eq!(events.len(), 2);
                 assert_eq!(events[0].value.as_deref(), Some("value"));
                 assert!(!events[0].echo);
                 assert!(events[1].value.is_none());
+                drop(events);
                 drop(guard);
-                assert!(current_async_handler().is_none());
+                assert_eq!(
+                    request_line_async("restored: ", false).await.unwrap(),
+                    "previous"
+                );
             }));
         });
     }
@@ -144,7 +152,7 @@ mod tests {
             let runtime = session.runtime_context.clone();
             block_on(runtime.scope(async {
                 let (_guard, events) = session.install_execution_input();
-                let error = read_line_async("error: ", true).await.unwrap_err();
+                let error = request_line_async("error: ", true).await.unwrap_err();
                 assert_eq!(
                     error.identifier(),
                     Some("RunMat:interaction:AsyncHandlerError")
