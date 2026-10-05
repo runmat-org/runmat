@@ -258,6 +258,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
         ledger: ledger.clone(),
     });
     let placement = Rc::new(Placement::default());
+    *placement.managed_ledger.borrow_mut() = Some(ledger.clone());
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()

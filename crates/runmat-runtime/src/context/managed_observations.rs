@@ -54,6 +54,22 @@ pub struct ManagedObservationLease {
 }
 
 impl ManagedObservationPool {
+    #[cfg(test)]
+    pub(crate) fn synthetic_unaccounted_for_tests(ledger: &ManagedHostEffectLedger) -> Self {
+        // Test placement fakes exercise receipt ownership against tiny ledger
+        // capacities; this is never a production reservation or certificate.
+        let backing = ledger.reserve_stage(0).expect("synthetic current ledger");
+        Self {
+            owner: Arc::new(PoolOwner {
+                state: Mutex::new(PoolState {
+                    slots: vec![Slot::default()],
+                }),
+                ledger: ledger.clone(),
+                _backing: backing,
+            }),
+        }
+    }
+
     pub fn new(
         ledger: &ManagedHostEffectLedger,
         capacity: usize,
@@ -140,6 +156,10 @@ impl ManagedObservationLease {
 
     pub fn same_owner(&self, pool: &ManagedObservationPool) -> bool {
         Arc::ptr_eq(&self.owner, &pool.owner)
+    }
+
+    pub(crate) fn same_ledger(&self, ledger: &ManagedHostEffectLedger) -> bool {
+        self.owner.ledger.same_owner(ledger)
     }
 }
 

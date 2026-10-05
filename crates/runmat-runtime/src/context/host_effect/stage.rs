@@ -219,6 +219,15 @@ pub struct HostEffectStagePermit {
 }
 
 impl HostEffectStagePermit {
+    pub(super) fn owns_managed_observation(
+        &self,
+        lease: &crate::context::ManagedObservationLease,
+    ) -> bool {
+        self.reservation
+            .managed_ledger()
+            .is_some_and(|ledger| lease.same_ledger(&ledger))
+    }
+
     pub(super) fn active_epoch(&self) -> Arc<AtomicBool> {
         self.active_epoch.clone()
     }

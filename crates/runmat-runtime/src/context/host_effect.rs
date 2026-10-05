@@ -373,6 +373,9 @@ fn select_host_effect_inner(
                 && selected.selected.kind == expected_candidate_kind
                 && selected.selected.candidate == expected_candidate_digest
                 && selected.observation_is_current()
+                && stage.as_ref().is_some_and(|stage| {
+                    stage.owns_managed_observation(&selected.observation_lease)
+                })
         }
     };
     if !valid_selection {

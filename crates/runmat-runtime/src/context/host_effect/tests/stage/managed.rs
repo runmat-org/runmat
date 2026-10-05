@@ -58,6 +58,7 @@ fn managed_runtime(
     assert_eq!(ledger.snapshot().capacity_bytes, capacity);
     let placement = Rc::new(Placement::default());
     placement.revision_available.set(true);
+    *placement.managed_ledger.borrow_mut() = Some(ledger.clone());
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()
@@ -192,6 +193,7 @@ fn placement_counts_live_precharge_when_final_scratch_bound_shrinks() {
     let ledger = ManagedHostEffectLedger::new(12);
     let placement = Rc::new(Placement::default());
     placement.revision_available.set(true);
+    *placement.managed_ledger.borrow_mut() = Some(ledger.clone());
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(
             RuntimeServicePorts::default()
@@ -364,6 +366,28 @@ fn shared_ledger_rebind_invalidates_only_issuing_session() {
     assert_eq!(second_placement.selections.get(), 1);
     drop(first);
     receipt.finish(WholeWorkObservationOutcome::Success);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
+fn foreign_managed_observation_owner_rejects_selection_before_receipt() {
+    let ledger = ManagedHostEffectLedger::new(12);
+    let (runtime, placement) = managed_runtime(&ledger, 12);
+    *placement.managed_ledger.borrow_mut() = Some(ManagedHostEffectLedger::new(12));
+    let stage = admit_host_effect_stage(&runtime, request(HostEffectOutput::ReturnedValue))
+        .expect("original owner stage");
+    let error = select_host_effect_after_stage(
+        &runtime,
+        request(HostEffectOutput::ReturnedValue),
+        HostEffectFinalFacts::TestOnly(Digest::sha256(b"source-and-destination")),
+        stage,
+    )
+    .err()
+    .expect("foreign observation cannot authorize an effect");
+    assert_eq!(error.identifier(), Some("RunMat:Placement:InvalidDecision"));
+    assert_eq!(placement.selections.get(), 1);
+    assert!(placement.observations.borrow().is_empty());
+    assert_eq!(placement.probes.load(Ordering::SeqCst), 0);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 

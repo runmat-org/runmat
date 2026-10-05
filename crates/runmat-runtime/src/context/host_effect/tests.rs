@@ -63,6 +63,7 @@ struct Placement {
     revision_available: Cell<bool>,
     on_select: RefCell<Option<Box<dyn Fn()>>>,
     on_observe: RefCell<Option<Box<dyn Fn()>>>,
+    managed_ledger: RefCell<Option<ManagedHostEffectLedger>>,
 }
 struct Probe(Arc<AtomicUsize>);
 impl RuntimeWholeWorkProbeLease for Probe {}
@@ -157,6 +158,10 @@ impl RuntimePlacementService for Placement {
         Ok(crate::context::test_managed_selection(
             request,
             Some(Box::new(Probe(self.probes.clone()))),
+            self.managed_ledger
+                .borrow()
+                .as_ref()
+                .expect("staged fixture ledger"),
         ))
     }
     fn observe_managed_whole_work(

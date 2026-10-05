@@ -338,17 +338,14 @@ impl RuntimeManagedWholeWorkSelection {
 pub(crate) fn test_managed_selection(
     request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
     test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+    ledger: &super::host_effect::ManagedHostEffectLedger,
 ) -> RuntimeManagedWholeWorkSelection {
     let candidate = &request.candidates[0];
     let identity = request
         .signature
         .permit_identity()
         .expect("typed test signature");
-    let pool = super::ManagedObservationPool::new(
-        &super::host_effect::ManagedHostEffectLedger::new(4096),
-        1,
-    )
-    .expect("synthetic observation slot");
+    let pool = super::ManagedObservationPool::synthetic_unaccounted_for_tests(ledger);
     RuntimeManagedWholeWorkSelection {
         identity,
         selected: runmat_execution::CompactSelectedExecutionCandidate {

@@ -162,6 +162,7 @@ fn staged_runtime(
     let live = Arc::new(AtomicBool::new(true));
     let drops = Arc::new(AtomicUsize::new(0));
     let ledger = ManagedHostEffectLedger::new(budget);
+    *placement.managed_ledger.borrow_mut() = Some(ledger.clone());
     let resources = Rc::new(StagedResources {
         revision: Digest::sha256(b"staged-resource-v1"),
         stage_scratch,

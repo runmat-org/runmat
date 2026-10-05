@@ -106,6 +106,7 @@ pub(super) struct Placement {
     pub(super) observations: RefCell<Vec<WholeWorkObservation>>,
     pub(super) probes: Arc<AtomicUsize>,
     pub(super) demands: RefCell<Vec<CandidateResourceDemand>>,
+    pub(super) managed_ledger: RefCell<Option<ManagedHostEffectLedger>>,
 }
 struct Probe(Arc<AtomicUsize>);
 impl RuntimeWholeWorkProbeLease for Probe {}
@@ -199,6 +200,10 @@ impl RuntimePlacementService for Placement {
         Ok(crate::context::test_managed_selection(
             request,
             Some(Box::new(Probe(self.probes.clone()))),
+            self.managed_ledger
+                .borrow()
+                .as_ref()
+                .expect("staged audio ledger"),
         ))
     }
     fn observe_managed_whole_work(
