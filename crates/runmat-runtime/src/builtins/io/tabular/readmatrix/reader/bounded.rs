@@ -6,12 +6,14 @@
 
 use super::*;
 use runmat_filesystem::FsBoundedInput;
+use sha2::{Digest as _, Sha256};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 
 pub(super) struct BoundedScanGeometry {
     pub(super) rows: usize,
     pub(super) columns: usize,
     pub(super) delimiter: Delimiter,
+    source_digest: [u8; 32],
 }
 
 struct RowReader<'a> {
@@ -19,6 +21,7 @@ struct RowReader<'a> {
     line: String,
     line_number: usize,
     first_data_line: bool,
+    digest: Sha256,
 }
 
 impl<'a> RowReader<'a> {
@@ -28,6 +31,7 @@ impl<'a> RowReader<'a> {
             line: String::new(),
             line_number: 0,
             first_data_line: true,
+            digest: Sha256::new(),
         }
     }
 
@@ -73,6 +77,7 @@ impl<'a> RowReader<'a> {
                     &mut pending_len,
                     &available[..count],
                 )?;
+                self.digest.update(&available[..count]);
                 self.source.consume(count);
                 saw_bytes = true;
                 checked_row_work(cooperation, path, count).await?;
@@ -291,10 +296,12 @@ pub(super) async fn scan_utf8(
     if let Some(error) = semantic_error {
         return Err(error);
     }
+    let source_digest = reader.digest.finalize().into();
     Ok(BoundedScanGeometry {
         rows,
         columns,
         delimiter,
+        source_digest,
     })
 }
 
@@ -396,7 +403,7 @@ pub(super) async fn fill_utf8(
         .then(|| vec![options.empty_value_f64(); count]);
     let mut reader = RowReader::new(source);
     let mut data_row = 0usize;
-    while let Some((_, text)) = reader
+    while let Some((line_number, text)) = reader
         .next(cooperation, path, options.num_header_lines)
         .await?
     {
@@ -420,8 +427,8 @@ pub(super) async fn fill_utf8(
                         token,
                         options,
                         dtype,
-                        output_row + 1,
-                        output_col + 1,
+                        line_number,
+                        first_col + output_col + 1,
                     )?;
                     storage.set_value(index, value).map_err(|source| {
                         readmatrix_error_with(
@@ -430,8 +437,12 @@ pub(super) async fn fill_utf8(
                         )
                     })?;
                 } else if let Some(storage) = floating.as_mut() {
-                    storage[index] =
-                        parse_numeric_token(token, options, output_row + 1, output_col + 1)?;
+                    storage[index] = parse_numeric_token(
+                        token,
+                        options,
+                        line_number,
+                        first_col + output_col + 1,
+                    )?;
                 }
                 if (output_col + 1) % ROW_WORK_CHUNK == 0 {
                     checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
@@ -444,6 +455,10 @@ pub(super) async fn fill_utf8(
         data_row = data_row.checked_add(1).ok_or_else(matrix_overflow)?;
     }
     if data_row != geometry.rows {
+        return Err(changed_source());
+    }
+    let replay_digest: [u8; 32] = reader.digest.finalize().into();
+    if replay_digest != geometry.source_digest {
         return Err(changed_source());
     }
     if let Some(storage) = integer {
@@ -466,6 +481,6 @@ pub(super) async fn fill_utf8(
 fn changed_source() -> RuntimeError {
     readmatrix_error_with(
         &READMATRIX_ERROR_IO_READ,
-        "readmatrix: opened source changed geometry between validation and output",
+        "readmatrix: opened source changed between validation and output",
     )
 }

@@ -174,6 +174,48 @@ fn retained_seekable_utf8_scan_decodes_multibyte_header_across_chunk() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let directory = tempfile::tempdir().expect("isolated numeric-text source");
+    let file = directory.path().join("numbers.csv");
+    std::fs::write(&file, b"1,2\n3,4\n").expect("initial payload");
+    let _restore =
+        runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::NativeFsProvider));
+    let selected = TabularFsOwner::capture(Some(&file))
+        .expect("captured provider")
+        .path(file.clone())
+        .expect("selected source");
+    let mut opened = block_on(selected.open_bounded_input())
+        .expect("native direct read")
+        .expect("bounded source");
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let options = ReadMatrixOptions {
+        delimiter: Some(Delimiter::Char(',')),
+        ..ReadMatrixOptions::default()
+    };
+    let geometry = block_on(bounded::scan_utf8(
+        &mut opened,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect("first pass");
+    std::fs::write(&file, b"9,8\n7,6\n").expect("same-length in-place mutation");
+    let error = block_on(bounded::fill_utf8(
+        &mut opened,
+        &geometry,
+        &mut cooperation,
+        &selected,
+        &options,
+    ))
+    .expect_err("second pass cannot publish unvalidated new bytes");
+    assert!(error
+        .message()
+        .contains("changed between validation and output"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn retained_seekable_utf8_scan_preserves_bom_range_and_exact_wide_integer() {
     let _lock = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().expect("isolated numeric-text source");
