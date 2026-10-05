@@ -47,7 +47,8 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
         .expect("exact ragged output");
         assert_eq!(tensor.shape, [2, 3]);
         assert_eq!(tensor.numeric_dtype(), dtype);
-        let bytes = 6 * dtype.byte_size() + 2 * std::mem::size_of::<usize>();
+        let bytes = runmat_value::ExactHostTensor2dAllocation::requested_bytes(dtype, 2, 3)
+            .expect("same physical output owner requested layout");
         assert_eq!(live.load(Ordering::SeqCst), bytes);
         let expected = [
             1.0,
@@ -173,7 +174,9 @@ fn exact_output_claim_releases_on_pending_drop_and_cancellation() {
     let source = CancellationSource::new();
     let runtime =
         RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), source.token());
-    let claimed = 2 * std::mem::size_of::<f64>() + 2 * std::mem::size_of::<usize>();
+    let claimed =
+        runmat_value::ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 2)
+            .expect("same physical output owner requested layout");
     for cancel in [false, true] {
         let dropped_turn = Rc::new(Cell::new(false));
         let dropped_turn_owner = dropped_turn.clone();
