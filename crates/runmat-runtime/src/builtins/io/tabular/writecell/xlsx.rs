@@ -159,9 +159,9 @@ pub(in crate::builtins::io::tabular) fn append_sheet_cell_xml(
 }
 
 pub(in crate::builtins::io::tabular) fn append_sheet_text_start(xml: &mut String, reference: &str) {
-    xml.push_str(&format!(
-        "      <c r=\"{reference}\" t=\"inlineStr\"><is><t>"
-    ));
+    xml.push_str("      <c r=\"");
+    xml.push_str(reference);
+    xml.push_str("\" t=\"inlineStr\"><is><t>");
 }
 
 pub(in crate::builtins::io::tabular) fn append_escaped_xml_text_character(
