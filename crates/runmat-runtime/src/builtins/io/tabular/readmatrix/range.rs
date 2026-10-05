@@ -269,7 +269,7 @@ fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
 }
 
 pub(super) fn apply_range<T: Clone>(
-    rows: &[Vec<T>],
+    rows: Vec<Vec<T>>,
     max_cols: usize,
     range: &RangeSpec,
     default_fill: T,
@@ -300,20 +300,15 @@ pub(super) fn apply_range<T: Clone>(
 
     let mut subset = Vec::new();
     let mut subset_max_cols = 0usize;
-    for row_idx in range.start_row..=end_row {
-        if row_idx >= rows.len() {
-            break;
-        }
-        let row = &rows[row_idx];
+    for row in rows
+        .into_iter()
+        .skip(range.start_row)
+        .take(end_row - range.start_row + 1)
+    {
         let mut extracted = Vec::with_capacity(end_col - range.start_col + 1);
-        for col_idx in range.start_col..=end_col {
-            if col_idx >= max_cols {
-                break;
-            }
-            let value = row
-                .get(col_idx)
-                .cloned()
-                .unwrap_or_else(|| default_fill.clone());
+        let mut fields = row.into_iter().skip(range.start_col);
+        for _ in range.start_col..=end_col {
+            let value = fields.next().unwrap_or_else(|| default_fill.clone());
             extracted.push(value);
         }
         subset_max_cols = subset_max_cols.max(extracted.len());

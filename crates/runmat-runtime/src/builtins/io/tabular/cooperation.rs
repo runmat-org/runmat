@@ -22,6 +22,19 @@ impl<'a> TabularCooperation<'a> {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn with_test_budget(
+        runtime: &'a RuntimeContext,
+        builtin: &'static str,
+        budget: CpuCooperationBudget,
+    ) -> Self {
+        Self {
+            runtime: Some(runtime),
+            budget: Some(budget),
+            builtin,
+        }
+    }
+
     pub(super) async fn completed(&mut self, work: usize) -> BuiltinResult<()> {
         let (Some(runtime), Some(budget)) = (self.runtime, self.budget.as_mut()) else {
             return Ok(());
