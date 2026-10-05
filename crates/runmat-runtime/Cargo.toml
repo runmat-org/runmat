@@ -58,6 +58,7 @@ num-traits = "0.2"
 nalgebra = "0.32"
 rustfft = "6.2"
 futures = "0.3"
+async-io = "2"
 async-recursion = "1.1"
 flate2 = "1.1"
 

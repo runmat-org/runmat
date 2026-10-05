@@ -1,6 +1,6 @@
 use super::{
     RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService, RuntimeTcpService,
-    RuntimeUserPathService,
+    RuntimeTimingService, RuntimeUserPathService,
 };
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
@@ -896,7 +896,7 @@ pub trait RuntimeCollectiveService {
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
 /// produces a stable capability error through the corresponding `require_*`
 /// accessor; there is no string-keyed service locator.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RuntimeServicePorts {
     call: Option<Rc<dyn RuntimeCallService>>,
     builtin: Option<Rc<dyn RuntimeBuiltinService>>,
@@ -919,6 +919,36 @@ pub struct RuntimeServicePorts {
     spmd: Option<Rc<dyn RuntimeSpmdService>>,
     distributed: Option<Rc<dyn RuntimeDistributedService>>,
     collective: Option<Rc<dyn RuntimeCollectiveService>>,
+    timing: Rc<dyn RuntimeTimingService>,
+}
+
+impl Default for RuntimeServicePorts {
+    fn default() -> Self {
+        Self {
+            call: None,
+            builtin: None,
+            workspace: None,
+            object: None,
+            host: None,
+            http: None,
+            preferences: None,
+            user_path: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            process: None,
+            tcp: None,
+            error: None,
+            acceleration: None,
+            placement: None,
+            host_effect_resources: None,
+            native: None,
+            foreign: None,
+            parallel: None,
+            spmd: None,
+            distributed: None,
+            collective: None,
+            timing: Rc::new(super::timing::PlatformTimingService::new()),
+        }
+    }
 }
 
 impl std::fmt::Debug for RuntimeServicePorts {
@@ -947,6 +977,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("spmd", &self.spmd.is_some())
             .field("distributed", &self.distributed.is_some())
             .field("collective", &self.collective.is_some());
+        debug.field("timing", &"installed");
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
         debug.finish()
@@ -976,6 +1007,14 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    pub fn with_timing(mut self, service: Rc<dyn RuntimeTimingService>) -> Self {
+        self.timing = service;
+        self
+    }
+
+    pub fn timing(&self) -> &Rc<dyn RuntimeTimingService> {
+        &self.timing
+    }
     /// A staged effect may finish only under the same installed owners that
     /// reserved the scan and supplied the original placement revision.
     pub(crate) fn same_host_effect_owners(&self, other: &Self) -> bool {
