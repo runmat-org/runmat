@@ -136,7 +136,11 @@ impl PlacementSession {
         };
         selected.observation_permit = Some(
             self.observation_permits
-                .register(&selected.decision.signature),
+                .register(&selected.decision.signature)
+                .map_err(|source| PlacementPlanError {
+                    code: "RunMat:Placement:InvalidRequest",
+                    message: source.to_string(),
+                })?,
         );
         Ok(selected)
     }

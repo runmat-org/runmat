@@ -27,12 +27,13 @@ impl ObservationPermits {
     pub(super) fn register(
         &self,
         signature: &PlacementSignature,
-    ) -> Arc<dyn RuntimeWholeWorkObservationPermit> {
+    ) -> Result<Arc<dyn RuntimeWholeWorkObservationPermit>, runmat_execution::ContractError> {
+        let identity = signature.permit_identity()?;
         let permit = Arc::new(Permit(AtomicBool::new(true)));
         let mut active = self.active.borrow_mut();
         active.retain(|(_, weak)| weak.strong_count() != 0);
-        active.push((signature.permit_identity(), Arc::downgrade(&permit)));
-        permit
+        active.push((identity, Arc::downgrade(&permit)));
+        Ok(permit)
     }
 
     pub(super) fn invalidate(&self, invalidation: &PlacementInvalidation) {
@@ -75,7 +76,7 @@ mod tests {
         };
         let permits = ObservationPermits::default();
         for _ in 0..128 {
-            drop(permits.register(&signature));
+            drop(permits.register(&signature).unwrap());
             assert_eq!(permits.active.borrow().len(), 1);
         }
         permits.invalidate(&PlacementInvalidation::All);
@@ -106,7 +107,7 @@ mod tests {
             },
         };
         let permits = ObservationPermits::default();
-        let active = permits.register(&signature);
+        let active = permits.register(&signature).unwrap();
         permits.invalidate(&PlacementInvalidation::Provider { digest });
         assert!(active.is_current());
         permits.invalidate(&PlacementInvalidation::Program {

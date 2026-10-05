@@ -44,6 +44,14 @@ impl PlacementSignature {
         {
             return Err("placement operation must be 1..=128 bytes without control characters");
         }
+        if self
+            .revision
+            .program
+            .as_ref()
+            .is_some_and(|program| program.validate().is_err())
+        {
+            return Err("placement program revision is invalid");
+        }
         Ok(())
     }
 
@@ -54,17 +62,18 @@ impl PlacementSignature {
     /// Compact invalidation facts for an in-flight selection. The program
     /// revision uses its canonical identity rather than cloning its retained
     /// domain-contribution names into each observation registration.
-    pub fn permit_identity(&self) -> PlacementPermitIdentity {
-        PlacementPermitIdentity {
+    pub fn permit_identity(&self) -> Result<PlacementPermitIdentity, crate::ContractError> {
+        Ok(PlacementPermitIdentity {
             signature: self.cache_key(),
-            program: self.revision.program.as_ref().map(|revision| {
-                revision
-                    .identity_digest()
-                    .expect("validated program revision has an identity")
-            }),
+            program: self
+                .revision
+                .program
+                .as_ref()
+                .map(|revision| revision.identity_digest())
+                .transpose()?,
             authority: self.revision.authority,
             policy: self.revision.policy,
-        }
+        })
     }
 }
 
@@ -124,20 +133,28 @@ impl PlacementInvalidation {
     /// The same typed match governs cached feedback, pending receipts, and
     /// still-running whole-work observation permits.
     pub fn matches_signature(&self, signature: &PlacementSignature) -> bool {
-        self.matches_permit_identity(&signature.permit_identity())
+        match self {
+            Self::All => true,
+            Self::Program { revision } => signature.revision.program.as_ref() == Some(revision),
+            Self::Provider { digest } => {
+                signature.revision.authority
+                    == PlacementExecutionAuthorityRevision::Provider(*digest)
+            }
+            Self::HostService { digest } => {
+                signature.revision.authority
+                    == PlacementExecutionAuthorityRevision::HostService(*digest)
+            }
+            Self::Policy { digest } => signature.revision.policy == *digest,
+            Self::Signature { key } => signature.cache_key() == *key,
+        }
     }
 
     pub fn matches_permit_identity(&self, identity: &PlacementPermitIdentity) -> bool {
         match self {
             Self::All => true,
-            Self::Program { revision } => {
-                identity.program
-                    == Some(
-                        revision
-                            .identity_digest()
-                            .expect("validated program revision has an identity"),
-                    )
-            }
+            Self::Program { revision } => revision
+                .identity_digest()
+                .is_ok_and(|digest| identity.program == Some(digest)),
             Self::Provider { digest } => {
                 identity.authority == PlacementExecutionAuthorityRevision::Provider(*digest)
             }
