@@ -115,6 +115,10 @@ impl FileHandle for CountedHandle {
 
 #[async_trait(?Send)]
 impl FsProvider for GatedOpenFs {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.inner.path_namespace()
+    }
+
     fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
         Some(self.fs_lease.clone())
     }

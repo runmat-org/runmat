@@ -11,11 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 fn virtual_directory() -> &'static str {
-    if cfg!(windows) {
-        r"C:\mat"
-    } else {
-        "/mat"
-    }
+    "/mat"
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

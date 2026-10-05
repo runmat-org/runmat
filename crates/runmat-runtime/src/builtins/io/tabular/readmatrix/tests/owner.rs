@@ -19,6 +19,10 @@ struct DelayedOwner {
 
 #[async_trait(?Send)]
 impl FsProvider for DelayedOwner {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.memory.path_namespace()
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from(selected_dir()))
     }
@@ -95,19 +99,11 @@ fn selected() -> Arc<DelayedOwner> {
 }
 
 fn selected_dir() -> &'static str {
-    if cfg!(windows) {
-        r"C:\selected"
-    } else {
-        "/selected"
-    }
+    "/selected"
 }
 
 fn replacement_dir() -> &'static str {
-    if cfg!(windows) {
-        r"C:\replacement"
-    } else {
-        "/replacement"
-    }
+    "/replacement"
 }
 
 fn selected_file() -> PathBuf {

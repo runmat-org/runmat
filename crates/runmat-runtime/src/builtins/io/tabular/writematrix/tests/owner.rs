@@ -84,6 +84,10 @@ struct RevokingProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for RevokingProvider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.memory.path_namespace()
+    }
+
     fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
         Some(Arc::new(RevocableLease(self.valid.clone())))
     }

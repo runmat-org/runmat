@@ -22,12 +22,8 @@ fn selected_outer_load_revoked_during_pending_open_never_reads_or_publishes() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{GatedOpenFs, Witness};
 
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\gated.mat"
-    } else {
-        "/mat/gated.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/gated.mat";
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
         "answer".to_string(),
         Value::Num(42.0),
@@ -68,12 +64,8 @@ fn selected_outer_load_revoked_by_first_read_stops_decode_before_more_reads() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{GatedOpenFs, Witness};
 
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\read-revoked.mat"
-    } else {
-        "/mat/read-revoked.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/read-revoked.mat";
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
         "answer".to_string(),
         Value::Num(42.0),

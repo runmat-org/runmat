@@ -69,6 +69,10 @@ struct GatedProvider {
 
 #[async_trait(?Send)]
 impl FsProvider for GatedProvider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.memory.path_namespace()
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/engine"))
     }

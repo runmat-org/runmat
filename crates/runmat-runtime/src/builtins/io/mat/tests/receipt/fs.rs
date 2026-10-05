@@ -49,6 +49,10 @@ fn unused() -> io::Error {
 
 #[async_trait(?Send)]
 impl FsProvider for PendingWriteFs {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.inner.path_namespace()
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(self.cwd.clone())
     }

@@ -19,19 +19,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 fn directory() -> &'static str {
-    if cfg!(windows) {
-        r"C:\fid-await"
-    } else {
-        "/fid-await"
-    }
+    "/fid-await"
 }
 
 fn replacement_directory() -> &'static str {
-    if cfg!(windows) {
-        r"C:\fid-replacement"
-    } else {
-        "/fid-replacement"
-    }
+    "/fid-replacement"
 }
 
 struct Gate {
@@ -94,6 +86,10 @@ fn unused() -> io::Error {
 
 #[async_trait::async_trait(?Send)]
 impl FsProvider for Provider {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.memory.path_namespace()
+    }
+
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from(directory()))
     }

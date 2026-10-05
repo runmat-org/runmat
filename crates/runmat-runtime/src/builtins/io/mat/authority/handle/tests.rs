@@ -59,12 +59,8 @@ fn revoked_captured_filesystem_keeps_typed_io_cause_on_receiver_resolution() {
     use runmat_filesystem as fs;
 
     let _state = crate::builtins::io::mat::tests::state_guard();
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\revoked.mat"
-    } else {
-        "/mat/revoked.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/revoked.mat";
     let (provider, _release) = GatedOpenFs::new(directory, filename, b"unused");
     let provider = std::sync::Arc::new(provider);
     let _selected = fs::replace_provider(provider.clone());

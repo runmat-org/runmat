@@ -124,12 +124,8 @@ fn selected_outer_save_reports_write_error_once_with_source() {
 
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\readonly.mat"
-    } else {
-        "/mat/readonly.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/readonly.mat";
     let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         directory,
     ));
@@ -169,12 +165,8 @@ fn selected_outer_save_observes_only_after_published_mat_payload() {
 
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\published.mat"
-    } else {
-        "/mat/published.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/published.mat";
     let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         directory,
     ));
@@ -208,12 +200,8 @@ fn revoked_mat_resource_authority_rejects_outer_save_before_write() {
 
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\revoked.mat"
-    } else {
-        "/mat/revoked.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/revoked.mat";
     let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         directory,
     ));
@@ -245,12 +233,8 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
 
     ensure_test_resolver();
     set_workspace(&[("answer", Value::Num(42.0))]);
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\pending.mat"
-    } else {
-        "/mat/pending.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/pending.mat";
     let filesystem = std::sync::Arc::new(PendingWriteFs::new(directory));
     let _selected = runmat_filesystem::replace_provider(filesystem.clone());
     runmat_filesystem::set_current_dir(directory).expect("virtual cwd");
@@ -319,12 +303,8 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
             .expect("nested resident payload"),
     );
     set_workspace(&[("nested", nested)]);
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
-    let filename = if cfg!(windows) {
-        r"C:\mat\nested.mat"
-    } else {
-        "/mat/nested.mat"
-    };
+    let directory = "/mat";
+    let filename = "/mat/nested.mat";
     let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
         directory,
     ));

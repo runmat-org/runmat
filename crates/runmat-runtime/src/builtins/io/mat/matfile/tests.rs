@@ -11,11 +11,7 @@ fn cancelled_assignment_does_not_open_or_publish_mat_bytes() {
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
     use std::rc::Rc;
 
-    let (directory, filename) = if cfg!(windows) {
-        (r"C:\selected", r"C:\selected\cancelled.mat")
-    } else {
-        ("/selected", "/selected/cancelled.mat")
-    };
+    let (directory, filename) = ("/selected", "/selected/cancelled.mat");
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _selected = fs::replace_provider(provider.clone());
     let object = block_on(matfile_builtin(
@@ -108,11 +104,7 @@ fn finite_matfile_constructor_rejects_before_resident_writable_download() {
 #[test]
 fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
     let _state = crate::builtins::io::mat::tests::state_guard();
-    let (directory, filename) = if cfg!(windows) {
-        (r"C:\mat", r"C:\mat\missing.mat")
-    } else {
-        ("/mat", "/mat/missing.mat")
-    };
+    let (directory, filename) = ("/mat", "/mat/missing.mat");
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected.clone());
     fs::set_current_dir(directory).expect("virtual cwd");
@@ -155,7 +147,7 @@ fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
 #[test]
 fn finite_matfile_member_read_rejects_before_missing_file_is_opened() {
     let _state = crate::builtins::io::mat::tests::state_guard();
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let directory = "/mat";
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected);
     fs::set_current_dir(directory).expect("virtual cwd");
@@ -183,7 +175,7 @@ fn selected_outer_member_read_reports_open_failure_once() {
     use super::super::tests::receipt::Witness;
     use runmat_execution::WholeWorkObservationOutcome;
 
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let directory = "/mat";
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected.clone());
     fs::set_current_dir(directory).expect("virtual cwd");
@@ -215,7 +207,7 @@ fn selected_outer_assignment_pending_drop_releases_without_publication_or_feedba
     let _state = crate::builtins::io::mat::tests::state_guard();
     use super::super::tests::receipt::{PendingWriteFs, Witness};
 
-    let directory = if cfg!(windows) { r"C:\mat" } else { "/mat" };
+    let directory = "/mat";
     let selected = Arc::new(PendingWriteFs::new(directory));
     let _provider = fs::replace_provider(selected.clone());
     fs::set_current_dir(directory).expect("virtual cwd");
