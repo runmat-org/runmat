@@ -4,7 +4,10 @@
 use super::super::scan;
 use super::*;
 use sha2::{Digest as _, Sha256};
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
+
+mod source;
+use source::BoundedByteReader;
 
 pub(super) enum LineBuffer {
     Ordinary(String),
@@ -79,7 +82,7 @@ impl LineBuffer {
 }
 
 pub(super) struct RowReader<'a> {
-    source: BufReader<&'a mut FsBoundedInput>,
+    source: BoundedByteReader<'a>,
     line: LineBuffer,
     line_number: usize,
     first_data_line: bool,
@@ -93,7 +96,7 @@ impl<'a> RowReader<'a> {
         staged_line: Option<ExactHostEffectBytes>,
     ) -> Self {
         Self {
-            source: BufReader::with_capacity(4096, source),
+            source: BoundedByteReader::new(source),
             line: staged_line
                 .map_or_else(|| LineBuffer::Ordinary(String::new()), LineBuffer::Staged),
             line_number: 0,
