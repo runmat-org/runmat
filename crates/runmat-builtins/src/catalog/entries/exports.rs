@@ -22,6 +22,7 @@ pub use super::logical::*;
 pub use super::math::*;
 pub use super::parallel::*;
 pub use super::plotting::*;
+pub use super::resources::*;
 pub use super::stats::*;
 pub use super::strings::*;
 pub use super::structs::*;

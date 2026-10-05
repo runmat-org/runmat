@@ -7,5 +7,5 @@ pub use close::{
 };
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    values.push(&close::CLOSE_CATALOG_ENTRY);
+    values.extend_from_slice(close::ENTRIES);
 }

@@ -31,6 +31,7 @@ mod testing;
 mod value_distribution;
 mod exports;
 mod interop;
+mod resources;
 
 use self::aggregation::extend_groups;
 
@@ -64,6 +65,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     fea::extend_entries(values);
     geometry::extend_entries(values);
     interop::extend_entries(values);
+    resources::extend_entries(values);
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
