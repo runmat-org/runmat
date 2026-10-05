@@ -73,17 +73,44 @@ fn gather_owned<'a>(
 }
 
 fn is_host_leaf(value: &Value) -> bool {
-    !matches!(
-        value,
+    match value {
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::SparseTensor(_)
+        | Value::ComplexTensor(_)
+        | Value::Symbolic(_)
+        | Value::SymbolicArray(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => true,
         Value::Cell(_)
-            | Value::OutputList(_)
-            | Value::GpuTensor(_)
-            | Value::Struct(_)
-            | Value::StructArray(_)
-            | Value::Object(_)
-            | Value::ObjectArray(_)
-            | Value::Closure(_)
-    )
+        | Value::Struct(_)
+        | Value::StructArray(_)
+        | Value::GpuTensor(_)
+        | Value::Object(_)
+        | Value::ObjectArray(_)
+        | Value::Closure(_)
+        | Value::OutputList(_)
+        | Value::HandleObject(_)
+        | Value::Listener(_)
+        | Value::Future(_)
+        | Value::Task(_)
+        | Value::Pool(_)
+        | Value::Job(_)
+        | Value::Distributed(_)
+        | Value::Composite(_)
+        | Value::Foreign(_) => false,
+    }
 }
 
 fn execution_error(source: ExecutionServiceError) -> RuntimeError {
@@ -164,6 +191,49 @@ mod tests {
                 Some("RunMat:TransientSequenceBelowDispatch")
             );
         }
+    }
+
+    #[test]
+    fn multilevel_cell_moves_host_leaf_but_rejects_nested_transient() {
+        let chars = CharArray::new_row("2024-04-09");
+        let pointer = chars.data.as_ptr();
+        let nested = Value::Cell(
+            CellArray::new(
+                vec![Value::Cell(
+                    CellArray::new(vec![Value::CharArray(chars)], 1, 1).unwrap(),
+                )],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        let Value::Cell(outer) = block_on(gather_if_needed_owned_async(nested, None)).unwrap()
+        else {
+            panic!("outer cell");
+        };
+        let Value::Cell(inner) = &outer.data[0] else {
+            panic!("inner cell");
+        };
+        assert!(
+            matches!(&inner.data[0], Value::CharArray(value) if value.data.as_ptr() == pointer)
+        );
+
+        let nested_transient = Value::Cell(
+            CellArray::new(
+                vec![Value::Cell(
+                    CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1).unwrap(),
+                )],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        let error = block_on(gather_if_needed_owned_async(nested_transient, None))
+            .expect_err("nested transient must not bypass scalar gather");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceBelowDispatch")
+        );
     }
 
     #[test]

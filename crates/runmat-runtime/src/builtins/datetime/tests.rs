@@ -509,6 +509,31 @@ fn datetime_preserves_empty_cellstr_geometry() {
 }
 
 #[test]
+fn datetime_cellstr_input_format_preserves_unicode_whitespace_trim_boundaries() {
+    let text = format!(
+        "{}2024-04-09{}",
+        "\u{2003}".repeat(1025),
+        "\u{00a0}".repeat(1025)
+    );
+    let input = Value::Cell(
+        runmat_value::CellArray::new(vec![Value::CharArray(CharArray::new_row(&text))], 1, 1)
+            .unwrap(),
+    );
+    let object = as_datetime(
+        futures::executor::block_on(datetime_builtin(vec![
+            input,
+            Value::from("InputFormat"),
+            Value::from("yyyy-MM-dd"),
+        ]))
+        .expect("Unicode whitespace is trimmed before date parsing"),
+    );
+    assert_eq!(
+        serial_tensor_for_object(&object).unwrap().materialize_f64(),
+        vec![serial_for_date(2024, 4, 9)]
+    );
+}
+
+#[test]
 fn datetime_rejects_noncharacter_and_paged_cell_elements_before_resident_access() {
     let allocation = unregistered_resident(vec![1, 1]);
     let paged = CharArray::new_with_shape(vec!['x'; 20], vec![1, 10, 2]).expect("paged char");
