@@ -1,8 +1,8 @@
 use crate::catalog::inference::{default_double_scalar, finish_fixed, numeric_kind};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    CallInference, CallRequest, InferenceDiagnostic, NumericClass, NumericDomain, ValueFact,
-    ValueKindFact,
+    CallInference, CallRequest, InferenceDiagnostic, NumericClass, NumericDomain, ResidencyFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn tic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -40,10 +40,16 @@ pub(super) fn toc(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
             ));
         } else if let ValueKindFact::Numeric(ref numeric) = argument.kind {
             if numeric.class != NumericClass::UInt64
+                || numeric.domain == NumericDomain::Complex
                 || argument
                     .shape
                     .element_count()
                     .is_some_and(|count| count != 1)
+                || matches!(argument.storage, StorageFact::Sparse | StorageFact::Opaque)
+                || matches!(
+                    argument.residency,
+                    ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
+                )
             {
                 diagnostics.push(InferenceDiagnostic::error(
                     "RM-CATALOG-TOC-TOKEN",

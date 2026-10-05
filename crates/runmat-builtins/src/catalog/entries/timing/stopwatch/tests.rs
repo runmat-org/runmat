@@ -1,7 +1,7 @@
 use super::*;
 use runmat_types::{
     CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
-    RequestedOutputCount, ValueFact, ValueKindFact,
+    RequestedOutputCount, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 fn request(arguments: Vec<ValueFact>) -> CallRequest {
@@ -42,4 +42,24 @@ fn stopwatch_facts_and_token_rejection() {
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-TOC-TOKEN"));
+
+    let complex = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Complex,
+    }));
+    let mut resident = complex.clone();
+    resident.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Real,
+    });
+    resident.residency = ResidencyFact::Device { provider: None };
+    let mut sparse = resident.clone();
+    sparse.residency = ResidencyFact::Host;
+    sparse.storage = StorageFact::Sparse;
+    for invalid in [complex, resident, sparse] {
+        assert!(inference::toc(&request(vec![invalid]), &TOC_CATALOG_ENTRY)
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-TOC-TOKEN"));
+    }
 }
