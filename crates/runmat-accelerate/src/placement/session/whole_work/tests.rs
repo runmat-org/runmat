@@ -30,6 +30,35 @@ fn fixed_size_host_route_uses_the_same_placement_policy_without_candidate_vec() 
 }
 
 #[test]
+fn owned_and_borrowed_compared_routes_use_the_same_graph_policy() {
+    let estimate = |execution_ns| {
+        CandidateCostEvidence::Estimated(runmat_execution::ExecutionCostEstimate {
+            components: runmat_execution::ExecutionCostComponents {
+                execution_ns,
+                ..Default::default()
+            },
+            scratch_bytes: Some(8),
+            confidence: runmat_execution::EstimateConfidence::Exact,
+            source: runmat_execution::EstimateSource::Compiler,
+        })
+    };
+    let mut host = candidate(ExecutionCandidateKind::SharedRuntime);
+    host.cost = estimate(100);
+    let mut provider = candidate(ExecutionCandidateKind::ProviderGraph);
+    provider.cost = estimate(20);
+    let routes = request(vec![host, provider]);
+    let owned = PlacementSession::default()
+        .select_whole_work(routes.clone())
+        .expect("owned compared route");
+    let borrowed = PlacementSession::default()
+        .select_whole_work_borrowed(routes.as_ref())
+        .expect("borrowed compared route");
+    assert_eq!(owned.decision.kind, WholeWorkDecisionKind::Compared);
+    assert_eq!(owned.decision, borrowed.decision);
+    assert_eq!(owned.decision.signature, routes.signature);
+}
+
+#[test]
 fn session_preserves_native_send_affinity_with_local_probe_lease() {
     fn assert_send<T: Send>() {}
     assert_send::<PlacementSession>();

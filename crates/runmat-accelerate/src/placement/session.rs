@@ -167,7 +167,7 @@ pub struct PlacementSession {
     state: RefCell<PlacementSessionState>,
     pending: pending::PendingFeedback,
     observation_permits: observation_permits::ObservationPermits,
-    whole_work_probes: Arc<Mutex<BTreeSet<(Digest, String, ExecutionCandidateKind)>>>,
+    whole_work_probes: Arc<Mutex<BTreeSet<whole_work::ProbeKey>>>,
 }
 
 impl Default for PlacementSession {

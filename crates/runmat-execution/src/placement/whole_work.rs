@@ -224,9 +224,7 @@ impl WholeWorkPlacementRequestRef<'_> {
                     return Err("provider-required work contains a host or foreign-device route");
                 }
             }
-            if self.candidates.len() > 1
-                && !identities.insert(candidate.selected(&self.signature.operation).candidate)
-            {
+            if self.candidates.len() > 1 && !identities.insert(candidate.identity_digest()) {
                 return Err("whole-work candidate route identity is duplicated");
             }
         }

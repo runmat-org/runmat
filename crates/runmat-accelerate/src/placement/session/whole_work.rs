@@ -20,7 +20,7 @@ use crate::placement::partition::{
     single_candidate_resources_admitted, CandidateResourceFacts, ResourceAdmissionError,
 };
 
-type ProbeKey = (Digest, String, ExecutionCandidateKind);
+pub(super) type ProbeKey = (Digest, Digest, ExecutionCandidateKind);
 
 struct ProbeLease {
     active: Arc<Mutex<BTreeSet<ProbeKey>>>,
@@ -51,13 +51,13 @@ struct Admitted<'a> {
 }
 
 struct SelectionDraft {
-    selected: SelectedExecutionCandidate,
+    selected: Option<SelectedExecutionCandidate>,
     kind: WholeWorkDecisionKind,
     predicted_total_ns: Option<u64>,
     probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
-    /// The compared graph already owns its validated signature. Other routes
-    /// take the caller's original signature without an intermediate clone.
-    compared_signature: Option<runmat_execution::PlacementSignature>,
+    /// A compared route waits for the caller to transfer its original
+    /// signature into the graph planner. A borrowed caller clones only here.
+    compared_graph: Option<PlacementGraph>,
 }
 
 impl PlacementSession {
@@ -66,7 +66,13 @@ impl PlacementSession {
         request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
         let draft = self.select_whole_work_untracked(request.as_ref())?;
-        Ok(self.finish_whole_work_selection(draft, request.signature))
+        self.finish_whole_work_selection(
+            draft,
+            request.signature,
+            Some(request.resources),
+            request.deterministic,
+            request.require_transactional_results,
+        )
     }
 
     pub fn select_whole_work_borrowed(
@@ -74,20 +80,57 @@ impl PlacementSession {
         request: WholeWorkPlacementRequestRef<'_>,
     ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
         let draft = self.select_whole_work_untracked(request)?;
-        Ok(self.finish_whole_work_selection(draft, (*request.signature).clone()))
+        let resources = draft
+            .compared_graph
+            .as_ref()
+            .map(|_| (*request.resources).clone());
+        self.finish_whole_work_selection(
+            draft,
+            (*request.signature).clone(),
+            resources,
+            request.deterministic,
+            request.require_transactional_results,
+        )
     }
 
     fn finish_whole_work_selection(
         &self,
         draft: SelectionDraft,
         signature: runmat_execution::PlacementSignature,
-    ) -> RuntimeWholeWorkSelection {
+        resources: Option<runmat_execution::PlacementResourceSnapshot>,
+        deterministic: bool,
+        require_transactional_results: bool,
+    ) -> Result<RuntimeWholeWorkSelection, PlacementPlanError> {
+        let (signature, selected_candidate, kind, predicted_total_ns) =
+            if let Some(graph) = draft.compared_graph {
+                let plan = self.plan(PlacementPlanRequest {
+                    signature,
+                    graph,
+                    limits: PlacementGraphLimits::default(),
+                    resources: resources.expect("compared route retains resource snapshot"),
+                    deterministic,
+                    require_transactional_results,
+                })?;
+                (
+                    plan.signature,
+                    plan.selections.into_iter().next().expect("one-node graph"),
+                    WholeWorkDecisionKind::Compared,
+                    Some(plan.predicted_total_ns),
+                )
+            } else {
+                (
+                    signature,
+                    draft.selected.expect("non-compared route has a selection"),
+                    draft.kind,
+                    draft.predicted_total_ns,
+                )
+            };
         let mut selected = RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
-                signature: draft.compared_signature.unwrap_or(signature),
-                selected: draft.selected,
-                kind: draft.kind,
-                predicted_total_ns: draft.predicted_total_ns,
+                signature,
+                selected: selected_candidate,
+                kind,
+                predicted_total_ns,
             },
             probe: draft.probe,
             observation_permit: None,
@@ -96,7 +139,7 @@ impl PlacementSession {
             self.observation_permits
                 .register(&selected.decision.signature),
         );
-        selected
+        Ok(selected)
     }
 
     fn select_whole_work_untracked(
@@ -205,7 +248,7 @@ impl PlacementSession {
                 .or_else(|| admitted.first())
                 .expect("nonempty admitted whole-work candidates");
             return Ok(SelectionDraft {
-                selected: item.selected.clone(),
+                selected: Some(item.selected.clone()),
                 kind: if matches!(
                     request.constraint,
                     WholeWorkConstraint::ProviderRequired { .. }
@@ -219,7 +262,7 @@ impl PlacementSession {
                     .estimate()
                     .and_then(|cost| cost.checked_total_ns()),
                 probe: None,
-                compared_signature: None,
+                compared_graph: None,
             });
         }
 
@@ -229,19 +272,19 @@ impl PlacementSession {
                 let item = &admitted[index];
                 let key = (
                     request.signature.cache_key(),
-                    item.selected.candidate.clone(),
+                    item.candidate.identity_digest(),
                     item.selected.kind,
                 );
                 lock_probes(&self.whole_work_probes).insert(key.clone());
                 return Ok(SelectionDraft {
-                    selected: item.selected.clone(),
+                    selected: Some(item.selected.clone()),
                     kind: WholeWorkDecisionKind::Exploratory,
                     predicted_total_ns: None,
                     probe: Some(Box::new(ProbeLease {
                         active: Arc::clone(&self.whole_work_probes),
                         key,
                     })),
-                    compared_signature: None,
+                    compared_graph: None,
                 });
             }
         }
@@ -286,23 +329,15 @@ impl PlacementSession {
                 })
                 .collect(),
         };
-        let plan = self.plan(PlacementPlanRequest {
-            signature: (*request.signature).clone(),
-            graph: PlacementGraph {
+        Ok(SelectionDraft {
+            selected: None,
+            kind: WholeWorkDecisionKind::Compared,
+            predicted_total_ns: None,
+            probe: None,
+            compared_graph: Some(PlacementGraph {
                 nodes: vec![node],
                 edges: Vec::new(),
-            },
-            limits: PlacementGraphLimits::default(),
-            resources: (*request.resources).clone(),
-            deterministic: request.deterministic,
-            require_transactional_results: request.require_transactional_results,
-        })?;
-        Ok(SelectionDraft {
-            selected: plan.selections.into_iter().next().expect("one-node graph"),
-            kind: WholeWorkDecisionKind::Compared,
-            predicted_total_ns: Some(plan.predicted_total_ns),
-            probe: None,
-            compared_signature: Some(plan.signature),
+            }),
         })
     }
 }
@@ -313,11 +348,11 @@ fn unmeasured_host(admitted: &[Admitted<'_>]) -> Result<SelectionDraft, Placemen
         .find(|item| !item.candidate.kind.is_provider())
         .ok_or_else(no_legal_candidate)?;
     Ok(SelectionDraft {
-        selected: item.selected.clone(),
+        selected: Some(item.selected.clone()),
         kind: WholeWorkDecisionKind::Unmeasured,
         predicted_total_ns: None,
         probe: None,
-        compared_signature: None,
+        compared_graph: None,
     })
 }
 
@@ -335,7 +370,7 @@ fn exploration_candidate(
                 || item.candidate.transactional_results)
             && !active.contains(&(
                 signature,
-                item.selected.candidate.clone(),
+                item.candidate.identity_digest(),
                 item.selected.kind,
             ))
     };
