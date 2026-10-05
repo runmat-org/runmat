@@ -46,15 +46,6 @@ pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn xlsread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![
-        Type::tensor(),
-        Type::OutputList(vec![Type::tensor(), Type::cell()]),
-        Type::OutputList(vec![Type::tensor(), Type::cell(), Type::cell()]),
-    ])
-}
-
 pub fn data_unknown_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
