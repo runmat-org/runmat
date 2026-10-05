@@ -68,8 +68,7 @@ pub struct CanonicalFluidBackwardEulerStep<'p, 'mesh, 'state> {
 }
 
 impl<'mesh> CanonicalFluidProblem<'mesh> {
-    /// All present boundary and body-force inputs are authenticated constants.
-    /// Future time-varying inputs must arrive through shared signal realization.
+    /// Inputs are already realized at the receiving time through the shared sampler.
     pub fn prepare_backward_euler<'p, 'state>(
         &'p self,
         start_time_s: f64,

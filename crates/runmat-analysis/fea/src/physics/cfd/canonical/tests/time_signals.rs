@@ -3,7 +3,7 @@ use super::*;
 use crate::excitation::ProjectionSample;
 use runmat_analysis_core::*;
 
-fn table<Q>(
+pub(super) fn table<Q>(
     id: &str,
     shape: SignalShape,
     frame: Option<CoordinateFrame>,

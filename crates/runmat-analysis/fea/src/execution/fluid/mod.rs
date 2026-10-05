@@ -12,7 +12,13 @@ mod result;
 pub use fields::fluid_native_field_definition_inventory;
 #[cfg(test)]
 pub(crate) mod tests;
+mod time_block;
+mod time_schedule;
 mod workload;
+pub use time_block::{
+    FluidTransientBlock, FluidTransientBlockReservation, FluidTransientBlockResult,
+};
+pub use time_schedule::FluidTransientSchedule;
 
 pub use result::FluidSteadySolverResult;
 pub use workload::FluidSteadyWorkload;

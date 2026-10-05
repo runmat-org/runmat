@@ -499,3 +499,5 @@ fn wall_shear_error(f: &fixture::Fixture, r: &CanonicalFluidResidual) -> f64 {
     }
     (error / exact).sqrt()
 }
+
+mod time_block;

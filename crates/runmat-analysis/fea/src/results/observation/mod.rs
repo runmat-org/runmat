@@ -73,7 +73,9 @@ pub use evaluate::{
     evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
     evaluate_structural_observations, resolved_observation_accepts_sample,
 };
-pub(crate) use history::{exact_scheduled_coordinates, sample_matches_policy};
+pub(crate) use history::{
+    exact_scheduled_coordinates, exact_scheduled_sample_count, sample_matches_policy,
+};
 pub use history::{
     reduce_observation_history, AccuracyEventAttribution, BoundedObservationHistory,
     ObservationEventAttribution, ObservationHistory, ObservationHistoryCheckpoint,

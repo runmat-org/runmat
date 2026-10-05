@@ -120,6 +120,32 @@ fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalPr
     }
 }
 
+pub(super) fn original_block_encoding_profile<'a>(
+    cells: usize,
+    faces: usize,
+    authorities: impl Iterator<Item = &'a str> + Clone,
+    count: usize,
+) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
+    #[derive(Serialize)]
+    #[serde(bound(serialize = "BoundaryProfiles<I>: Serialize"))]
+    struct Block<I> {
+        identity: Digest,
+        start_ordinal: usize,
+        end_ordinal: usize,
+        original: Repeated<OriginalProfile<I>>,
+    }
+    let profile = Block {
+        identity: Digest::from_bytes([0; 32]),
+        start_ordinal: 0,
+        end_ordinal: 0,
+        original: Repeated {
+            sample: original_profile(cells, faces, authorities),
+            count,
+        },
+    };
+    Ok(profile_serialized(&profile, LIMITS)?)
+}
+
 impl FluidSteadyWorkload {
     /// Maximum-width shared codec profile of the actual immutable result schema.
     /// Exact source topology determines cell/face cardinality; numeric samples

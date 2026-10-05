@@ -1,4 +1,6 @@
+mod schedule;
 use runmat_analysis_core::{IndependentDomain, ProcedureStep};
+pub(crate) use schedule::{ProcedureTimeSchedule, TimeScheduleError};
 
 /// A numerical sampling grid derived from the physical time domain authored on a procedure step.
 ///

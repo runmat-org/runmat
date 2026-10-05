@@ -84,7 +84,7 @@ pub(super) fn scheduled_sample_count(
     Ok(count)
 }
 
-pub(super) fn exact_scheduled_sample_count(
+pub(crate) fn exact_scheduled_sample_count(
     sampling: &SamplingPolicy,
 ) -> Result<Option<usize>, ObservationError> {
     match sampling {

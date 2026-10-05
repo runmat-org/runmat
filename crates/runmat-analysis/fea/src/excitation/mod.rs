@@ -37,7 +37,7 @@ pub(crate) use sample::{
     sample_prescribed_potential, sample_prescribed_pressure, sample_prescribed_temperature,
     sample_prescribed_velocity, sample_signal, time_breakpoints, ExcitationSamplePoint,
 };
-pub(crate) use time_grid::ProcedureTimeGrid;
+pub(crate) use time_grid::{ProcedureTimeGrid, ProcedureTimeSchedule, TimeScheduleError};
 
 #[cfg(test)]
 mod selection_tests;

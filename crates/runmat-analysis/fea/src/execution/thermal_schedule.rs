@@ -2,7 +2,7 @@
 use runmat_analysis_core::{AnalysisModel, ProcedureStep, SignalSampleApproach};
 
 use crate::{
-    excitation::{time_breakpoints, ProcedureTimeGrid},
+    excitation::{time_breakpoints, ProcedureTimeGrid, ProcedureTimeSchedule, TimeScheduleError},
     pipeline::required_bounded_time_history_samples,
     planning::resource::ResourcePlanningError,
     FeaRunError, ThermalProcedureControl,
@@ -12,8 +12,8 @@ use crate::{
 /// Fields are private: a caller cannot replace an admitted inventory with arbitrary coordinates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThermalSolveSchedule {
-    points_s: Vec<f64>,
-    events_s: Vec<f64>,
+    steady_point_s: [f64; 1],
+    schedule: Option<ProcedureTimeSchedule>,
     transient: bool,
 }
 
@@ -34,8 +34,8 @@ impl ThermalSolveSchedule {
             .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         let ThermalProcedureControl::BackwardEuler { snapshot_count } = procedure else {
             return Ok(Self {
-                points_s: vec![0.0],
-                events_s: Vec::new(),
+                steady_point_s: [0.0],
+                schedule: None,
                 transient: false,
             });
         };
@@ -52,66 +52,40 @@ impl ThermalSolveSchedule {
         required: &[f64],
         maximum: usize,
     ) -> Result<Self, FeaRunError> {
-        let start = grid[0];
-        let end = grid[grid.len() - 1];
-        let canonical_time = |value: f64| if value == 0.0 { 0.0 } else { value };
-        let mut points = grid.iter().copied().map(canonical_time).collect::<Vec<_>>();
-        for source in [events, required] {
-            for &raw in source {
-                if !raw.is_finite() || raw < start || raw > end {
-                    return Err(FeaRunError::InvalidModel(
-                        "thermal schedule sample lies outside the finite authored time interval"
-                            .into(),
-                    ));
+        let schedule =
+            ProcedureTimeSchedule::merge(grid, events, required, maximum).map_err(|error| {
+                match error {
+                    TimeScheduleError::Invalid(message) => {
+                        FeaRunError::InvalidModel(message.into())
+                    }
+                    TimeScheduleError::Ceiling { required, maximum } => {
+                        ResourcePlanningError::AccuracyCeiling {
+                            resource: "thermal solve samples",
+                            required: required as u64,
+                            maximum: maximum as u64,
+                        }
+                        .into()
+                    }
                 }
-            }
-            // Both sources are sorted by their shared realizers. Merge linearly, with a bound
-            // on the unique union; repeated observation requests must not consume sample budget.
-            let mut left = points.into_iter().peekable();
-            let mut right = source.iter().copied().map(canonical_time).peekable();
-            let mut merged = Vec::new();
-            while left.peek().is_some() || right.peek().is_some() {
-                let value = match (left.peek(), right.peek()) {
-                    (Some(a), Some(b)) if a <= b => left.next().unwrap(),
-                    (_, Some(_)) => right.next().unwrap(),
-                    _ => left.next().unwrap(),
-                };
-                if merged.last().is_none_or(|last| *last != value) {
-                    check_sample_count(
-                        merged
-                            .len()
-                            .checked_add(1)
-                            .ok_or(ResourcePlanningError::Overflow("thermal sample count"))?,
-                        maximum,
-                    )?;
-                    merged.push(value);
-                }
-            }
-            points = merged;
-        }
-        let mut events_s = events
-            .iter()
-            .copied()
-            .map(canonical_time)
-            .collect::<Vec<_>>();
-        events_s.sort_by(f64::total_cmp);
-        events_s.dedup();
+            })?;
         Ok(Self {
-            points_s: points,
-            events_s,
+            steady_point_s: [0.0],
+            schedule: Some(schedule),
             transient: true,
         })
     }
 
     pub fn points_s(&self) -> &[f64] {
-        &self.points_s
+        self.schedule
+            .as_ref()
+            .map_or(&self.steady_point_s, |schedule| schedule.points_s())
     }
     pub fn sample_count(&self) -> usize {
-        self.points_s.len()
+        self.points_s().len()
     }
     pub fn solve_count(&self) -> usize {
         if self.transient {
-            self.points_s.len() - 1
+            self.points_s().len() - 1
         } else {
             1
         }
@@ -126,15 +100,9 @@ impl ThermalSolveSchedule {
             ))
     }
     pub(crate) fn approach(&self, index: usize) -> SignalSampleApproach {
-        if self
-            .events_s
-            .binary_search_by(|event| event.total_cmp(&self.points_s[index]))
-            .is_ok()
-        {
-            SignalSampleApproach::LeftLimit
-        } else {
-            SignalSampleApproach::At
-        }
+        self.schedule
+            .as_ref()
+            .map_or(SignalSampleApproach::At, |schedule| schedule.arrival(index))
     }
 }
 
