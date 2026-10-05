@@ -3,7 +3,7 @@
   "crates/runmat-analysis/fea/src/assembly/mod.rs": 4395,
   "crates/runmat-runtime/src/analysis/figures.rs": 3748,
   "crates/runmat-runtime/src/analysis/contracts.rs": 2828,
-  "crates/runmat-runtime/src/analysis/storage.rs": 965,
+  "crates/runmat-runtime/src/analysis/storage.rs": 931,
   "crates/runmat-analysis/fea/src/fixtures.rs": 1647,
   "crates/runmat-runtime/src/analysis/operations/query.rs": 1541,
   "crates/runmat-analysis/fea/src/results/observation/distributed.rs": 1160,

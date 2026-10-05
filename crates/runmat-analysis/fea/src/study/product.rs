@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::execution::StructuralStudyWorkloads;
 
 use super::{
-    compile_analysis_study, plan_structural_study, AnalysisStudyCompilationError,
+    compile_analysis_study, plan_structural_study_with_fields, AnalysisStudyCompilationError,
     AnalysisStudyCompilationInput, CompiledAnalysisStudy, StructuralStudyPlanningError,
     StructuralStudyPlanningPolicy,
 };
@@ -36,6 +36,13 @@ pub struct StructuralStudyProductInput<'a> {
 pub fn build_structural_study_product(
     input: StructuralStudyProductInput<'_>,
 ) -> Result<StructuralStudyProduct, StructuralStudyProductError> {
+    build_structural_study_product_with_fields(input, &[])
+}
+
+pub fn build_structural_study_product_with_fields(
+    input: StructuralStudyProductInput<'_>,
+    fields: &[crate::execution::InitialFieldBinding],
+) -> Result<StructuralStudyProduct, StructuralStudyProductError> {
     let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
         study: input.study,
         geometry: input.geometry,
@@ -43,7 +50,7 @@ pub fn build_structural_study_product(
         materials: input.materials,
         mesh: input.mesh,
     })?;
-    let workloads = plan_structural_study(&compiled, input.planning)?;
+    let workloads = plan_structural_study_with_fields(&compiled, input.planning, fields)?;
     Ok(StructuralStudyProduct {
         compiled,
         workloads,

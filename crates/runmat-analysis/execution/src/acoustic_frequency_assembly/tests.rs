@@ -221,7 +221,8 @@ fn aggregate_accounts_mesh_as_input_not_as_emitted_output() {
     let mut actual_field_bytes = 0;
     for (result, artifact) in prepared.entries.iter().zip(&assembled.fields) {
         let (_, field_profile) = result.native_field_encoding_profiles().unwrap();
-        let partitions = acoustic_native_field_partitions(artifact).unwrap();
+        let partitions =
+            crate::field_recovery::recovered_field_payload_partitions(artifact).unwrap();
         let bytes = partitions
             .iter()
             .map(|(_, bytes)| bytes.len() as u64)

@@ -16,12 +16,20 @@ pub fn resolve_initial_fields(
     step: &ProcedureStep,
     maximum: u64,
 ) -> Result<Vec<InitialFieldBinding>, AnalysisPublicationError> {
-    let mut references = model
+    let references = model
         .initial_conditions
         .iter()
         .filter(|condition| condition.applies_to_step(step))
-        .filter_map(|condition| condition.field_artifact_ref())
-        .peekable();
+        .filter_map(|condition| condition.field_artifact_ref());
+    resolve_initial_field_references(references, maximum)
+}
+
+/// Resolve a closed source union with one cumulative read/residency allowance.
+pub fn resolve_initial_field_references<'a>(
+    references: impl Iterator<Item = &'a runmat_analysis_core::InitialFieldArtifactRef>,
+    maximum: u64,
+) -> Result<Vec<InitialFieldBinding>, AnalysisPublicationError> {
+    let mut references = references.peekable();
     if references.peek().is_none() {
         return Ok(Vec::new());
     }

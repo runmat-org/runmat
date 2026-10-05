@@ -83,9 +83,9 @@ mod excitation_workspace;
 mod facts;
 mod field_metadata;
 mod initial_fields;
-pub(crate) use initial_fields::{
-    initial_field_reservation_bytes, require_borrowed_initial_field_ceiling,
-    require_initial_field_ceiling,
+pub(crate) use initial_fields::require_borrowed_initial_field_ceiling;
+pub use initial_fields::{
+    initial_field_reservation_bytes, initial_field_source_ceiling, require_initial_field_ceiling,
 };
 mod frequency;
 mod local_execution;

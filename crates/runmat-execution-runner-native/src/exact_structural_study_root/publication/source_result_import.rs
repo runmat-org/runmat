@@ -79,7 +79,7 @@ pub fn import_structural_study_result(
         .iter()
         .map(|entry| (entry.reference.clone(), entry.material.clone()))
         .collect::<BTreeMap<_, _>>();
-    let recompiled = runmat_analysis_fea::study::build_structural_study_product(
+    let recompiled = runmat_analysis_fea::study::build_structural_study_product_with_fields(
         runmat_analysis_fea::study::StructuralStudyProductInput {
             study: &expected.study,
             geometry: &geometry_output.document,
@@ -88,6 +88,7 @@ pub fn import_structural_study_result(
             mesh: &mesh.artifact,
             planning: expected.planning,
         },
+        &expected.initial_fields,
     )
     .map_err(protocol)?;
     if &recompiled.compiled != compiled {

@@ -17,6 +17,7 @@ use runmat_analysis_fea::{
 };
 
 const LIMIT: u64 = 128 * 1024 * 1024;
+mod process;
 
 fn source() -> (AnalysisRunResult, RecoveredFieldArtifact) {
     let mut run = analysis_run_linear_static_with_options(

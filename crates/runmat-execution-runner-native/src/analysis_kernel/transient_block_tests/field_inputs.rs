@@ -135,6 +135,7 @@ fn native_cold_field_inputs_preserve_original_state_and_partition_equivalence() 
                 applies_before_step_id: workload.step_id.0.clone(),
             }),
         ];
+        crate::structural_study_root::verify_original_field_transport(&workload.initial_fields);
         drop(producer);
         let workload =
             StructuralTransientWorkload::from_canonical_bytes(&workload.canonical_bytes().unwrap())

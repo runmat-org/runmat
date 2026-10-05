@@ -295,8 +295,9 @@ pub use callable::{
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult, CoordinatorRetentionLimit};
 pub use field_recovery::{
     decode_recovered_field_artifact, import_structural_recovered_fields,
-    prepare_structural_field_recovery, ImportedRecoveredFields, PreparedStructuralFieldRecovery,
-    StructuralFieldRecoveryPreparation,
+    prepare_recovered_field_objects, prepare_structural_field_recovery,
+    recovered_field_transport_reservation_bytes, ImportedRecoveredFields,
+    PreparedStructuralFieldRecovery, StructuralFieldRecoveryPreparation,
 };
 pub use frequency_field_recovery::{
     import_structural_frequency_recovered_fields, prepare_structural_frequency_field_recovery,

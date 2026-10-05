@@ -30,7 +30,9 @@ use super::render_tiles::{
 mod assessment;
 mod initial_fields;
 mod metadata_identity;
-pub use initial_fields::{export_initial_field, resolve_initial_fields};
+pub use initial_fields::{
+    export_initial_field, resolve_initial_field_references, resolve_initial_fields,
+};
 use metadata_identity::persisted_run_digest;
 mod discovery;
 pub use assessment::{AssessmentRunEvidence, AssessmentStoreError};
@@ -698,47 +700,11 @@ pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisAr
         .map_err(|_| "analysis artifact store lock poisoned".to_owned())
 }
 
-pub fn load_run_result(run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.load_run(run_id)
-}
-
-pub fn load_structural_frequency_result(
-    run_id: &str,
-) -> Result<Option<AnalysisStudyStepRunData>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.load_structural_frequency(run_id)
-}
-
-pub fn load_acoustic_frequency_result(
-    run_id: &str,
-) -> Result<Option<AnalysisStudyStepRunData>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.load_acoustic_frequency(run_id)
-}
-
-pub fn load_run_metadata(run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
-    let guard = global_store()
-        .read()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    guard.load_run_metadata(run_id)
-}
-
-pub fn load_assessment_metadata(
-    run_id: &str,
-    maximum_bytes: u64,
-) -> Result<Option<AssessmentRunEvidence>, AssessmentStoreError> {
-    let guard = global_store().read().map_err(|_| {
-        AssessmentStoreError::Invalid("analysis artifact store lock poisoned".into())
-    })?;
-    guard.load_assessment_metadata(run_id, maximum_bytes)
-}
+mod source_access;
+pub use source_access::{
+    load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
+    load_structural_frequency_result,
+};
 
 pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {
     let guard = global_store()

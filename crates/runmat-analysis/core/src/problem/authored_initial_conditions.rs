@@ -32,6 +32,23 @@ pub enum AuthoredInitialConditionKind {
     FluidVelocity(InitialValue<Velocity>),
 }
 
+impl AuthoredInitialConditionKind {
+    pub fn field_artifact_ref(&self) -> Option<&InitialFieldArtifactRef> {
+        match self {
+            Self::Displacement(InitialValue::FieldArtifact(reference))
+            | Self::Velocity(InitialValue::FieldArtifact(reference))
+            | Self::AngularVelocity(InitialValue::FieldArtifact(reference))
+            | Self::Temperature(InitialValue::FieldArtifact(reference))
+            | Self::ElectricPotential(InitialValue::FieldArtifact(reference))
+            | Self::MagneticVectorPotential(InitialValue::FieldArtifact(reference))
+            | Self::AcousticPressure(InitialValue::FieldArtifact(reference))
+            | Self::FluidPressure(InitialValue::FieldArtifact(reference))
+            | Self::FluidVelocity(InitialValue::FieldArtifact(reference)) => Some(reference),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AuthoredInitialCondition {

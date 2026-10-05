@@ -3,7 +3,23 @@ use super::{ByteCount, ResourcePlanningError};
 use crate::execution::InitialFieldBinding;
 use runmat_canonical_codec::CanonicalLimits;
 
-pub(crate) fn require_initial_field_ceiling(
+/// Source closures coexist at whole-study preparation. Honor every authored step ceiling.
+pub fn initial_field_source_ceiling(
+    sequence: &runmat_analysis_core::AnalysisSequence,
+) -> Result<u64, ResourcePlanningError> {
+    sequence
+        .steps
+        .iter()
+        .map(|step| step.accuracy.resources.maximum_resident_bytes)
+        .min()
+        .ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "initial fields require an authored procedure sequence".into(),
+            )
+        })
+}
+
+pub fn require_initial_field_ceiling(
     fields: &[InitialFieldBinding],
     limits: CanonicalLimits,
     maximum: u64,
@@ -33,7 +49,7 @@ fn require_ceiling(required: u64, maximum: u64) -> Result<(), ResourcePlanningEr
     Ok(())
 }
 
-pub(crate) fn initial_field_reservation_bytes(
+pub fn initial_field_reservation_bytes(
     fields: &[InitialFieldBinding],
     limits: CanonicalLimits,
 ) -> Result<ByteCount, ResourcePlanningError> {

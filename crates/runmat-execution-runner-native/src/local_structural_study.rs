@@ -1,7 +1,7 @@
 //! Local composition of the same portable whole-study root used by remote execution.
 
 use runmat_analysis_fea::study::{
-    compile_analysis_study, plan_structural_study, AnalysisStudyCompilationInput,
+    compile_analysis_study, plan_structural_study_with_fields, AnalysisStudyCompilationInput,
 };
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -118,7 +118,9 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
     )
     .await?;
     crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
-    let workloads = plan_structural_study(&compiled, decoded.planning).map_err(protocol)?;
+    let workloads =
+        plan_structural_study_with_fields(&compiled, decoded.planning, &decoded.initial_fields)
+            .map_err(protocol)?;
     emit_local_progress(
         &observers,
         OPERATION,

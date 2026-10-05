@@ -432,7 +432,8 @@ pub fn import_acoustic_frequency_assembly(
         let objects = by_identity
             .remove(&artifact.identity().digest())
             .ok_or_else(|| invalid("missing original acoustic field output"))?;
-        let expected_partitions = acoustic_native_field_partitions(artifact)?;
+        let expected_partitions =
+            crate::field_recovery::recovered_field_payload_partitions(artifact)?;
         if objects.manifest.partitions.len() != expected_partitions.len() {
             return Err(AnalysisBridgeError::Identity(
                 "acoustic field partitions differ from original native fields",
@@ -484,46 +485,12 @@ pub fn prepare_acoustic_frequency_field_objects(
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
-    use runmat_analysis_fea::execution::AnalysisPayloadPartition;
-    let partitions = acoustic_native_field_partitions(artifact)?;
-    let borrowed = partitions
-        .iter()
-        .map(|(logical_identity, payload)| AnalysisPayloadPartition {
-            logical_identity: *logical_identity,
-            payload,
-        })
-        .collect::<Vec<_>>();
-    crate::prepare_partitioned_analysis_objects(
-        AnalysisNumericalObjectKind::Field,
-        artifact.identity().digest(),
-        &borrowed,
+    crate::prepare_recovered_field_objects(
+        artifact,
         chunk_bytes,
         ObjectNamespace::ResultValue,
         limits,
     )
-}
-
-fn acoustic_native_field_partitions(
-    artifact: &runmat_analysis_fea::results::field::RecoveredFieldArtifact,
-) -> AnalysisBridgeResult<Vec<(Digest, Vec<u8>)>> {
-    use runmat_analysis_fea::results::field::canonical_field_partitions;
-    let mut partitions = vec![(
-        artifact.identity().digest(),
-        artifact
-            .manifest()
-            .map_err(invalid)?
-            .canonical_bytes()
-            .map_err(invalid)?,
-    )];
-    for field in artifact.fields() {
-        for partition in canonical_field_partitions(field).map_err(invalid)? {
-            partitions.push((
-                partition.identity.digest(),
-                partition.canonical_bytes().map_err(invalid)?,
-            ));
-        }
-    }
-    Ok(partitions)
 }
 
 fn invalid(error: impl std::fmt::Display) -> AnalysisBridgeError {

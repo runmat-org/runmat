@@ -104,7 +104,7 @@ pub(super) async fn execute_for_composition(
             )
         }
     };
-    let product = match runmat_analysis_fea::study::build_structural_study_product(
+    let product = match runmat_analysis_fea::study::build_structural_study_product_with_fields(
         runmat_analysis_fea::study::StructuralStudyProductInput {
             study: &decoded.study,
             geometry: &completed.document,
@@ -113,6 +113,7 @@ pub(super) async fn execute_for_composition(
             mesh: &completed.result.artifact,
             planning: decoded.planning,
         },
+        &decoded.initial_fields,
     ) {
         Ok(product) => product,
         Err(error) => {

@@ -41,214 +41,15 @@ const ROOT_VALUE_SCHEMA: &str = "runmat.analysis.structural-study-root";
 const CONTRACT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 96);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StructuralStudyRootRequest {
-    schema_version: u16,
-    authored_study_digest: Digest,
-    frozen_project_digest: Option<Digest>,
-    study: RealizedStudy,
-    materials: Vec<StructuralStudyMaterial>,
-    planning: StructuralStudyPlanningPolicy,
-    local_execution: LocalExecutionPlan,
-    analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    input_materializations: Vec<InputMaterializationPlanRequest>,
-    geometry_meshing: ProgramExecutionDescriptor,
-    geometry_argument_count: u32,
-    materialization_argument_count: u32,
-}
-
-impl StructuralStudyRootRequest {
-    fn validate(&self) -> NativeExecutionResult<()> {
-        self.planning.numerics.validate().map_err(protocol)?;
-        self.geometry_meshing
-            .validate_for_portable_host()
-            .map_err(protocol)?;
-        if self.schema_version != 3
-            || self.authored_study_digest.bytes() == &[0; 32]
-            || self
-                .frozen_project_digest
-                .is_some_and(|digest| digest.bytes() == &[0; 32])
-            || self.study.module_path.trim().is_empty()
-            || self.study.study_id.trim().is_empty()
-            || self.geometry_argument_count == 0
-            || self.geometry_meshing.artifact.form != ExecutableForm::MeshingWorkload
-            || self.geometry_meshing.recipe.execution_mode
-                != crate::GEOMETRY_MESHING_ROOT_EXECUTION_MODE
-            || self.geometry_meshing.requested_outputs != 1
-        {
-            return Err(protocol("structural study root request is invalid"));
-        }
-        let mut identities = BTreeSet::new();
-        if self
-            .materials
-            .iter()
-            .any(|entry| !identities.insert(entry.reference.clone()))
-        {
-            return Err(protocol(
-                "structural study material identities are not unique",
-            ));
-        }
-        let materials = self
-            .materials
-            .iter()
-            .map(|entry| entry.material.clone())
-            .collect::<Vec<_>>();
-        runmat_analysis_core::validate_material_definitions(&materials).map_err(protocol)?;
-        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)?;
-        let materializations = self
-            .input_materializations
-            .iter()
-            .map(InputMaterializationPlanRequest::to_plan)
-            .collect::<NativeExecutionResult<Vec<_>>>()?;
-        validate_input_materialization_plan_inventory(
-            &self.study,
-            &materializations,
-            &self.geometry_meshing.recipe.program_revision,
-        )?;
-        let reference_count = materializations
-            .iter()
-            .flat_map(|prepared| prepared.input_references().iter())
-            .map(|reference| reference.id)
-            .collect::<BTreeSet<_>>()
-            .len();
-        if usize::try_from(self.materialization_argument_count).map_err(protocol)?
-            != reference_count
-        {
-            return Err(protocol(
-                "structural study input-reference count differs from its materialization plans",
-            ));
-        }
-        Ok(())
-    }
-
-    fn canonical_bytes(&self) -> NativeExecutionResult<Vec<u8>> {
-        self.validate()?;
-        encode_contract(ROOT_PREFIX, ROOT_DOMAIN, self, CONTRACT_LIMITS).map_err(protocol)
-    }
-
-    fn decode(bytes: &[u8]) -> NativeExecutionResult<Self> {
-        let request =
-            decode_contract(ROOT_PREFIX, ROOT_DOMAIN, bytes, CONTRACT_LIMITS).map_err(protocol)?;
-        Self::validate(&request)?;
-        Ok(request)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StructuralStudyMaterial {
-    reference: AuthoredMaterialRef,
-    material: MaterialModel,
-}
-
-pub struct StructuralStudyRootPreparation {
-    pub program_revision: ProgramRevision,
-    pub artifact_access: ArtifactAccess,
-    pub authored_study_digest: Digest,
-    pub frozen_project_digest: Option<Digest>,
-    pub study: RealizedStudy,
-    pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
-    pub planning: StructuralStudyPlanningPolicy,
-    pub local_execution: LocalExecutionPlan,
-    pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<InputMaterializationPlan>,
-    pub geometry_meshing: PreparedGeometryMeshingRoot,
-}
-
-/// Client-held admission contract for a geometry-derived structural study result.
-///
-/// Workloads are intentionally absent: exact topology is not available until the remote geometry
-/// and meshing stages finish. The importer admits the published compiled study against these
-/// immutable inputs, derives the workloads locally, and then applies the ordinary exact-result
-/// validation path.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralStudyResultExpectation {
-    pub program_revision: ProgramRevision,
-    pub artifact_access: ArtifactAccess,
-    pub authored_study_digest: Digest,
-    pub frozen_project_digest: Option<Digest>,
-    pub study: RealizedStudy,
-    pub materials: Vec<StructuralStudyMaterialExpectation>,
-    pub planning: StructuralStudyPlanningPolicy,
-    pub local_execution: LocalExecutionPlan,
-    pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
-    pub input_materializations: Vec<InputMaterializationPlanExpectation>,
-    pub geometry_request: runmat_analysis_execution::GeometryMaterializationRequest,
-    pub expected_meshing_request: runmat_meshing_core::MeshingRequest,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralStudyMaterialExpectation {
-    pub reference: AuthoredMaterialRef,
-    pub material: MaterialModel,
-}
-
-impl StructuralStudyResultExpectation {
-    pub fn validate(&self) -> NativeExecutionResult<()> {
-        self.artifact_access.validate().map_err(protocol)?;
-        self.planning.numerics.validate().map_err(protocol)?;
-        self.expected_meshing_request.validate().map_err(protocol)?;
-        self.geometry_request.validate().map_err(protocol)?;
-        if self.authored_study_digest.bytes() == &[0; 32]
-            || self
-                .frozen_project_digest
-                .is_some_and(|digest| digest.bytes() == &[0; 32])
-        {
-            return Err(protocol("structural study result expectation is invalid"));
-        }
-        if self.study.module_path.trim().is_empty()
-            || self.study.study_id.trim().is_empty()
-            || self.materials.iter().enumerate().any(|(index, material)| {
-                self.materials[..index]
-                    .iter()
-                    .any(|existing| existing.reference == material.reference)
-            })
-        {
-            return Err(protocol(
-                "structural study result source contract is invalid",
-            ));
-        }
-        runmat_analysis_core::validate_material_definitions(
-            &self
-                .materials
-                .iter()
-                .map(|entry| entry.material.clone())
-                .collect::<Vec<_>>(),
-        )
-        .map_err(protocol)?;
-        let materials = self
-            .materials
-            .iter()
-            .map(|entry| (entry.reference.clone(), entry.material.clone()))
-            .collect::<BTreeMap<_, _>>();
-        let expected_source_digest =
-            runmat_analysis_fea::study::structural_study_source_digest(&self.study, &materials)
-                .map_err(protocol)?;
-        let geometry_definition = runmat_geometry_core::GeometryDefinitionRef {
-            module_path: self.geometry_request.definition.module_path.clone(),
-            geometry_id: self.geometry_request.definition.geometry_id.clone(),
-        };
-        if expected_source_digest != self.authored_study_digest
-            || self.study.geometry.definition != geometry_definition
-            || self.study.geometry.source != self.geometry_request.definition.source
-            || self.study.geometry.bindings != self.geometry_request.bindings
-        {
-            return Err(protocol(
-                "structural study result source identity differs from its geometry or materials",
-            ));
-        }
-        validate_accelerator_requests(self.planning.backend, &self.analysis_accelerator_requests)?;
-        validate_input_plan_expectation_inventory(
-            &self.study,
-            &self.input_materializations,
-            &self.program_revision,
-        )?;
-        Ok(())
-    }
-}
+mod contract;
+mod initial_fields;
+mod preparation;
+use contract::{StructuralStudyMaterial, StructuralStudyRootRequest};
+pub use contract::{
+    StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
+    StructuralStudyRootPreparation,
+};
+pub use preparation::prepare_structural_study_root;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedStructuralStudyRoot {
@@ -413,190 +214,9 @@ pub struct DecodedStructuralStudyRoot {
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
+    pub initial_fields: Vec<runmat_analysis_fea::execution::InitialFieldBinding>,
     pub geometry_meshing: ProgramExecutionRequest,
     pub artifact_access: ArtifactAccess,
-}
-
-pub fn prepare_structural_study_root(
-    preparation: StructuralStudyRootPreparation,
-) -> NativeExecutionResult<PreparedStructuralStudyRoot> {
-    let StructuralStudyRootPreparation {
-        program_revision,
-        artifact_access,
-        authored_study_digest,
-        frozen_project_digest,
-        study,
-        materials,
-        planning,
-        local_execution,
-        analysis_accelerator_requests,
-        input_materializations,
-        geometry_meshing,
-    } = preparation;
-    artifact_access.validate().map_err(protocol)?;
-    if geometry_meshing.request().recipe.program_revision != program_revision {
-        return Err(protocol(
-            "geometry-meshing and structural-study program revisions differ",
-        ));
-    }
-    let expected_meshing_request = geometry_meshing.meshing_request().clone();
-    let geometry_request = geometry_meshing.geometry_request().clone();
-    let input_materializations = input_materializations
-        .into_iter()
-        .map(|materialization| materialization.rebind(&artifact_access).map_err(protocol))
-        .collect::<NativeExecutionResult<Vec<_>>>()?;
-    validate_input_materialization_plan_inventory(
-        &study,
-        &input_materializations,
-        &program_revision,
-    )?;
-    let mut input_value_objects = BTreeMap::new();
-    for materialization in &input_materializations {
-        materialization.validate_closed().map_err(protocol)?;
-        for object in materialization.input_objects() {
-            match input_value_objects.get(&object.reference.id) {
-                Some(existing) if existing != object => {
-                    return Err(protocol(
-                        "generator input value id collides with different immutable content",
-                    ));
-                }
-                Some(_) => {}
-                None => {
-                    input_value_objects.insert(object.reference.id, object.clone());
-                }
-            }
-        }
-    }
-    let input_expectations = input_materializations
-        .iter()
-        .map(InputMaterializationPlan::expectation)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(protocol)?;
-    let root = StructuralStudyRootRequest {
-        schema_version: 3,
-        authored_study_digest,
-        frozen_project_digest,
-        study,
-        materials: materials
-            .into_iter()
-            .map(|(reference, material)| StructuralStudyMaterial {
-                reference,
-                material,
-            })
-            .collect(),
-        planning,
-        local_execution,
-        analysis_accelerator_requests,
-        input_materializations: input_materializations
-            .iter()
-            .map(InputMaterializationPlanRequest::from_plan)
-            .collect::<NativeExecutionResult<Vec<_>>>()?,
-        geometry_meshing: descriptor_from_request(geometry_meshing.request()),
-        geometry_argument_count: u32::try_from(geometry_meshing.request().arguments.len())
-            .map_err(protocol)?,
-        materialization_argument_count: u32::try_from(input_value_objects.len())
-            .map_err(protocol)?,
-    };
-    let root_object = LogicalObject::new(
-        ObjectNamespace::InputValue,
-        "analysis/structural-study-roots",
-        ROOT_MEDIA_TYPE,
-        root.canonical_bytes()?,
-    )
-    .map_err(protocol)?;
-    let root_reference = artifact_access
-        .reference(&root_object, ValueRefKind::DriverObject, ROOT_VALUE_SCHEMA)
-        .map_err(protocol)?;
-    let recipe = ProgramBuildRecipe {
-        schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        program_revision,
-        entrypoint: "analysis_workload".into(),
-        outputs: OutputContract {
-            requested_outputs: 1,
-        },
-        execution_mode: STRUCTURAL_STUDY_ROOT_EXECUTION_MODE.into(),
-        target: ProgramTarget::portable(STRUCTURAL_STUDY_ROOT_TARGET_PROFILE),
-        features: BTreeSet::new(),
-        compile_options: BTreeSet::new(),
-        source_objects: Vec::new(),
-        expected_artifact_id: None,
-    };
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::AnalysisWorkload,
-        ROOT_PROGRAM_BYTES.to_vec(),
-    )
-    .map_err(protocol)?;
-    let mut arguments = vec![ValuePayload::Object(Box::new(root_reference))];
-    arguments.extend(geometry_meshing.request().arguments.clone());
-    arguments.extend(
-        input_value_objects
-            .values()
-            .map(|object| ValuePayload::Object(Box::new(object.reference.clone()))),
-    );
-    let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-        recipe: recipe.clone(),
-        artifact: artifact.clone(),
-        function: 0,
-        arguments,
-        requested_outputs: 1,
-    };
-    request.validate_for_portable_host().map_err(protocol)?;
-    let mut objects = geometry_meshing.objects().to_vec();
-    objects.push(root_object);
-    let mut required_programs = vec![RequiredStructuralStudyProgram { recipe, artifact }];
-    required_programs.extend(
-        geometry_meshing
-            .required_programs()
-            .iter()
-            .map(required_program),
-    );
-    for materialization in &input_materializations {
-        let descriptor = materialization.descriptor().map_err(protocol)?;
-        required_programs.push(RequiredStructuralStudyProgram {
-            recipe: descriptor.recipe,
-            artifact: descriptor.artifact,
-        });
-    }
-    let analysis_host =
-        prepare_analysis_host_program(request.recipe.program_revision.clone()).map_err(protocol)?;
-    required_programs.push(RequiredStructuralStudyProgram {
-        recipe: analysis_host.recipe,
-        artifact: analysis_host.artifact,
-    });
-    let mut seen = BTreeSet::new();
-    required_programs.retain(|program| seen.insert(program.artifact.id));
-    let expectation = StructuralStudyResultExpectation {
-        program_revision: request.recipe.program_revision.clone(),
-        artifact_access,
-        authored_study_digest: root.authored_study_digest,
-        frozen_project_digest: root.frozen_project_digest,
-        study: root.study.clone(),
-        materials: root
-            .materials
-            .iter()
-            .map(|entry| StructuralStudyMaterialExpectation {
-                reference: entry.reference.clone(),
-                material: entry.material.clone(),
-            })
-            .collect(),
-        planning: root.planning,
-        local_execution: root.local_execution,
-        analysis_accelerator_requests: root.analysis_accelerator_requests.clone(),
-        input_materializations: input_expectations,
-        geometry_request,
-        expected_meshing_request,
-    };
-    expectation.validate()?;
-    Ok(PreparedStructuralStudyRoot {
-        request,
-        objects,
-        input_value_objects: input_value_objects.into_values().collect(),
-        required_programs,
-        authored_study_digest: root.authored_study_digest,
-        expectation,
-    })
 }
 
 pub fn decode_structural_study_root(
@@ -651,15 +271,26 @@ pub fn decode_structural_study_root(
     let geometry_count = usize::try_from(root.geometry_argument_count).map_err(protocol)?;
     let materialization_count =
         usize::try_from(root.materialization_argument_count).map_err(protocol)?;
+    let source_count = usize::try_from(root.initial_field_argument_count).map_err(protocol)?;
     let component_count = geometry_count
-        .checked_add(materialization_count)
+        .checked_add(source_count)
+        .and_then(|count| count.checked_add(materialization_count))
         .ok_or_else(|| protocol("structural study component count overflows"))?;
     let arguments = program
         .arguments
         .get(1..)
         .filter(|arguments| arguments.len() == component_count)
         .ok_or_else(|| protocol("structural study component count differs"))?;
-    let (geometry_arguments, materialization_arguments) = arguments.split_at(geometry_count);
+    let (geometry_arguments, remaining_arguments) = arguments.split_at(geometry_count);
+    let (materialization_arguments, source_arguments) =
+        remaining_arguments.split_at(materialization_count);
+    let initial_fields = initial_fields::decode(
+        &root.study,
+        &root.initial_fields,
+        source_arguments,
+        &artifact_access,
+        store,
+    )?;
     let geometry_meshing = ProgramExecutionRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: root.geometry_meshing.recipe,
@@ -704,6 +335,7 @@ pub fn decode_structural_study_root(
         local_execution: root.local_execution,
         analysis_accelerator_requests: root.analysis_accelerator_requests,
         input_materializations,
+        initial_fields,
         geometry_meshing,
         artifact_access,
     })
@@ -756,3 +388,5 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 #[cfg(test)]
 #[path = "structural_study_root_tests.rs"]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::initial_fields::verify_original_field_transport;

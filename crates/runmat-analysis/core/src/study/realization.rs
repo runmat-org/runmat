@@ -51,6 +51,8 @@ pub struct RealizedStudy {
     pub sequence: AnalysisSequence,
 }
 
+mod initial_fields;
+
 impl AuthoredStudy {
     pub fn realize(
         &self,

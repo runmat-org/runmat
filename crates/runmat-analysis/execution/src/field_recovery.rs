@@ -1,3 +1,6 @@
+mod objects;
+pub(crate) use objects::recovered_field_payload_partitions;
+pub use objects::{prepare_recovered_field_objects, recovered_field_transport_reservation_bytes};
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{

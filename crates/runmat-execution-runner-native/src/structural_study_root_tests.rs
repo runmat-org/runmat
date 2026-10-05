@@ -9,6 +9,8 @@ use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::ArtifactAccess;
 
 use super::*;
+#[path = "structural_study_root_tests/initial_fields.rs"]
+pub(super) mod initial_fields;
 
 #[test]
 fn typed_study_root_binds_bounded_accelerators_to_the_planned_backend() {
@@ -106,6 +108,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         analysis_accelerator_requests: Vec::new(),
         local_execution,
         input_materializations: Vec::new(),
+        initial_fields: Vec::new(),
         geometry_meshing,
     })
     .unwrap();
@@ -574,6 +577,7 @@ fn prepare_source(
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
+        initial_fields: Vec::new(),
         geometry_meshing,
     })
     .unwrap()

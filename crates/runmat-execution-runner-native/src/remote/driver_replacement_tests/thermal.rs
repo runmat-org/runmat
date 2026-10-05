@@ -103,6 +103,7 @@ pub(super) fn prepare_authored_root(
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),
+        initial_fields: Vec::new(),
         geometry_meshing,
     })
     .unwrap()

@@ -339,6 +339,15 @@ pub async fn prepare_study(
                 },
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
+                initial_fields:
+                    runmat_runtime::analysis::storage::resolve_initial_field_references(
+                        realized.initial_field_references(),
+                        runmat_analysis_fea::planning::resource::initial_field_source_ceiling(
+                            &realized.sequence,
+                        )
+                        .map_err(|error| error.to_string())?,
+                    )
+                    .map_err(|error| error.to_string())?,
                 input_materializations,
                 geometry_meshing,
             })

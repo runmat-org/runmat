@@ -71,8 +71,8 @@ pub use planning::{
     StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
 };
 pub use product::{
-    build_structural_study_product, StructuralStudyProduct, StructuralStudyProductError,
-    StructuralStudyProductInput,
+    build_structural_study_product, build_structural_study_product_with_fields,
+    StructuralStudyProduct, StructuralStudyProductError, StructuralStudyProductInput,
 };
 pub use thermal_planning::{
     plan_thermal_step, plan_thermal_step_with_fields, plan_thermal_study,
