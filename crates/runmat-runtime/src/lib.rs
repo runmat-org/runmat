@@ -1662,10 +1662,20 @@ async fn feval_builtin_in_runtime(
                 crate::object::protocol::ObjectAccessContext::default(),
             );
             let usage = request.sequence_use;
-            let sequence = crate::object::protocol::read_subscript_path_sequence_with_access(
-                receiver, path, request,
-            )
-            .await?;
+            let sequence = match runtime {
+                Some(runtime) => {
+                    crate::object::protocol::read_subscript_path_sequence_with_access_in_context(
+                        runtime, receiver, path, request,
+                    )
+                    .await?
+                }
+                None => {
+                    crate::object::protocol::read_subscript_path_sequence_with_access(
+                        receiver, path, request,
+                    )
+                    .await?
+                }
+            };
             use crate::sequence::ResolveValueSequence;
             let mut values =
                 sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
