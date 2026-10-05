@@ -86,6 +86,8 @@ pub struct RuntimeTcpServer {
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeTcpClientStatus {
     pub connected: bool,
+    /// Non-consuming snapshot of bytes already buffered by the service and
+    /// unread bytes reported by the native socket at the observation point.
     pub bytes_available: usize,
     pub byte_order: RuntimeTcpByteOrder,
     pub timeout: Option<Duration>,

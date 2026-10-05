@@ -1,4 +1,5 @@
 use super::registry::{self, Client, ClientIo, Registry, Resource, Server};
+use super::unread::socket_unread_bytes;
 use crate::context::{
     RuntimeTcpBind, RuntimeTcpClient, RuntimeTcpClientStatus, RuntimeTcpConnect, RuntimeTcpIssuer,
     RuntimeTcpReadMode, RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer,
@@ -163,39 +164,25 @@ struct ReadReceipt {
     guard: tokio::sync::OwnedMutexGuard<ClientIo>,
 }
 
+fn available_snapshot(io: &ClientIo) -> Result<usize, TcpTransportError> {
+    let socket_bytes = socket_unread_bytes(&io.stream)
+        .map_err(|source| io_error("TCP unread-byte query failed", source))?;
+    io.unread.len().checked_add(socket_bytes).ok_or_else(|| {
+        TcpTransportError::new(TcpTransportErrorKind::Io, "TCP unread-byte count overflow")
+    })
+}
+
 pub(super) async fn describe_client(
     registry: Arc<Mutex<Registry>>,
     issuer: RuntimeTcpIssuer,
     authority: ForeignRef,
 ) -> Result<RuntimeTcpClientStatus, TcpTransportError> {
     let client = registry::client(&registry, &issuer, &authority)?;
-    let mut io = Arc::clone(&client.io).lock_owned().await;
-    let mut chunk = [0u8; 4096];
-    while !io.closed && !*client.closed.borrow() {
-        match io.stream.try_read(&mut chunk) {
-            Ok(0) => {
-                io.closed = true;
-                break;
-            }
-            Ok(n) => {
-                io.unread.try_reserve(n).map_err(|source| {
-                    TcpTransportError::with_source(
-                        TcpTransportErrorKind::Io,
-                        "TCP available-byte buffer allocation failed",
-                        source,
-                    )
-                })?;
-                io.unread.extend_from_slice(&chunk[..n]);
-            }
-            Err(source) if source.kind() == io::ErrorKind::WouldBlock => break,
-            Err(source) if source.kind() == io::ErrorKind::Interrupted => continue,
-            Err(source) => return Err(io_error("TCP available-byte inspection failed", source)),
-        }
-        tokio::task::yield_now().await;
-    }
+    let io = Arc::clone(&client.io).lock_owned().await;
+    let bytes_available = available_snapshot(&io)?;
     Ok(RuntimeTcpClientStatus {
         connected: !io.closed && !*client.closed.borrow(),
-        bytes_available: io.unread.len(),
+        bytes_available,
         byte_order: client.byte_order,
         timeout: client.timeout,
     })
@@ -223,48 +210,54 @@ pub(super) async fn read(
     match mode {
         RuntimeTcpReadMode::Count(count) => {
             while io.unread.len() < count && !io.closed {
-                let n =
-                    client_io(&client, io.stream.read(&mut chunk), "TCP read timed out").await?;
-                if n == 0 {
-                    io.closed = true;
-                    break;
-                }
-                io.unread.try_reserve(n).map_err(|source| {
+                io.unread.try_reserve(chunk.len()).map_err(|source| {
                     TcpTransportError::with_source(
                         TcpTransportErrorKind::Io,
                         "TCP read buffer allocation failed",
                         source,
                     )
                 })?;
+                let n =
+                    client_io(&client, io.stream.read(&mut chunk), "TCP read timed out").await?;
+                if n == 0 {
+                    io.closed = true;
+                    break;
+                }
                 io.unread.extend_from_slice(&chunk[..n]);
                 tokio::task::yield_now().await;
             }
         }
         RuntimeTcpReadMode::Available => {
-            if io.unread.is_empty() && !io.closed {
-                let n =
-                    client_io(&client, io.stream.read(&mut chunk), "TCP read timed out").await?;
-                if n == 0 {
-                    io.closed = true;
-                } else {
-                    io.unread.extend_from_slice(&chunk[..n]);
-                }
-            }
-            while !io.closed {
+            // Freeze a non-consuming entry snapshot. A continuously sending
+            // peer cannot keep this invocation alive or grow its allocation.
+            let target = available_snapshot(&io)?;
+            while io.unread.len() < target && !io.closed {
                 if *client.closed.borrow() {
                     return Err(TcpTransportError::new(
                         TcpTransportErrorKind::Closed,
                         "TCP client is closed",
                     ));
                 }
-                match io.stream.try_read(&mut chunk) {
+                let remaining = target - io.unread.len();
+                let wanted = remaining.min(chunk.len());
+                io.unread.try_reserve(wanted).map_err(|source| {
+                    TcpTransportError::with_source(
+                        TcpTransportErrorKind::Io,
+                        "TCP read buffer allocation failed",
+                        source,
+                    )
+                })?;
+                match io.stream.try_read(&mut chunk[..wanted]) {
                     Ok(0) => {
                         io.closed = true;
                         break;
                     }
                     Ok(n) => io.unread.extend_from_slice(&chunk[..n]),
                     Err(source) if source.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(source) if source.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(source) if source.kind() == io::ErrorKind::Interrupted => {
+                        tokio::task::yield_now().await;
+                        continue;
+                    }
                     Err(source) => return Err(io_error("TCP available-byte read failed", source)),
                 }
                 tokio::task::yield_now().await;
@@ -272,6 +265,13 @@ pub(super) async fn read(
         }
         RuntimeTcpReadMode::Line => {
             while !io.unread.contains(&b'\n') && !io.closed {
+                io.unread.try_reserve(chunk.len()).map_err(|source| {
+                    TcpTransportError::with_source(
+                        TcpTransportErrorKind::Io,
+                        "TCP line buffer allocation failed",
+                        source,
+                    )
+                })?;
                 let n = client_io(
                     &client,
                     io.stream.read(&mut chunk),

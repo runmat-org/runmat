@@ -2,6 +2,7 @@
 
 mod operation;
 mod registry;
+mod unread;
 #[cfg(test)]
 mod tests;
 

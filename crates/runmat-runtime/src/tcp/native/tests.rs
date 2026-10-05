@@ -122,3 +122,83 @@ fn forged_reference_cannot_read_live_socket_and_dropped_read_restores_bytes() {
     ));
     assert!(matches!(child, Err(error) if error.kind() == TcpTransportErrorKind::InvalidAuthority));
 }
+
+#[test]
+fn status_is_non_consuming_and_available_read_has_a_fixed_entry_bound() {
+    let (driver, service) = service();
+    let server = futures::executor::block_on(service.bind(
+        RuntimeTcpIssuer::Process,
+        RuntimeTcpBind {
+            address: "127.0.0.1".into(),
+            port: 0,
+            io_timeout: Some(Duration::from_secs(2)),
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("bind");
+    let client = futures::executor::block_on(service.connect(
+        RuntimeTcpIssuer::Process,
+        RuntimeTcpConnect {
+            host: "127.0.0.1".into(),
+            port: server.local_addr.port(),
+            connect_timeout: Some(Duration::from_secs(2)),
+            io_timeout: Some(Duration::from_secs(2)),
+            byte_order: RuntimeTcpByteOrder::Little,
+        },
+    ))
+    .expect("connect");
+    let accepted = futures::executor::block_on(service.accept(
+        RuntimeTcpIssuer::Process,
+        server.authority,
+        Some(Duration::from_secs(2)),
+    ))
+    .expect("accept");
+
+    let empty = futures::executor::block_on(service.read(
+        RuntimeTcpIssuer::Process,
+        accepted.authority.clone(),
+        RuntimeTcpReadMode::Available,
+    ))
+    .expect("empty available read must not wait for a peer write");
+    assert!(empty.publish().is_empty());
+
+    let payload = vec![0x5a; 8192];
+    assert_eq!(
+        futures::executor::block_on(service.write(
+            RuntimeTcpIssuer::Process,
+            client.authority,
+            payload.clone(),
+        ))
+        .expect("write"),
+        payload.len()
+    );
+    let observed = driver.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let status = service
+                    .describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone())
+                    .await
+                    .expect("status");
+                if status.bytes_available == payload.len() {
+                    break status;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("socket bytes observable")
+    });
+    assert!(observed.connected);
+    let unchanged = futures::executor::block_on(
+        service.describe_client(RuntimeTcpIssuer::Process, accepted.authority.clone()),
+    )
+    .expect("repeat status");
+    assert_eq!(unchanged.bytes_available, payload.len());
+    let read = futures::executor::block_on(service.read(
+        RuntimeTcpIssuer::Process,
+        accepted.authority,
+        RuntimeTcpReadMode::Available,
+    ))
+    .expect("bounded snapshot read");
+    assert_eq!(read.publish(), payload);
+}
