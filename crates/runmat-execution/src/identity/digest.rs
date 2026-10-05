@@ -45,6 +45,15 @@ impl Write for DigestStream {
     }
 }
 
+impl minicbor::encode::Write for DigestStream {
+    type Error = std::convert::Infallible;
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.update(bytes);
+        Ok(())
+    }
+}
+
 impl Digest {
     pub fn sha256(bytes: impl AsRef<[u8]>) -> Self {
         Self(Sha256::digest(bytes.as_ref()).into())

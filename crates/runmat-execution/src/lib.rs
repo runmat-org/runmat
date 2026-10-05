@@ -56,12 +56,13 @@ pub use placement::{
     ExecutionCostComponents, ExecutionCostEstimate, ObservedCandidateDuration, PlacementDecision,
     PlacementExecutionAuthorityRevision, PlacementFeedback, PlacementGraph,
     PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode,
-    PlacementInvalidation, PlacementPlanRequest, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature, ProviderInputStageDemand, ProviderInputStageDemands,
-    ProviderReadbackDemand, ProviderReadbackDemands, ProviderResourceSnapshot,
-    ResourceBoundUnavailable, ResourceByteBound, SelectedExecutionCandidate, WholeWorkCandidate,
-    WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind, WholeWorkObservation,
-    WholeWorkObservationOutcome, WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
+    PlacementInvalidation, PlacementPermitIdentity, PlacementPlanRequest,
+    PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderInputStageDemand,
+    ProviderInputStageDemands, ProviderReadbackDemand, ProviderReadbackDemands,
+    ProviderResourceSnapshot, ResourceBoundUnavailable, ResourceByteBound,
+    SelectedExecutionCandidate, WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision,
+    WholeWorkDecisionKind, WholeWorkObservation, WholeWorkObservationOutcome,
+    WholeWorkPlacementRequest, WholeWorkPlacementRequestRef,
 };
 pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};

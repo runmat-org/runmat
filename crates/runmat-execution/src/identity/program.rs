@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-use super::Digest;
+use super::{Digest, DigestStream};
 use crate::{schema::PROGRAM_REVISION_SCHEMA_V1, ContractError};
 
 const MAX_CONTRIBUTIONS: usize = 32;
@@ -337,7 +337,16 @@ impl ProgramRevision {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContractError> {
         self.validate()?;
         let mut bytes = Vec::new();
-        let mut encoder = Encoder::new(&mut bytes);
+        self.write_canonical(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn write_canonical<W>(&self, target: &mut W) -> Result<(), ContractError>
+    where
+        W: minicbor::encode::Write,
+        W::Error: std::fmt::Display,
+    {
+        let mut encoder = Encoder::new(target);
         encoder
             .map(9)
             .and_then(|encoder| encoder.u8(0))
@@ -366,7 +375,7 @@ impl ProgramRevision {
                 .and_then(|encoder| encoder.bytes(contribution.digest.bytes()))
                 .map_err(|error| ContractError::invalid("program revision", error.to_string()))?;
         }
-        Ok(bytes)
+        Ok(())
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ContractError> {
@@ -418,9 +427,11 @@ impl ProgramRevision {
     }
 
     pub fn identity_digest(&self) -> Result<Digest, ContractError> {
-        let mut framed = b"runmat-program-revision-v1\0".to_vec();
-        framed.extend(self.canonical_bytes()?);
-        Ok(Digest::sha256(framed))
+        self.validate()?;
+        let mut framed = DigestStream::new();
+        framed.update(b"runmat-program-revision-v1\0");
+        self.write_canonical(&mut framed)?;
+        Ok(framed.finish())
     }
 
     pub fn canonical_identity(&self) -> String {

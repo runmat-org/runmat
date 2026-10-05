@@ -50,6 +50,30 @@ impl PlacementSignature {
     pub fn cache_key(&self) -> Digest {
         Digest::sha256_serialized(self).expect("placement signature serializes")
     }
+
+    /// Compact invalidation facts for an in-flight selection. The program
+    /// revision uses its canonical identity rather than cloning its retained
+    /// domain-contribution names into each observation registration.
+    pub fn permit_identity(&self) -> PlacementPermitIdentity {
+        PlacementPermitIdentity {
+            signature: self.cache_key(),
+            program: self.revision.program.as_ref().map(|revision| {
+                revision
+                    .identity_digest()
+                    .expect("validated program revision has an identity")
+            }),
+            authority: self.revision.authority,
+            policy: self.revision.policy,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlacementPermitIdentity {
+    pub signature: Digest,
+    pub program: Option<Digest>,
+    pub authority: PlacementExecutionAuthorityRevision,
+    pub policy: Digest,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -100,19 +124,28 @@ impl PlacementInvalidation {
     /// The same typed match governs cached feedback, pending receipts, and
     /// still-running whole-work observation permits.
     pub fn matches_signature(&self, signature: &PlacementSignature) -> bool {
+        self.matches_permit_identity(&signature.permit_identity())
+    }
+
+    pub fn matches_permit_identity(&self, identity: &PlacementPermitIdentity) -> bool {
         match self {
             Self::All => true,
-            Self::Program { revision } => signature.revision.program.as_ref() == Some(revision),
+            Self::Program { revision } => {
+                identity.program
+                    == Some(
+                        revision
+                            .identity_digest()
+                            .expect("validated program revision has an identity"),
+                    )
+            }
             Self::Provider { digest } => {
-                signature.revision.authority
-                    == PlacementExecutionAuthorityRevision::Provider(*digest)
+                identity.authority == PlacementExecutionAuthorityRevision::Provider(*digest)
             }
             Self::HostService { digest } => {
-                signature.revision.authority
-                    == PlacementExecutionAuthorityRevision::HostService(*digest)
+                identity.authority == PlacementExecutionAuthorityRevision::HostService(*digest)
             }
-            Self::Policy { digest } => signature.revision.policy == *digest,
-            Self::Signature { key } => signature.cache_key() == *key,
+            Self::Policy { digest } => identity.policy == *digest,
+            Self::Signature { key } => identity.signature == *key,
         }
     }
 }
