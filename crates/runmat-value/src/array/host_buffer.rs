@@ -56,6 +56,12 @@ impl<T: Clone> HostBuffer<T> {
         }
     }
 
+    pub(crate) fn try_new_exact(payload: T) -> Result<Self, T> {
+        ExactShared::try_new(payload).map(|owner| Self {
+            payload: Owner::Exact(owner),
+        })
+    }
+
     pub(crate) fn get(&self) -> &T {
         match &self.payload {
             Owner::Ordinary(value) => value.as_ref(),

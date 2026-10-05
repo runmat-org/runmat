@@ -20,14 +20,37 @@ impl<T> ExactShared<T> {
         std::mem::size_of::<Inner<T>>()
     }
 
-    pub(super) fn new(value: T) -> Self {
-        let boxed = Box::new(Inner {
-            strong: AtomicUsize::new(1),
-            value,
-        });
-        Self {
-            pointer: NonNull::from(Box::leak(boxed)),
+    pub(super) fn try_new(value: T) -> Result<Self, T> {
+        Self::try_new_with(value, |layout| unsafe { std::alloc::alloc(layout) })
+    }
+
+    fn try_new_with(
+        value: T,
+        allocate: impl FnOnce(std::alloc::Layout) -> *mut u8,
+    ) -> Result<Self, T> {
+        let layout = std::alloc::Layout::new::<Inner<T>>();
+        // SAFETY: the checked, nonzero layout exactly matches Inner<T>.
+        let pointer = allocate(layout).cast::<Inner<T>>();
+        if pointer.is_null() {
+            return Err(value);
         }
+        // SAFETY: this fresh allocation is initialized once and uniquely
+        // owned by the returned handle until its final reference drops.
+        unsafe {
+            pointer.write(Inner {
+                strong: AtomicUsize::new(1),
+                value,
+            })
+        };
+        Ok(Self {
+            pointer: NonNull::new(pointer).expect("non-null exact owner"),
+        })
+    }
+
+    pub(super) fn new(value: T) -> Self {
+        Self::try_new(value).unwrap_or_else(|_| {
+            std::alloc::handle_alloc_error(std::alloc::Layout::new::<Inner<T>>())
+        })
     }
 
     fn inner(&self) -> &Inner<T> {
@@ -70,6 +93,18 @@ impl<T> ExactShared<T> {
         // allocation was Box. No Drop runs on `this` after transfer.
         let boxed = unsafe { Box::from_raw(this.pointer.as_ptr()) };
         boxed.value
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[test]
+    fn denied_exact_owner_allocation_returns_the_original_payload() {
+        let payload = vec![3_u64, 5, 8];
+        let result = ExactShared::try_new_with(payload, |_| std::ptr::null_mut());
+        assert_eq!(result.err(), Some(vec![3, 5, 8]));
     }
 }
 

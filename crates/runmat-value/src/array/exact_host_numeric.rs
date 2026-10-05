@@ -164,7 +164,7 @@ impl ExactHostTensor2dAllocation {
             pointer.as_ptr().add(1).write(self.shape[1]);
         }
         let shape = unsafe { Vec::from_raw_parts(pointer.as_ptr(), 2, 2) };
-        Tensor::from_host_buffer(self.numeric.into_host_buffer(), shape)
+        Tensor::from_host_buffer(self.numeric.try_into_host_buffer()?, shape)
             .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
     }
 }
@@ -412,6 +412,20 @@ impl ExactHostNumericAllocation {
             ExactAllocation::Integer(allocation) => {
                 let (storage, reservation) = allocation.into_parts();
                 HostNumericBuffer::from_exact_integer_storage(storage, reservation)
+            }
+        }
+    }
+
+    pub fn try_into_host_buffer(
+        self,
+    ) -> Result<HostNumericBuffer, ExactHostNumericAllocationError> {
+        match self.allocation {
+            ExactAllocation::Floating(allocation) => {
+                HostNumericBuffer::try_adopt_exact_fallible(allocation, self.dtype, self.len)
+            }
+            ExactAllocation::Integer(allocation) => {
+                let (storage, reservation) = allocation.into_parts();
+                HostNumericBuffer::try_from_exact_integer_storage(storage, reservation)
             }
         }
     }

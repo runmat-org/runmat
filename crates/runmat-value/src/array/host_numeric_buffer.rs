@@ -3,7 +3,9 @@ use std::ffi::c_void;
 
 use super::host_allocation::HostData;
 use super::host_buffer::HostBuffer;
-use super::{record_host_copy, AdoptedHostAllocation, HostCopyReason};
+use super::{
+    record_host_copy, AdoptedHostAllocation, ExactHostNumericAllocationError, HostCopyReason,
+};
 
 #[derive(Debug)]
 struct OwnedIntegerStorage {
@@ -91,18 +93,45 @@ impl HostNumericBuffer {
         Self::try_adopt_with_owner(allocation, dtype, len, true)
     }
 
+    pub(crate) fn try_adopt_exact_fallible(
+        allocation: AdoptedHostAllocation,
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let storage = Self::try_adopt_storage(allocation, dtype, len)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
+        HostBuffer::try_new_exact(storage)
+            .map(|storage| Self { storage })
+            .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
+    }
+
     fn try_adopt_with_owner(
         allocation: AdoptedHostAllocation,
         dtype: NumericDType,
         len: usize,
         exact: bool,
     ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        let storage = Self::try_adopt_storage(allocation, dtype, len)?;
+        Ok(Self {
+            storage: if exact {
+                HostBuffer::new_exact(storage)
+            } else {
+                HostBuffer::new(storage)
+            },
+        })
+    }
+
+    fn try_adopt_storage(
+        allocation: AdoptedHostAllocation,
+        dtype: NumericDType,
+        len: usize,
+    ) -> Result<HostNumericStorage, (AdoptedHostAllocation, String)> {
         macro_rules! adopt {
             ($variant:ident, $type:ty) => {
                 HostData::<$type>::try_adopt(allocation, len).map(HostNumericStorage::$variant)
             };
         }
-        let storage = match dtype {
+        match dtype {
             NumericDType::F64 => adopt!(F64, f64),
             NumericDType::F32 => adopt!(F32, f32),
             NumericDType::I8
@@ -118,14 +147,7 @@ impl HostNumericBuffer {
                     "external adopted integer storage is unavailable; exact integer allocations use the owned typed constructor".into(),
                 ));
             }
-        }?;
-        Ok(Self {
-            storage: if exact {
-                HostBuffer::new_exact(storage)
-            } else {
-                HostBuffer::new(storage)
-            },
-        })
+        }
     }
 
     pub(crate) fn from_exact_integer_storage(
@@ -138,6 +160,18 @@ impl HostNumericBuffer {
                 _reservation: Some(reservation),
             })),
         }
+    }
+
+    pub(crate) fn try_from_exact_integer_storage(
+        values: IntegerStorage,
+        reservation: super::ExactHostAllocationClaim,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        HostBuffer::try_new_exact(HostNumericStorage::Integer(OwnedIntegerStorage {
+            values,
+            _reservation: Some(reservation),
+        }))
+        .map(|storage| Self { storage })
+        .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
