@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
 use super::cooperation::{await_io, TabularCooperation};
-use super::path::TabularFsOwner;
+use super::path::{TabularFsOwner, TabularFsPath};
 use crate::builtins::common::fs::home_directory;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
