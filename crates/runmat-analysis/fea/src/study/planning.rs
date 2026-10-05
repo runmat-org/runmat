@@ -18,6 +18,7 @@ use crate::ComputeBackend;
 use super::CompiledAnalysisStudy;
 
 mod dynamics;
+mod initial_fields;
 #[cfg(test)]
 mod tests;
 
@@ -87,14 +88,25 @@ pub fn plan_structural_study(
     study: &CompiledAnalysisStudy,
     policy: StructuralStudyPlanningPolicy,
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
+    plan_structural_study_with_fields(study, policy, &[])
+}
+
+/// Plan with closed original sources. Each consumer receives only its active bindings;
+/// topology and quantity admission remain with the existing numerical workload owners.
+pub fn plan_structural_study_with_fields(
+    study: &CompiledAnalysisStudy,
+    policy: StructuralStudyPlanningPolicy,
+    fields: &[crate::execution::InitialFieldBinding],
+) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     policy.numerics.validate()?;
     if policy.formulation_requirement != study.formulation_requirement {
         return Err(StructuralStudyPlanningError::FormulationRequirementMismatch);
     }
+    initial_fields::validate_inventory(&study.model, fields)?;
     if study.model.sequence.steps.iter().all(is_linear_static_step) {
         return plan_linear_sequence(study, policy);
     }
-    dynamics::plan(study, policy)
+    dynamics::plan(study, policy, fields)
 }
 
 fn is_linear_static_step(step: &ProcedureStep) -> bool {

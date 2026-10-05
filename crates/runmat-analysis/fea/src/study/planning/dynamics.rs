@@ -29,13 +29,14 @@ use super::{
 pub(super) fn plan(
     study: &CompiledAnalysisStudy,
     policy: StructuralStudyPlanningPolicy,
+    fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     match study.model.sequence.steps.as_slice() {
         [step]
             if step.procedure == AnalysisProcedure::TransientResponse
                 && step.solution_space == SolutionSpace::Direct =>
         {
-            plan_direct_transient(study, step, policy)
+            plan_direct_transient(study, step, policy, fields)
         }
         [step]
             if step.procedure == AnalysisProcedure::HarmonicResponse
@@ -51,7 +52,7 @@ pub(super) fn plan(
             planned.validate()?;
             Ok(planned)
         }
-        _ => plan_heterogeneous(study, policy),
+        _ => plan_heterogeneous(study, policy, fields),
     }
 }
 
@@ -59,11 +60,12 @@ fn plan_direct_transient(
     study: &CompiledAnalysisStudy,
     step: &ProcedureStep,
     policy: StructuralStudyPlanningPolicy,
+    fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     let (interval_count, block_plan) = transient_schedule(step, policy)?;
     let workload = StructuralTransientWorkload {
         schema_version: 2,
-        initial_fields: Vec::new(),
+        initial_fields: super::initial_fields::select(&study.model, step, fields)?,
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
@@ -108,18 +110,20 @@ fn plan_direct_frequency(
 fn plan_heterogeneous(
     study: &CompiledAnalysisStudy,
     policy: StructuralStudyPlanningPolicy,
+    fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     let residual_directions = response_spectrum_residual_directions(study)?;
     let mut workloads = BTreeMap::new();
     for step in &study.model.sequence.steps {
         if step.family == runmat_analysis_core::PhysicsFamily::Thermal {
-            let workload = super::super::plan_thermal_step(
+            let workload = super::super::plan_thermal_step_with_fields(
                 study,
                 &step.step_id.0,
                 super::super::ThermalStudyPlanningPolicy {
                     backend: policy.backend,
                     formulation_requirement: policy.formulation_requirement,
                 },
+                super::initial_fields::select(&study.model, step, fields)?,
             )
             .map_err(|error| {
                 crate::execution::AnalysisExecutionError::Invalid(error.to_string())
@@ -161,7 +165,7 @@ fn plan_heterogeneous(
                 StructuralStepWorkload::ModalTransient {
                     template: Box::new(StructuralModalTransientTemplate {
                         schema_version: 2,
-                        initial_fields: Vec::new(),
+                        initial_fields: super::initial_fields::select(&study.model, step, fields)?,
                         model: study.model.clone(),
                         step_id: step.step_id.clone(),
                         backend: policy.backend,

@@ -15,6 +15,7 @@ use runmat_analysis_core::{
     ObservationValueShape, Velocity,
 };
 use runmat_execution::Digest;
+mod planning;
 
 fn source(
     mesh: &SolverMeshArtifact,
@@ -120,6 +121,16 @@ fn solved_fields_survive_cold_workload_admission_and_first_dynamic_block() {
             }),
         ];
         drop(producer);
+        if let IndependentDomain::TimeSeconds { interval_count, .. } =
+            &mut model.sequence.steps[0].independent_domain
+        {
+            *interval_count = 4;
+        }
+        for criterion in &mut model.sequence.steps[0].accuracy.criteria {
+            if criterion.contribution == ErrorContributionKind::Algebraic {
+                criterion.tolerance = AccuracyTolerance::Relative(1e-10);
+            }
+        }
         let workload = StructuralTransientWorkload {
             schema_version: 2,
             initial_fields: fields,
@@ -131,6 +142,7 @@ fn solved_fields_survive_cold_workload_admission_and_first_dynamic_block() {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
             residual_target: 1e-10,
         };
+        planning::verify_original_sources(&workload, &mesh);
         let encoded = workload.canonical_bytes().unwrap();
         let cold = StructuralTransientWorkload::from_canonical_bytes(&encoded).unwrap();
         let scope = super::super::prepare_transient_checkpoint_scope(&cold, &mesh, None).unwrap();

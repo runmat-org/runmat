@@ -67,7 +67,8 @@ mod frequency_workload;
 mod identity;
 mod initial_field;
 pub(crate) use initial_field::{
-    validate_initial_field_declarations, validate_initial_field_selection,
+    validate_initial_field_declarations, validate_initial_field_inventory,
+    validate_initial_field_selection,
 };
 pub use initial_field::{AdmittedInitialField, InitialFieldBinding};
 mod modal_result;

@@ -9,6 +9,20 @@ pub(crate) fn require_initial_field_ceiling(
     maximum: u64,
 ) -> Result<(), ResourcePlanningError> {
     let required = initial_field_reservation_bytes(fields, limits)?.0;
+    require_ceiling(required, maximum)
+}
+
+/// Admit selected sources before cloning their numerical payloads into a workload.
+pub(crate) fn require_borrowed_initial_field_ceiling(
+    fields: &[&InitialFieldBinding],
+    limits: CanonicalLimits,
+    maximum: u64,
+) -> Result<(), ResourcePlanningError> {
+    let required = reservation(fields, fields.is_empty(), limits)?.0;
+    require_ceiling(required, maximum)
+}
+
+fn require_ceiling(required: u64, maximum: u64) -> Result<(), ResourcePlanningError> {
     if required > maximum {
         return Err(ResourcePlanningError::AccuracyCeiling {
             resource: "initial-field residency",
@@ -23,7 +37,15 @@ pub(crate) fn initial_field_reservation_bytes(
     fields: &[InitialFieldBinding],
     limits: CanonicalLimits,
 ) -> Result<ByteCount, ResourcePlanningError> {
-    if fields.is_empty() {
+    reservation(fields, fields.is_empty(), limits)
+}
+
+fn reservation<T: serde::Serialize + ?Sized>(
+    fields: &T,
+    empty: bool,
+    limits: CanonicalLimits,
+) -> Result<ByteCount, ResourcePlanningError> {
+    if empty {
         return Ok(ByteCount(0));
     }
     let bytes =

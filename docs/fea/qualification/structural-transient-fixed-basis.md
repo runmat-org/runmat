@@ -148,3 +148,24 @@ initial displacement and velocity. Source metadata authenticates provenance and
 content; it is not a numerical proof. Independent producer-process termination,
 modal field-input physics and measured memory remain separate open gates. Original
 rod continuum failures remain mandatory and unchanged.
+
+### Shared whole-study source planning
+
+`plan_structural_study_with_fields` accepts the closed source union for a compiled
+study. The shared original-field owner rejects missing, duplicate and unselected
+bindings; structural planning rejects procedures that cannot consume a selected
+field. Direct transient workloads and modal transient templates retain their exact
+active original displacement/velocity bindings. A thermal prestress prefix delegates
+its selected original temperature to the existing thermal planner. No planner
+performs source lookup, interpolation or a producer solve.
+
+Before copying a selected numerical payload into a workload, the shared codec
+profiles its borrowed bindings against the consuming step's unchanged source
+residency ceiling. The existing owned-workload validation uses the same reservation.
+This is source admission, not a measured whole-study peak-memory certificate.
+
+The both-order witness routes actual solved U/V through planning, cold workload
+decoding and the first dynamic block. The original nonuniform temperature witness
+also checks cold thermal-preload-modal planning. These library checks do not close
+standalone `.fea` source transport or independent producer-process termination;
+those entrypoint and lifecycle gates remain open.

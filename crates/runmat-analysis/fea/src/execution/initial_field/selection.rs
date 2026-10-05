@@ -7,6 +7,38 @@ pub(crate) fn validate_declarations(
     step: &ProcedureStep,
     fields: &[InitialFieldBinding],
 ) -> AnalysisExecutionResult<()> {
+    validate_unique(fields)?;
+    for binding in fields {
+        if !model.initial_conditions.iter().any(|condition| {
+            condition.applies_to_step(step)
+                && condition.field_artifact_ref() == Some(binding.reference())
+        }) {
+            return Err(invalid("binding is not selected by the consuming step"));
+        }
+    }
+    require_selected_sources(model, std::iter::once(step), fields)
+}
+
+/// Closed source union for a complete sequence, before selecting per-step workloads.
+pub(crate) fn validate_inventory(
+    model: &AnalysisModel,
+    fields: &[InitialFieldBinding],
+) -> AnalysisExecutionResult<()> {
+    validate_unique(fields)?;
+    for binding in fields {
+        if !model.sequence.steps.iter().any(|step| {
+            model.initial_conditions.iter().any(|condition| {
+                condition.applies_to_step(step)
+                    && condition.field_artifact_ref() == Some(binding.reference())
+            })
+        }) {
+            return Err(invalid("binding is not selected by any consuming step"));
+        }
+    }
+    require_selected_sources(model, model.sequence.steps.iter(), fields)
+}
+
+fn validate_unique(fields: &[InitialFieldBinding]) -> AnalysisExecutionResult<()> {
     for (index, binding) in fields.iter().enumerate() {
         binding.validate()?;
         if fields[..index]
@@ -15,21 +47,25 @@ pub(crate) fn validate_declarations(
         {
             return Err(invalid("duplicate selected binding"));
         }
-        if !model.initial_conditions.iter().any(|condition| {
-            condition.applies_to_step(step)
-                && condition.field_artifact_ref() == Some(binding.reference())
-        }) {
-            return Err(invalid("binding is not selected by the consuming step"));
-        }
     }
-    for condition in model
-        .initial_conditions
-        .iter()
-        .filter(|condition| condition.applies_to_step(step))
-    {
-        if let Some(reference) = condition.field_artifact_ref() {
-            if !fields.iter().any(|field| field.reference() == reference) {
-                return Err(invalid("selected condition has no closed field binding"));
+    Ok(())
+}
+
+fn require_selected_sources<'a>(
+    model: &AnalysisModel,
+    steps: impl Iterator<Item = &'a ProcedureStep>,
+    fields: &[InitialFieldBinding],
+) -> AnalysisExecutionResult<()> {
+    for step in steps {
+        for condition in model
+            .initial_conditions
+            .iter()
+            .filter(|condition| condition.applies_to_step(step))
+        {
+            if let Some(reference) = condition.field_artifact_ref() {
+                if !fields.iter().any(|field| field.reference() == reference) {
+                    return Err(invalid("selected condition has no closed field binding"));
+                }
             }
         }
     }

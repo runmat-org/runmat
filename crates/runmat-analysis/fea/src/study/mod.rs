@@ -67,8 +67,8 @@ pub use nonlinear_product::{
     NonlinearSolidStudyPlanningError, NonlinearSolidStudyProduct, NonlinearSolidStudyProductInput,
 };
 pub use planning::{
-    plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningError,
-    StructuralStudyPlanningPolicy,
+    plan_structural_study, plan_structural_study_with_fields, StructuralNumericalPlanningPolicy,
+    StructuralStudyPlanningError, StructuralStudyPlanningPolicy,
 };
 pub use product::{
     build_structural_study_product, StructuralStudyProduct, StructuralStudyProductError,

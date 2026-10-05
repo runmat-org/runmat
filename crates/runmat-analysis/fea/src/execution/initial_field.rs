@@ -16,6 +16,7 @@ use super::{AnalysisExecutionError, AnalysisExecutionResult};
 mod selection;
 pub(crate) use selection::{
     validate_declarations as validate_initial_field_declarations,
+    validate_inventory as validate_initial_field_inventory,
     validate_selection as validate_initial_field_selection,
 };
 

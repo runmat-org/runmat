@@ -1,5 +1,6 @@
 //! Exercise original solved temperature inputs through shared authored product admission.
 use super::*;
+mod mixed;
 pub(super) fn through_authored_product(
     mut expected: ThermalWorkload,
     mesh: &SolverMeshArtifact,
@@ -24,6 +25,7 @@ pub(super) fn through_authored_product(
         backend: expected.backend,
         formulation_requirement: expected.formulation_requirement,
     };
+    mixed::verify_source_selection(&compiled, &expected.initial_fields, policy);
     assert!(crate::study::plan_thermal_study(&compiled, policy).is_err());
     let product = crate::study::plan_thermal_study_product_with_fields(
         compiled,
