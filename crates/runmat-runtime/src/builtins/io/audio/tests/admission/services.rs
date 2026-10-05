@@ -133,6 +133,12 @@ impl RuntimePlacementService for Placement {
         &self,
         request: WholeWorkPlacementRequest,
     ) -> Result<RuntimeWholeWorkSelection, crate::RuntimeError> {
+        self.select_whole_work_borrowed(request.as_ref())
+    }
+    fn select_whole_work_borrowed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<RuntimeWholeWorkSelection, crate::RuntimeError> {
         request.validate().expect("test audio candidate is valid");
         let candidate = &request.candidates[0];
         if let Some(available) = request.resources.memory_available_bytes {
