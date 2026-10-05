@@ -28,7 +28,7 @@ fn select_factory(
 ) -> Option<PathBuf> {
     configured
         .map(|path| {
-            if path.is_absolute() {
+            if runmat_filesystem::is_absolute_provider_path(&path) {
                 path
             } else {
                 cwd.join(path)

@@ -479,7 +479,7 @@ fn target_path_in_base(target: &str, base_folder: Option<&str>) -> BuiltinResult
     let Some(base_folder) = base_folder else {
         return Ok(target);
     };
-    if target.is_absolute() {
+    if runmat_filesystem::is_absolute_provider_path(&target) {
         return Ok(target);
     }
     let expanded = expand_user_path(base_folder, RUNTESTS_BUILTIN_NAME)

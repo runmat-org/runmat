@@ -65,7 +65,7 @@ impl Default for DiaryState {
 }
 
 fn open_sink(filename: &Path) -> io::Result<DiarySink> {
-    let (provider, resolved_path) = if filename.is_absolute() {
+    let (provider, resolved_path) = if fs::is_absolute_provider_path(filename) {
         (fs::current_provider(), filename.to_path_buf())
     } else {
         let (provider, cwd) = fs::current_provider_with_current_dir()?;

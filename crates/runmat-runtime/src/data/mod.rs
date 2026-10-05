@@ -1014,7 +1014,7 @@ pub async fn write_array_payload_async(
 fn captured_storage_root(
     root: &Path,
 ) -> BuiltinResult<(std::sync::Arc<dyn fs::FsProvider>, PathBuf)> {
-    if root.is_absolute() {
+    if fs::is_absolute_provider_path(root) {
         return Ok((fs::current_provider(), root.to_path_buf()));
     }
     let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|source| {

@@ -29,7 +29,10 @@ impl DataPathAuthority {
         absolute_provider: impl FnOnce() -> Arc<dyn FsProvider>,
         relative_provider_and_dir: impl FnOnce() -> std::io::Result<(Arc<dyn FsProvider>, PathBuf)>,
     ) -> BuiltinResult<Self> {
-        if paths.iter().all(|path| path.as_ref().is_absolute()) {
+        if paths
+            .iter()
+            .all(|path| fs::is_absolute_provider_path(path.as_ref()))
+        {
             return Ok(Self {
                 provider: absolute_provider(),
                 cwd: None,
@@ -49,7 +52,7 @@ impl DataPathAuthority {
 
     pub(super) fn resolve(&self, path: impl AsRef<Path>) -> BuiltinResult<PathBuf> {
         let path = path.as_ref();
-        if path.is_absolute() {
+        if fs::is_absolute_provider_path(path) {
             Ok(path.to_path_buf())
         } else {
             self.cwd.as_ref().map(|cwd| cwd.join(path)).ok_or_else(|| {
@@ -176,8 +179,8 @@ mod tests {
     #[test]
     fn absolute_path_does_not_require_working_directory() {
         fn verify(provider: Arc<dyn FsProvider>, source: &Path, target: &Path) {
-            assert!(source.is_absolute());
-            assert!(target.is_absolute());
+            assert!(fs::is_absolute_provider_path(source));
+            assert!(fs::is_absolute_provider_path(target));
             let source_text = source.to_str().expect("fixture path is Unicode");
             let target_text = target.to_str().expect("fixture path is Unicode");
             let authority = DataPathAuthority::capture_with(
@@ -223,7 +226,7 @@ mod tests {
         const ABSOLUTE: &str = "C:\\data\\source.data";
         #[cfg(not(windows))]
         const ABSOLUTE: &str = "/data/source.data";
-        assert!(Path::new(ABSOLUTE).is_absolute());
+        assert!(fs::is_absolute_provider_path(Path::new(ABSOLUTE)));
         let provider: Arc<dyn FsProvider> = Arc::new(fs::MemoryFsProvider::new());
         for paths in [[ABSOLUTE, "target.data"], ["source.data", "target.data"]] {
             let error = DataPathAuthority::capture_with(

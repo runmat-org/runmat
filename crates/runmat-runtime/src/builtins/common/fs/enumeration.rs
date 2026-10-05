@@ -136,7 +136,7 @@ pub(crate) async fn matching_in(
 }
 
 fn resolve(cwd: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
+    if vfs::is_absolute_provider_path(path) {
         path.to_path_buf()
     } else {
         cwd.join(path)

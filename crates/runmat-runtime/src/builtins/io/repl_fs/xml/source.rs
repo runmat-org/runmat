@@ -31,7 +31,7 @@ impl XmlPathOwner {
     }
 
     pub(super) fn resolve(self, path: PathBuf) -> XmlFsPath {
-        let path = if path.is_absolute() {
+        let path = if fs::is_absolute_provider_path(&path) {
             path
         } else {
             self.cwd.join(path)
@@ -46,7 +46,7 @@ impl XmlPathOwner {
 
 impl XmlFsPath {
     pub(super) fn capture(path: PathBuf) -> io::Result<Self> {
-        let (provider, path) = if path.is_absolute() {
+        let (provider, path) = if fs::is_absolute_provider_path(&path) {
             (fs::current_provider(), path)
         } else {
             let (provider, cwd) = fs::current_provider_with_current_dir()?;
@@ -107,6 +107,34 @@ mod tests {
         } else {
             PathBuf::from(format!("/{name}"))
         }
+    }
+
+    #[cfg(not(windows))]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rooted_xml_path_uses_selected_provider_without_cwd_prefix() {
+        let _lock = fs::provider_override_lock();
+        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(test_dir("selected")));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir(test_dir(
+            "replacement",
+        )));
+        let absolute = test_dir("project").join("rooted.xml");
+        selected
+            .write_project_path(&absolute, b"<selected/>")
+            .expect("selected source");
+        replacement
+            .write_project_path(&absolute, b"<replacement/>")
+            .expect("replacement source");
+        let _selected = fs::replace_provider(selected);
+        fs::set_current_dir(test_dir("selected")).expect("selected cwd");
+        let captured = XmlFsPath::capture(absolute.clone()).expect("absolute capture");
+        assert_eq!(captured.path, absolute);
+        let _replacement = fs::replace_provider(replacement);
+        fs::set_current_dir(test_dir("replacement")).expect("replacement cwd");
+        assert_eq!(
+            futures::executor::block_on(captured.read_bytes()).unwrap(),
+            b"<selected/>"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -25,7 +25,7 @@ impl DeleteFilesystem {
     }
 
     fn resolved(&self, path: &Path) -> PathBuf {
-        if path.is_absolute() {
+        if vfs::is_absolute_provider_path(path) {
             path.to_path_buf()
         } else {
             self.cwd.join(path)

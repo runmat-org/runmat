@@ -93,7 +93,7 @@ impl CapturedUserPathAuthority {
         self.check_current()?;
         let expanded = self.expand_home(text)?;
         let path = Path::new(&expanded);
-        let resolved = if path.is_absolute() {
+        let resolved = if fs::is_absolute_provider_path(path) {
             path.to_path_buf()
         } else {
             self.cwd.join(path)
@@ -111,7 +111,7 @@ impl CapturedUserPathAuthority {
                 search_segment: None,
             });
         };
-        let home = if home.is_absolute() {
+        let home = if fs::is_absolute_provider_path(home) {
             home.clone()
         } else {
             self.cwd.join(home)

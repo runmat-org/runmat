@@ -24,7 +24,7 @@ impl TabularFsOwner {
     /// A known absolute path needs no working-directory service. For a path
     /// that will be materialized later, retain the current directory now.
     pub(super) fn capture(known_path: Option<&Path>) -> io::Result<Self> {
-        let (provider, cwd) = if known_path.is_some_and(Path::is_absolute) {
+        let (provider, cwd) = if known_path.is_some_and(fs::is_absolute_provider_path) {
             (fs::current_provider(), None)
         } else {
             let (provider, cwd) = fs::current_provider_with_current_dir()?;
@@ -48,7 +48,7 @@ impl TabularFsOwner {
     }
 
     pub(super) fn path(self, path: PathBuf) -> io::Result<TabularFsPath> {
-        let path = if path.is_absolute() {
+        let path = if fs::is_absolute_provider_path(&path) {
             path
         } else {
             self.cwd

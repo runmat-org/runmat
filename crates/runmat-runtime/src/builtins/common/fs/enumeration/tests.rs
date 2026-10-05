@@ -5,6 +5,20 @@ use tempfile::tempdir;
 #[path = "permission_tests.rs"]
 mod permission_tests;
 
+#[cfg(not(windows))]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn rooted_provider_entry_is_not_rebased_under_cwd() {
+    assert_eq!(
+        resolve(Path::new("/working"), Path::new("/project/file.m")),
+        Path::new("/project/file.m")
+    );
+    assert_eq!(
+        resolve(Path::new("/working"), Path::new("relative/file.m")),
+        Path::new("/working/relative/file.m")
+    );
+}
+
 #[test]
 fn missing_and_file_prefixes_have_no_native_matches() {
     let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK

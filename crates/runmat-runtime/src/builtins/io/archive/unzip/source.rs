@@ -148,7 +148,7 @@ pub(super) fn resolve_archive_path(
     let expanded = expand_user_path(text.trim(), BUILTIN_NAME)
         .map_err(|msg| unzip_error_with(&UNZIP_ERROR_FILENAME, msg))?;
     let path = PathBuf::from(expanded);
-    if path.is_absolute() {
+    if vfs::is_absolute_provider_path(&path) {
         Ok(path)
     } else {
         Ok(captured_cwd(captured, &UNZIP_ERROR_IO)?.join(path))
@@ -164,7 +164,7 @@ pub(super) fn resolve_output_folder(
             let expanded = expand_user_path(raw.trim(), BUILTIN_NAME)
                 .map_err(|msg| unzip_error_with(&UNZIP_ERROR_OUTPUT_FOLDER, msg))?;
             let path = PathBuf::from(expanded);
-            if path.is_absolute() {
+            if vfs::is_absolute_provider_path(&path) {
                 Ok(path)
             } else {
                 Ok(captured_cwd(captured, &UNZIP_ERROR_OUTPUT_FOLDER)?.join(path))

@@ -12,7 +12,7 @@ pub(super) struct ImportInput {
 
 impl ImportInput {
     pub(super) fn capture(path: PathBuf) -> BuiltinResult<Self> {
-        let (provider, path) = if path.is_absolute() {
+        let (provider, path) = if fs::is_absolute_provider_path(&path) {
             (fs::current_provider(), path)
         } else {
             let (provider, cwd) = fs::current_provider_with_current_dir().map_err(|err| {

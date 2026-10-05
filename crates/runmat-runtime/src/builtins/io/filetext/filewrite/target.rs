@@ -11,7 +11,7 @@ pub(super) struct OutputTarget {
 
 impl OutputTarget {
     pub(super) fn capture(path: PathBuf) -> BuiltinResult<Self> {
-        if path.is_absolute() {
+        if fs::is_absolute_provider_path(&path) {
             return Ok(Self {
                 provider: fs::current_provider(),
                 path,

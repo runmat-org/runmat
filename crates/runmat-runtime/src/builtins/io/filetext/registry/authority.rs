@@ -60,7 +60,7 @@ pub(crate) struct FileFilesystem {
 
 impl FileFilesystem {
     pub(crate) fn capture(path: &Path) -> io::Result<Self> {
-        let (provider, path) = if path.is_absolute() {
+        let (provider, path) = if fs::is_absolute_provider_path(path) {
             (fs::current_provider(), path.to_path_buf())
         } else {
             let (provider, cwd) = fs::current_provider_with_current_dir()?;

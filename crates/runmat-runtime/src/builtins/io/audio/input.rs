@@ -56,7 +56,7 @@ impl FsInputLease {
         error: &'static BuiltinErrorDescriptor,
         builtin: &'static str,
     ) -> BuiltinResult<Self> {
-        if path.is_absolute() {
+        if fs::is_absolute_provider_path(&path) {
             let provider = fs::current_provider();
             return Ok(Self {
                 resource: fs::capture_resource_lease(provider.clone()),

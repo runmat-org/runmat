@@ -18,7 +18,7 @@ pub(crate) struct MatFsPath {
 
 impl MatFsPath {
     pub(crate) fn capture(path: PathBuf) -> io::Result<Self> {
-        let (provider, path) = if path.is_absolute() {
+        let (provider, path) = if fs::is_absolute_provider_path(&path) {
             (fs::current_provider(), path)
         } else {
             let (provider, cwd) = fs::current_provider_with_current_dir()?;
@@ -79,6 +79,33 @@ impl MatFsPath {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    #[cfg(not(windows))]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rooted_mat_path_keeps_exact_selected_provider_across_swap() {
+        let _state = crate::builtins::io::mat::tests::state_guard();
+        let selected = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
+        let replacement = Arc::new(fs::MemoryFsProvider::with_current_dir("/replacement"));
+        selected
+            .write_project_path("/project/rooted.mat", b"selected")
+            .expect("selected source");
+        replacement
+            .write_project_path("/project/rooted.mat", b"replacement")
+            .expect("replacement source");
+        let _selected = fs::replace_provider(selected);
+        fs::set_current_dir("/selected").expect("selected cwd");
+        let captured =
+            MatFsPath::capture(PathBuf::from("/project/rooted.mat")).expect("rooted capture");
+        assert_eq!(captured.path(), std::path::Path::new("/project/rooted.mat"));
+        let _replacement = fs::replace_provider(replacement);
+        fs::set_current_dir("/replacement").expect("replacement cwd");
+        let mut opened = block_on(captured.open()).expect("original owner open");
+        let mut bytes = Vec::new();
+        use std::io::Read;
+        opened.read_to_end(&mut bytes).expect("selected bytes");
+        assert_eq!(bytes, b"selected");
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

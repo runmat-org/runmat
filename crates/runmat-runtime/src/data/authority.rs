@@ -3,7 +3,7 @@
 use super::data_error;
 use crate::context::{RuntimeContext, RuntimeContextLocalId};
 use crate::BuiltinResult;
-use runmat_filesystem::FsProvider;
+use runmat_filesystem::{is_absolute_provider_path, FsProvider};
 use runmat_types::{
     ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity, StaticClassIdentity,
 };
@@ -141,7 +141,7 @@ pub(crate) fn issue_dataset(
     root: PathBuf,
     public_path: String,
 ) -> BuiltinResult<ForeignRef> {
-    if !root.is_absolute() {
+    if !is_absolute_provider_path(&root) {
         return Err(data_error(
             "Dataset authority requires an absolute resolved root",
         ));
