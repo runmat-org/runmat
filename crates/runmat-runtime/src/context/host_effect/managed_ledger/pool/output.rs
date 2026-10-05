@@ -137,6 +137,55 @@ impl PooledOutputPermit {
         ledger.snapshot.peak_claimed_bytes = ledger.snapshot.peak_claimed_bytes.max(claimed);
         Ok(PooledOutputClaim { owner, charged })
     }
+
+    /// # Safety
+    /// A non-null allocator result must be a fresh, uniquely owned global
+    /// allocation with exactly the supplied layout and alignment. Ownership
+    /// transfers to the returned Box-backed claim.
+    unsafe fn reserve_exact_claim_with(
+        &self,
+        bytes: usize,
+        allocate: impl FnOnce(Layout) -> *mut u8,
+    ) -> Result<ExactHostAllocationClaim, ExactHostNumericAllocationError> {
+        let claim = self.claim(bytes)?;
+        let layout = Layout::new::<PooledOutputClaim>();
+        // SAFETY: the nonzero layout is exactly PooledOutputClaim. A failed
+        // allocation drops `claim`, refunding its ledger bytes.
+        let pointer = allocate(layout).cast::<PooledOutputClaim>();
+        if pointer.is_null() {
+            return Err(ExactHostNumericAllocationError::AllocationFailed);
+        }
+        // SAFETY: this is a fresh, aligned allocation with one owner and no
+        // fallible operation between initialization and Box ownership.
+        let boxed = unsafe {
+            pointer.write(claim);
+            Box::from_raw(pointer)
+        };
+        let output = self.state.lock().expect("pooled output lock");
+        let current = output.active
+            && self.active_epoch.load(Ordering::Acquire)
+            && output
+                .cancellation
+                .as_ref()
+                .is_some_and(|token| !token.is_cancelled())
+            && output
+                .session_owner
+                .as_ref()
+                .is_some_and(|owner| owner.load(Ordering::Acquire) == output.session_generation);
+        drop(output);
+        if !current
+            || !self
+                .ledger
+                .lock()
+                .expect("host ledger lock")
+                .snapshot
+                .current
+        {
+            drop(boxed);
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        Ok(ExactHostAllocationClaim::Owned(boxed))
+    }
 }
 
 impl std::fmt::Debug for PooledOutputPermit {
@@ -158,20 +207,13 @@ impl ExactHostAllocationPermit for PooledOutputPermit {
         &self,
         bytes: usize,
     ) -> Result<ExactHostAllocationClaim, ExactHostNumericAllocationError> {
-        let claim = self.claim(bytes)?;
-        let layout = Layout::new::<PooledOutputClaim>();
-        // SAFETY: the nonzero layout is exactly PooledOutputClaim. A failed
-        // allocation drops `claim`, refunding its ledger bytes.
-        let pointer = unsafe { alloc(layout) }.cast::<PooledOutputClaim>();
-        if pointer.is_null() {
-            return Err(ExactHostNumericAllocationError::AllocationFailed);
-        }
-        // SAFETY: this is a fresh, aligned allocation with one owner and no
-        // fallible operation between initialization and Box ownership.
-        unsafe {
-            pointer.write(claim);
-            Ok(ExactHostAllocationClaim::Owned(Box::from_raw(pointer)))
-        }
+        let allocate = |layout| {
+            // SAFETY: this exact layout is released by the Box-backed claim.
+            unsafe { alloc(layout) }
+        };
+        // SAFETY: the global allocator supplies the exact requested layout,
+        // or null; the claim owner releases the block through Box.
+        unsafe { self.reserve_exact_claim_with(bytes, allocate) }
     }
 }
 
@@ -296,5 +338,84 @@ mod tests {
         drop(peer);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn denied_claim_metadata_allocation_refunds_and_allows_reuse() {
+        let ledger = ManagedHostEffectLedger::new(96);
+        let pool = ManagedHostEffectStagePool::new(&ledger, 1).unwrap();
+        let stage = pool.acquire(8).unwrap();
+        let session = Arc::new(AtomicU64::new(1));
+        stage
+            .reservation()
+            .reserve_preallocated_output_permit(64, CancellationSource::new().token(), session, 1)
+            .unwrap()
+            .unwrap();
+        let output = &pool.slots[0].output;
+        let before = ledger.snapshot();
+        // SAFETY: null never transfers a physical allocation into the claim.
+        let denied = unsafe { output.reserve_exact_claim_with(4, |_| std::ptr::null_mut()) };
+        assert!(matches!(
+            denied,
+            Err(ExactHostNumericAllocationError::AllocationFailed)
+        ));
+        assert_eq!(
+            ledger.snapshot().live_reserved_bytes,
+            before.live_reserved_bytes
+        );
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        let claim = output.reserve_exact_claim(4).expect("refunded headroom");
+        drop(claim);
+        drop(stage);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn retirement_while_claim_metadata_allocation_is_pending_refunds_once() {
+        use std::sync::Barrier;
+
+        let ledger = ManagedHostEffectLedger::new(96);
+        let pool = ManagedHostEffectStagePool::new(&ledger, 1).unwrap();
+        let stage = pool.acquire(8).unwrap();
+        let session = Arc::new(AtomicU64::new(1));
+        stage
+            .reservation()
+            .reserve_preallocated_output_permit(64, CancellationSource::new().token(), session, 1)
+            .unwrap()
+            .unwrap();
+        let output = Arc::clone(&pool.slots[0].output);
+        let entered = Arc::new(Barrier::new(2));
+        let resume = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let entered_worker = Arc::clone(&entered);
+            let resume_worker = Arc::clone(&resume);
+            let worker = scope.spawn(move || {
+                // SAFETY: the closure returns a fresh global-allocator block
+                // with the exact layout after the deterministic pause.
+                let allocate = |layout| {
+                    entered_worker.wait();
+                    resume_worker.wait();
+                    // SAFETY: this is a fresh exact-layout global allocation.
+                    unsafe { alloc(layout) }
+                };
+                unsafe { output.reserve_exact_claim_with(4, allocate) }
+            });
+            entered.wait();
+            assert!(ledger.snapshot().live_claimed_bytes > 0);
+            stage.reservation().retire_invocation();
+            drop(stage);
+            resume.wait();
+            assert!(matches!(
+                worker.join().expect("claim worker"),
+                Err(ExactHostNumericAllocationError::ExceedsPermit)
+            ));
+        });
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        let next = pool.acquire(8).expect("retired slot and metadata refunded");
+        assert_eq!(next.generation, 2);
     }
 }

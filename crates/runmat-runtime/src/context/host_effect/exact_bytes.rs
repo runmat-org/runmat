@@ -32,14 +32,21 @@ impl ExactHostEffectBytes {
         capacity: usize,
         claim: HostEffectLiveAllocationClaim,
     ) -> Result<Self, HostEffectAllocationError> {
-        Self::new_with(capacity, claim, |layout| {
+        let allocate = |layout| {
             // SAFETY: the checked layout and matching release remain owned by
             // the returned buffer if allocation succeeds.
             unsafe { alloc(layout) }
-        })
+        };
+        // SAFETY: the global allocator supplies a fresh block with precisely
+        // the requested layout, or null. This owner releases that same block.
+        unsafe { Self::new_with(capacity, claim, allocate) }
     }
 
-    fn new_with(
+    /// # Safety
+    /// A non-null allocator result must be a fresh, uniquely owned block from
+    /// the global allocator with exactly the supplied layout and alignment.
+    /// Ownership transfers to this buffer for `dealloc` on drop.
+    unsafe fn new_with(
         capacity: usize,
         claim: HostEffectLiveAllocationClaim,
         allocate: impl FnOnce(Layout) -> *mut u8,
@@ -193,9 +200,13 @@ mod tests {
             .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 4)
             .expect("claim");
         assert!(matches!(
-            ExactHostEffectBytes::new_with(4, HostEffectLiveAllocationClaim::Shared(claim), |_| {
-                std::ptr::null_mut()
-            }),
+            unsafe {
+                ExactHostEffectBytes::new_with(
+                    4,
+                    HostEffectLiveAllocationClaim::Shared(claim),
+                    |_| std::ptr::null_mut(),
+                )
+            },
             Err(HostEffectAllocationError::AllocationFailed)
         ));
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
