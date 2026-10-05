@@ -7,7 +7,7 @@ use super::{
 use crate::{BuiltinResult, RuntimeError};
 
 mod fields;
-pub(super) use fields::{for_each_field, for_each_field_ref, split_fields};
+pub(super) use fields::{for_each_field_ref, split_fields};
 
 fn field_overflow() -> RuntimeError {
     readmatrix_error_with(

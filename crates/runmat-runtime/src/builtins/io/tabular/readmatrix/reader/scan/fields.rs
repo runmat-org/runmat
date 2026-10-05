@@ -14,7 +14,8 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) enum FieldView<'line, '
 impl<'line, 'scratch> FieldView<'line, 'scratch> {
     pub(in crate::builtins::io::tabular::readmatrix::reader) fn as_str(&self) -> &str {
         match self {
-            Self::Borrowed(value) | Self::Staged(value) => value,
+            Self::Borrowed(value) => value,
+            Self::Staged(value) => value,
             Self::Owned(value) => value,
         }
     }

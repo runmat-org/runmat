@@ -73,7 +73,7 @@ fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
     );
     assert_eq!(
         unsafe { tensor.host_buffer().foreign_data_pointer() }.cast::<u64>(),
-        original
+        original.cast_mut()
     );
     assert_eq!(quota.retained.load(Ordering::SeqCst), 16 + shape_bytes);
     drop(tensor);
