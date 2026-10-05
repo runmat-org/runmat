@@ -6,15 +6,70 @@
 
 use async_trait::async_trait;
 use std::io;
+use std::{error::Error, fmt};
+
+/// What is known about the destination after a publication failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FsPublicationDisposition {
+    /// The previous destination was not changed.
+    NotPublished,
+    /// The new bytes were committed, but a later step failed.
+    Published,
+    /// The issuer cannot prove which version is public; do not retry blindly.
+    Indeterminate,
+}
+
+/// Preserve both the provider failure and its observable commit disposition.
+#[derive(Debug)]
+pub struct FsPublicationFailure {
+    disposition: FsPublicationDisposition,
+    source: io::Error,
+}
+
+impl FsPublicationFailure {
+    pub fn new(disposition: FsPublicationDisposition, source: io::Error) -> Self {
+        Self {
+            disposition,
+            source,
+        }
+    }
+
+    pub fn not_published(source: io::Error) -> Self {
+        Self::new(FsPublicationDisposition::NotPublished, source)
+    }
+
+    pub fn disposition(&self) -> FsPublicationDisposition {
+        self.disposition
+    }
+
+    pub fn io_error(&self) -> &io::Error {
+        &self.source
+    }
+}
+
+impl fmt::Display for FsPublicationFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{:?} staged publication: {}",
+            self.disposition, self.source
+        )
+    }
+}
+
+impl Error for FsPublicationFailure {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.source)
+    }
+}
 
 /// An unpublished output owned by the filesystem provider that created it.
 ///
-/// `publish` may suspend for a future provider implementation, but it must
-/// have one atomic, provider-defined commit point. Before that point, dropping
-/// the future aborts the stage without modifying the destination. After that
-/// point, the future must finish in the same poll without another suspension:
-/// a caller cannot observe cancellation while publication continues unseen.
-/// Implementations must not detach a commit task from this owner.
+/// `publish` has one provider-defined commit point. A provider must report
+/// whether failure left the old destination intact, occurred after commit, or
+/// cannot be determined. Dropping an uncommitted stage aborts it. Providers
+/// must not detach a commit task from this owner; distributed transports need
+/// an explicit status/commit protocol before they can opt in.
 #[async_trait(?Send)]
 pub trait FsStagedOutput: Send {
     /// Write at most `bytes.len()` bytes; zero is permitted only for empty input.
@@ -24,9 +79,10 @@ pub trait FsStagedOutput: Send {
     /// Make the staged bytes ready for publication without changing the target.
     async fn flush_and_sync(&mut self) -> io::Result<()>;
 
-    /// Publish this exact stage over its captured destination. A failed or
-    /// dropped publication retains the previous target and aborts the stage.
-    async fn publish(self: Box<Self>) -> io::Result<()>;
+    /// Publish this exact stage over its captured destination. An error must
+    /// carry the actual commit disposition; only `NotPublished` promises the
+    /// previous target is unchanged.
+    async fn publish(self: Box<Self>) -> Result<(), FsPublicationFailure>;
 }
 
 #[cfg(test)]
@@ -60,7 +116,7 @@ mod tests {
             Ok(())
         }
 
-        async fn publish(self: Box<Self>) -> io::Result<()> {
+        async fn publish(self: Box<Self>) -> Result<(), FsPublicationFailure> {
             pending::<()>().await;
             unreachable!("fixture never publishes")
         }

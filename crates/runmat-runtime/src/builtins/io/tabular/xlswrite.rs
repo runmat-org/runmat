@@ -162,6 +162,14 @@ async fn write_spreadsheet(
         .await
         .map_err(|source| match source {
             write_owner::StagedWriteError::Control(error) => error,
+            write_owner::StagedWriteError::PublicationInterrupted(error, disposition) => {
+                write_owner::publication_interruption_error(error, disposition)
+            }
+            write_owner::StagedWriteError::Publication(source) => xlswrite_error_with_source(
+                &XLSWRITE_ERROR_IO,
+                "xlswrite: staged publication failed or its effect could not be confirmed",
+                source,
+            ),
             write_owner::StagedWriteError::Io(source) => xlswrite_error_with_source(
                 &XLSWRITE_ERROR_IO,
                 "xlswrite: failed to replace spreadsheet file",

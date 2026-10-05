@@ -365,6 +365,14 @@ async fn write_staged_segment(
 fn map_staged_write_error(source: write_owner::StagedWriteError) -> RuntimeError {
     match source {
         write_owner::StagedWriteError::Control(error) => error,
+        write_owner::StagedWriteError::PublicationInterrupted(error, disposition) => {
+            write_owner::publication_interruption_error(error, disposition)
+        }
+        write_owner::StagedWriteError::Publication(source) => writecell_error_with_source(
+            &WRITECELL_ERROR_IO,
+            "writecell: staged publication failed or its effect could not be confirmed",
+            source,
+        ),
         write_owner::StagedWriteError::Io(source) => writecell_error_with_source(
             &WRITECELL_ERROR_IO,
             "writecell: failed to replace delimited text file",
@@ -452,6 +460,14 @@ pub(super) async fn write_spreadsheet_cells(
         .await
         .map_err(|source| match source {
             write_owner::StagedWriteError::Control(error) => error,
+            write_owner::StagedWriteError::PublicationInterrupted(error, disposition) => {
+                write_owner::publication_interruption_error(error, disposition)
+            }
+            write_owner::StagedWriteError::Publication(source) => writecell_error_with_source(
+                &WRITECELL_ERROR_IO,
+                "writecell: staged publication failed or its effect could not be confirmed",
+                source,
+            ),
             write_owner::StagedWriteError::Io(source) => writecell_error_with_source(
                 &WRITECELL_ERROR_IO,
                 "writecell: failed to replace spreadsheet file",

@@ -1,7 +1,7 @@
 //! A native stage lives in a newly created private sibling directory.
 //! Neither its name nor its cleanup path is exposed to tabular consumers.
 
-use crate::FsStagedOutput;
+use crate::{FsPublicationFailure, FsStagedOutput};
 use async_trait::async_trait;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -93,12 +93,15 @@ impl FsStagedOutput for NativeStagedOutput {
         file.sync_all()
     }
 
-    async fn publish(mut self: Box<Self>) -> io::Result<()> {
+    async fn publish(mut self: Box<Self>) -> Result<(), FsPublicationFailure> {
         // The native implementation performs no await after rename. Dropping
         // a pending future before it reaches that syscall still drops `self`.
-        self.flush_and_sync().await?;
+        self.flush_and_sync()
+            .await
+            .map_err(FsPublicationFailure::not_published)?;
         self.file.take();
-        fs::rename(&self.payload, &self.destination)?;
+        fs::rename(&self.payload, &self.destination)
+            .map_err(FsPublicationFailure::not_published)?;
         self.published = true;
         Ok(())
     }
@@ -155,7 +158,11 @@ mod tests {
         let stage_dir = root.path().join("failed-stage");
         let mut stage = begin_at(&directory_target, stage_dir.clone()).expect("stage");
         block_on(stage.write_chunk(b"payload")).expect("write");
-        assert!(block_on(Box::new(stage).publish()).is_err());
+        let failure = block_on(Box::new(stage).publish()).expect_err("directory target");
+        assert_eq!(
+            failure.disposition(),
+            crate::FsPublicationDisposition::NotPublished
+        );
         assert!(!stage_dir.exists());
         assert!(directory_target.is_dir());
     }

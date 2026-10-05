@@ -10,7 +10,11 @@ use super::path::TabularFsPath;
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
 use futures::lock::Mutex as AsyncMutex;
-use runmat_filesystem::FsStagedOutput;
+use runmat_filesystem::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
+
+#[path = "write_owner/publication.rs"]
+mod publication;
+pub(super) use publication::interruption_error as publication_interruption_error;
 
 pub(super) type WriteLock = Arc<AsyncMutex<()>>;
 type WeakWriteLock = Weak<AsyncMutex<()>>;
@@ -88,6 +92,8 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 pub(super) enum StagedWriteError {
     Io(io::Error),
     Control(RuntimeError),
+    Publication(FsPublicationFailure),
+    PublicationInterrupted(RuntimeError, FsPublicationDisposition),
 }
 
 pub(super) async fn safe_replace_file(
@@ -192,18 +198,75 @@ pub(super) async fn finish_stage(
         .await
         .map_err(StagedWriteError::Control)?;
     selected.check().map_err(StagedWriteError::Io)?;
-    await_io(runtime, builtin, stage.publish())
-        .await
-        .map_err(StagedWriteError::Control)?
-        .map_err(StagedWriteError::Io)?;
-    selected.check().map_err(StagedWriteError::Io)
+    publication::publish(runtime, builtin, stage).await?;
+    selected.check().map_err(|source| {
+        StagedWriteError::Publication(FsPublicationFailure::new(
+            FsPublicationDisposition::Published,
+            source,
+        ))
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use super::publication::PublicationInterruption;
     use super::*;
     use crate::builtins::io::tabular::path::TabularFsOwner;
+    use crate::execution::RuntimeExecutionService;
+    use async_trait::async_trait;
+    use runmat_execution::cancellation::CancellationSource;
     use runmat_filesystem::{self as fs, MemoryFsProvider};
+    use std::error::Error;
+    use std::future::Future;
+    use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll};
+
+    struct PendingPublication {
+        polled: Arc<AtomicBool>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl Drop for PendingPublication {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl FsStagedOutput for PendingPublication {
+        async fn write_chunk(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+
+        async fn flush_and_sync(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn publish(self: Box<Self>) -> Result<(), FsPublicationFailure> {
+            self.polled.store(true, Ordering::SeqCst);
+            futures::future::pending::<()>().await;
+            unreachable!("pending publication fixture")
+        }
+    }
+
+    struct ReadyCancellingPublication(CancellationSource);
+
+    #[async_trait(?Send)]
+    impl FsStagedOutput for ReadyCancellingPublication {
+        async fn write_chunk(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+
+        async fn flush_and_sync(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        async fn publish(self: Box<Self>) -> Result<(), FsPublicationFailure> {
+            self.0.cancel(runmat_execution::CancellationReason::User);
+            Ok(())
+        }
+    }
 
     fn root() -> &'static str {
         if cfg!(windows) {
@@ -265,5 +328,120 @@ mod tests {
                 .expect("replacement"),
             b"other\n"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cancelled_pending_publication_is_indeterminate_and_drops_owner() {
+        let _lock = fs::provider_override_lock();
+        let provider = Arc::new(MemoryFsProvider::with_current_dir(root()));
+        let destination = PathBuf::from(root()).join("pending.csv");
+        provider
+            .write_project_path(&destination, b"old")
+            .expect("original target");
+        let _restore = fs::replace_provider(provider.clone());
+        fs::set_current_dir(root()).expect("selected cwd");
+        let selected = TabularFsOwner::capture(Some(&destination))
+            .expect("capture")
+            .path(destination.clone())
+            .expect("selected path");
+        let source = CancellationSource::new();
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let mut cooperation = TabularCooperation::new(Some(&runtime), "writecell");
+        let polled = Arc::new(AtomicBool::new(false));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stage: Box<dyn FsStagedOutput> = Box::new(PendingPublication {
+            polled: polled.clone(),
+            dropped: dropped.clone(),
+        });
+        let mut call = Box::pin(finish_stage(
+            Some(&runtime),
+            &mut cooperation,
+            "writecell",
+            &selected,
+            stage,
+        ));
+        let waker = futures::task::noop_waker();
+        assert!(matches!(
+            call.as_mut().poll(&mut Context::from_waker(&waker)),
+            Poll::Pending
+        ));
+        assert!(polled.load(Ordering::SeqCst));
+        source.cancel(runmat_execution::CancellationReason::User);
+        let StagedWriteError::PublicationInterrupted(cancelled, disposition) =
+            futures::executor::block_on(call).expect_err("publication cancelled")
+        else {
+            panic!("pending publication must retain cancellation and uncertainty")
+        };
+        assert_eq!(disposition, FsPublicationDisposition::Indeterminate);
+        let error = publication_interruption_error(cancelled, disposition);
+        assert!(error
+            .identifier()
+            .is_some_and(|id| id.ends_with(":Cancelled")));
+        let interruption = error
+            .source()
+            .and_then(|source| source.downcast_ref::<PublicationInterruption>())
+            .expect("typed publication interruption");
+        assert_eq!(
+            interruption.disposition(),
+            FsPublicationDisposition::Indeterminate
+        );
+        assert!(
+            matches!(
+                interruption.source().and_then(|source| source
+                    .downcast_ref::<crate::execution::ExecutionServiceError>(
+                )),
+                Some(crate::execution::ExecutionServiceError::Cancelled)
+            )
+        );
+        assert!(dropped.load(Ordering::SeqCst));
+        assert_eq!(provider.read_project_path(&destination).unwrap(), b"old");
+    }
+
+    #[test]
+    fn committed_publication_failure_retains_disposition_and_source() {
+        let failure = FsPublicationFailure::new(
+            FsPublicationDisposition::Published,
+            io::Error::new(io::ErrorKind::PermissionDenied, "postcommit lease revoked"),
+        );
+        assert_eq!(failure.disposition(), FsPublicationDisposition::Published);
+        assert_eq!(failure.io_error().kind(), io::ErrorKind::PermissionDenied);
+        assert!(failure.source().is_some());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cancellation_after_ready_publication_reports_published() {
+        let _lock = fs::provider_override_lock();
+        let provider = Arc::new(MemoryFsProvider::with_current_dir(root()));
+        let _restore = fs::replace_provider(provider);
+        fs::set_current_dir(root()).expect("selected cwd");
+        let destination = PathBuf::from(root()).join("ready.csv");
+        let selected = TabularFsOwner::capture(Some(&destination))
+            .expect("capture")
+            .path(destination)
+            .expect("selected path");
+        let source = CancellationSource::new();
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let mut cooperation = TabularCooperation::new(Some(&runtime), "writecell");
+        let result = futures::executor::block_on(finish_stage(
+            Some(&runtime),
+            &mut cooperation,
+            "writecell",
+            &selected,
+            Box::new(ReadyCancellingPublication(source)),
+        ));
+        let StagedWriteError::PublicationInterrupted(_, disposition) =
+            result.expect_err("post-publication cancellation")
+        else {
+            panic!("ready publication must retain its committed disposition")
+        };
+        assert_eq!(disposition, FsPublicationDisposition::Published);
     }
 }

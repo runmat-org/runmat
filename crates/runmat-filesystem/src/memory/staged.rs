@@ -1,7 +1,7 @@
 //! A memory stage is private bytes until one locked map replacement.
 
 use super::*;
-use crate::FsStagedOutput;
+use crate::{FsPublicationFailure, FsStagedOutput};
 use std::sync::atomic::AtomicU64;
 
 pub(super) fn begin(
@@ -42,25 +42,23 @@ impl FsStagedOutput for MemoryStagedOutput {
         Ok(())
     }
 
-    async fn publish(mut self: Box<Self>) -> io::Result<()> {
-        let mut tree = self
-            .provider
-            .inner
-            .lock()
-            .map_err(|_| io::Error::other("memory filesystem lock poisoned"))?;
-        ensure_parent_dir(&tree, &self.destination)?;
+    async fn publish(mut self: Box<Self>) -> Result<(), FsPublicationFailure> {
+        let mut tree = self.provider.inner.lock().map_err(|_| {
+            FsPublicationFailure::not_published(io::Error::other("memory filesystem lock poisoned"))
+        })?;
+        ensure_parent_dir(&tree, &self.destination).map_err(FsPublicationFailure::not_published)?;
         match tree.entries.get(&self.destination) {
             Some(MemoryEntry::Directory) => {
-                return Err(io::Error::new(
+                return Err(FsPublicationFailure::not_published(io::Error::new(
                     ErrorKind::InvalidInput,
                     "cannot replace a directory with staged file bytes",
-                ));
+                )));
             }
             Some(MemoryEntry::File { readonly: true, .. }) => {
-                return Err(io::Error::new(
+                return Err(FsPublicationFailure::not_published(io::Error::new(
                     ErrorKind::PermissionDenied,
                     "destination file is readonly",
-                ));
+                )));
             }
             Some(MemoryEntry::File { .. }) | None => {}
         }
@@ -136,10 +134,12 @@ mod tests {
         block_on(provider.set_readonly(Path::new("/reports/data.csv"), true)).unwrap();
         let mut stage = begin(provider.clone(), Path::new("/reports/data.csv")).unwrap();
         block_on(stage.write_chunk(b"replacement")).unwrap();
+        let failure = block_on(stage.publish()).unwrap_err();
         assert_eq!(
-            block_on(stage.publish()).unwrap_err().kind(),
-            ErrorKind::PermissionDenied
+            failure.disposition(),
+            crate::FsPublicationDisposition::NotPublished
         );
+        assert_eq!(failure.io_error().kind(), ErrorKind::PermissionDenied);
         assert_eq!(
             provider.read_project_path("/reports/data.csv").unwrap(),
             b"original"

@@ -50,7 +50,7 @@ pub use resource::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use sandbox::SandboxFsProvider;
-pub use staged_output::FsStagedOutput;
+pub use staged_output::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
