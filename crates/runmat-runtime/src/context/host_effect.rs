@@ -324,7 +324,8 @@ fn select_host_effect_inner(
         providers: Vec::new(),
         epoch: u64::from_le_bytes(epoch_digest.bytes()[..8].try_into().expect("digest length")),
     };
-    let expected_candidate = candidate.selected(request.operation);
+    let expected_candidate_digest = candidate.identity_digest();
+    let expected_candidate_kind = candidate.kind;
     let selected = if stage.is_some() {
         let candidates = [candidate];
         service.select_whole_work_borrowed(WholeWorkPlacementRequestRef {
@@ -350,7 +351,10 @@ fn select_host_effect_inner(
     if !admission.liveness_lease.is_current() {
         return Err(stale_resource());
     }
-    if selected.decision.signature != signature || selected.decision.selected != expected_candidate
+    if selected.decision.signature != signature
+        || selected.decision.selected.node != request.operation
+        || selected.decision.selected.kind != expected_candidate_kind
+        || selected.decision.selected.candidate.parse::<Digest>() != Ok(expected_candidate_digest)
     {
         return Err(
             build_runtime_error("placement selected an unadmitted host effect route")

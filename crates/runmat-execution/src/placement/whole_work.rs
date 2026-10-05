@@ -41,6 +41,17 @@ impl WholeWorkCandidate {
     /// Opaque placement identity derived only from typed route facts. Neither
     /// user layer labels nor unstable allocation IDs are consulted by policy.
     pub fn selected(&self, node: &str) -> SelectedExecutionCandidate {
+        SelectedExecutionCandidate {
+            node: node.to_owned(),
+            candidate: self.identity_digest().to_string(),
+            kind: self.kind,
+        }
+    }
+
+    /// The canonical route identity without the presentation String objects
+    /// owned by a selected decision. This is useful for exact post-selection
+    /// validation before another node/candidate String would be allocated.
+    pub fn identity_digest(&self) -> Digest {
         let mut encoded = DigestStream::new();
         encoded.update(b"runmat.whole-work.candidate.v2\0");
         encoded.update(&[match self.kind {
@@ -96,11 +107,7 @@ impl WholeWorkCandidate {
         serde_json::to_writer(&mut encoded, &self.presentation)
             .expect("typed presentation stage must serialize");
         encoded.update(self.route_facts.bytes());
-        SelectedExecutionCandidate {
-            node: node.to_owned(),
-            candidate: encoded.finish().to_string(),
-            kind: self.kind,
-        }
+        encoded.finish()
     }
 
     fn validate(&self) -> Result<(), &'static str> {
@@ -435,6 +442,10 @@ mod tests {
                     assert_eq!(
                         route.selected("readmatrix").candidate,
                         legacy_candidate_identity(&route),
+                    );
+                    assert_eq!(
+                        route.selected("readmatrix").candidate.parse::<Digest>(),
+                        Ok(route.identity_digest())
                     );
                 }
             }
