@@ -961,6 +961,9 @@ mod tests {
 
     #[test]
     fn lsqnonlin_vector_residual_recovers_parameters() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(1, "lsqnonlin fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -980,7 +983,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "residual".into(),
                 function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    1,
+                    "lsqnonlin fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -999,6 +1006,9 @@ mod tests {
 
     #[test]
     fn lsqnonlin_respects_bounds_and_empty_constraint_placeholders() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(2, "lsqnonlin fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
@@ -1015,7 +1025,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bounded".into(),
                 function: 2,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(2),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    2,
+                    "lsqnonlin fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1039,6 +1053,9 @@ mod tests {
 
     #[test]
     fn lsqnonlin_accepts_empty_options_placeholder() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(22, "lsqnonlin fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
@@ -1053,7 +1070,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "empty_options".into(),
                 function: 22,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(22),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    22,
+                    "lsqnonlin fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1068,6 +1089,9 @@ mod tests {
 
     #[test]
     fn lsqnonlin_partial_bounds_apply_to_leading_variables() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(23, "lsqnonlin fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
@@ -1084,7 +1108,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "partial_bounds".into(),
                 function: 23,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(23),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    23,
+                    "lsqnonlin fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1103,6 +1131,9 @@ mod tests {
 
     #[test]
     fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(3, "lsqnonlin fixture"),
+        ]);
         let _guard = crate::output_count::push_output_count(Some(7));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
@@ -1121,7 +1152,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "multi".into(),
                 function: 3,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(3),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    3,
+                    "lsqnonlin fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1162,6 +1197,9 @@ mod tests {
 
     #[test]
     fn lsqnonlin_accepts_problem_struct() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(4, "lsqnonlin fixture"),
+        ]);
         let _guard = crate::output_count::push_output_count(Some(2));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
@@ -1181,7 +1219,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "problem".into(),
                 function: 4,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(4),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    4,
+                    "lsqnonlin fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

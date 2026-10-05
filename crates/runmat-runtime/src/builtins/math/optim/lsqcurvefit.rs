@@ -1108,6 +1108,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_passes_wide_integer_xdata_to_callback_exactly() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(901, "lsqcurvefit fixture"),
+        ]);
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let expected = u64::MAX;
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -1128,7 +1131,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "wide_xdata".into(),
                 function: 901,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(901),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    901,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1144,6 +1151,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_automatic_resident_input_gathers_but_explicit_input_is_gated() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(904, "lsqcurvefit fixture"),
+        ]);
         test_support::with_test_provider(|provider| {
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|_function, _args, _requested_outputs| {
@@ -1165,7 +1175,11 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "zero_model".into(),
                     function: 904,
-                    authority: runmat_value::BoundFunctionAuthority::unavailable(904),
+                    authority: crate::user_functions::test_support::exact_portable_binding(
+                        904,
+                        "lsqcurvefit fixture",
+                    )
+                    .authority,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
                 },
@@ -1209,6 +1223,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_linear_model_recovers_parameters() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(1, "lsqcurvefit fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -1232,7 +1249,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line".into(),
                 function: 1,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(1),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    1,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1254,6 +1275,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_exponential_model_recovers_parameters() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(2, "lsqcurvefit fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
@@ -1284,7 +1308,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "exp_decay".into(),
                 function: 2,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(2),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    2,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1305,6 +1333,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_respects_bounds() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(3, "lsqcurvefit fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
@@ -1327,7 +1358,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bounded_line".into(),
                 function: 3,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(3),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    3,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1346,6 +1381,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_multi_output_includes_diagnostics_lambda_and_jacobian() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(4, "lsqcurvefit fixture"),
+        ]);
         let _guard = crate::output_count::push_output_count(Some(7));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
@@ -1369,7 +1407,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line_multi".into(),
                 function: 4,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(4),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    4,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1408,6 +1450,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_output_reports_selected_algorithm() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(45, "lsqcurvefit fixture"),
+        ]);
         let _guard = crate::output_count::push_output_count(Some(5));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
@@ -1433,7 +1478,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "line_algorithm".into(),
                 function: 45,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(45),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    45,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1463,6 +1512,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_underdetermined_case_runs() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(5, "lsqcurvefit fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let p = match &args[0] {
@@ -1478,7 +1530,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "underdetermined".into(),
                 function: 5,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(5),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    5,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1498,6 +1554,9 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_rejects_model_ydata_shape_mismatch() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(6, "lsqcurvefit fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, _requested_outputs| {
                 crate::sequence::single_value_future(async move {
@@ -1509,7 +1568,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "bad_shape".into(),
                 function: 6,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(6),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    6,
+                    "lsqcurvefit fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },

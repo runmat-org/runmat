@@ -768,6 +768,9 @@ mod tests {
 
     #[test]
     fn quad_respects_tighter_tolerance_on_polynomial() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(7, "quad fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
@@ -783,7 +786,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "square".into(),
                 function: 7,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(7),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    7,
+                    "quad fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -929,6 +936,9 @@ mod tests {
 
     #[test]
     fn quad_passes_wide_integer_extra_parameter_exactly() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(902, "quad fixture"),
+        ]);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let expected = u64::MAX;
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -953,7 +963,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "parameterized".into(),
                 function: 902,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(902),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    902,
+                    "quad fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1019,6 +1033,9 @@ mod tests {
 
     #[test]
     fn quad_forwards_extra_arguments_after_tol_and_trace() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(42, "quad fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 42);
@@ -1042,7 +1059,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "scaled_line".into(),
                 function: 42,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(42),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    42,
+                    "quad fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
@@ -1078,6 +1099,9 @@ mod tests {
 
     #[test]
     fn quad_handles_integrable_endpoint_shape() {
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            crate::user_functions::test_support::exact_portable_binding(9, "quad fixture"),
+        ]);
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, args, _requested_outputs| {
                 let x = match &args[0] {
@@ -1094,7 +1118,11 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "sqrt_fn".into(),
                 function: 9,
-                authority: runmat_value::BoundFunctionAuthority::unavailable(9),
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    9,
+                    "quad fixture",
+                )
+                .authority,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
             },
