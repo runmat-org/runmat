@@ -45,6 +45,33 @@ fn native_opened_extent_bounds_growth_and_keeps_small_range_reads_small() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn native_managed_read_contract_matches_retained_open_authority() {
+    use std::fs;
+
+    let provider: Arc<dyn FsProvider> = Arc::new(NativeFsProvider);
+    let contract = provider
+        .managed_read_contract()
+        .expect("native direct handle has a typed managed request bound");
+    assert!(contract.capture_requested_heap_bytes > 0);
+    assert_eq!(
+        contract.opened_requested_heap_bytes,
+        contract.capture_requested_heap_bytes + std::mem::size_of::<fs::File>() as u64
+    );
+    let captured = capture_resource_lease_for_effect(provider.clone())
+        .expect("capture")
+        .expect("native lease");
+    assert_eq!(captured.contract().revision, contract.revision);
+    assert_eq!(
+        captured
+            .managed_opened_input_cost()
+            .expect("lease agrees with provider's pure claim")
+            .requested_heap_bytes,
+        contract.opened_requested_heap_bytes
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn sparse_large_native_source_needs_only_a_small_caller_buffer() {
     use std::fs::{self, OpenOptions};
 

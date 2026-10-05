@@ -45,7 +45,8 @@ use provider_path::{capture_provider_many, capture_provider_pair};
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use resource::{
-    capture_resource_lease, CapturedFsResourceLease, FsBoundedInput, FsFilePayloadContract,
+    capture_resource_lease, capture_resource_lease_for_effect, CapturedFsResourceLease,
+    FsBoundedInput, FsFilePayloadContract, FsManagedOpenedInputCost, FsManagedReadContract,
     FsResourceContract, FsResourceLease, FsResourceRevision,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -441,6 +442,13 @@ pub trait FsProvider: Send + Sync + 'static {
     /// refer to the same open, never to a separate path metadata lookup.
     async fn open_bounded_input(&self, _path: &Path) -> io::Result<Option<FsBoundedInput>> {
         Ok(None)
+    }
+
+    /// Pure, allocation-free pre-effect managed-byte contract for this exact
+    /// provider's bounded input route. `None` is unavailable, never zero.
+    /// Callers must still certify their path, codec, and output allocations.
+    fn managed_read_contract(&self) -> Option<FsManagedReadContract> {
+        None
     }
 
     /// Opt-in resource authority for this exact provider instance. The lease

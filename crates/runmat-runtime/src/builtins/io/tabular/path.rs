@@ -54,14 +54,7 @@ impl TabularFsOwner {
             let (provider, cwd) = fs::current_provider_with_current_dir()?;
             (provider, Some(cwd))
         };
-        let advertised = provider.resource_lease().is_some();
-        let lease = fs::capture_resource_lease(provider.clone());
-        if advertised && lease.is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "tabular filesystem authority was invalidated",
-            ));
-        }
+        let lease = fs::capture_resource_lease_for_effect(provider.clone())?;
         let owner = Self {
             provider,
             cwd,

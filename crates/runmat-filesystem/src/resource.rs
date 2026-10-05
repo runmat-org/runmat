@@ -9,6 +9,28 @@ use std::sync::Arc;
 mod bounded_input;
 pub use bounded_input::FsBoundedInput;
 
+/// Requested Rust-managed heap bytes for one provider-owned opened input,
+/// excluding caller buffers, path capture, OS/kernel allocations, and RSS.
+/// Providers may advertise this only when every allocation in their direct
+/// opened-handle route has a proven bound and revisioned implementation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct FsManagedOpenedInputCost {
+    pub requested_heap_bytes: u64,
+}
+
+/// Pure pre-effect bound for allocations made by this provider's bounded
+/// input route. The first amount covers captured lease construction; the
+/// second covers opening the exact handle. Both are requested Rust-managed
+/// heap bytes, not allocator overhead, OS memory, caller path/codec buffers,
+/// or a complete-call resource certificate. The revision must match the
+/// retained [`FsResourceLease`] and opened handle.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct FsManagedReadContract {
+    pub revision: FsResourceRevision,
+    pub capture_requested_heap_bytes: u64,
+    pub opened_requested_heap_bytes: u64,
+}
+
 /// Revision of the implementation and resource behavior being certified.
 /// A changed claim must use a new revision before placement profiles can be
 /// reused; no archive codec or HTTP revision is implied by this value.
@@ -76,6 +98,13 @@ pub struct FsResourceContract {
 pub trait FsResourceLease: Send + Sync + 'static {
     fn contract(&self) -> FsResourceContract;
     fn is_valid(&self) -> bool;
+
+    /// An absent certificate is not a zero-cost opened handle. This bound is
+    /// for the selected provider's managed heap route only, not a process
+    /// physical-memory or codec certificate.
+    fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
+        None
+    }
 }
 
 /// Keeps the precise provider and its resource authority together across
@@ -96,6 +125,12 @@ impl CapturedFsResourceLease {
         self.contract
     }
 
+    pub fn managed_opened_input_cost(&self) -> Option<FsManagedOpenedInputCost> {
+        self.is_valid()
+            .then(|| self.lease.managed_opened_input_cost())
+            .flatten()
+    }
+
     pub fn is_valid(&self) -> bool {
         self.lease.is_valid() && self.lease.contract() == self.contract
     }
@@ -114,7 +149,7 @@ pub fn capture_resource_lease(provider: Arc<dyn FsProvider>) -> Option<CapturedF
     })
 }
 
-pub(crate) fn capture_resource_lease_for_effect(
+pub fn capture_resource_lease_for_effect(
     provider: Arc<dyn FsProvider>,
 ) -> std::io::Result<Option<CapturedFsResourceLease>> {
     let Some(lease) = provider.resource_lease() else {
