@@ -27,7 +27,7 @@ pub(super) trait TabularReadPath {
 pub(super) struct BorrowedTabularReadPath<'a> {
     provider: Arc<dyn FsProvider>,
     path: &'a Path,
-    lease: Option<CapturedFsResourceLease>,
+    lease: CapturedFsResourceLease,
 }
 
 impl<'a> BorrowedTabularReadPath<'a> {
@@ -41,7 +41,12 @@ impl<'a> BorrowedTabularReadPath<'a> {
                 "borrowed tabular source must be absolute in its provider namespace",
             ));
         }
-        let lease = fs::capture_resource_lease_for_effect(provider.clone())?;
+        let lease = fs::capture_resource_lease_for_effect(provider.clone())?.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "borrowed bounded source has no retained resource authority",
+            )
+        })?;
         let captured = Self {
             provider,
             path,
@@ -62,11 +67,11 @@ impl TabularReadPath for BorrowedTabularReadPath<'_> {
     }
 
     fn check(&self) -> io::Result<()> {
-        check_resource_lease(self.lease.as_ref())
+        check_resource_lease(Some(&self.lease))
     }
 
     async fn open_bounded_input(&self) -> io::Result<Option<fs::FsBoundedInput>> {
-        open_bounded_input_on(&self.provider, self.path, self.lease.as_ref()).await
+        open_bounded_input_on(&self.provider, self.path, Some(&self.lease)).await
     }
 
     async fn open_read_preferred(&self) -> io::Result<TabularReadSource> {
