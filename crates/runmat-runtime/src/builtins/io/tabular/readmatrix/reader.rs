@@ -134,6 +134,9 @@ pub(super) async fn read_default_staged(
         Ok(Value::Tensor(tensor))
     }
     .await;
+    // The stage precharge also owns the opened provider handle's requested
+    // heap bytes. Release that handle before retiring the stage reservation.
+    drop(source);
     receipt.finish(if runtime.is_cancelled() {
         WholeWorkObservationOutcome::Cancelled
     } else if result.is_ok() {
