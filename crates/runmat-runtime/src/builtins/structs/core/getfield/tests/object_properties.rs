@@ -3,14 +3,15 @@ use super::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn public_getfield_dependent_getter_uses_selected_session() {
-    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let wrong = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
+    wrong.set_runmat_extensions_enabled(false);
     let _wrong_scope = wrong.enter();
     let selected = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
+    selected.set_runmat_extensions_enabled(true);
     let expected_session = selected.session_lease();
     let class = runmat_types::ClassIdentity::from("SelectedGetfieldSession");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
@@ -67,6 +68,7 @@ fn public_getfield_dependent_getter_uses_selected_session() {
     ))
     .expect("selected public getfield getter");
     assert_eq!(result, Value::Num(29.0));
+    assert!(!wrong.runmat_extensions_enabled());
     assert!(std::sync::Weak::ptr_eq(
         &crate::context::legacy::active()
             .expect("wrong enclosing session restored")
