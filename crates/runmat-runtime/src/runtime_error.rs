@@ -1,6 +1,6 @@
 pub use runmat_async::{
     runtime_error as build_runtime_error, CallFrame, ErrorContext, GpuGatherRetry, RuntimeError,
-    RuntimeErrorBuilder, RuntimeErrorSourceBound, RuntimeFailureOrigin,
+    RuntimeErrorBuilder, RuntimeErrorSourceBound, RuntimeFailureOrigin, SharedRuntimeErrorSource,
 };
 
 #[cfg(test)]

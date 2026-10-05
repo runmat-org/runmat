@@ -351,6 +351,7 @@ fn normalize_outputs(
 #[cfg(test)]
 mod native_failure_tests {
     use futures::executor::block_on;
+    use std::error::Error as _;
 
     use crate::{ExecutableSource, InvocationControl, ProcedureInvocation, RunMatSession};
 
@@ -391,6 +392,98 @@ s.first(C{:}).second(later());
                 }),
                 Some("RunMat:FirstInvocation".to_string()),
             );
+        });
+    }
+
+    fn forced_native_failure(source_id: &str, program: &str) -> runmat_runtime::RuntimeError {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(source_id, "native_exception.m", program),
+            None,
+        ))
+        .expect("compile native exception fixture");
+        let result = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation::entrypoint(),
+            &InvocationControl::default().force_generic_native(),
+        ));
+        match result {
+            Err(crate::RunError::Runtime(error)) => error,
+            Err(other) => panic!("expected runtime error from native executor: {other:?}"),
+            Ok(_) => panic!("native error must propagate"),
+        }
+    }
+
+    #[test]
+    fn native_direct_and_caught_rethrow_preserve_source_less_origin() {
+        runmat_gc::gc_test_context(|| {
+            let direct = forced_native_failure(
+                "native-direct-error@1",
+                "function native_exception()\nerror('RunMat:NativeOrigin', 'boom');\nend\n",
+            );
+            let reraised = forced_native_failure(
+                "native-rethrow-error@1",
+                "function native_exception()\ntry\n error('RunMat:NativeOrigin', 'boom');\ncatch e\n rethrow(e);\nend\nend\n",
+            );
+            for error in [&direct, &reraised] {
+                assert_eq!(error.identifier(), Some("RunMat:NativeOrigin"));
+                assert_eq!(error.message(), "boom");
+                assert_eq!(
+                    error.context.call_frames.len(),
+                    1,
+                    "rethrow must not add an origin frame"
+                );
+                assert_eq!(error.context.call_frames[0].function, "native_exception");
+                let span = error.span.as_ref().expect("native source span");
+                assert!(span.len() > 0);
+                let frame_span = error.context.call_frames[0]
+                    .span
+                    .expect("native frame span");
+                assert!(frame_span.1 >= frame_span.0);
+            }
+            let mut direct_original = &direct;
+            while let Some(shared) = direct_original.source().and_then(|source| {
+                source.downcast_ref::<runmat_runtime::runtime_error::SharedRuntimeErrorSource>()
+            }) {
+                direct_original = shared.original();
+            }
+            assert!(
+                direct_original.source.is_none(),
+                "direct source-less origin remains source-less"
+            );
+            let mut original = &reraised;
+            while let Some(shared) = original.source().and_then(|source| {
+                source.downcast_ref::<runmat_runtime::runtime_error::SharedRuntimeErrorSource>()
+            }) {
+                original = shared.original();
+            }
+            assert!(
+                original.source.is_none(),
+                "source-less original stays source-less"
+            );
+            assert_eq!(reraised.context.phase, direct.context.phase);
+        });
+    }
+
+    #[test]
+    fn native_caught_rethrow_keeps_downcastable_format_failure_cause() {
+        runmat_gc::gc_test_context(|| {
+            let reraised = forced_native_failure(
+                "native-rethrow-cause@1",
+                "function native_exception()\ntry\n error('bad %q', 1);\ncatch e\n rethrow(e);\nend\nend\n",
+            );
+            assert_eq!(reraised.identifier(), Some("RunMat:error"));
+            assert_eq!(reraised.context.call_frames.len(), 1);
+            assert_eq!(reraised.context.call_frames[0].function, "native_exception");
+            let mut original = &reraised;
+            while let Some(shared) = original.source().and_then(|source| {
+                source.downcast_ref::<runmat_runtime::runtime_error::SharedRuntimeErrorSource>()
+            }) {
+                original = shared.original();
+            }
+            assert!(original
+                .source()
+                .is_some_and(|source| source.is::<runmat_runtime::RuntimeError>()));
         });
     }
 }
