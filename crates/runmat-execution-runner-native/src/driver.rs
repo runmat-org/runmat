@@ -373,7 +373,8 @@ impl LocalDriver {
                 .get(&request.task_id)
                 .cloned()
                 .expect("scheduled task has completion");
-            let result = process::execute_attempt(&this, &request, &completion);
+            let observed = process::execute_attempt(&this, &request, &completion);
+            let result = observed.result;
             let report = match &result {
                 Ok(success) => AttemptReport::Succeeded {
                     result: success.clone(),
@@ -384,14 +385,14 @@ impl LocalDriver {
                     message: message.clone(),
                 },
             };
+            let mut report = BackendReport::for_request(&request, report);
+            report.execution = Some(Box::new(observed.execution));
             let actions = this
                 .driver
                 .lock()
                 .expect("local driver poisoned")
-                .handle(DriverCommand::BackendReport(BackendReport::for_request(
-                    &request, report,
-                )))
-                .unwrap_or_default();
+                .handle(DriverCommand::BackendReport(report))
+                .expect("native provider report binds its original attempt observation");
             let snapshot = this
                 .driver
                 .lock()

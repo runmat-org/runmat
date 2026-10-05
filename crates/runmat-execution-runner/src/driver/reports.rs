@@ -38,15 +38,43 @@ impl Driver {
             self.discard_backend_report(report, "attempt is already terminal", actions);
             return Ok(());
         }
+        if let Some(execution) = &report.execution {
+            if matches!(report.report, AttemptReport::Started)
+                || execution.validate_against(&attempt.request).is_err()
+            {
+                self.discard_backend_report(
+                    report,
+                    "invalid provider execution observation",
+                    actions,
+                );
+                return Ok(());
+            }
+        }
+        let execution = report.execution.clone();
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
-                if result.validate_against(&attempt.request).is_err() {
+                if result.validate_against(&attempt.request).is_err()
+                    || execution.as_ref().is_some_and(|execution| {
+                        !matches!(
+                            execution.termination,
+                            crate::task::AttemptExecutionTermination::ProcessExited {
+                                success: true,
+                                ..
+                            }
+                        ) || result.resources.as_ref().is_none_or(|resources| {
+                            resources.resources.usage.wall_millis != execution.wall_millis
+                        })
+                    })
+                {
                     self.fail_attempt(
                         &attempt,
-                        report.task_id,
-                        report.attempt_id,
                         AttemptFailureKind::Rejected,
+                        execution,
+                        Some(
+                            "worker success contradicts admitted accounting or execution evidence"
+                                .into(),
+                        ),
                     )?;
                     return Ok(());
                 }
@@ -55,6 +83,8 @@ impl Driver {
                     &attempt,
                     AttemptDisposition::Succeeded,
                     result.resources.clone(),
+                    execution,
+                    None,
                 )?;
                 let decision = self.commit_result(&attempt, result)?;
                 if let CommitDecision::Accepted(commit) = decision {
@@ -76,11 +106,17 @@ impl Driver {
                     });
                 }
             }
-            AttemptReport::Failed { kind, .. } => {
-                self.fail_attempt(&attempt, report.task_id, report.attempt_id, kind)?;
+            AttemptReport::Failed { kind, message } => {
+                self.fail_attempt(&attempt, kind, execution, Some(message))?;
             }
-            AttemptReport::Lost { .. } => {
-                self.finish_attempt(&attempt, AttemptDisposition::Lost, None)?;
+            AttemptReport::Lost { message } => {
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Lost,
+                    None,
+                    execution,
+                    Some(message),
+                )?;
                 self.emit(DriverEventKind::AttemptLost {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
@@ -88,7 +124,13 @@ impl Driver {
                 self.finish_unsuccessful(report.task_id, RetryCause::Lost)?;
             }
             AttemptReport::Cancelled => {
-                self.finish_attempt(&attempt, AttemptDisposition::Cancelled, None)?;
+                self.finish_attempt(
+                    &attempt,
+                    AttemptDisposition::Cancelled,
+                    None,
+                    execution,
+                    None,
+                )?;
                 self.emit(DriverEventKind::AttemptCancelled {
                     task_id: report.task_id,
                     attempt_id: report.attempt_id,
@@ -121,11 +163,19 @@ impl Driver {
     fn fail_attempt(
         &mut self,
         attempt: &AttemptRecord,
-        task_id: TaskId,
-        attempt_id: runmat_execution::identity::AttemptId,
         kind: AttemptFailureKind,
+        execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+        diagnostic: Option<String>,
     ) -> RunnerResult<()> {
-        self.finish_attempt(attempt, AttemptDisposition::Failed { kind }, None)?;
+        let task_id = attempt.request.task_id;
+        let attempt_id = attempt.request.id;
+        self.finish_attempt(
+            attempt,
+            AttemptDisposition::Failed { kind },
+            None,
+            execution,
+            diagnostic,
+        )?;
         self.emit(DriverEventKind::AttemptFailed {
             task_id,
             attempt_id,
@@ -144,11 +194,15 @@ impl Driver {
         attempt: &AttemptRecord,
         disposition: AttemptDisposition,
         resources: Option<Box<crate::task::AttemptResourceAccounting>>,
+        execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+        diagnostic: Option<String>,
     ) -> RunnerResult<()> {
         let terminal = AttemptTerminal {
             disposition,
             closed_at_driver_millis: self.snapshot.now_millis,
             resources,
+            execution,
+            diagnostic,
         };
         terminal
             .validate_against(attempt)

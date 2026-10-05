@@ -211,7 +211,7 @@ pub use meshing_host::{
 };
 pub use program_object_source::NativeProgramObjectSource;
 pub use program_session::{NativeProgramSession, NativeProgramTask};
-pub use protocol::{ProgramProgress, WorkerResponse};
+pub use protocol::{ProgramProgress, WorkerProcessMessage, WorkerResponse};
 pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
     run_remote_worker_quic, run_remote_worker_relay, QuicRemoteWorkerChannel,

@@ -1,6 +1,150 @@
 //! Actual native host deadlines without an analysis coordinator or remote scheduler.
 use super::*;
-use runmat_execution_runner::AttemptDisposition;
+use runmat_execution_artifact::ProgramExecutionRequest;
+use runmat_execution_runner::{AttemptDisposition, AttemptExecutionTermination};
+use runmat_execution_runner_native::WorkerProcessMessage;
+use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
+
+pub(super) async fn fault_child(mode: &str) {
+    let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint().unwrap();
+    let limits = FrameLimits {
+        max_message_bytes: 64 * 1024 * 1024,
+    };
+    let bytes = read_payload(&mut reader, limits).await.unwrap();
+    let request: ProgramExecutionRequest = serde_json::from_slice(&bytes).unwrap();
+    request.validate().unwrap();
+    let mut response = ProgramExecutionResponse::Success {
+        value: ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Null)),
+    };
+    if mode == "--retry-observed-child" {
+        // Test-only fault injection; no production formulation or physical output.
+        let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV).unwrap();
+        match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(Path::new(&root).join("first-attempt-witness"))
+        {
+            Ok(_) => {
+                response = ProgramExecutionResponse::Failure {
+                    message: "intentional first attempt failure".into(),
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => panic!("fault injection marker: {error}"),
+        }
+    }
+    let bytes = if mode == "--raw-terminal-child" {
+        serde_json::to_vec(&response).unwrap()
+    } else {
+        serde_json::to_vec(&WorkerProcessMessage::Completed { response }).unwrap()
+    };
+    write_payload(&mut writer, &bytes, limits).await.unwrap();
+    if mode == "--exit-after-success-child" {
+        std::process::exit(17);
+    }
+}
+
+async fn fault_parent() {
+    for mode in [
+        "--exit-after-success-child",
+        "--raw-terminal-child",
+        "--retry-observed-child",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let (host, request) = fixture();
+        let session = NativeProgramSession::new(config(directory.path(), mode)).unwrap();
+        seed_host_invocation(&mut session.object_store(), &host, &request);
+        let mut original = submission(&session, &host, &request);
+        if mode == "--retry-observed-child" {
+            original.request.retry =
+                runmat_execution::task::RetryPolicy::TestPolicy { max_attempts: 2 };
+        }
+        let envelope = original.retry_resource_envelope().unwrap();
+        let task = session.submit(request, original).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(result) = task.try_result() {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let history = task.try_attempt_history().unwrap();
+        assert!(history.len() <= usize::from(envelope.maximum_attempts));
+        assert_eq!(
+            history.len(),
+            if mode == "--retry-observed-child" {
+                2
+            } else {
+                1
+            },
+            "{mode}: {result:?}"
+        );
+        assert_eq!(result.is_ok(), mode == "--retry-observed-child");
+        for (index, attempt) in history.iter().enumerate() {
+            assert_eq!(attempt.request.ordinal, u16::try_from(index + 1).unwrap());
+            let terminal = attempt.terminal.as_ref().unwrap();
+            let observation = terminal.execution.as_ref().unwrap();
+            observation.validate_against(&attempt.request).unwrap();
+            assert!(matches!(
+                observation.termination,
+                AttemptExecutionTermination::ProcessExited { .. }
+            ));
+            assert!(observation.local_ipc_sent_bytes.unwrap() > 0);
+            assert!(observation.local_ipc_received_bytes.unwrap() > 0);
+        }
+        if mode == "--exit-after-success-child" {
+            assert_eq!(
+                history[0]
+                    .terminal
+                    .as_ref()
+                    .unwrap()
+                    .execution
+                    .as_ref()
+                    .unwrap()
+                    .termination,
+                AttemptExecutionTermination::ProcessExited {
+                    code: Some(17),
+                    success: false
+                }
+            );
+        }
+        if mode == "--retry-observed-child" {
+            assert!(history[0].terminal.as_ref().unwrap().resources.is_none());
+            assert_eq!(
+                history[0].terminal.as_ref().unwrap().diagnostic.as_deref(),
+                Some("intentional first attempt failure")
+            );
+            let success = result.unwrap();
+            assert_eq!(
+                history[1].terminal.as_ref().unwrap().resources,
+                success.resources
+            );
+            assert_eq!(
+                history[1]
+                    .terminal
+                    .as_ref()
+                    .unwrap()
+                    .execution
+                    .as_ref()
+                    .unwrap()
+                    .wall_millis,
+                success
+                    .resources
+                    .as_ref()
+                    .unwrap()
+                    .resources
+                    .usage
+                    .wall_millis
+            );
+        }
+        let cold: Vec<runmat_execution_runner::task::AttemptRecord> =
+            serde_json::from_slice(&serde_json::to_vec(&history).unwrap()).unwrap();
+        assert_eq!(cold, history);
+    }
+}
 
 pub(super) async fn run() {
     for user_cancel in [false, true] {
@@ -42,9 +186,19 @@ pub(super) async fn run() {
         assert_eq!(terminal.disposition, AttemptDisposition::Cancelled);
         assert!(terminal.closed_at_driver_millis >= original.assigned_at_millis);
         assert!(original.cancellation_requested_at.is_some());
-        // The process path has not yet reported unsuccessful interval/transport
-        // accounting; this witness must not invent it from the reservation.
+        // Original process interval/transport/exit evidence is available, but
+        // complete artifact accounting must not be invented from reservation.
         assert!(terminal.resources.is_none());
+        let execution = terminal.execution.as_ref().unwrap();
+        assert!(execution.wall_millis > 0);
+        assert!(matches!(
+            execution.termination,
+            AttemptExecutionTermination::ProcessExited { .. }
+        ));
+        assert!(execution.local_ipc_sent_bytes.unwrap() > 0);
+        if user_cancel {
+            assert!(execution.local_ipc_received_bytes.unwrap() > 0);
+        }
         if !user_cancel {
             assert!(
                 original.cancellation_requested_at.unwrap()
@@ -56,4 +210,5 @@ pub(super) async fn run() {
             serde_json::from_slice(&serde_json::to_vec(&history).unwrap()).unwrap();
         assert_eq!(cold, history);
     }
+    fault_parent().await;
 }

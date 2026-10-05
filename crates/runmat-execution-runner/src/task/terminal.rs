@@ -35,12 +35,31 @@ pub struct AttemptTerminal {
     pub closed_at_driver_millis: u64,
     /// Original report; None explicitly leaves consumption unaccounted.
     pub resources: Option<Box<AttemptResourceAccounting>>,
+    pub execution: Option<Box<super::AttemptExecutionObservation>>,
+    /// Original failure/loss report text, or explicit absence of diagnostic evidence.
+    pub diagnostic: Option<String>,
 }
 
 impl AttemptTerminal {
     pub(crate) fn validate_against(&self, attempt: &AttemptRecord) -> Result<(), String> {
         if self.closed_at_driver_millis < attempt.assigned_at_millis {
             return Err("attempt closure precedes its assignment".into());
+        }
+        if let Some(execution) = &self.execution {
+            execution.validate_against(&attempt.request)?;
+            if self.disposition == AttemptDisposition::Succeeded
+                && !matches!(
+                    execution.termination,
+                    super::AttemptExecutionTermination::ProcessExited { success: true, .. }
+                )
+            {
+                return Err("successful attempt contradicts process exit evidence".into());
+            }
+            if self.resources.as_ref().is_some_and(|resources| {
+                resources.resources.usage.wall_millis != execution.wall_millis
+            }) {
+                return Err("original accounting differs from observed execution interval".into());
+            }
         }
         if let Some(resources) = &self.resources {
             resources.validate_against(&attempt.request)?;

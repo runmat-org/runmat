@@ -66,6 +66,12 @@ impl DriverSnapshot {
                 .map(|(id, task)| (*id, &task.submission.dependencies)),
         )?;
         for (task_id, task) in &self.tasks {
+            let retry = task.submission.retry_resource_envelope()?;
+            if task.attempt_count > retry.maximum_attempts {
+                return Err(RunnerError::Invalid(
+                    "attempt history exceeds admitted retry envelope".into(),
+                ));
+            }
             if task.submission.request.id != *task_id {
                 return Err(RunnerError::Invalid("task identity mismatch".into()));
             }

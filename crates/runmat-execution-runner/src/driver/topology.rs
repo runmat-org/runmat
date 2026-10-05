@@ -89,6 +89,7 @@ impl Driver {
     }
 
     pub(super) fn submit(&mut self, submission: TaskSubmission) -> RunnerResult<()> {
+        submission.retry_resource_envelope()?;
         submission.request.resources.validate().map_err(|error| {
             RunnerError::Invalid(format!("task resource request is invalid: {error}"))
         })?;

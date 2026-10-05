@@ -233,6 +233,19 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
 
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
+    if let Some(mode) = arguments.get(1).and_then(|mode| mode.to_str()) {
+        if matches!(
+            mode,
+            "--exit-after-success-child" | "--raw-terminal-child" | "--retry-observed-child"
+        ) {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(attempt_lifecycle::fault_child(mode));
+            return;
+        }
+    }
     if arguments
         .iter()
         .any(|argument| argument == "--attempt-lifecycle-only")

@@ -26,8 +26,9 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     let request: WorkerRequest = serde_json::from_slice(&payload)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let response = execute(request).await;
-    let payload = serde_json::to_vec(&response)
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let payload =
+        serde_json::to_vec(&crate::protocol::WorkerProcessMessage::Completed { response })
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     write_payload(&mut writer, &payload, limits).await?;
     Ok(())
 }

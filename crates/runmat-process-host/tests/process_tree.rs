@@ -30,3 +30,15 @@ async fn terminate_kills_the_child_process_group() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalid_process_identities_reject_without_signalling_a_substitute_group() {
+    for process_id in [0, u32::MAX] {
+        let error = runmat_process_host::terminate_process_tree(process_id)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!is_process_alive(process_id));
+    }
+}

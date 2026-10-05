@@ -147,6 +147,8 @@ impl Driver {
                         &attempt,
                         crate::task::AttemptDisposition::Cancelled,
                         None,
+                        None,
+                        None,
                     )?;
                     self.snapshot
                         .attempts

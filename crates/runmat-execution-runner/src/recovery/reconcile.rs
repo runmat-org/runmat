@@ -42,6 +42,8 @@ pub fn reconcile_snapshot_at_fence(
                 disposition: crate::task::AttemptDisposition::Lost,
                 closed_at_driver_millis,
                 resources: None,
+                execution: None,
+                diagnostic: Some("driver authority replaced before a terminal report".into()),
             });
             (attempt.request.id, attempt.request.task_id)
         })

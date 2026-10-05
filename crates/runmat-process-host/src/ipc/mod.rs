@@ -12,3 +12,6 @@ pub mod windows;
 pub use endpoint::LocalEndpoint;
 pub use frame::{read_frame, read_payload, write_frame, write_payload, FrameLimits};
 pub use handshake::{negotiate_handshake, HostHandshake};
+
+mod meter;
+pub use meter::{IpcByteCounter, MeteredIo};

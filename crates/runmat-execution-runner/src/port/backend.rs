@@ -16,6 +16,8 @@ pub struct BackendReport {
     pub worker_id: WorkerId,
     pub driver_fence: u64,
     pub report: AttemptReport,
+    /// Original provider evidence; absent when the provider cannot establish it.
+    pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
 }
 
 impl BackendReport {
@@ -26,6 +28,7 @@ impl BackendReport {
             worker_id: request.worker_id,
             driver_fence: request.driver_fence,
             report,
+            execution: None,
         }
     }
 }

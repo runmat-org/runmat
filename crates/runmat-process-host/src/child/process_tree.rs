@@ -100,7 +100,7 @@ pub(super) fn contain(
 pub(super) async fn terminate(child: &mut Child, process_id: Option<u32>) -> std::io::Result<()> {
     #[cfg(unix)]
     if let Some(process_id) = process_id {
-        let group = i32::try_from(process_id).unwrap_or(i32::MAX);
+        let group = unix_process_id(process_id)?;
         let result = unsafe { libc::kill(-group, libc::SIGKILL) };
         if result != 0 {
             let error = std::io::Error::last_os_error();
@@ -133,9 +133,15 @@ pub(super) async fn terminate(child: &mut Child, process_id: Option<u32>) -> std
 }
 
 pub async fn terminate_id(process_id: u32) -> std::io::Result<()> {
+    if process_id == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "process identity must be positive",
+        ));
+    }
     #[cfg(unix)]
     {
-        let group = i32::try_from(process_id).unwrap_or(i32::MAX);
+        let group = unix_process_id(process_id)?;
         let result = unsafe { libc::kill(-group, libc::SIGKILL) };
         if result == 0 {
             return Ok(());
@@ -172,9 +178,14 @@ pub async fn terminate_id(process_id: u32) -> std::io::Result<()> {
 }
 
 pub fn is_alive(process_id: u32) -> bool {
+    if process_id == 0 {
+        return false;
+    }
     #[cfg(unix)]
     {
-        let process_id = i32::try_from(process_id).unwrap_or(i32::MAX);
+        let Ok(process_id) = unix_process_id(process_id) else {
+            return false;
+        };
         let result = unsafe { libc::kill(process_id, 0) };
         if result == 0 {
             #[cfg(target_os = "linux")]
@@ -215,4 +226,17 @@ fn linux_process_is_zombie(process_id: i32) -> bool {
     stat.rsplit_once(')')
         .and_then(|(_, fields)| fields.split_whitespace().next())
         == Some("Z")
+}
+
+#[cfg(unix)]
+fn unix_process_id(process_id: u32) -> std::io::Result<i32> {
+    i32::try_from(process_id)
+        .ok()
+        .filter(|id| *id > 0)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "process identity is outside the positive native PID range",
+            )
+        })
 }
