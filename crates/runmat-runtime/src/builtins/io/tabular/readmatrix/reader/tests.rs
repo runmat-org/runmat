@@ -359,10 +359,12 @@ fn retained_seekable_utf8_scan_preserves_bom_range_and_exact_wide_integer() {
         .expect("captured provider")
         .path(file.clone())
         .expect("selected native source");
-    let mut options = ReadMatrixOptions::default();
-    options.encoding = "utf-8".to_string();
-    options.num_header_lines = 1;
-    options.delimiter = Some(Delimiter::Char(','));
+    let mut options = ReadMatrixOptions {
+        encoding: "utf-8".to_string(),
+        num_header_lines: 1,
+        delimiter: Some(Delimiter::Char(',')),
+        ..ReadMatrixOptions::default()
+    };
     options.set_output_type("uint64").expect("typed output");
     options.range = Some(super::super::range::parse_range(&Value::from("A2:B2")).unwrap());
     let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);

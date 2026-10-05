@@ -1077,8 +1077,8 @@ mod tests {
         assert!(matches!(
             response,
             ProgramExecutionResponse::Failure { message }
-                if message.contains("MIR actual 2 expected 3")
-                    && message.contains("analysis actual 2 expected 3")
+                if message.contains(&format!("MIR actual 2 expected {}", runmat_mir::MIR_SCHEMA_VERSION))
+                    && message.contains(&format!("analysis actual 2 expected {}", runmat_mir::analysis::ANALYSIS_STORE_SCHEMA_VERSION))
                     && message.contains(&format!(
                         "bytecode actual 6 expected {}",
                         crate::BYTECODE_SCHEMA_VERSION
