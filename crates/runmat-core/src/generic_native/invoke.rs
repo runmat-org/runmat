@@ -432,7 +432,7 @@ s.first(C{:}).second(later());
                 );
                 assert_eq!(error.context.call_frames[0].function, "native_exception");
                 let span = error.span.as_ref().expect("native source span");
-                assert!(span.len() > 0);
+                assert!(!span.is_empty());
                 let frame_span = error.context.call_frames[0]
                     .span
                     .expect("native frame span");
