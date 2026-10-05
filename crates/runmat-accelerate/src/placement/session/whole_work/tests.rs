@@ -181,7 +181,7 @@ fn managed_completion_uses_preallocated_series_and_preserves_portable_profile() 
         .expect("inline managed feedback");
     }
     let observed = session.observed_candidate_duration_digest(
-        &route.signature,
+        (&route.signature).into(),
         candidate_digest,
         ExecutionCandidateKind::SharedRuntime,
         true,

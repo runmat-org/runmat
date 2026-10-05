@@ -1067,7 +1067,7 @@ mod tests {
                 ExecutionCandidateKind::SharedRuntime
             ),
             session.observed_candidate_duration_digest(
-                &signature,
+                (&signature).into(),
                 candidate,
                 ExecutionCandidateKind::SharedRuntime,
                 true,
