@@ -13,7 +13,14 @@ pub async fn feval_builtin_registered(
     f: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    crate::feval_builtin_in_runtime(runtime.as_ref(), requested_outputs, f, rest).await
+    let input_callsite = crate::callsite::current_callsite().and_then(|mut callsite| {
+        (!callsite.arg_spans.is_empty()).then(|| {
+            callsite.arg_spans.remove(0);
+            callsite
+        })
+    });
+    crate::feval_builtin_in_runtime(runtime.as_ref(), requested_outputs, f, rest, input_callsite)
+        .await
 }
 
 #[cfg(test)]

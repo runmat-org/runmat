@@ -16417,7 +16417,7 @@ fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
     let source = ExecutableSource::new(
         "core-native-inputname@1",
         "nativeInputname.m",
-        "function [first, second, third, fourth] = nativeInputname(alpha)\nfirst = probe(alpha);\nsecond = probe(alpha + 1);\nh = @probe;\nthird = h(alpha);\nfourth = h(alpha + 1);\nend\nfunction out = probe(value)\nout = inputname(1);\nend\n",
+        "function [first, second, third, fourth, fifth, sixth] = nativeInputname(alpha)\nfirst = probe(alpha);\nsecond = probe(alpha + 1);\nh = @probe;\nthird = h(alpha);\nfourth = h(alpha + 1);\nfifth = feval(@probe, alpha);\nsixth = feval(@probe, alpha + 1);\nend\nfunction out = probe(value)\nout = inputname(1);\nend\n",
     );
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let unit = block_on(session.compile_executable_unit(source, None))
@@ -16427,7 +16427,7 @@ fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
         ProcedureInvocation {
             target: ProcedureTarget::Function("nativeInputname".into()),
             arguments: vec![runmat_value::Value::Num(7.0)],
-            requested_outputs: 4,
+            requested_outputs: 6,
         },
         &InvocationControl::default().force_generic_native(),
     ))
@@ -16435,6 +16435,10 @@ fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
     assert_output_values(
         &result,
         &[
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+            ),
             runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
             runmat_value::Value::CharArray(
                 runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),

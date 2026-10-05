@@ -431,18 +431,29 @@ async fn call_builtin_with_requested_outputs(
     name: &str,
     args: &[Value],
     requested_outputs: usize,
+    callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<ValueSequence, RuntimeError> {
     let value = match runtime {
         Some(runtime) => {
-            crate::call_builtin_async_with_outputs_in_context(
-                runtime,
-                name,
-                args,
-                requested_outputs,
+            runtime
+                .scope(crate::callsite::with_callsite(
+                    callsite,
+                    crate::call_builtin_async_with_outputs_in_context(
+                        runtime,
+                        name,
+                        args,
+                        requested_outputs,
+                    ),
+                ))
+                .await?
+        }
+        None => {
+            crate::callsite::with_callsite(
+                callsite,
+                crate::call_builtin_async_with_outputs(name, args, requested_outputs),
             )
             .await?
         }
-        None => crate::call_builtin_async_with_outputs(name, args, requested_outputs).await?,
     };
     crate::call::arguments::adapt_legacy_builtin_result(value)
 }
@@ -452,14 +463,21 @@ async fn forward_named_fallback(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
+    callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<ValueSequence, RuntimeError> {
-    let value = crate::dispatcher::try_call_builtin_async_with_outputs(
-        &name,
-        &args,
-        requested_outputs,
-        runtime,
-    )
-    .await?
+    let invoke = crate::callsite::with_callsite(
+        callsite,
+        crate::dispatcher::try_call_builtin_async_with_outputs(
+            &name,
+            &args,
+            requested_outputs,
+            runtime,
+        ),
+    );
+    let value = match runtime {
+        Some(runtime) => runtime.scope(invoke).await?,
+        None => invoke.await?,
+    }
     .ok_or_else(|| {
         crate::build_runtime_error(format!("Undefined function: {name}"))
             .with_identifier("RunMat:UndefinedFunction")
@@ -479,9 +497,14 @@ async fn execute_resolved_callable(
 ) -> Result<ValueSequence, RuntimeError> {
     match identity {
         CallableIdentity::Builtin(id) => {
-            let value =
-                call_builtin_with_requested_outputs(runtime, &id.0, &args, requested_outputs)
-                    .await?;
+            let value = call_builtin_with_requested_outputs(
+                runtime,
+                &id.0,
+                &args,
+                requested_outputs,
+                metadata.function_input_callsite.clone(),
+            )
+            .await?;
             Ok(value)
         }
         CallableIdentity::BoundFunction(function) => {
@@ -547,7 +570,14 @@ async fn execute_resolved_callable(
             let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
                 return Err(undefined_identity_error(&other, &metadata));
             };
-            forward_named_fallback(runtime, name, args, requested_outputs).await
+            forward_named_fallback(
+                runtime,
+                name,
+                args,
+                requested_outputs,
+                metadata.function_input_callsite,
+            )
+            .await
         }
     }
 }
@@ -562,9 +592,14 @@ async fn try_execute_resolved_callable(
 ) -> Result<Option<ValueSequence>, RuntimeError> {
     match identity {
         CallableIdentity::Builtin(id) => {
-            let value =
-                call_builtin_with_requested_outputs(runtime, &id.0, &args, requested_outputs)
-                    .await?;
+            let value = call_builtin_with_requested_outputs(
+                runtime,
+                &id.0,
+                &args,
+                requested_outputs,
+                input_callsite,
+            )
+            .await?;
             Ok(Some(value))
         }
         CallableIdentity::BoundFunction(function) => {
@@ -622,7 +657,7 @@ async fn try_execute_resolved_callable(
                 args.clone(),
                 requested_outputs,
             )
-            .with_function_input_callsite(input_callsite);
+            .with_function_input_callsite(input_callsite.clone());
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result.map(Some);
@@ -630,13 +665,19 @@ async fn try_execute_resolved_callable(
             let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
                 return Ok(None);
             };
-            let value = crate::dispatcher::try_call_builtin_async_with_outputs(
-                &name,
-                &args,
-                requested_outputs,
-                runtime,
-            )
-            .await?;
+            let invoke = crate::callsite::with_callsite(
+                input_callsite,
+                crate::dispatcher::try_call_builtin_async_with_outputs(
+                    &name,
+                    &args,
+                    requested_outputs,
+                    runtime,
+                ),
+            );
+            let value = match runtime {
+                Some(runtime) => runtime.scope(invoke).await?,
+                None => invoke.await?,
+            };
             value
                 .map(crate::call::arguments::adapt_legacy_builtin_result)
                 .transpose()

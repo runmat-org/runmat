@@ -10,6 +10,19 @@ pub struct CallsiteInfo {
     pub arg_spans: Vec<Span>,
 }
 
+/// Keep the ordinary source callsite active only while this future is polled.
+/// This is presentation/source metadata, not permission to select a callee.
+pub async fn with_callsite<F: Future>(info: Option<CallsiteInfo>, future: F) -> F::Output {
+    let mut future = Box::pin(future);
+    std::future::poll_fn(move |cx| {
+        let _guard = info
+            .as_ref()
+            .map(|info| push_callsite(info.source_id, Some(info.arg_spans.clone())));
+        future.as_mut().poll(cx)
+    })
+    .await
+}
+
 /// Scope caller-expression provenance to each poll, not to a suspended task.
 /// An interleaved invocation can otherwise observe another caller's input names.
 pub async fn with_function_input_callsite<F: Future>(
@@ -249,5 +262,28 @@ mod tests {
         assert!(second.as_mut().poll(&mut context).is_pending());
         drop(second);
         assert!(current_function_input_callsite().is_none());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ordinary_callsite_is_not_ambient_while_builtin_future_is_pending() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let info = CallsiteInfo {
+            source_id: Some(SourceId(9)),
+            arg_spans: vec![Span { start: 1, end: 2 }],
+        };
+        let mut pending = Box::pin(runtime.scope(with_callsite(
+            Some(info.clone()),
+            std::future::poll_fn(move |_| {
+                assert_eq!(current_callsite(), Some(info.clone()));
+                Poll::<()>::Pending
+            }),
+        )));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(pending.as_mut().poll(&mut context).is_pending());
+        assert!(current_callsite().is_none());
+        drop(pending);
+        assert!(current_callsite().is_none());
     }
 }
