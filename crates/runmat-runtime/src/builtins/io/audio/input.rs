@@ -148,7 +148,9 @@ mod tests {
             "MemoryFS now supplies its own bounded opened snapshot, not a native memory-peak certificate"
         );
         let mut opened_bytes = [0; 8];
-        opened.read_exact(&mut opened_bytes).expect("opened snapshot");
+        opened
+            .read_exact(&mut opened_bytes)
+            .expect("opened snapshot");
         assert_eq!(&opened_bytes, b"selected");
         drop(opened);
         let bytes = block_on(input.provider.read(&input.path)).expect("captured read");
