@@ -133,3 +133,94 @@ fn wide_existing_sheet_projection_yields_before_table_publication() {
     drop(call);
     assert!(dropped.get());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn tall_zero_cell_inputs_preserve_geometry_and_observe_cancellation() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let _restore = runmat_filesystem::replace_provider(Arc::new(
+        MemoryFsProvider::with_current_dir("/xlswrite-input"),
+    ));
+    let selected = selected();
+    let values = [
+        Value::Tensor(Tensor::new(Vec::new(), vec![1_000_000, 0]).expect("empty tensor")),
+        Value::LogicalArray(
+            LogicalArray::new(Vec::new(), vec![1_000_000, 0]).expect("empty logical"),
+        ),
+        Value::SparseTensor(
+            SparseTensor::new(1_000_000, 0, vec![0], Vec::<usize>::new(), Vec::new())
+                .expect("empty sparse"),
+        ),
+    ];
+    for value in values {
+        let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+        let table = futures::executor::block_on(XlsTable::from_value_cooperative(
+            value.clone(),
+            None,
+            &mut cooperation,
+            &selected,
+        ))
+        .expect("zero-cell table");
+        assert_eq!(
+            (table.rows, table.cols, table.cells.len()),
+            (1_000_000, 0, 0)
+        );
+
+        let source = CancellationSource::new();
+        source.cancel(CancellationReason::User);
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let mut cooperation = TabularCooperation::new(Some(&runtime), BUILTIN_NAME);
+        let error = futures::executor::block_on(XlsTable::from_value_cooperative(
+            value,
+            Some(&runtime),
+            &mut cooperation,
+            &selected,
+        ))
+        .expect_err("cancelled zero-cell conversion");
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn empty_sparse_columns_yield_after_bounded_scan() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let _restore = runmat_filesystem::replace_provider(Arc::new(
+        MemoryFsProvider::with_current_dir("/xlswrite-input"),
+    ));
+    let selected = selected();
+    let source = CancellationSource::new();
+    let runtime =
+        RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), source.token());
+    let dropped = Rc::new(Cell::new(false));
+    let turns = Rc::new(Cell::new(0));
+    let budget = pending_budget(&source, dropped.clone(), 16, turns.clone());
+    let mut cooperation = TabularCooperation::with_test_budget(&runtime, BUILTIN_NAME, budget);
+    let sparse = SparseTensor::new(1, 16_384, vec![0; 16_385], Vec::<usize>::new(), Vec::new())
+        .expect("wide empty sparse");
+    let mut call = Box::pin(XlsTable::from_value_cooperative(
+        Value::SparseTensor(sparse),
+        Some(&runtime),
+        &mut cooperation,
+        &selected,
+    ));
+    assert!(matches!(
+        call.as_mut()
+            .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+        Poll::Pending
+    ));
+    assert_eq!(turns.get(), 17, "empty column scan yielded after cell fill");
+    source.cancel(CancellationReason::User);
+    let Poll::Ready(Err(error)) = call
+        .as_mut()
+        .poll(&mut Context::from_waker(futures::task::noop_waker_ref()))
+    else {
+        panic!("cancelled sparse projection must not return a table")
+    };
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    drop(call);
+    assert!(dropped.get());
+}

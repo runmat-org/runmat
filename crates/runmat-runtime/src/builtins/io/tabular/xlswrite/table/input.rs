@@ -79,6 +79,14 @@ impl XlsTable {
         let rows = tensor.rows();
         let cols = tensor.cols();
         let count = checked_cell_count(rows, cols, "numeric array")?;
+        if count == 0 {
+            checkpoint_input(cooperation, selected, 0).await?;
+            return Ok(Self {
+                rows,
+                cols,
+                cells: Vec::new(),
+            });
+        }
         let mut cells = reserved_cells(count)?;
         let mut work = 0;
         for row in 0..rows {
@@ -110,6 +118,14 @@ impl XlsTable {
         let rows = sparse.rows;
         let cols = sparse.cols;
         let count = checked_cell_count(rows, cols, "sparse array")?;
+        if count == 0 {
+            checkpoint_input(cooperation, selected, 0).await?;
+            return Ok(Self {
+                rows,
+                cols,
+                cells: Vec::new(),
+            });
+        }
         let mut cells = reserved_cells(count)?;
         while cells.len() < count {
             let chunk = (count - cells.len()).min(1024);
@@ -123,6 +139,11 @@ impl XlsTable {
         }
         let mut work = 0;
         for col in 0..cols {
+            work += 1;
+            if work >= 1024 {
+                checkpoint_input(cooperation, selected, work).await?;
+                work = 0;
+            }
             let start = sparse.col_ptrs[col];
             let end = sparse.col_ptrs[col + 1];
             for entry in start..end {
@@ -163,6 +184,14 @@ impl XlsTable {
         ensure_shape_2d(&logical.shape, "logical array")?;
         let (rows, cols) = shape_rows_cols(&logical.shape);
         let count = checked_cell_count(rows, cols, "logical array")?;
+        if count == 0 {
+            checkpoint_input(cooperation, selected, 0).await?;
+            return Ok(Self {
+                rows,
+                cols,
+                cells: Vec::new(),
+            });
+        }
         let mut cells = reserved_cells(count)?;
         let mut work = 0;
         for row in 0..rows {
