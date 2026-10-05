@@ -73,6 +73,10 @@ fn possible_routes(value: &ValueFact, literal: Option<&str>) -> (bool, bool) {
             routes
         }
         ValueKindFact::Unknown | ValueKindFact::Composite(_) => (true, true),
+        // Graphics handle parsing accepts numeric/text targets, not objects.
+        // Without a known runtime class, however, this may still be a sealed
+        // TCP client or server at execution time.
+        ValueKindFact::Object(object) if object.runtime_class.is_none() => (false, true),
         _ => (false, false),
     }
 }
@@ -246,6 +250,30 @@ mod tests {
             .0
             .contains(&CapabilityRequirement::Network));
         assert!(result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::UserInterface));
+    }
+
+    #[test]
+    fn unknown_object_class_may_require_network_but_not_graphics() {
+        let object = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: None,
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: None,
+        }));
+        let result = infer(
+            &request(vec![object], RequestedOutputCount::One),
+            &super::super::CLOSE_CATALOG_ENTRY,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert!(result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Network));
+        assert!(!result
             .capabilities
             .0
             .contains(&CapabilityRequirement::UserInterface));
