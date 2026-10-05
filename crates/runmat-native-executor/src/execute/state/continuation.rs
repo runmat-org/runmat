@@ -50,6 +50,18 @@ impl HostState {
                 });
             }
         }
+        if let Some(preparation) = &self.pending_multi_preparation {
+            let values = preparation.root_references().collect::<Vec<_>>();
+            for value in values {
+                let slot = u32::try_from(self.roots.len())
+                    .expect("pending multi-target preparation root cardinality is bounded by native value admission");
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
         if let Some(assignment) = &self.pending_assign {
             let values = assignment.root_references().collect::<Vec<_>>();
             for value in values {
@@ -198,6 +210,7 @@ impl HostState {
             || self.pending_sequence_rvalue.is_some()
             || self.sequence_assignment_register.is_some()
             || self.prepared_multi_assignment.is_some()
+            || self.pending_multi_preparation.is_some()
             || !self.captured_sequences.is_empty()
             || self.has_contextual_progress()
     }

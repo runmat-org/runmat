@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 
-use runmat_mir::{MirOutputTarget, MirOutputTargetList, MirPlace};
+use runmat_mir::{MirOutputTargetList, MirPlace};
 use runmat_runtime::native::NativeValueRef;
-use runmat_runtime::sequence::{
-    DestinationCardinality, DestinationLayout, PreparedSequenceDestination,
-};
+use runmat_runtime::sequence::{DestinationLayout, PreparedSequenceDestination};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -13,8 +11,9 @@ use crate::execute::state::HostState;
 
 mod roots;
 mod target;
+mod preparation;
+pub(super) use preparation::PendingMultiPreparation;
 use roots::local_value;
-use target::prepare_sequence_target;
 
 #[derive(Clone)]
 pub(super) enum PreparedTarget {
@@ -40,41 +39,23 @@ impl PreparedMultiAssignment {
         state: &mut HostState,
         targets: &MirOutputTargetList,
     ) -> NativeExecutorResult<Self> {
-        let mut prepared = Vec::with_capacity(targets.targets.len());
-        let mut cardinalities = Vec::with_capacity(targets.targets.len());
-        let mut retained = Vec::new();
-        for target in &targets.targets {
-            match target {
-                MirOutputTarget::Place(place) => {
-                    prepared.push(PreparedTarget::Place(place.clone()));
-                    cardinalities.push(DestinationCardinality::Fixed);
-                }
-                MirOutputTarget::Discard => {
-                    prepared.push(PreparedTarget::Discard);
-                    cardinalities.push(DestinationCardinality::Discard);
-                }
-                MirOutputTarget::Sequence(target) => {
-                    let (root, destination) = prepare_sequence_target(state, target)?;
-                    destination.visit_retained_values(&mut |value| {
-                        retained.push(state.arena.insert(value.clone()));
-                    });
-                    cardinalities.push(DestinationCardinality::Sequence(destination.cardinality()));
-                    prepared.push(PreparedTarget::Sequence { root, destination });
-                }
-            }
-        }
-        Ok(Self {
-            targets: prepared,
-            layout: DestinationLayout::new(cardinalities)?,
-            values: Vec::new(),
-            retained,
-            next_target: 0,
-            roots: BTreeMap::new(),
-        })
+        preparation::prepare(state, targets)
     }
 
     pub(in crate::execute) const fn cardinality(&self) -> usize {
         self.layout.total()
+    }
+
+    pub(in crate::execute) fn skip_preparation_regions(
+        &self,
+        state: &mut HostState,
+    ) -> NativeExecutorResult<()> {
+        for target in &self.targets {
+            if matches!(target, PreparedTarget::Sequence { .. }) {
+                continuation::skip_completed_region(state)?;
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::execute) fn bind_values(

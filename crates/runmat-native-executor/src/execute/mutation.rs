@@ -16,7 +16,7 @@ pub(super) use continuation::PendingAssign;
 pub(super) use continuation::PendingPlacePrepare;
 pub(super) use continuation::PendingPlainMulti;
 pub(super) use continuation::PendingSequenceAssign;
-pub(super) use prepared_multi::PreparedMultiAssignment;
+pub(super) use prepared_multi::{PendingMultiPreparation, PreparedMultiAssignment};
 
 #[derive(Clone)]
 enum PlaceSegment {

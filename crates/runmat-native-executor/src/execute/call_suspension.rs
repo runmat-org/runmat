@@ -12,8 +12,10 @@ use super::state::HostState;
 mod prepared;
 mod publication;
 mod subscript;
+mod sequence;
 pub(super) use prepared::{begin_prepared_receiver, take_completed_prepared_receiver};
 pub(super) use publication::publish;
+pub(super) use sequence::{begin_sequence_stage, take_completed_sequence_stage, SequenceStage};
 pub(super) use subscript::take_completed_subscript_path;
 
 pub(super) type CallFuture =
@@ -25,6 +27,7 @@ pub(super) type CompletionFuture =
 pub(super) enum CallCompletion {
     Values(Vec<Value>),
     PreparedReceiver(Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>),
+    SequenceStage(Box<SequenceStage>),
 }
 
 pub(super) struct PendingCall {
@@ -46,6 +49,10 @@ pub(super) enum CompletedPayload {
     PreparedReceiver {
         prepared: Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
         receiver: NativeValueRef,
+    },
+    SequenceStage {
+        stage: Box<SequenceStage>,
+        roots: Vec<NativeValueRef>,
     },
 }
 
@@ -103,6 +110,7 @@ pub(super) fn completed_roots(state: &HostState) -> impl Iterator<Item = NativeV
         .flat_map(|completed| match &completed.payload {
             CompletedPayload::Values(outputs) => outputs.clone(),
             CompletedPayload::PreparedReceiver { receiver, .. } => vec![*receiver],
+            CompletedPayload::SequenceStage { roots, .. } => roots.clone(),
         })
 }
 
@@ -159,6 +167,13 @@ pub(super) async fn complete(
         CallCompletion::PreparedReceiver(prepared) => {
             let receiver = state.arena.insert(prepared.receiver().clone());
             CompletedPayload::PreparedReceiver { prepared, receiver }
+        }
+        CallCompletion::SequenceStage(stage) => {
+            let mut roots = Vec::new();
+            stage.visit_retained_values(&mut |value| {
+                roots.push(state.arena.insert(value.clone()));
+            });
+            CompletedPayload::SequenceStage { stage, roots }
         }
     };
     state.completed_call = Some(CompletedCall {

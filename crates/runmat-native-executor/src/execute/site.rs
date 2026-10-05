@@ -283,7 +283,10 @@ fn execute_instruction(
             .any(|target| matches!(target, runmat_mir::MirOutputTarget::Sequence(_))) =>
         {
             let prepared = match state.prepared_multi_assignment.take() {
-                Some(prepared) => prepared,
+                Some(prepared) => {
+                    prepared.skip_preparation_regions(state)?;
+                    prepared
+                }
                 None => super::mutation::PreparedMultiAssignment::prepare(state, targets)?,
             };
             let results = match evaluate_rvalue(state, value, prepared.cardinality(), None) {

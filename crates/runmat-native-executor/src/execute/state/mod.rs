@@ -65,6 +65,7 @@ pub(super) struct HostState {
     pub pending_sequence_rvalue: Option<super::mutation::PreparedSequenceRvalue>,
     pub pending_sequence_assign: Option<super::mutation::PendingSequenceAssign>,
     pub prepared_multi_assignment: Option<super::mutation::PreparedMultiAssignment>,
+    pub pending_multi_preparation: Option<super::mutation::PendingMultiPreparation>,
     /// First-class comma-separated sequences captured in source evaluation
     /// order and consumed by a later call or aggregate construction.
     pub captured_sequences:
@@ -289,6 +290,7 @@ impl HostState {
             pending_sequence_rvalue: None,
             pending_sequence_assign: None,
             prepared_multi_assignment: None,
+            pending_multi_preparation: None,
             captured_sequences: BTreeMap::new(),
             contextual_index_extents: Vec::new(),
             subscript_end_receivers: Vec::new(),

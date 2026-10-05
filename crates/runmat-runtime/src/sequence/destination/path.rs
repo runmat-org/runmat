@@ -101,6 +101,26 @@ impl SequenceDestinationBuilder {
         step: AssignmentStepSpec,
         caller_function_name: Option<&str>,
     ) -> Result<(), RuntimeError> {
+        self.push_step_with_context(None, step, caller_function_name)
+            .await
+    }
+
+    pub async fn push_step_in_context(
+        &mut self,
+        context: &crate::context::RuntimeContext,
+        step: AssignmentStepSpec,
+        caller_function_name: Option<&str>,
+    ) -> Result<(), RuntimeError> {
+        self.push_step_with_context(Some(context), step, caller_function_name)
+            .await
+    }
+
+    async fn push_step_with_context(
+        &mut self,
+        context: Option<&crate::context::RuntimeContext>,
+        step: AssignmentStepSpec,
+        caller_function_name: Option<&str>,
+    ) -> Result<(), RuntimeError> {
         if let Some(suffix) = &mut self.object_suffix {
             suffix.structural_steps.push(step.clone());
             suffix.steps.push(object_subscript_from_step(step));
@@ -118,13 +138,30 @@ impl SequenceDestinationBuilder {
             return Ok(());
         }
         let step = prepare_step(&self.current, step).await?;
-        self.current = read_step(None, self.current.clone(), &step, caller_function_name).await?;
+        self.current =
+            read_step(context, self.current.clone(), &step, caller_function_name).await?;
         self.steps.push(step);
         Ok(())
     }
 
     pub async fn finish(
+        self,
+        endpoint: SequenceEndpointSpec,
+    ) -> Result<PreparedSequenceDestination, RuntimeError> {
+        self.finish_with_context(None, endpoint).await
+    }
+
+    pub async fn finish_in_context(
+        self,
+        context: &crate::context::RuntimeContext,
+        endpoint: SequenceEndpointSpec,
+    ) -> Result<PreparedSequenceDestination, RuntimeError> {
+        self.finish_with_context(Some(context), endpoint).await
+    }
+
+    async fn finish_with_context(
         mut self,
+        context: Option<&crate::context::RuntimeContext>,
         endpoint: SequenceEndpointSpec,
     ) -> Result<PreparedSequenceDestination, RuntimeError> {
         if matches!(&endpoint, SequenceEndpointSpec::Member(_))
@@ -163,11 +200,25 @@ impl SequenceDestinationBuilder {
                 .steps
                 .push(object_subscript_from_endpoint(endpoint.clone()));
             let path = ObjectSubscriptPath::new(suffix.steps)?;
-            let cardinality = crate::builtins::introspection::object_indexing::object_path_assignment_cardinality(
-                &suffix.target,
-                &path,
-            )
-            .await?;
+            let cardinality = match context {
+                Some(context) => {
+                    crate::builtins::introspection::object_indexing::object_path_cardinality_in_context(
+                        context,
+                        &suffix.target,
+                        &path,
+                        runmat_types::ObjectIndexingContext::Assignment,
+                        &crate::object::protocol::ObjectAccessContext::default(),
+                    )
+                    .await?
+                }
+                None => {
+                    crate::builtins::introspection::object_indexing::object_path_assignment_cardinality(
+                        &suffix.target,
+                        &path,
+                    )
+                    .await?
+                }
+            };
             return Ok(PreparedSequenceDestination {
                 kind: PreparedDestinationKind::ObjectProtocol(Box::new(
                     PreparedObjectProtocolDestination {
