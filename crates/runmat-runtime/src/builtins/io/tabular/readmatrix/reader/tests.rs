@@ -20,6 +20,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+#[path = "tests/exact.rs"]
+mod exact;
+
 fn fixture_path() -> PathBuf {
     // MemoryFsProvider has a virtual rooted namespace on every platform.
     PathBuf::from("/readmatrix-row/input.csv")
