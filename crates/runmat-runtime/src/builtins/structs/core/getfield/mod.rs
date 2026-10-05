@@ -43,13 +43,6 @@ async fn getfield_builtin(
     execution::getfield(runtime.as_ref(), base, rest, true).await
 }
 
-pub(crate) async fn getfield_internal(
-    base: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
-    execution::getfield(None, base, rest, false).await
-}
-
 pub(crate) async fn getfield_internal_with_context(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,

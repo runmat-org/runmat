@@ -52,6 +52,7 @@ async fn dispatch_num_arguments_overload(
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn dispatch_subsasgn(
     obj: Value,
     subscript: Value,
