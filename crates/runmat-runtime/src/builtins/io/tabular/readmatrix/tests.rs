@@ -65,6 +65,54 @@ fn logical_like_rejects_wrong_shape_without_retiring_prototype() {
         assert!(block_on(provider.download(&prototype)).is_ok());
     });
 }
+
+#[test]
+fn logical_like_retires_wrong_owner_result_and_preserves_caller_alias() {
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
+
+    test_support::with_test_provider(|provider| {
+        let prototype = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1],
+                shape: &[1, 1],
+            })
+            .expect("prototype");
+        let foreign = TestAllocationOwner::new()
+            .allocate_logical(vec![0], vec![1, 1])
+            .expect("foreign logical allocation");
+        let probe = foreign.probe;
+        let error = super::output::checked_like_result(foreign.handle, &prototype, &[1, 1])
+            .expect_err("a foreign provider result cannot be published");
+        assert_eq!(error.identifier(), READMATRIX_ERROR_OUTPUT_TYPE.identifier);
+        assert_eq!(probe.retirements(), 1, "rejected result is retired");
+
+        let error = super::output::checked_like_result(prototype.clone(), &prototype, &[1, 1])
+            .expect_err("Like must not return the caller's own allocation");
+        assert_eq!(error.identifier(), READMATRIX_ERROR_OUTPUT_TYPE.identifier);
+        assert!(block_on(provider.download(&prototype)).is_ok());
+    });
+}
+
+#[test]
+fn logical_like_rejects_numeric_class_from_same_provider() {
+    test_support::with_test_provider(|provider| {
+        let prototype = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1],
+                shape: &[1, 1],
+            })
+            .expect("logical prototype");
+        let numeric = gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::new(vec![1.0], vec![1, 1]).expect("numeric source"),
+        )
+        .expect("numeric provider result");
+        let error = super::output::checked_like_result(numeric, &prototype, &[1, 1])
+            .expect_err("numeric storage cannot satisfy logical Like");
+        assert_eq!(error.identifier(), READMATRIX_ERROR_OUTPUT_TYPE.identifier);
+        assert!(block_on(provider.download(&prototype)).is_ok());
+    });
+}
 use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
 fn unique_path(prefix: &str) -> PathBuf {
