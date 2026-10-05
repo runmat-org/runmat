@@ -816,8 +816,43 @@ pub fn current_dir() -> io::Result<PathBuf> {
 }
 
 pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    if current_dir_override().is_some() {
-        futures::executor::block_on(set_current_dir_async(path.as_ref().to_path_buf()))
+    futures::executor::block_on(set_current_dir_async(path.as_ref().to_path_buf()))
+}
+
+pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
+    let (provider, selected_dir) = {
+        let state = provider_state_lock()
+            .read()
+            .expect("filesystem provider lock poisoned");
+        (state.provider.clone(), state.current_dir_override.clone())
+    };
+    if let Some(base) = selected_dir {
+        let mut target = PathBuf::from(path.as_ref());
+        if !provider.path_namespace().is_absolute(&target) {
+            target = base.join(target);
+        }
+        let canonical = provider
+            .canonicalize(&target)
+            .await
+            .unwrap_or(target.clone());
+        let metadata = provider.metadata(&canonical).await?;
+        if !metadata.is_dir() {
+            return Err(io::Error::new(
+                ErrorKind::NotFound,
+                format!("Not a directory: {}", canonical.display()),
+            ));
+        }
+        let mut state = provider_state_lock()
+            .write()
+            .expect("filesystem provider lock poisoned");
+        if !Arc::ptr_eq(&state.provider, &provider) {
+            return Err(io::Error::new(
+                ErrorKind::Interrupted,
+                "filesystem provider changed before working-directory publication",
+            ));
+        }
+        state.current_dir_override = Some(canonical);
+        Ok(())
     } else {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -827,28 +862,6 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
         {
             Ok(())
         }
-    }
-}
-
-pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
-    if current_dir_override().is_some() {
-        let mut target = PathBuf::from(path.as_ref());
-        if !target.has_root() {
-            let base = current_dir()?;
-            target = base.join(target);
-        }
-        let canonical = canonicalize_async(&target).await.unwrap_or(target.clone());
-        let metadata = metadata_async(&canonical).await?;
-        if !metadata.is_dir() {
-            return Err(io::Error::new(
-                ErrorKind::NotFound,
-                format!("Not a directory: {}", canonical.display()),
-            ));
-        }
-        replace_current_dir_override(Some(canonical));
-        Ok(())
-    } else {
-        set_current_dir(path)
     }
 }
 
