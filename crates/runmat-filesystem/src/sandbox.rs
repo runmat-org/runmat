@@ -110,7 +110,7 @@ impl FsProvider for SandboxFsProvider {
     ) -> io::Result<Option<Box<dyn crate::FsStagedOutput>>> {
         // Sandbox paths are virtual-rooted (`/reports/out.csv`), including on
         // Windows where that spelling has a root but no drive prefix.
-        if !destination.has_root() {
+        if !self.path_namespace().is_absolute(destination) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "sandbox staged destination must be an absolute virtual path",
@@ -463,6 +463,21 @@ mod tests {
         executor::block_on(stage.write_chunk(b"replacement")).expect("write");
         assert!(executor::block_on(stage.publish()).is_err());
         assert!(root.path().join("directory-target").is_dir());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn staged_replacement_rejects_native_windows_namespaces() {
+        let root = tempdir().expect("root");
+        let provider = SandboxFsProvider::new(root.path().to_path_buf()).expect("sandbox");
+        for path in [r"C:\reports\output.csv", r"\\server\share\output.csv"] {
+            let error = provider
+                .begin_staged_replace(Path::new(path))
+                .err()
+                .expect("native namespace is not a virtual destination");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        }
+        assert_eq!(fs::read_dir(root.path()).expect("sandbox root").count(), 0);
     }
 
     #[cfg(unix)]
