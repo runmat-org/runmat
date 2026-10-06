@@ -19,6 +19,23 @@ fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallReques
 }
 
 #[test]
+fn timer_effect_declarations_are_sorted_and_unique() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    for entry in entries {
+        assert!(
+            entry
+                .contract
+                .effects
+                .windows(2)
+                .all(|pair| pair[0] < pair[1]),
+            "{} has noncanonical effect ordering",
+            entry.identity.name
+        );
+    }
+}
+
+#[test]
 fn all_runtime_timer_bindings_have_one_catalog_identity() {
     let mut entries = Vec::new();
     extend_entries(&mut entries);

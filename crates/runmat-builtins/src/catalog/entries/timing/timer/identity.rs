@@ -24,8 +24,8 @@ macro_rules! timer_effects {
     };
     (START) => {
         &[
-            EffectKind::Clock,
             EffectKind::EnvironmentWrite,
+            EffectKind::Clock,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
@@ -33,8 +33,8 @@ macro_rules! timer_effects {
     };
     (STARTAT) => {
         &[
-            EffectKind::Clock,
             EffectKind::EnvironmentWrite,
+            EffectKind::Clock,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
@@ -42,8 +42,8 @@ macro_rules! timer_effects {
     };
     (STOP) => {
         &[
-            EffectKind::Clock,
             EffectKind::EnvironmentWrite,
+            EffectKind::Clock,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
@@ -59,8 +59,8 @@ macro_rules! timer_effects {
     };
     (DELETE) => {
         &[
-            EffectKind::Clock,
             EffectKind::EnvironmentWrite,
+            EffectKind::Clock,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
