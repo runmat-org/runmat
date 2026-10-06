@@ -323,6 +323,9 @@ async fn resume_interpreter(
 #[cfg(test)]
 #[path = "deopt_projection_tests.rs"]
 mod projection_tests;
+#[cfg(test)]
+#[path = "deopt_deal_tests.rs"]
+mod deal_tests;
 
 #[cfg(test)]
 mod tests {

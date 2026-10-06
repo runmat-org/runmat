@@ -39,6 +39,9 @@ mod native_debug_frames;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_arity.rs"]
 mod native_arity;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_deal.rs"]
+mod native_deal;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
