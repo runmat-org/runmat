@@ -77,7 +77,7 @@ pub(in crate::interpreter::dispatch) fn dispatch_call<'a>(
 // semantic-call child, once for every live Process frame.
 #[inline(never)]
 fn suspend_builtin(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(builtin::dispatch(ctx))
+    builtin::dispatch(ctx)
 }
 
 #[inline(never)]
