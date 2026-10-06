@@ -5,6 +5,7 @@ mod cputime;
 mod pause;
 mod stopwatch;
 mod timeit;
+mod timer;
 
 pub use self::cputime::{
     CPUTIME_DESCRIPTOR, CPUTIME_ERROR_TOO_MANY_INPUTS, CPUTIME_ERROR_UNAVAILABLE,
@@ -24,10 +25,16 @@ pub use self::timeit::{
     TIMEIT_ERROR_NUM_OUTPUTS_FINITE, TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
     TIMEIT_ERROR_NUM_OUTPUTS_NONNEG, TIMEIT_ERROR_NUM_OUTPUTS_SCALAR, TIMEIT_ERROR_TOO_MANY_INPUTS,
 };
+pub use self::timer::{
+    TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility, TIMER_ERROR_CALLBACK,
+    TIMER_ERROR_GC, TIMER_ERROR_INVALID_HANDLE, TIMER_ERROR_INVALID_INPUT,
+    TIMER_ERROR_INVALID_PROPERTY,
+};
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(cputime::ENTRIES.iter().copied());
     values.extend(pause::ENTRIES.iter().copied());
     values.extend(stopwatch::ENTRIES.iter().copied());
     values.extend(timeit::ENTRIES.iter().copied());
+    values.extend(timer::ENTRIES.iter().copied());
 }
