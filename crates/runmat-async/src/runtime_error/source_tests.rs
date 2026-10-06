@@ -18,6 +18,12 @@ fn retained_allocation_survives_original_error_in_a_nested_source_chain() {
     let drops = Arc::new(AtomicUsize::new(0));
     let original = runtime_error("full original message")
         .with_identifier("RunMat:Original")
+        .with_span(miette::SourceSpan::new(5.into(), 3))
+        .with_call_frames(vec![CallFrame {
+            function: "origin".into(),
+            source_id: Some(7),
+            span: Some((5, 8)),
+        }])
         .with_source(std::io::Error::other("typed original cause"))
         .with_retained_diagnostic_allocation(RetainedDiagnosticAllocation::Owned(Box::new(Lease(
             drops.clone(),
@@ -30,6 +36,9 @@ fn retained_allocation_survives_original_error_in_a_nested_source_chain() {
         .expect("original runtime error remains downcastable");
     assert_eq!(inner.identifier(), Some("RunMat:Original"));
     assert_eq!(inner.message(), "full original message");
+    assert_eq!(inner.span.as_ref().map(miette::SourceSpan::offset), Some(5));
+    assert_eq!(inner.context.call_frames[0].function, "origin");
+    assert_eq!(inner.context.call_frames[0].source_id, Some(7));
     assert!(StdError::source(inner).unwrap().is::<std::io::Error>());
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     drop(nested);
