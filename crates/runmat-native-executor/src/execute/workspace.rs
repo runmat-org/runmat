@@ -338,6 +338,7 @@ fn workspace_read_borrow_error(error: std::cell::BorrowError) -> runmat_runtime:
     )
 }
 
+#[cfg(not(test))]
 fn missing_session_variable_authority() -> runmat_runtime::RuntimeError {
     runmat_runtime::runtime_error::semantic_error(
         "RunMat:Workspace:SessionAuthorityMissing",
