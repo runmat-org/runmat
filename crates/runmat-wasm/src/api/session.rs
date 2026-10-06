@@ -72,6 +72,7 @@ use crate::wire::value::{integer_json_value, MAX_DATA_PREVIEW};
 pub struct RunMatWasm {
     pub(crate) session: RefCell<RunMatSession>,
     in_flight_session: Cell<bool>,
+    clear_workspace_after_flight: Cell<bool>,
     #[cfg(target_arch = "wasm32")]
     local_tasks: RefCell<std::rc::Rc<runmat_runtime::context::BrowserLocalTaskSupervisor>>,
     config: RefCell<SessionConfig>,
@@ -113,6 +114,14 @@ impl Drop for InFlightSession<'_> {
                 // The moved session is terminal. Never replace the disposed
                 // placeholder with an owner whose callbacks could resume.
             } else {
+                let config = self.host.config.borrow();
+                session.set_compat_mode(config.language_compat);
+                session.set_error_namespace(config.error_namespace.clone());
+                session.set_emit_fusion_plan(config.emit_fusion_plan);
+                drop(config);
+                if self.host.clear_workspace_after_flight.replace(false) {
+                    session.clear_variables();
+                }
                 *self.host.session.borrow_mut() = session;
             }
         }
@@ -179,6 +188,7 @@ impl RunMatWasm {
         Self {
             session: RefCell::new(session),
             in_flight_session: Cell::new(false),
+            clear_workspace_after_flight: Cell::new(false),
             #[cfg(target_arch = "wasm32")]
             local_tasks,
             config: RefCell::new(config),
@@ -194,6 +204,9 @@ impl RunMatWasm {
     pub(crate) fn ensure_not_disposed(&self) -> Result<(), JsValue> {
         if self.disposed.get() {
             return Err(js_error("RunMat session has been disposed"));
+        }
+        if self.in_flight_session.get() {
+            return Err(js_error("RunMat session already has an in-flight request"));
         }
         Ok(())
     }
@@ -895,6 +908,9 @@ impl RunMatWasm {
         self.ensure_not_disposed()?;
         let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)
             .map_err(|err| js_error(&format!("executeRequest payload parse failed: {err}")))?;
+        // Admit ownership before telemetry or interrupt authority is changed.
+        // A second request must never replace the first request's cancel slot.
+        let mut session = self.take_session()?;
         let source_for_telemetry = match &request_payload.source {
             ExecuteRequestSourcePayload::Text { text, .. } => text.clone(),
             ExecuteRequestSourcePayload::Path { path } => path.clone(),
@@ -922,7 +938,7 @@ impl RunMatWasm {
                 if !cfg.telemetry_consent {
                     None
                 } else {
-                    self.session.borrow().telemetry_run(TelemetryRunConfig {
+                    session.telemetry_run(TelemetryRunConfig {
                         kind: cfg.telemetry_run_kind.clone(),
                         jit_enabled: cfg.enable_jit,
                         accelerate_enabled: self.gpu_status.active,
@@ -931,7 +947,7 @@ impl RunMatWasm {
             }
         };
 
-        let interrupt_handle = self.session.borrow().interrupt_handle();
+        let interrupt_handle = session.interrupt_handle();
         self.active_interrupt
             .borrow_mut()
             .replace(interrupt_handle.clone());
@@ -946,8 +962,6 @@ impl RunMatWasm {
         let _active_interrupt_guard = ActiveInterruptGuard {
             slot: &self.active_interrupt,
         };
-
-        let mut session = self.take_session()?;
 
         let mut request = runmat_core::abi::ExecutionRequest::for_source(
             match request_payload.source {
@@ -1405,7 +1419,9 @@ impl RunMatWasm {
             flag.cancel(runmat_execution::CancellationReason::User);
             return;
         }
-        self.session.borrow().cancel_execution();
+        if !self.in_flight_session.get() {
+            self.session.borrow().cancel_execution();
+        }
     }
 
     #[wasm_bindgen(js_name = "setLanguageCompat")]
@@ -1418,7 +1434,9 @@ impl RunMatWasm {
                 let mut config = self.config.borrow_mut();
                 config.language_compat = parsed;
             }
-            self.session.borrow_mut().set_compat_mode(parsed);
+            if !self.in_flight_session.get() {
+                self.session.borrow_mut().set_compat_mode(parsed);
+            }
         } else {
             warn!("RunMat wasm: ignoring unknown language compat mode '{mode}'");
         }
@@ -1429,11 +1447,15 @@ impl RunMatWasm {
         if self.disposed.get() {
             return;
         }
-        self.session.borrow_mut().set_error_namespace(namespace);
+        self.config.borrow_mut().error_namespace = namespace.clone();
+        if !self.in_flight_session.get() {
+            self.session.borrow_mut().set_error_namespace(namespace);
+        }
     }
 
     #[wasm_bindgen(js_name = setInputHandler)]
     pub fn set_input_handler(&self, handler: JsValue) -> Result<(), JsValue> {
+        self.ensure_not_disposed()?;
         #[cfg(target_arch = "wasm32")]
         {
             if handler.is_null() || handler.is_undefined() {
@@ -1462,7 +1484,12 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = setFusionPlanEnabled)]
     pub fn set_fusion_plan_enabled(&self, enabled: bool) {
-        self.session.borrow_mut().set_emit_fusion_plan(enabled);
+        if self.disposed.get() {
+            return;
+        }
+        if !self.in_flight_session.get() {
+            self.session.borrow_mut().set_emit_fusion_plan(enabled);
+        }
         if let Ok(mut cfg) = self.config.try_borrow_mut() {
             cfg.emit_fusion_plan = enabled;
         }
@@ -1470,6 +1497,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = fusionPlanForSource)]
     pub fn fusion_plan_for_source(&self, source: String) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
         let mut session = self.session.borrow_mut();
         let snapshot = session
             .compile_fusion_plan(&source)
@@ -1516,6 +1544,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = stats)]
     pub fn stats(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
         let payload = {
             let session = self.session.borrow();
             StatsPayload::from(session.stats())
@@ -1526,7 +1555,14 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = clearWorkspace)]
     pub fn clear_workspace(&self) {
-        self.session.borrow_mut().clear_variables();
+        if self.disposed.get() {
+            return;
+        }
+        if self.in_flight_session.get() {
+            self.clear_workspace_after_flight.set(true);
+        } else {
+            self.session.borrow_mut().clear_variables();
+        }
     }
 
     #[wasm_bindgen(js_name = exportWorkspaceState)]
@@ -1774,7 +1810,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = telemetryConsent)]
     pub fn telemetry_consent(&self) -> bool {
-        self.session.borrow().telemetry_consent()
+        self.config.borrow().telemetry_consent
     }
 
     #[wasm_bindgen(js_name = gpuStatus)]
@@ -1785,10 +1821,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = telemetryClientId)]
     pub fn telemetry_client_id(&self) -> Option<String> {
-        self.session
-            .borrow()
-            .telemetry_client_id()
-            .map(|value| value.to_string())
+        self.config.borrow().telemetry_client_id.clone()
     }
 
     #[wasm_bindgen(js_name = memoryUsage)]

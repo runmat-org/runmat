@@ -163,7 +163,26 @@ async fn dispose_while_public_execution_is_pending_never_restores_its_task_owner
     })
     .await;
 
+    assert!(runtime.active_interrupt.borrow().is_some());
+    assert!(
+        runtime.execute_request_js(request.clone()).await.is_err(),
+        "second request must reject before replacing active cancellation"
+    );
+    assert!(
+        runtime.active_interrupt.borrow().is_some(),
+        "rejected request must not clear first request's cancel authority"
+    );
+    assert!(runtime.workspace_snapshot().is_err());
+    assert!(runtime.stats().is_err());
     runtime.dispose();
+    assert!(
+        runtime
+            .active_interrupt
+            .borrow()
+            .as_ref()
+            .is_some_and(|active| active.token().is_cancelled()),
+        "dispose cancels the original in-flight source"
+    );
     let _ = execution
         .await
         .expect("in-flight request returns a structured result");
