@@ -1,14 +1,14 @@
 //! MATLAB-compatible timer handle objects.
 //!
-//! Timer objects are handle objects with MATLAB timer properties. RunMat keeps
-//! timers in a per-thread registry so `timerfind` can discover them after the
-//! constructor returns. Lifecycle methods execute callbacks on the current VM
-//! path rather than a background event thread; this keeps callback execution
-//! deterministic across native and wasm hosts.
+//! Timer objects are handle objects with MATLAB timer properties. The runtime
+//! session owns discovery and lifecycle state; the host's local task driver
+//! polls callbacks after `start` returns.
 
-mod property;
+pub(crate) mod property;
 mod arguments;
+mod lifecycle;
 use arguments::{apply_name_value_pairs, prepare_timer_property_pairs, PreparedTimerPair};
+use lifecycle::{start_one_timer, stop_one_timer, wait_one_timer};
 use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility};
 
 use runmat_builtins::{
@@ -18,10 +18,7 @@ use runmat_builtins::{
 };
 use runmat_types::MemberAccess;
 use runmat_value::NumericScalar;
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Duration;
 
 #[cfg(test)]
 use once_cell::sync::Lazy;
@@ -40,6 +37,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const TIMER_CLASS: runmat_types::StaticClassIdentity =
@@ -52,10 +50,6 @@ const TIMER_CALLABLE_WAIT: &str = "__runmat_timer_wait";
 const TIMER_CALLABLE_DELETE: &str = "__runmat_timer_delete";
 
 const CALLBACK_PROPS: [&str; 4] = ["TimerFcn", "StartFcn", "StopFcn", "ErrorFcn"];
-thread_local! {
-    static TIMER_REGISTRY: RefCell<Vec<HandleRef>> = const { RefCell::new(Vec::new()) };
-    static TIMER_COUNTER: Cell<usize> = const { Cell::new(0) };
-}
 
 #[cfg(test)]
 static TIMER_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -379,13 +373,35 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     descriptor(crate::builtins::timing::timer::TIMER_DESCRIPTOR),
     extensions(crate::builtins::timing::timer::TIMER_EXTENSIONS),
     integer_capabilities(crate::builtins::timing::timer::TIMER_INTEGER_CAPABILITIES),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn timer_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
     ensure_timer_class_registered();
     let args = prepare_timer_property_pairs(&args, false).await?;
-    let mut object = default_timer_object(next_timer_name());
+    let name = runtime
+        .timer_session()
+        .borrow_mut()
+        .next_name()
+        .ok_or_else(|| timer_error(&TIMER_ERROR_INVALID_INPUT, "timer: name identity exhausted"))?;
+    let mut object = default_timer_object(name);
     apply_name_value_pairs(&mut object, &args, true)?;
+    let Some(Value::String(visibility_text)) = object.properties.get("ObjectVisibility") else {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            "timer: invalid ObjectVisibility value",
+        ));
+    };
+    let visibility = TimerVisibility::parse(visibility_text).ok_or_else(|| {
+        timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            "timer: invalid ObjectVisibility value",
+        )
+    })?;
     let target = runmat_gc::gc_allocate(Value::Object(object))
         .map_err(|err| timer_error(&TIMER_ERROR_GC, format!("timer: {err}")))?;
     runmat_gc::gc_add_root(target)
@@ -395,7 +411,10 @@ pub async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         target,
         valid: true,
     };
-    TIMER_REGISTRY.with(|registry| registry.borrow_mut().push(handle.clone()));
+    runtime
+        .timer_session()
+        .borrow_mut()
+        .register(handle.clone(), visibility);
     Ok(Value::HandleObject(handle))
 }
 
@@ -407,10 +426,19 @@ pub async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     descriptor(crate::builtins::timing::timer::TIMERFIND_DESCRIPTOR),
     extensions(crate::builtins::timing::timer::TIMERFIND_EXTENSIONS),
     integer_capabilities(crate::builtins::timing::timer::TIMERFIND_INTEGER_CAPABILITIES),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timerfind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    find_timers(prepare_timer_property_pairs(&args, true).await?, false)
+pub async fn timerfind_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
+    find_timers(
+        &runtime,
+        prepare_timer_property_pairs(&args, true).await?,
+        false,
+    )
 }
 
 #[runtime_builtin(
@@ -421,10 +449,19 @@ pub async fn timerfind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     descriptor(crate::builtins::timing::timer::TIMERFINDALL_DESCRIPTOR),
     extensions(crate::builtins::timing::timer::TIMERFIND_EXTENSIONS),
     integer_capabilities(crate::builtins::timing::timer::TIMERFIND_INTEGER_CAPABILITIES),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    find_timers(prepare_timer_property_pairs(&args, true).await?, true)
+pub async fn timerfindall_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
+    find_timers(
+        &runtime,
+        prepare_timer_property_pairs(&args, true).await?,
+        true,
+    )
 }
 
 #[runtime_builtin(
@@ -436,10 +473,15 @@ pub async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
-    start_timer_values(&value, None).await?;
+pub async fn timer_start_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
+    start_timer_values(&runtime, &value, None).await?;
     Ok(Value::Num(0.0))
 }
 
@@ -452,9 +494,15 @@ pub async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timer_startat_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn timer_startat_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
     let prepared = match rest.first() {
         Some(delay) => {
             prepare_timer_property_pairs(
@@ -470,7 +518,7 @@ pub async fn timer_startat_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
         .map(|pair| numeric_scalar(&pair.value, "startat"))
         .transpose()?
         .filter(|seconds| *seconds > 0.0);
-    start_timer_values(&value, delay).await?;
+    start_timer_values(&runtime, &value, delay).await?;
     Ok(Value::Num(0.0))
 }
 
@@ -483,10 +531,15 @@ pub async fn timer_startat_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timer_stop_builtin(value: Value) -> BuiltinResult<Value> {
-    stop_timer_values(&value, true).await?;
+pub async fn timer_stop_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
+    stop_timer_values(&runtime, &value, true).await?;
     Ok(Value::Num(0.0))
 }
 
@@ -499,10 +552,15 @@ pub async fn timer_stop_builtin(value: Value) -> BuiltinResult<Value> {
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timer_wait_builtin(value: Value) -> BuiltinResult<Value> {
-    wait_timer_values(&value).await?;
+pub async fn timer_wait_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
+    wait_timer_values(&runtime, &value).await?;
     Ok(Value::Num(0.0))
 }
 
@@ -515,10 +573,15 @@ pub async fn timer_wait_builtin(value: Value) -> BuiltinResult<Value> {
     sink = true,
     suppress_auto_output = true,
     descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
+    context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
-pub async fn timer_delete_builtin(value: Value) -> BuiltinResult<Value> {
-    delete_timer_values(&value).await?;
+pub async fn timer_delete_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let runtime = timer_runtime(runtime)?;
+    delete_timer_values(&runtime, &value).await?;
     Ok(Value::Num(0.0))
 }
 
@@ -697,14 +760,6 @@ fn default_timer_object(name: String) -> ObjectInstance {
     object
 }
 
-fn next_timer_name() -> String {
-    TIMER_COUNTER.with(|counter| {
-        let next = counter.get() + 1;
-        counter.set(next);
-        format!("timer-{next}")
-    })
-}
-
 async fn set_timer_property_object(
     obj: Value,
     property_name: &'static str,
@@ -803,13 +858,15 @@ fn normalize_property_value(name: TimerProperty, value: Value) -> BuiltinResult<
 fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
     match value {
         Value::String(_)
-        | Value::CharArray(_)
+        | Value::CharArray(runmat_value::CharArray { rows: 1, .. })
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_)
-        | Value::Cell(_) => Ok(value),
+        | Value::Closure(_) => Ok(value),
+        Value::Cell(ref cell)
+            if cell.data.is_empty()
+                || cell.data.first().is_some_and(is_callback_function) => Ok(value),
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
             format!(
@@ -817,6 +874,17 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
             ),
         )),
     }
+}
+
+fn is_callback_function(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::Closure(_)
+    )
 }
 
 fn parse_choice<T: Copy>(
@@ -921,14 +989,18 @@ fn fits_platform_usize(value: f64) -> bool {
     value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64)
 }
 
-async fn start_timer_values(value: &Value, override_delay: Option<f64>) -> BuiltinResult<()> {
+async fn start_timer_values(
+    runtime: &RuntimeContext,
+    value: &Value,
+    override_delay: Option<f64>,
+) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_timer_handle(handle) => {
-            start_one_timer(handle.clone(), override_delay).await
+            start_one_timer(runtime, handle.clone(), override_delay).await
         }
         Value::Cell(cell) => {
             for item in &cell.data {
-                Box::pin(start_timer_values(item, override_delay)).await?;
+                Box::pin(start_timer_values(runtime, item, override_delay)).await?;
             }
             Ok(())
         }
@@ -939,14 +1011,18 @@ async fn start_timer_values(value: &Value, override_delay: Option<f64>) -> Built
     }
 }
 
-async fn stop_timer_values(value: &Value, call_stop: bool) -> BuiltinResult<()> {
+async fn stop_timer_values(
+    runtime: &RuntimeContext,
+    value: &Value,
+    call_stop: bool,
+) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_timer_handle(handle) => {
-            stop_one_timer(handle, call_stop).await
+            stop_one_timer(runtime, handle, call_stop).await
         }
         Value::Cell(cell) => {
             for item in &cell.data {
-                Box::pin(stop_timer_values(item, call_stop)).await?;
+                Box::pin(stop_timer_values(runtime, item, call_stop)).await?;
             }
             Ok(())
         }
@@ -957,17 +1033,14 @@ async fn stop_timer_values(value: &Value, call_stop: bool) -> BuiltinResult<()> 
     }
 }
 
-async fn wait_timer_values(value: &Value) -> BuiltinResult<()> {
+async fn wait_timer_values(runtime: &RuntimeContext, value: &Value) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_timer_handle(handle) => {
-            if running_property(handle)? {
-                stop_one_timer(handle, true).await?;
-            }
-            Ok(())
+            wait_one_timer(runtime, handle).await
         }
         Value::Cell(cell) => {
             for item in &cell.data {
-                Box::pin(wait_timer_values(item)).await?;
+                Box::pin(wait_timer_values(runtime, item)).await?;
             }
             Ok(())
         }
@@ -978,18 +1051,21 @@ async fn wait_timer_values(value: &Value) -> BuiltinResult<()> {
     }
 }
 
-async fn delete_timer_values(value: &Value) -> BuiltinResult<()> {
+async fn delete_timer_values(runtime: &RuntimeContext, value: &Value) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_timer_handle(handle) => {
-            stop_one_timer(handle, false).await?;
+            stop_one_timer(runtime, handle, false).await?;
             crate::set_handle_valid(handle, false);
-            TIMER_REGISTRY.with(|registry| registry.borrow_mut().retain(|h| h != handle));
+            let pending = runtime.timer_session().borrow_mut().delete(handle);
+            if let Some(lease) = pending {
+                lease.cancel();
+            }
             let _ = runmat_gc::gc_remove_root(handle.target);
             Ok(())
         }
         Value::Cell(cell) => {
             for item in &cell.data {
-                Box::pin(delete_timer_values(item)).await?;
+                Box::pin(delete_timer_values(runtime, item)).await?;
             }
             Ok(())
         }
@@ -998,74 +1074,6 @@ async fn delete_timer_values(value: &Value) -> BuiltinResult<()> {
             format!("timer: expected timer handle, got {other:?}"),
         )),
     }
-}
-
-async fn start_one_timer(handle: HandleRef, override_delay: Option<f64>) -> BuiltinResult<()> {
-    ensure_valid_timer(&handle)?;
-    let timer_fcn = property(&handle, "TimerFcn")?;
-    if callback_is_empty(&timer_fcn) {
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_PROPERTY,
-            "timer: TimerFcn must be set before starting a timer",
-        ));
-    }
-    set_property(&handle, "Running", Value::String("on".to_string()))?;
-    set_property(&handle, "TasksExecuted", Value::Num(0.0))?;
-    let start_delay = override_delay.unwrap_or(numeric_property(&handle, "StartDelay")?);
-    sleep_seconds(start_delay);
-    if let Err(err) = run_callback(&handle, "StartFcn", "StartFcn").await {
-        let _ = stop_one_timer(&handle, false).await;
-        return Err(err);
-    }
-
-    let execution_mode = TimerExecutionMode::parse(&string_property(&handle, "ExecutionMode")?)
-        .ok_or_else(|| {
-            timer_error(
-                &TIMER_ERROR_INVALID_PROPERTY,
-                "timer: invalid ExecutionMode value",
-            )
-        })?;
-    let tasks = if execution_mode == TimerExecutionMode::SingleShot {
-        1usize
-    } else {
-        parse_tasks_to_execute_value(&property(&handle, "TasksToExecute")?)?
-    };
-    let period = numeric_property(&handle, "Period")?;
-    let mut last_fire: Option<runmat_time::Instant> = None;
-    for idx in 0..tasks {
-        if idx > 0 {
-            sleep_seconds(period);
-        }
-        let now = runmat_time::Instant::now();
-        if let Some(last) = last_fire {
-            let instant_period = now.duration_since(last).as_secs_f64();
-            set_property(&handle, "InstantPeriod", Value::Num(instant_period))?;
-            update_average_period(&handle, instant_period, idx)?;
-        }
-        last_fire = Some(now);
-        match run_callback(&handle, "TimerFcn", "TimerFcn").await {
-            Ok(()) => {
-                let executed = numeric_property(&handle, "TasksExecuted")? + 1.0;
-                set_property(&handle, "TasksExecuted", Value::Num(executed))?;
-            }
-            Err(err) => {
-                let _ = run_callback(&handle, "ErrorFcn", "ErrorFcn").await;
-                let _ = stop_one_timer(&handle, true).await;
-                return Err(timer_error(&TIMER_ERROR_CALLBACK, err.message()));
-            }
-        }
-    }
-    stop_one_timer(&handle, true).await
-}
-
-async fn stop_one_timer(handle: &HandleRef, call_stop: bool) -> BuiltinResult<()> {
-    ensure_valid_timer(handle)?;
-    let was_running = running_property(handle)?;
-    set_property(handle, "Running", Value::String("off".to_string()))?;
-    if call_stop && was_running {
-        run_callback(handle, "StopFcn", "StopFcn").await?;
-    }
-    Ok(())
 }
 
 fn update_average_period(handle: &HandleRef, instant_period: f64, idx: usize) -> BuiltinResult<()> {
@@ -1079,6 +1087,7 @@ fn update_average_period(handle: &HandleRef, instant_period: f64, idx: usize) ->
 }
 
 async fn run_callback(
+    runtime: &RuntimeContext,
     handle: &HandleRef,
     property_name: &str,
     event_type: &str,
@@ -1107,32 +1116,45 @@ async fn run_callback(
             let Some(function) = cell.data.first().cloned() else {
                 return Ok(());
             };
-            let mut args = callback_base_args(handle, event_type);
+            let mut args = callback_base_args(runtime, handle, event_type);
             args.extend(cell.data.iter().skip(1).cloned());
-            crate::call_feval_async_with_outputs(function, &args, 0).await?;
+            crate::call_feval_async_with_outputs_in_context(runtime, function, &args, 0).await?;
         }
         function @ (Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)) => {
-            let args = callback_base_args(handle, event_type);
-            crate::call_feval_async_with_outputs(function, &args, 0).await?;
+            let args = callback_base_args(runtime, handle, event_type);
+            crate::call_feval_async_with_outputs_in_context(runtime, function, &args, 0).await?;
         }
         _ => {}
     }
     Ok(())
 }
 
-fn callback_base_args(handle: &HandleRef, event_type: &str) -> Vec<Value> {
-    vec![Value::HandleObject(handle.clone()), timer_event(event_type)]
+fn callback_base_args(
+    runtime: &RuntimeContext,
+    handle: &HandleRef,
+    event_type: &str,
+) -> Vec<Value> {
+    vec![
+        Value::HandleObject(handle.clone()),
+        timer_event(runtime, event_type),
+    ]
 }
 
-fn timer_event(event_type: &str) -> Value {
+fn timer_event(runtime: &RuntimeContext, event_type: &str) -> Value {
     let mut data = StructValue::new();
     data.insert(
         "time",
-        Value::Num(runmat_time::duration_since_epoch().as_secs_f64()),
+        Value::Num(
+            runtime
+                .service_ports()
+                .timing()
+                .wall_time_since_epoch()
+                .as_secs_f64(),
+        ),
     );
     let mut event = StructValue::new();
     event.insert("Type", Value::String(event_type.to_string()));
@@ -1149,43 +1171,42 @@ fn callback_is_empty(value: &Value) -> bool {
     }
 }
 
-fn sleep_seconds(seconds: f64) {
-    if seconds <= 0.0 || !seconds.is_finite() {
-        return;
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::thread::sleep(Duration::from_secs_f64(seconds));
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = seconds;
-    }
-}
-
-fn find_timers(args: Vec<PreparedTimerPair>, include_invisible: bool) -> BuiltinResult<Value> {
+fn find_timers(
+    runtime: &RuntimeContext,
+    args: Vec<PreparedTimerPair>,
+    include_invisible: bool,
+) -> BuiltinResult<Value> {
     ensure_timer_class_registered();
     let filters: Vec<_> = args
         .into_iter()
         .map(|pair| (pair.property, normalize_find_value(pair.value)))
         .collect();
     let mut matches = Vec::new();
-    TIMER_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        registry.retain(crate::is_handle_valid);
-        for handle in registry.iter() {
-            if !include_invisible
-                && !string_property(handle, "ObjectVisibility")
-                    .map(|value| value.eq_ignore_ascii_case("on"))
-                    .unwrap_or(false)
-            {
-                continue;
-            }
-            if filters_match(handle, &filters).unwrap_or(false) {
-                matches.push(Value::HandleObject(handle.clone()));
+    let handles = runtime.timer_session().borrow().handles();
+    for handle in handles
+        .iter()
+        .filter(|handle| crate::is_handle_valid(handle))
+    {
+        let visibility = string_property(handle, "ObjectVisibility")
+            .ok()
+            .and_then(|value| TimerVisibility::parse(&value));
+        if let Some(visibility) = visibility {
+            if let Some(entry) = runtime.timer_session().borrow_mut().record_mut(handle) {
+                entry.visibility = visibility;
             }
         }
-    });
+        let admitted_visibility = runtime
+            .timer_session()
+            .borrow()
+            .record(handle)
+            .map(|entry| entry.visibility);
+        if !include_invisible && admitted_visibility != Some(TimerVisibility::On) {
+            continue;
+        }
+        if filters_match(handle, &filters).unwrap_or(false) {
+            matches.push(Value::HandleObject(handle.clone()));
+        }
+    }
     handles_to_result(matches)
 }
 
@@ -1289,10 +1310,6 @@ fn numeric_property(handle: &HandleRef, name: &str) -> BuiltinResult<f64> {
     numeric_scalar(&property(handle, name)?, name)
 }
 
-fn running_property(handle: &HandleRef) -> BuiltinResult<bool> {
-    Ok(string_property(handle, "Running")?.eq_ignore_ascii_case("on"))
-}
-
 fn running_is_on(object: &ObjectInstance) -> bool {
     matches!(
         object.properties.get("Running"),
@@ -1329,23 +1346,114 @@ fn timer_error(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) 
     builder.build()
 }
 
-#[cfg(test)]
-pub(crate) fn reset_timer_state_for_tests() {
-    TIMER_REGISTRY.with(|registry| {
-        for handle in registry.borrow().iter() {
-            let _ = runmat_gc::gc_remove_root(handle.target);
-        }
-        registry.borrow_mut().clear();
-    });
-    TIMER_COUNTER.with(|counter| counter.set(0));
+fn timer_runtime(runtime: Option<RuntimeContext>) -> BuiltinResult<RuntimeContext> {
+    runtime.ok_or_else(|| {
+        timer_error(
+            &TIMER_ERROR_INVALID_INPUT,
+            "timer: runtime session is required for timer ownership",
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::{
+        RuntimeLocalTaskSupervisor, RuntimeServiceFuture, RuntimeServicePorts, RuntimeTimingService,
+    };
+    use crate::execution::RuntimeExecutionService;
     use futures::executor::block_on;
     use runmat_value::{CharArray, IntegerStorage, Tensor};
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    struct TestClock(Arc<Mutex<Duration>>);
+
+    impl RuntimeTimingService for TestClock {
+        fn monotonic_elapsed(&self) -> Duration {
+            *self.0.lock().unwrap()
+        }
+
+        fn wall_time_since_epoch(&self) -> Duration {
+            Duration::from_secs(1_700_000_000) + self.monotonic_elapsed()
+        }
+
+        fn process_cpu_seconds(&self) -> Option<f64> {
+            None
+        }
+
+        fn sleep(&self, duration: Duration) -> RuntimeServiceFuture<Result<(), RuntimeError>> {
+            let now = self.0.clone();
+            Box::pin(async move {
+                *now.lock().unwrap() += duration;
+                Ok(())
+            })
+        }
+    }
+
+    thread_local! {
+        static TEST_SESSION: RefCell<Option<(RuntimeContext, Rc<RuntimeLocalTaskSupervisor>)>> = const { RefCell::new(None) };
+    }
+
+    fn reset_timer_state_for_tests() {
+        reset_timer_state_for_tests_with_clock(None);
+    }
+
+    fn reset_timer_state_for_tests_with_clock(clock: Option<Arc<Mutex<Duration>>>) {
+        TEST_SESSION.with(|session| {
+            let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
+            let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+            let owner = runtime.local_identity();
+            let mut ports =
+                RuntimeServicePorts::default().with_local_tasks(supervisor.submission_port(owner));
+            if let Some(clock) = clock {
+                ports = ports.with_timing(Rc::new(TestClock(clock)));
+            }
+            let runtime = runtime.with_service_ports(ports);
+            *session.borrow_mut() = Some((runtime, supervisor));
+        });
+    }
+
+    fn test_runtime() -> RuntimeContext {
+        TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").0.clone())
+    }
+
+    fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
+        TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").1.clone())
+    }
+
+    async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::timer_builtin(Some(test_runtime()), args).await
+    }
+
+    async fn timerfind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::timerfind_builtin(Some(test_runtime()), args).await
+    }
+
+    async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::timerfindall_builtin(Some(test_runtime()), args).await
+    }
+
+    async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
+        super::timer_start_builtin(Some(test_runtime()), value).await
+    }
+
+    async fn timer_wait_builtin(value: Value) -> BuiltinResult<Value> {
+        let runtime = test_runtime();
+        test_supervisor()
+            .drive_until(super::timer_wait_builtin(Some(runtime), value))
+            .await?
+    }
+
+    async fn timer_delete_builtin(value: Value) -> BuiltinResult<Value> {
+        super::timer_delete_builtin(Some(test_runtime()), value).await
+    }
+
+    async fn timer_stop_builtin(value: Value) -> BuiltinResult<Value> {
+        super::timer_stop_builtin(Some(test_runtime()), value).await
+    }
 
     #[test]
     fn timer_constructor_sets_defaults_and_name_values() {
@@ -1459,12 +1567,104 @@ mod tests {
         ]))
         .expect("timer");
         block_on(timer_start_builtin(timer.clone())).expect("start");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            0,
+            "start must return before callback execution"
+        );
+        block_on(timer_wait_builtin(timer.clone())).expect("wait");
         let Value::HandleObject(handle) = timer else {
             panic!("expected timer handle");
         };
         assert_eq!(*calls.lock().unwrap(), 2);
         assert_eq!(numeric_property(&handle, "TasksExecuted").unwrap(), 2.0);
         assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+    }
+
+    #[test]
+    fn timer_stop_claims_stop_callback_once_and_wait_does_not_stop() {
+        let _lock = TIMER_TEST_LOCK.lock().unwrap();
+        reset_timer_state_for_tests();
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let recorded = calls.clone();
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, _args, _requested_outputs| {
+                let recorded = recorded.clone();
+                let name = format!("{function:?}");
+                Box::pin(async move {
+                    recorded.lock().unwrap().push(name);
+                    Ok(crate::sequence::ValueSequence::empty())
+                })
+            },
+        )));
+        let timer = block_on(timer_builtin(vec![
+            Value::String("TimerFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "tick".into(),
+                function: 1,
+            },
+            Value::String("StopFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "done".into(),
+                function: 2,
+            },
+            Value::String("StartDelay".into()),
+            Value::Num(1.0),
+        ]))
+        .expect("timer");
+        block_on(timer_start_builtin(timer.clone())).expect("start");
+        assert!(calls.lock().unwrap().is_empty());
+        block_on(timer_stop_builtin(timer.clone())).expect("stop");
+        block_on(timer_stop_builtin(timer.clone())).expect("idempotent stop");
+        block_on(timer_wait_builtin(timer)).expect("wait stopped timer");
+        assert_eq!(calls.lock().unwrap().len(), 1, "StopFcn must run once");
+    }
+
+    #[test]
+    fn fixed_rate_drop_counts_missed_slots_without_executing_them() {
+        let _lock = TIMER_TEST_LOCK.lock().unwrap();
+        let clock = Arc::new(Mutex::new(Duration::ZERO));
+        reset_timer_state_for_tests_with_clock(Some(clock.clone()));
+        let calls = Arc::new(Mutex::new(0usize));
+        let callback_calls = calls.clone();
+        let callback_clock = clock.clone();
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, _args, _requested_outputs| {
+                let calls = callback_calls.clone();
+                let clock = callback_clock.clone();
+                Box::pin(async move {
+                    *calls.lock().unwrap() += 1;
+                    if *calls.lock().unwrap() == 1 {
+                        *clock.lock().unwrap() += Duration::from_millis(250);
+                    }
+                    Ok(crate::sequence::ValueSequence::empty())
+                })
+            },
+        )));
+        let timer = block_on(timer_builtin(vec![
+            Value::String("TimerFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "tick".into(),
+                function: 1,
+            },
+            Value::String("ExecutionMode".into()),
+            Value::String("fixedRate".into()),
+            Value::String("BusyMode".into()),
+            Value::String("drop".into()),
+            Value::String("Period".into()),
+            Value::Num(0.1),
+            Value::String("TasksToExecute".into()),
+            Value::Num(4.0),
+        ]))
+        .expect("timer");
+        block_on(timer_start_builtin(timer.clone())).expect("start");
+        block_on(timer_wait_builtin(timer.clone())).expect("wait");
+        let Value::HandleObject(handle) = timer else {
+            panic!("timer handle");
+        };
+        assert_eq!(*calls.lock().unwrap(), 2);
+        assert_eq!(numeric_property(&handle, "TasksExecuted").unwrap(), 2.0);
+        assert_eq!(*clock.lock().unwrap(), Duration::from_millis(300));
     }
 
     #[test]
@@ -1486,6 +1686,28 @@ mod tests {
             panic!("expected empty cell");
         };
         assert_eq!((cell.rows, cell.cols), (1, 0));
+    }
+
+    #[test]
+    fn timer_handle_cannot_start_in_another_session_before_task_admission() {
+        let _lock = TIMER_TEST_LOCK.lock().unwrap();
+        reset_timer_state_for_tests();
+        let timer = block_on(timer_builtin(vec![
+            Value::String("TimerFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "tick".into(),
+                function: 1,
+            },
+        ]))
+        .expect("timer");
+        let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let error = block_on(super::timer_start_builtin(Some(foreign), timer.clone()))
+            .expect_err("foreign timer start");
+        assert_eq!(error.identifier(), Some("RunMat:timer:InvalidHandle"));
+        let Value::HandleObject(handle) = timer else {
+            panic!("timer handle");
+        };
+        assert_eq!(string_property(&handle, "Running").unwrap(), "off");
     }
 
     #[test]
@@ -1569,6 +1791,7 @@ mod tests {
         assert_eq!(found, timer);
 
         block_on(timer_start_builtin(Value::HandleObject(handle))).expect("start");
+        block_on(timer_wait_builtin(timer.clone())).expect("wait");
         assert_eq!(*calls.lock().unwrap(), 2);
     }
 

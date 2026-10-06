@@ -26,6 +26,7 @@ mod source_evaluation;
 mod services;
 mod state;
 mod timing;
+mod timer;
 mod tcp;
 #[cfg(test)]
 mod cancellation_tests;
@@ -86,6 +87,7 @@ pub use tcp::{
     RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpIssuer, RuntimeTcpReadMode,
     RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
 };
+pub(crate) use timer::{TimerAdmissionError, TimerPhase};
 pub use timing::RuntimeTimingService;
 pub(crate) use timing::StopwatchToken;
 pub use user_path::{

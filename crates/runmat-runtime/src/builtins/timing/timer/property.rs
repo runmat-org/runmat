@@ -98,7 +98,7 @@ impl TimerProperty {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TimerBusyMode {
+pub(crate) enum TimerBusyMode {
     Drop,
     Error,
     Queue,
@@ -127,7 +127,7 @@ impl TimerBusyMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TimerExecutionMode {
+pub(crate) enum TimerExecutionMode {
     SingleShot,
     FixedRate,
     FixedDelay,
@@ -161,7 +161,7 @@ impl TimerExecutionMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TimerVisibility {
+pub(crate) enum TimerVisibility {
     On,
     Off,
 }
