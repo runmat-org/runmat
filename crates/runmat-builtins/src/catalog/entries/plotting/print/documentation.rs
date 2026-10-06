@@ -25,6 +25,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Storage and execution", paragraphs: &[
             "The output is written through the selected filesystem authority. Native hosts can export to ordinary paths; browser hosts write to their installed virtual filesystem, from which the host can expose a download artifact. Export does not change figure data or the current directory.",
             "Filename and option operands can materialize on the host. Plot data retained by the scene may be rendered through the shared WGPU path and fall back to CPU rasterization when headless GPU initialization is unavailable. `print` itself is an I/O and fusion boundary, not a numeric GPU kernel; it does not change plot-data residency.",
+            "A host-known figure is copied before operand materialization. A resident numeric figure handle is selected after its value materializes; that selected scene is then copied before rendering. Figure changes before resident-handle selection may appear in the export, while later changes do not alter the copied scene.",
             "The file-export call can suspend during rendering or publication. Failures retain the rendering or filesystem cause; a rejected device or malformed host option has no file effect.",
         ] },
     ],
@@ -55,6 +56,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "PNG and control tests", location: "builtins::plotting::print::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Pending resident scene and filesystem ownership", location: "builtins::plotting::print::pending_tests" },
         ],
         notes: &["Historical four programs, three FAQs, and five related links are preserved; browser and native rendering/artifact execution remains an integration gate."],
     },

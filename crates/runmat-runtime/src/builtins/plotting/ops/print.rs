@@ -76,7 +76,7 @@ mod pending_tests;
 )]
 pub async fn print_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    mut args: Vec<Value>,
 ) -> BuiltinResult<bool> {
     let requested_outputs = if let Some(runtime) = runtime.as_ref() {
         runtime
@@ -154,22 +154,42 @@ pub async fn print_builtin(
     #[cfg(feature = "plot-core")]
     let early_scene = early_handle.and_then(clone_figure);
     let owner = export::PrintFsOwner::capture(known_filename.as_deref()).map_err(export::map_io)?;
-    // A resident integer handle needs provider data to establish binary64
-    // exactness; the selected scene and filesystem owner are already captured.
+    // A wide resident integer handle needs one authenticated provider readback
+    // to establish binary64 exactness. Retain and materialize that payload so
+    // the ordinary argument gather never repeats the download.
     if let Some(first @ Value::GpuTensor(_)) = args.first() {
-        if crate::builtins::common::validation::value_has_native_integer_class(first)
-            && !export::await_effect(
+        if crate::builtins::common::validation::value_has_native_integer_class(first) {
+            let mut cooperation = runtime
+                .as_ref()
+                .map(crate::context::RuntimeContext::cpu_cooperation);
+            let prepared = export::await_effect(
                 runtime.as_ref(),
-                crate::builtins::common::validation::native_integer_value_is_exact_f64_async(first),
+                crate::builtins::common::validation::prepare_direct_integer_f64_boundary(
+                    first,
+                    cooperation.as_mut(),
+                ),
             )
-            .await??
-        {
-            return Err(build_runtime_error(
-                "print: integer figure handle values must be exactly representable as double",
-            )
-            .with_builtin(BUILTIN_NAME)
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build());
+            .await?
+            .map_err(|error| error.into_runtime_error())?;
+            if !prepared.is_exact() {
+                return Err(build_runtime_error(
+                    "print: integer figure handle values must be exactly representable as double",
+                )
+                .with_builtin(BUILTIN_NAME)
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build());
+            }
+            if let Some(payload) = prepared.into_resident_payload() {
+                args[0] = payload.into_value().map_err(|detail| {
+                    build_runtime_error(format!(
+                        "print: validated integer figure handle could not be materialized: {detail}"
+                    ))
+                    .with_identifier("RunMat:Internal")
+                    .with_builtin(BUILTIN_NAME)
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+                })?;
+            }
         }
     }
     // Host-known invalid controls are rejected before any resident download or

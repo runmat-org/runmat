@@ -85,6 +85,21 @@ impl<'a> PreparedIntegerBoundary<'a> {
 }
 
 impl PreparedIntegerPayload {
+    /// Materialize the already-authenticated resident readback without a
+    /// second provider selection or download.
+    pub fn into_value(self) -> Result<Value, String> {
+        match self {
+            Self::Real(gathered) => runmat_value::Tensor::new_integer(
+                crate::builtins::common::gpu_helpers::integer_storage_from_owned(gathered.data),
+                gathered.shape,
+            )
+            .map(Value::Tensor),
+            Self::Complex(gathered) => {
+                crate::builtins::common::gpu_helpers::value_from_numeric_download(gathered, false)
+            }
+        }
+    }
+
     pub fn real(&self) -> Option<&HostIntegerTensorOwned> {
         match self {
             Self::Real(value) => Some(value),
