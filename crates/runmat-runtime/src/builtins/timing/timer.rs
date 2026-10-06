@@ -22,8 +22,9 @@ use dispatch::{delete_timer_values, start_timer_values, stop_timer_values, wait_
 use lifecycle::{start_one_timer, stop_one_timer, wait_one_timer};
 use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility};
 use runmat_builtins::{
-    TIMER_ERROR_CALLBACK, TIMER_ERROR_GC, TIMER_ERROR_INVALID_HANDLE, TIMER_ERROR_INVALID_INPUT,
-    TIMER_ERROR_INVALID_PROPERTY,
+    TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION, TIMER_ERROR_CALLBACK, TIMER_ERROR_GC,
+    TIMER_ERROR_INVALID_HANDLE, TIMER_ERROR_INVALID_INPUT, TIMER_ERROR_INVALID_PROPERTY,
+    TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION,
 };
 
 use runmat_types::MemberAccess;
@@ -59,13 +60,10 @@ static TIMER_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 macro_rules! timer_setter_builtin {
     ($fn_name:ident, $builtin_name:literal, $property:literal) => {
         #[runtime_builtin(
-                                            name = $builtin_name,
-                                            binding_variant = "default",
-                                            category = "timing",
-                                            summary = "Validate and assign a timer property.",
-                                            keywords = "timer,set,property",
-                                            builtin_path = "crate::builtins::timing::timer"
-                                        )]
+                                    name = $builtin_name,
+                                    binding_variant = "default",
+                                                    builtin_path = "crate::builtins::timing::timer"
+                                                )]
         pub async fn $fn_name(obj: Value, value: Value) -> BuiltinResult<Value> {
             set_timer_property_object(obj, $property, value).await
         }
