@@ -64,12 +64,16 @@ pub enum GraphicsFlushDisposition {
 
 /// The invocation owner can inspect this disposition while a completion is
 /// pending, including when cancellation or revocation drops the operation.
-/// It must inspect the disposition before drop. This is needed because a GUI
-/// or browser may commit between two polls.
+/// `abandon` atomically retires queued, unpublished work or reports that a
+/// host dispatch already won the race. Returning `NotPublished` guarantees
+/// the host cannot subsequently start the effect. This distinction cannot be
+/// obtained by a separate disposition read followed by Drop.
 pub trait RuntimeGraphicsFlushOperation:
     Future<Output = Result<GraphicsFlushReceipt, RuntimeError>>
 {
     fn disposition(&self) -> GraphicsFlushDisposition;
+
+    fn abandon(self: Pin<&mut Self>) -> GraphicsFlushDisposition;
 }
 
 /// Completes after the requested presentation and callback policy reaches a
@@ -78,8 +82,8 @@ pub trait RuntimeGraphicsFlushOperation:
 /// the callback queue; callers do not synthesize successful receipts.
 ///
 /// The returned operation must begin no host effect before its first poll.
-/// Drop retires pending work where possible; callers use its last observed
-/// disposition when cancellation races a host commit.
+/// Drop retires pending work where possible; callers first use `abandon` to
+/// atomically determine whether cancellation or host dispatch won.
 pub trait RuntimeGraphicsPresentationService {
     fn flush(&self, request: GraphicsFlushRequest) -> Pin<Box<dyn RuntimeGraphicsFlushOperation>>;
 }

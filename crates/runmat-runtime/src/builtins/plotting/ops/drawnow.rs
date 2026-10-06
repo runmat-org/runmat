@@ -99,14 +99,17 @@ async fn drawnow_in_context(
             terminal = Some(operation.as_mut().await);
         })
         .await;
-    let disposition = operation.as_ref().get_ref().disposition();
     // A completed host result wins even when cancellation arrives during its
     // ready poll. The shared cancellation wrapper still owns the listener and
     // drops externally pending work when cancellation wins first.
     let terminal = match (terminal, cancellation_race) {
         (Some(result), _) => result,
-        (None, Err(source)) => return Err(cancelled_flush(source, disposition)),
+        (None, Err(source)) => {
+            let disposition = operation.as_mut().abandon();
+            return Err(cancelled_flush(source, disposition));
+        }
         (None, Ok(())) => {
+            let disposition = operation.as_mut().abandon();
             return Err(attach_disposition(
                 drawnow_error(
                     &runmat_builtins::DRAWNOW_ERROR_PRESENTATION,
@@ -116,6 +119,7 @@ async fn drawnow_in_context(
             ));
         }
     };
+    let disposition = operation.as_mut().abandon();
     let receipt = match terminal {
         Ok(receipt) => receipt,
         Err(mut error) => {

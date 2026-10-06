@@ -34,6 +34,10 @@ impl RuntimeGraphicsFlushOperation for ReadyFlush {
             GraphicsFlushDisposition::NotPublished
         }
     }
+
+    fn abandon(self: Pin<&mut Self>) -> GraphicsFlushDisposition {
+        self.as_ref().get_ref().disposition()
+    }
 }
 
 struct TestGraphics {
@@ -210,6 +214,7 @@ fn host_callback_policy_violations_preserve_published_effect_cause() {
 struct PendingState {
     polls: Cell<usize>,
     drops: Cell<usize>,
+    abandoned: Cell<bool>,
 }
 
 struct PendingFlush {
@@ -233,6 +238,12 @@ impl RuntimeGraphicsFlushOperation for PendingFlush {
         } else {
             self.after_poll
         }
+    }
+
+    fn abandon(self: Pin<&mut Self>) -> GraphicsFlushDisposition {
+        let this = self.as_ref().get_ref();
+        this.state.abandoned.set(true);
+        this.disposition()
     }
 }
 
@@ -286,6 +297,7 @@ fn pending_cancellation_preserves_exact_effect_disposition_and_retires_operation
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(effect_disposition(&error), disposition);
         assert_eq!(state.polls.get(), 1, "no host replay after cancellation");
+        assert!(state.abandoned.get());
         assert_eq!(state.drops.get(), 1);
     }
 }
@@ -320,6 +332,10 @@ impl RuntimeGraphicsFlushOperation for TerminalFlush {
         } else {
             GraphicsFlushDisposition::NotPublished
         }
+    }
+
+    fn abandon(self: Pin<&mut Self>) -> GraphicsFlushDisposition {
+        self.as_ref().get_ref().disposition()
     }
 }
 
