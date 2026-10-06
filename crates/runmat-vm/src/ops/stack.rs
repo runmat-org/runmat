@@ -3,7 +3,7 @@ use crate::bytecode::EmitLabel;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop2, pop_value};
 use crate::runtime::workspace::{
-    ensure_workspace_slot_name, mark_workspace_assigned, refresh_workspace_state,
+    admit_workspace_slot_write, ensure_workspace_slot_name, workspace_slot_value,
 };
 use runmat_runtime::{dispatcher::gather_if_needed_async, RuntimeError};
 use runmat_value::{CharArray, Value};
@@ -103,7 +103,7 @@ pub fn load_local(
 
 #[inline]
 pub fn load_var(stack: &mut Vec<Value>, vars: &[Value], index: usize) {
-    stack.push(vars[index].clone());
+    stack.push(workspace_slot_value(index).unwrap_or_else(|| vars[index].clone()));
 }
 
 pub fn store_var<BeforeOverwrite, AfterStore>(
@@ -124,14 +124,12 @@ where
     }
     if index >= vars.len() {
         vars.resize(index + 1, Value::Num(0.0));
-        refresh_workspace_state(vars);
     }
-    vars[index] = value;
-    refresh_workspace_state(vars);
     if let Some(name) = var_names.get(&index) {
         ensure_workspace_slot_name(index, name);
     }
-    mark_workspace_assigned(index);
+    admit_workspace_slot_write(index, &value)?;
+    vars[index] = value;
     after_store(index, &vars[index]);
     Ok(())
 }
@@ -165,11 +163,9 @@ where
     } else {
         if offset >= vars.len() {
             vars.resize(offset + 1, Value::Num(0.0));
-            refresh_workspace_state(vars);
         }
         before_var_overwrite(&vars[offset], &value);
         vars[offset] = value;
-        refresh_workspace_state(vars);
         let func_name = context
             .call_stack
             .last()

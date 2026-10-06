@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use regex::Regex;
 use runmat_builtins::BuiltinErrorDescriptor;
@@ -44,6 +45,11 @@ async fn load_builtin(
             "load supports at most one output argument",
         ));
     }
+    let mut workspace_target = if requested_outputs == Some(0) {
+        Some(LoadWorkspaceTarget::capture(runtime.as_ref())?)
+    } else {
+        None
+    };
     let execution = evaluate_with_context(
         &args,
         runtime.as_ref(),
@@ -60,13 +66,13 @@ async fn load_builtin(
     // the awaited decode/restoration work.
     let result = (|| {
         if requested_outputs == Some(0) {
-            for (name, value) in eval.variables() {
-                if let Some(receipt) = receipt.as_ref() {
-                    receipt.checkpoint()?;
-                }
-                crate::workspace::assign(name, value.clone())
-                    .map_err(|err| load_error_with(&LOAD_ERROR_WORKSPACE, err))?;
-            }
+            let target = workspace_target.as_mut().ok_or_else(|| {
+                load_error_with(
+                    &LOAD_ERROR_WORKSPACE,
+                    "load: statement-form workspace target was not retained",
+                )
+            })?;
+            target.assign_all(eval.variables(), receipt.as_ref())?;
             Ok(Value::OutputList(Vec::new()))
         } else {
             if let Some(receipt) = receipt.as_ref() {
@@ -119,6 +125,75 @@ struct LoadExecution {
     receipt: Option<HostEffectReceipt>,
 }
 
+enum LoadWorkspaceTarget {
+    Canonical(crate::workspace::BaseWorkspaceProjection),
+    Service(Rc<dyn crate::context::RuntimeWorkspaceService>),
+    Facade,
+}
+
+impl LoadWorkspaceTarget {
+    fn capture(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<Self> {
+        let Some(service) = runtime.and_then(|runtime| runtime.service_ports().workspace()) else {
+            return Ok(Self::Facade);
+        };
+        if let Some(projection) = service
+            .begin_workspace_projection()
+            .map_err(load_workspace_flow)?
+        {
+            return Ok(Self::Canonical(projection));
+        }
+        Ok(Self::Service(service.clone()))
+    }
+
+    fn assign_all(
+        &mut self,
+        variables: &[(String, Value)],
+        receipt: Option<&HostEffectReceipt>,
+    ) -> BuiltinResult<()> {
+        match self {
+            Self::Canonical(projection) => {
+                for (name, value) in variables {
+                    checkpoint(receipt)?;
+                    projection
+                        .assign(name, value.clone())
+                        .map_err(crate::workspace::base_workspace_error_to_runtime)
+                        .map_err(load_workspace_flow)?;
+                }
+                checkpoint(receipt)?;
+                projection
+                    .publish()
+                    .map(|_| ())
+                    .map_err(crate::workspace::base_workspace_error_to_runtime)
+                    .map_err(load_workspace_flow)
+            }
+            Self::Service(service) => {
+                for (name, value) in variables {
+                    checkpoint(receipt)?;
+                    service
+                        .assign(name, value.clone())
+                        .map_err(load_workspace_flow)?;
+                }
+                Ok(())
+            }
+            Self::Facade => {
+                for (name, value) in variables {
+                    checkpoint(receipt)?;
+                    crate::workspace::try_assign(name, value.clone())
+                        .map_err(load_workspace_flow)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn checkpoint(receipt: Option<&HostEffectReceipt>) -> BuiltinResult<()> {
+    if let Some(receipt) = receipt {
+        receipt.checkpoint()?;
+    }
+    Ok(())
+}
+
 const BUILTIN_NAME: &str = "load";
 
 fn load_error(message: impl Into<String>) -> RuntimeError {
@@ -148,6 +223,11 @@ fn load_error_with_source(
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+fn load_workspace_flow(mut error: RuntimeError) -> RuntimeError {
+    error.context = error.context.with_builtin(BUILTIN_NAME);
+    error
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {

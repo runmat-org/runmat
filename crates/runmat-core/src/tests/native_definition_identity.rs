@@ -43,7 +43,7 @@ fn repeated_callback_witness_uses_native_and_preserves_old_capture_instances() {
             "retained closure calls must originate in native code"
         );
         assert_eq!(
-            session.get_variables().get("answer"),
+            session.get_variables().unwrap().get("answer"),
             Some(&Value::Num(8.0))
         );
     });
@@ -60,14 +60,14 @@ fn changed_definition_invalidates_native_dynamic_lookup() {
         execute(&mut session, changed);
         assert!(execute(&mut session, changed));
         assert_eq!(
-            session.get_variables().get("answer"),
+            session.get_variables().unwrap().get("answer"),
             Some(&Value::Num(102.0))
         );
         // Restoring the original authored source is another real publication,
         // not permission to execute a cached entry against stale callable IDs.
         execute(&mut session, initial);
         assert_eq!(
-            session.get_variables().get("answer"),
+            session.get_variables().unwrap().get("answer"),
             Some(&Value::Num(3.0))
         );
     });
@@ -92,7 +92,13 @@ fn native_retained_named_handle_preserves_outputs_and_caught_errors() {
             execute(&mut session, caught),
             "catching caller must execute native"
         );
-        assert_eq!(session.get_variables().get("a"), Some(&Value::Num(3.0)));
-        assert_eq!(session.get_variables().get("b"), Some(&Value::Num(4.0)));
+        assert_eq!(
+            session.get_variables().unwrap().get("a"),
+            Some(&Value::Num(3.0))
+        );
+        assert_eq!(
+            session.get_variables().unwrap().get("b"),
+            Some(&Value::Num(4.0))
+        );
     });
 }

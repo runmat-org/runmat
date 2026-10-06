@@ -109,7 +109,7 @@ pub(super) async fn exist_for_query(
 
     match query {
         ExistQuery::Any => evaluate_default(name).await,
-        ExistQuery::Var => Ok(if variable_exists(name) {
+        ExistQuery::Var => Ok(if variable_exists(name)? {
             ExistResultKind::Variable
         } else {
             ExistResultKind::NotFound
@@ -204,7 +204,7 @@ pub(super) async fn exist_for_query(
 }
 
 async fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
-    if variable_exists(name) {
+    if variable_exists(name)? {
         return Ok(ExistResultKind::Variable);
     }
     if builtin_exists(name) {
@@ -242,8 +242,15 @@ pub(super) fn exist_handle(value: &Value) -> ExistResultKind {
     }
 }
 
-fn variable_exists(name: &str) -> bool {
-    crate::workspace::lookup(name).is_some()
+fn variable_exists(name: &str) -> BuiltinResult<bool> {
+    crate::workspace::try_lookup(name)
+        .map(|value| value.is_some())
+        .map_err(exist_workspace_flow)
+}
+
+fn exist_workspace_flow(mut error: crate::RuntimeError) -> crate::RuntimeError {
+    error.context = error.context.with_builtin(BUILTIN_NAME);
+    error
 }
 
 fn builtin_exists(name: &str) -> bool {

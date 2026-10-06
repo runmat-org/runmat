@@ -467,9 +467,10 @@ impl RunMatSession {
         })?;
         self.pending_companion_source_discovery = Some(companion);
         let previous_workspace_names = self
-            .workspace_values
-            .keys()
-            .cloned()
+            .base_workspace_snapshot()
+            .map_err(RunError::Runtime)?
+            .iter()
+            .map(|(name, _)| name.to_string())
             .collect::<HashSet<_>>();
         let mut execution = self.execute_internal(input, true).await?;
         let workspace_names = execution
@@ -480,10 +481,10 @@ impl RunMatSession {
             .collect::<Vec<_>>();
         let workspace_full = execution.workspace_snapshot.full;
         let outcome = &mut execution.outcome;
-        outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names);
+        outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names)?;
         if workspace_full {
             outcome.workspace_delta.removals =
-                self.abi_workspace_removals(previous_workspace_names);
+                self.abi_workspace_removals(previous_workspace_names)?;
             if !outcome.workspace_delta.removals.is_empty() {
                 outcome.effects.push(crate::abi::ObservedEffect::Workspace(
                     crate::abi::WorkspaceEffectKind::Clear,
@@ -863,20 +864,42 @@ impl RunMatSession {
         if debug_trace {
             debug!(?execution_vars, "[repl] execution vars");
         }
+        let workspace_projection = self
+            .base_workspace
+            .begin_projection()
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
+            .map_err(RunError::Runtime)?;
+        let workspace_projection = std::rc::Rc::new(
+            runmat_runtime::workspace::BaseWorkspaceProjectionService::new(workspace_projection),
+        );
         if debug_trace {
-            debug!(workspace_values_before = ?self.workspace_values, "[repl] workspace snapshot before execution");
+            let workspace_values_before = workspace_projection
+                .snapshot()
+                .map_err(RunError::Runtime)?
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value.clone()))
+                .collect::<HashMap<_, _>>();
+            debug!(
+                ?workspace_values_before,
+                "[repl] workspace snapshot before execution"
+            );
         }
         let id_to_name: HashMap<usize, String> = execution_vars
             .iter()
             .map(|(name, var_id)| (*var_id, name.clone()))
             .collect();
-        let mut assigned_this_execution: HashSet<String> = HashSet::new();
         let assigned_snapshot: HashSet<String> = execution_vars
             .keys()
-            .filter(|name| self.workspace_values.contains_key(name.as_str()))
-            .cloned()
+            .map(|name| {
+                workspace_projection
+                    .lookup(name.as_str())
+                    .map(|value| value.map(|_| name.clone()))
+            })
+            .collect::<std::result::Result<Vec<_>, RuntimeError>>()
+            .map_err(RunError::Runtime)?
+            .into_iter()
+            .flatten()
             .collect();
-        let prev_assigned_snapshot = assigned_snapshot.clone();
         if debug_trace {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
@@ -938,13 +961,17 @@ impl RunMatSession {
         let fusion_snapshot: Option<FusionPlanSnapshot> = None;
 
         // Prepare variable array with existing values before execution
-        self.prepare_variable_array_for_execution(&bytecode, &execution_vars, debug_trace);
+        let mut variable_array = self
+            .prepare_variable_array_for_execution(
+                &bytecode,
+                &execution_vars,
+                &workspace_projection,
+                debug_trace,
+            )
+            .map_err(RunError::Runtime)?;
 
         if self.verbose {
-            debug!(
-                "Variable array after preparation: {:?}",
-                self.variable_array
-            );
+            debug!("Variable array after preparation: {:?}", variable_array);
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
 
@@ -963,9 +990,30 @@ impl RunMatSession {
         let mut workspace_snapshot_force_full = false;
         let mut ans_update: Option<(usize, Value)> = None;
         #[cfg(not(target_arch = "wasm32"))]
-        let tiered_interactive = self.prepare_tiered_interactive(&interactive_unit);
+        let tiered_interactive = self
+            .prepare_tiered_interactive(&interactive_unit, &workspace_projection)
+            .map_err(RunError::Runtime)?;
         #[cfg(not(target_arch = "wasm32"))]
         let mut native_loop_backedges = std::collections::BTreeMap::new();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let execution_runtime = self
+            .runtime_context
+            .clone()
+            .with_program_revision(Some(interactive_unit.revision().program_revision.clone()))
+            .with_service_ports(
+                self.runtime_context
+                    .service_ports()
+                    .clone()
+                    .with_workspace(workspace_projection.clone()),
+            );
+        #[cfg(target_arch = "wasm32")]
+        let execution_runtime = self.runtime_context.clone().with_service_ports(
+            self.runtime_context
+                .service_ports()
+                .clone()
+                .with_workspace(workspace_projection.clone()),
+        );
 
         // Check if this is an expression statement (ends with Pop)
         let is_expression_stmt = bytecode
@@ -1005,7 +1053,12 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some((workspace, profile)) = tiered_interactive.as_ref() {
             match self
-                .invoke_tiered_interactive(&interactive_unit, workspace, profile.as_ref())
+                .invoke_tiered_interactive(
+                    &interactive_unit,
+                    workspace,
+                    profile.as_ref(),
+                    execution_runtime.clone(),
+                )
                 .await
             {
                 Ok(Some(native)) => {
@@ -1031,24 +1084,20 @@ impl RunMatSession {
                     execution_vars.retain(|name, _| snapshot.values.contains_key(name));
                     for (name, value) in snapshot.values {
                         let slot = execution_vars.get(&name).copied().unwrap_or_else(|| {
-                            let slot = self.variable_array.len();
+                            let slot = variable_array.len();
                             execution_vars.insert(name.clone(), slot);
                             slot
                         });
-                        if self.variable_array.len() <= slot {
-                            self.variable_array.resize(slot + 1, Value::Num(0.0));
+                        if variable_array.len() <= slot {
+                            variable_array.resize(slot + 1, Value::Num(0.0));
                         }
-                        self.variable_array[slot] = value;
+                        variable_array[slot] = value;
                     }
                     used_jit = true;
                     execution_completed = true;
                     if !display_context.single_stmt_non_assign {
                         if let Some(var_id) = display_context.first_assign_var {
-                            if let Some(name) = id_to_name.get(&var_id) {
-                                assigned_this_execution.insert(name.clone());
-                            }
-                            if let Some(assignment_value) = self.variable_array.get(var_id).cloned()
-                            {
+                            if let Some(assignment_value) = variable_array.get(var_id).cloned() {
                                 if is_semicolon_suppressed {
                                     suppressed_value = Some(assignment_value);
                                 } else {
@@ -1071,7 +1120,7 @@ impl RunMatSession {
             if self.verbose {
                 debug!(
                     "Interpreter path: variable_array size: {}, bytecode.var_count: {}",
-                    self.variable_array.len(),
+                    variable_array.len(),
                     bytecode.var_count
                 );
             }
@@ -1092,8 +1141,8 @@ impl RunMatSession {
                 execution_bytecode.var_count = temp_var_id + 1; // Expand variable count for temp variable
 
                 // Ensure our variable array can hold the temporary variable
-                if self.variable_array.len() <= temp_var_id {
-                    self.variable_array.resize(temp_var_id + 1, Value::Num(0.0));
+                if variable_array.len() <= temp_var_id {
+                    variable_array.resize(temp_var_id + 1, Value::Num(0.0));
                 }
 
                 if self.verbose {
@@ -1104,15 +1153,8 @@ impl RunMatSession {
                 }
             }
 
-            #[cfg(not(target_arch = "wasm32"))]
-            let execution_runtime = self
-                .runtime_context
-                .clone()
-                .with_program_revision(Some(interactive_unit.revision().program_revision.clone()));
-            #[cfg(target_arch = "wasm32")]
-            let execution_runtime = self.runtime_context.clone();
             match self
-                .interpret_with_context(&execution_bytecode, execution_runtime)
+                .interpret_with_context(&execution_bytecode, &mut variable_array, execution_runtime)
                 .await
             {
                 Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {
@@ -1126,12 +1168,9 @@ impl RunMatSession {
                     if stmt_count == 1 {
                         if !display_context.single_stmt_non_assign {
                             if let Some(var_id) = display_context.first_assign_var {
-                                if let Some(name) = id_to_name.get(&var_id) {
-                                    assigned_this_execution.insert(name.clone());
-                                }
                                 // For assignments, capture the assigned value for both display and type info
-                                if var_id < self.variable_array.len() {
-                                    let assignment_value = self.variable_array[var_id].clone();
+                                if var_id < variable_array.len() {
+                                    let assignment_value = variable_array[var_id].clone();
                                     if !is_semicolon_suppressed {
                                         result_value = Some(assignment_value);
                                         if self.verbose {
@@ -1167,8 +1206,8 @@ impl RunMatSession {
                         && suppressed_value.is_none()
                     {
                         let temp_var_id = execution_bytecode.var_count - 1; // The temp variable we added
-                        if temp_var_id < self.variable_array.len() {
-                            let expression_value = self.variable_array[temp_var_id].clone();
+                        if temp_var_id < variable_array.len() {
+                            let expression_value = variable_array[temp_var_id].clone();
                             if !is_semicolon_suppressed {
                                 // Capture for 'ans' update when output is not suppressed
                                 ans_update = Some((temp_var_id, expression_value.clone()));
@@ -1220,23 +1259,47 @@ impl RunMatSession {
                 }
                 if result_value.is_none() {
                     if let Some(var_id) = last_store_var_index(&bytecode) {
-                        if var_id < self.variable_array.len() {
-                            result_value = Some(self.variable_array[var_id].clone());
+                        if var_id < variable_array.len() {
+                            result_value = Some(variable_array[var_id].clone());
                         }
                     }
                     if result_value.is_none() {
                         if let Some(var_id) = last_assign_var {
-                            if var_id < self.variable_array.len() {
-                                result_value = Some(self.variable_array[var_id].clone());
+                            if var_id < variable_array.len() {
+                                result_value = Some(variable_array[var_id].clone());
                             }
                         }
                     }
                     if result_value.is_none() {
                         if let Some(var_id) = last_emit_var_index(&bytecode) {
-                            if var_id < self.variable_array.len() {
-                                result_value = Some(self.variable_array[var_id].clone());
+                            if var_id < variable_array.len() {
+                                result_value = Some(variable_array[var_id].clone());
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Executor-visible workspace mutations are admitted in source order.
+        // Publish them even when a later statement fails so an ordinary script
+        // preserves MATLAB workspace semantics without replacing concurrent
+        // canonical state from an end-of-run snapshot.
+        if workspace_projection
+            .has_pending_changes()
+            .map_err(RunError::Runtime)?
+        {
+            let commit = workspace_projection.publish().map_err(RunError::Runtime)?;
+            for change in commit.changes().changes() {
+                match change.kind() {
+                    runmat_runtime::workspace::WorkspaceChangeKind::Assign => {
+                        if let (Some(name), Some(value)) = (change.name(), change.value()) {
+                            workspace_updates.push(workspace_entry(name, value));
+                        }
+                    }
+                    runmat_runtime::workspace::WorkspaceChangeKind::Remove
+                    | runmat_runtime::workspace::WorkspaceChangeKind::Clear => {
+                        workspace_snapshot_force_full = true;
                     }
                 }
             }
@@ -1246,14 +1309,14 @@ impl RunMatSession {
         if used_jit && is_expression_stmt {
             if let Some(value) = result_value.clone() {
                 let slot = execution_vars.get("ans").copied().unwrap_or_else(|| {
-                    let slot = self.variable_array.len();
+                    let slot = variable_array.len();
                     execution_vars.insert("ans".to_string(), slot);
                     slot
                 });
-                if self.variable_array.len() <= slot {
-                    self.variable_array.resize(slot + 1, Value::Num(0.0));
+                if variable_array.len() <= slot {
+                    variable_array.resize(slot + 1, Value::Num(0.0));
                 }
-                self.variable_array[slot] = value.clone();
+                variable_array[slot] = value.clone();
                 ans_update = Some((slot, value));
             }
         }
@@ -1274,131 +1337,85 @@ impl RunMatSession {
         self.stats.average_execution_time_ms =
             self.stats.total_execution_time_ms as f64 / self.stats.total_executions as f64;
 
-        // Update variable names mapping and function definitions if execution was successful
-        if error.is_none() {
-            let vm_workspace_state = runmat_vm::take_updated_workspace_state();
-            let vm_workspace_state = (!used_jit).then_some(vm_workspace_state).flatten();
-            if let Some(workspace_state) = vm_workspace_state {
-                let mutated_names = workspace_state.names;
-                let assigned = workspace_state.assigned;
-                if debug_trace {
-                    debug!(
-                        ?mutated_names,
-                        ?assigned,
-                        "[repl] mutated names and assigned return values"
-                    );
-                }
-                self.workspace_bindings.clear();
-                for (name, slot) in &mutated_names {
-                    self.bind_workspace_slot(name.clone(), *slot);
-                }
-                let previous_workspace = self.workspace_values.clone();
-                let current_names: HashSet<String> = assigned
-                    .iter()
-                    .filter(|name| {
-                        mutated_names
-                            .get(*name)
-                            .map(|var_id| *var_id < self.variable_array.len())
-                            .unwrap_or(false)
-                    })
-                    .cloned()
-                    .collect();
-                let removed_names: HashSet<String> = previous_workspace
-                    .keys()
-                    .filter(|name| !current_names.contains(*name))
-                    .cloned()
-                    .collect();
-                let mut rebuilt_workspace = HashMap::new();
-                let mut changed_names: HashSet<String> = assigned
-                    .difference(&prev_assigned_snapshot)
-                    .cloned()
-                    .collect();
-
-                for name in &current_names {
-                    let Some(var_id) = mutated_names.get(name).copied() else {
-                        continue;
-                    };
-                    if var_id >= self.variable_array.len() {
-                        continue;
-                    }
-                    let value_clone = self.variable_array[var_id].clone();
-                    runmat_runtime::execution::validate_storable_value(&value_clone)
-                        .map_err(RunError::Runtime)?;
-                    if previous_workspace.get(name) != Some(&value_clone) {
-                        changed_names.insert(name.clone());
-                    }
-                    rebuilt_workspace.insert(name.clone(), value_clone);
-                }
-
-                if debug_trace {
-                    debug!(?changed_names, ?removed_names, "[repl] workspace changes");
-                }
-
-                self.workspace_values = rebuilt_workspace;
-                if !removed_names.is_empty() {
-                    workspace_snapshot_force_full = true;
-                } else {
-                    for name in changed_names {
-                        if let Some(value_clone) = self.workspace_values.get(&name).cloned() {
-                            workspace_updates.push(workspace_entry(&name, &value_clone));
-                            if debug_trace {
-                                debug!(name, ?value_clone, "[repl] workspace update");
-                            }
-                        }
-                    }
-                }
-            } else {
-                let previous_workspace = self.workspace_values.clone();
-                let mut rebuilt_workspace = HashMap::new();
-                let mut changed_names: HashSet<String> = HashSet::new();
-
-                for (name, var_id) in &execution_vars {
-                    if *var_id >= self.variable_array.len() {
-                        continue;
-                    }
-                    let value_clone = self.variable_array[*var_id].clone();
-                    runmat_runtime::execution::validate_storable_value(&value_clone)
-                        .map_err(RunError::Runtime)?;
-                    if previous_workspace.get(name) != Some(&value_clone) {
-                        changed_names.insert(name.clone());
-                    }
-                    self.bind_workspace_slot(name.clone(), *var_id);
-                    rebuilt_workspace.insert(name.clone(), value_clone);
-                }
-
-                let removed_names: HashSet<String> = previous_workspace
-                    .keys()
-                    .filter(|name| !rebuilt_workspace.contains_key(*name))
-                    .cloned()
-                    .collect();
-
-                self.workspace_values = rebuilt_workspace;
-                if !removed_names.is_empty() {
-                    workspace_snapshot_force_full = true;
-                } else {
-                    for name in changed_names {
-                        if let Some(value_clone) = self.workspace_values.get(&name).cloned() {
-                            workspace_updates.push(workspace_entry(&name, &value_clone));
-                        }
-                    }
-                }
+        let vm_workspace_state = (!used_jit)
+            .then(runmat_vm::take_updated_workspace_state)
+            .flatten();
+        let mut completed_workspace = if let Some(workspace_state) = vm_workspace_state {
+            let mutated_names = workspace_state.names;
+            let assigned = workspace_state.assigned;
+            if debug_trace {
+                debug!(
+                    ?mutated_names,
+                    ?assigned,
+                    "[repl] mutated names and assigned return values"
+                );
             }
+            Some(
+                assigned
+                    .into_iter()
+                    .filter_map(|name| {
+                        let slot = mutated_names.get(&name).copied()?;
+                        let value = workspace_state.vars.get(slot)?.clone();
+                        Some((name, (slot, value)))
+                    })
+                    .collect::<HashMap<_, _>>(),
+            )
+        } else if used_jit && error.is_none() {
+            Some(
+                execution_vars
+                    .iter()
+                    .filter_map(|(name, slot)| {
+                        variable_array
+                            .get(*slot)
+                            .cloned()
+                            .map(|value| (name.clone(), (*slot, value)))
+                    })
+                    .collect::<HashMap<_, _>>(),
+            )
+        } else {
+            None
+        };
+
+        // An unsuppressed expression updates `ans` only after successful
+        // execution. This is a language-visible host write, so admit it
+        // explicitly instead of inferring it from the completed register file.
+        if error.is_none() {
+            if let (Some(workspace), Some((var_id, value))) =
+                (completed_workspace.as_mut(), ans_update)
+            {
+                runmat_runtime::execution::validate_storable_value(&value)
+                    .map_err(RunError::Runtime)?;
+                workspace_projection
+                    .assign("ans", value.clone())
+                    .map_err(RunError::Runtime)?;
+                let commit = workspace_projection.publish().map_err(RunError::Runtime)?;
+                for change in commit.changes().changes() {
+                    if let (Some(name), Some(value)) = (change.name(), change.value()) {
+                        workspace_updates.push(workspace_entry(name, value));
+                    }
+                }
+                workspace.insert("ans".to_string(), (var_id, value));
+            }
+        }
+
+        if let Some(completed_workspace) = completed_workspace {
+            // The executor has already admitted every language-visible
+            // mutation in source order. The completed register file now only
+            // refreshes VM slot metadata; it is never a second workspace
+            // authority and must not overwrite a newer canonical value.
+            self.refresh_workspace_binding_slots(&completed_workspace);
+        }
+
+        // Function-definition publication remains transactional with a
+        // successful language execution; value assignments above deliberately
+        // survive a later runtime error.
+        if error.is_none() {
             #[cfg(not(target_arch = "wasm32"))]
             self.generic_native_cache
                 .publish_session_registry(&self.function_registry, &function_registry_after_success)
                 .map_err(RunError::Runtime)?;
             self.function_registry = function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
-            // Apply 'ans' update if applicable (persisting expression result)
-            if let Some((var_id, value)) = ans_update {
-                runmat_runtime::execution::validate_storable_value(&value)
-                    .map_err(RunError::Runtime)?;
-                self.bind_workspace_slot("ans".to_string(), var_id);
-                self.workspace_values.insert("ans".to_string(), value);
-                if debug_trace {
-                    println!("Updated 'ans' to var_id {}", var_id);
-                }
-            }
         }
 
         if self.verbose {
@@ -1412,14 +1429,13 @@ impl RunMatSession {
             && !display_var_ids.is_empty()
         {
             if let Some(var_id) = last_store_var_index(&bytecode) {
-                if var_id < self.variable_array.len() {
-                    result_value = Some(self.variable_array[var_id].clone());
+                if var_id < variable_array.len() {
+                    result_value = Some(variable_array[var_id].clone());
                 }
             } else if matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
                 && result_value.is_none()
             {
-                if let Some(v) = self
-                    .variable_array
+                if let Some(v) = variable_array
                     .iter()
                     .rev()
                     .find(|v| !matches!(v, Value::Num(0.0)))
@@ -1455,7 +1471,7 @@ impl RunMatSession {
             } else {
                 for var_id in display_var_ids {
                     if let (Some(label), Some(display_value)) =
-                        (id_to_name.get(&var_id), self.variable_array.get(var_id))
+                        (id_to_name.get(&var_id), variable_array.get(var_id))
                     {
                         runmat_runtime::console::record_value_output(
                             Some(label.as_str()),
@@ -1483,30 +1499,31 @@ impl RunMatSession {
                 timestamp_ms: entry.timestamp_ms,
             })
             .collect();
+        let canonical_workspace = self.base_workspace_snapshot().map_err(RunError::Runtime)?;
         let (workspace_entries, snapshot_full) = if workspace_snapshot_force_full {
-            let mut entries: Vec<WorkspaceEntry> = self
-                .workspace_values
+            let mut entries = canonical_workspace
                 .iter()
                 .map(|(name, value)| workspace_entry(name, value))
-                .collect();
+                .collect::<Vec<_>>();
             entries.sort_by(|a, b| a.name.cmp(&b.name));
             (entries, true)
         } else if workspace_updates.is_empty() {
-            if self.workspace_values.is_empty() {
+            if canonical_workspace.is_empty() {
                 (workspace_updates, false)
             } else {
-                let mut entries: Vec<WorkspaceEntry> = self
-                    .workspace_values
+                let mut entries = canonical_workspace
                     .iter()
                     .map(|(name, value)| workspace_entry(name, value))
-                    .collect();
+                    .collect::<Vec<_>>();
                 entries.sort_by(|a, b| a.name.cmp(&b.name));
                 (entries, true)
             }
         } else {
             (workspace_updates, false)
         };
-        let workspace_snapshot = self.build_workspace_snapshot(workspace_entries, snapshot_full);
+        let workspace_snapshot = self
+            .build_workspace_snapshot(workspace_entries, snapshot_full)
+            .map_err(RunError::Runtime)?;
         let figures_touched = runmat_runtime::plotting_hooks::take_recent_figures();
         let stdin_events = stdin_events
             .lock()
@@ -1623,12 +1640,13 @@ impl RunMatSession {
     async fn interpret_with_context(
         &mut self,
         bytecode: &runmat_vm::Bytecode,
+        variable_array: &mut Vec<Value>,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
         let source_name = self.current_source_name().to_string();
         runmat_vm::interpret_with_vars_in_context(
             bytecode,
-            &mut self.variable_array,
+            variable_array,
             Some(source_name.as_str()),
             runtime,
         )
@@ -1638,14 +1656,15 @@ impl RunMatSession {
     fn abi_workspace_upserts(
         &self,
         workspace_names: Vec<String>,
-    ) -> Vec<crate::abi::WorkspaceBindingValue> {
+    ) -> std::result::Result<Vec<crate::abi::WorkspaceBindingValue>, RunError> {
+        let workspace = self.base_workspace_snapshot().map_err(RunError::Runtime)?;
         let mut workspace_names = workspace_names;
         workspace_names.sort();
         workspace_names.dedup();
-        workspace_names
+        Ok(workspace_names
             .into_iter()
             .filter_map(|name| {
-                let value = self.workspace_values.get(&name)?.clone();
+                let value = workspace.get(&name)?.clone();
                 let binding = runmat_hir::BindingName(name);
                 let key = self
                     .workspace_bindings
@@ -1654,22 +1673,23 @@ impl RunMatSession {
                     .unwrap_or_else(|| self.workspace_binding_key(&binding.0));
                 Some(crate::abi::WorkspaceBindingValue { key, value })
             })
-            .collect()
+            .collect())
     }
 
     fn abi_workspace_removals(
         &self,
         previous_workspace_names: HashSet<String>,
-    ) -> Vec<crate::abi::WorkspaceBindingKey> {
+    ) -> std::result::Result<Vec<crate::abi::WorkspaceBindingKey>, RunError> {
+        let workspace = self.base_workspace_snapshot().map_err(RunError::Runtime)?;
         let mut removed_names = previous_workspace_names
             .into_iter()
-            .filter(|name| !self.workspace_values.contains_key(name))
+            .filter(|name| workspace.get(name).is_none())
             .collect::<Vec<_>>();
         removed_names.sort();
-        removed_names
+        Ok(removed_names
             .into_iter()
             .map(|name| self.workspace_binding_key(&name))
-            .collect()
+            .collect())
     }
 }
 

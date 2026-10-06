@@ -113,7 +113,7 @@ fn repeated_source_reuses_remapped_dotted_local_function_during_hot_native_execu
             assert!(outcome.error.is_none(), "{:?}", outcome.error);
             native_calls += usize::from(outcome.used_jit);
             assert_eq!(
-                session.get_variables().get("result"),
+                session.get_variables().unwrap().get("result"),
                 Some(&runmat_value::Value::Num(5.0))
             );
             let bump = session.function_registry.resolve_name("bump").unwrap();
@@ -224,7 +224,7 @@ fn function_file_localfunctions_excludes_primary_at_public_call_boundary() {
         .unwrap();
         assert!(called.error.is_none(), "{:?}", called.error);
         let Some(runmat_value::Value::Cell(handles)) =
-            session.get_variables().get("selected_handles")
+            session.get_variables().unwrap().get("selected_handles")
         else {
             panic!("localfunctions must return a cell");
         };

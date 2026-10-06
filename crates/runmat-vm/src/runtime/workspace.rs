@@ -1,8 +1,19 @@
 use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
+mod frame;
+pub(crate) use frame::{
+    reconcile_workspace_frame, release_pending_workspace_service_frame,
+    reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
+    workspace_frame_clear, workspace_frame_lookup, workspace_frame_name_is_global,
+    workspace_frame_publishes, workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId,
+    WorkspaceFrameLifecycle,
+};
+use frame::{take_service_frame, PendingServiceFrame};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum WorkspaceOwner {
@@ -41,19 +52,23 @@ struct WorkspaceState {
     assigned_ids_this_execution: HashSet<usize>,
     removed_slots_this_execution: HashMap<usize, String>,
     slot_lifecycle: HashMap<usize, SlotLifecycle>,
-    data_ptr: *const Value,
-    len: usize,
+    values: Vec<Value>,
+    pending_var_reconciliation: HashSet<usize>,
 }
 
 struct WorkspaceFrame {
+    id: WorkspaceFrameId,
+    lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
     state: WorkspaceState,
     global_aliases: FrameGlobalBindings,
-    vars_ptr: *mut Vec<Value>,
-    vars_snapshot: Vec<Value>,
     publish_on_drop: bool,
 }
 
-pub type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
+pub(crate) struct PendingWorkspace {
+    pub(crate) names: HashMap<String, usize>,
+    pub(crate) assigned: HashSet<String>,
+    pub(crate) publish_to_current_service: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceValueSnapshot {
@@ -73,7 +88,7 @@ pub enum WorkspaceTarget {
 pub struct WorkspaceTargetSnapshot {
     pub names: HashMap<String, usize>,
     pub assigned: HashSet<String>,
-    pub vars_ptr: *mut Vec<Value>,
+    pub vars: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,9 +101,11 @@ pub struct WorkspaceAssignedReport {
 
 runmat_thread_local! {
     static WORKSPACE_STACKS: RefCell<HashMap<WorkspaceOwner, Vec<WorkspaceFrame>>> = RefCell::new(HashMap::new());
-    static PENDING_WORKSPACES: RefCell<HashMap<WorkspaceOwner, WorkspaceSnapshot>> = RefCell::new(HashMap::new());
+    static PENDING_WORKSPACES: RefCell<HashMap<WorkspaceOwner, PendingWorkspace>> = RefCell::new(HashMap::new());
     static LAST_WORKSPACE_STATES: RefCell<HashMap<WorkspaceOwner, WorkspaceValueSnapshot>> = RefCell::new(HashMap::new());
     static LAST_WORKSPACE_ASSIGNED_REPORTS: RefCell<HashMap<WorkspaceOwner, WorkspaceAssignedReport>> = RefCell::new(HashMap::new());
+    static PENDING_SERVICE_FRAMES: RefCell<HashMap<WorkspaceOwner, Vec<PendingServiceFrame>>> = RefCell::new(HashMap::new());
+    static NEXT_WORKSPACE_FRAME_ID: Cell<usize> = const { Cell::new(1) };
 }
 
 fn with_stack<R>(owner: WorkspaceOwner, f: impl FnOnce(&[WorkspaceFrame]) -> R) -> R {
@@ -194,6 +211,7 @@ impl Drop for WorkspaceStateGuard {
     fn drop(&mut self) {
         with_stack_mut(self.owner, |stack| {
             if let Some(frame) = stack.pop() {
+                frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
                 if !frame.publish_on_drop {
                     return;
                 }
@@ -215,7 +233,7 @@ impl Drop for WorkspaceStateGuard {
                     states.borrow_mut().insert(
                         self.owner,
                         WorkspaceValueSnapshot {
-                            vars: frame.vars_snapshot,
+                            vars: ws.values,
                             names: ws.names,
                             assigned: ws.assigned,
                         },
@@ -242,16 +260,42 @@ pub fn push_pending_workspace(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> PendingWorkspaceGuard {
+    push_pending_workspace_with_publication(names, assigned, true)
+}
+
+pub(crate) fn push_transactional_pending_workspace(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+) -> PendingWorkspaceGuard {
+    push_pending_workspace_with_publication(names, assigned, false)
+}
+
+fn push_pending_workspace_with_publication(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+    publish_to_current_service: bool,
+) -> PendingWorkspaceGuard {
     let owner = current_owner();
     PENDING_WORKSPACES.with(|workspaces| {
-        workspaces.borrow_mut().insert(owner, (names, assigned));
+        workspaces.borrow_mut().insert(
+            owner,
+            PendingWorkspace {
+                names,
+                assigned,
+                publish_to_current_service,
+            },
+        );
     });
     PendingWorkspaceGuard { owner }
 }
 
-pub fn take_pending_workspace_state() -> Option<WorkspaceSnapshot> {
+pub(crate) fn take_pending_workspace_state() -> Option<PendingWorkspace> {
     let owner = current_owner();
     PENDING_WORKSPACES.with(|workspaces| workspaces.borrow_mut().remove(&owner))
+}
+
+pub fn workspace_global_names() -> Vec<String> {
+    runmat_runtime::workspace::session::global_names()
 }
 
 pub fn take_updated_workspace_state() -> Option<WorkspaceValueSnapshot> {
@@ -298,10 +342,13 @@ fn set_workspace_state_with_publish(
         };
         slot_lifecycle.insert(*idx, lifecycle);
     }
-    let vars_ptr = vars as *mut Vec<Value>;
     let owner = current_owner();
+    let service_frame = take_service_frame(owner);
+    service_frame.lifecycle.set(WorkspaceFrameLifecycle::Active);
     with_stack_mut(owner, |stack| {
         stack.push(WorkspaceFrame {
+            id: service_frame.id,
+            lifecycle: service_frame.lifecycle,
             global_aliases,
             state: WorkspaceState {
                 names,
@@ -310,23 +357,69 @@ fn set_workspace_state_with_publish(
                 assigned_ids_this_execution: HashSet::new(),
                 removed_slots_this_execution: HashMap::new(),
                 slot_lifecycle,
-                data_ptr: vars.as_ptr(),
-                len: vars.len(),
+                values: vars.clone(),
+                pending_var_reconciliation: HashSet::new(),
             },
-            vars_ptr,
-            vars_snapshot: vars.clone(),
             publish_on_drop,
         });
     });
     WorkspaceStateGuard { owner }
 }
 
+pub(crate) fn set_workspace_state_with_publication(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+    vars: &mut Vec<Value>,
+    publish_to_current_service: bool,
+    global_aliases: FrameGlobalBindings,
+) -> WorkspaceStateGuard {
+    set_workspace_state_with_publish(
+        names,
+        assigned,
+        vars,
+        publish_to_current_service,
+        global_aliases,
+    )
+}
+
 pub fn refresh_workspace_state(vars: &[Value]) {
     with_stack_mut(current_owner(), |stack| {
         if let Some(frame) = stack.last_mut() {
-            frame.state.data_ptr = vars.as_ptr();
-            frame.state.len = vars.len();
-            frame.vars_snapshot = vars.to_vec();
+            frame.state.values.clone_from(&vars.to_vec());
+        }
+    });
+}
+
+/// Refresh one execution-slot cache entry without cloning the full frame.
+/// This does not change assignment lifecycle; declaration/import paths use it
+/// before the corresponding language binding is admitted.
+pub fn refresh_workspace_slot(index: usize, value: &Value) {
+    with_stack_mut(current_owner(), |stack| {
+        if let Some(frame) = stack.last_mut() {
+            if frame.state.values.len() <= index {
+                frame.state.values.resize(index + 1, Value::Num(0.0));
+            }
+            frame.state.values[index] = value.clone();
+        }
+    });
+}
+
+pub fn reconcile_workspace_vars(vars: &mut Vec<Value>) {
+    with_stack_mut(current_owner(), |stack| {
+        let Some(frame) = stack.last_mut() else {
+            return;
+        };
+        let changed = std::mem::take(&mut frame.state.pending_var_reconciliation);
+        for slot in changed {
+            if vars.len() <= slot {
+                vars.resize(slot + 1, Value::Num(0.0));
+            }
+            vars[slot] = frame
+                .state
+                .values
+                .get(slot)
+                .cloned()
+                .unwrap_or(Value::Num(0.0));
         }
     });
 }
@@ -339,13 +432,7 @@ pub fn workspace_lookup(name: &str) -> Option<Value> {
         if !ws.assigned.contains(name) {
             return None;
         }
-        if *idx >= ws.len {
-            return None;
-        }
-        unsafe {
-            let ptr = ws.data_ptr.add(*idx);
-            Some((*ptr).clone())
-        }
+        ws.values.get(*idx).cloned()
     })
 }
 
@@ -393,22 +480,23 @@ pub fn workspace_clear() -> Result<(), String> {
         let frame = stack
             .last_mut()
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
-        let ws = &mut frame.state;
-        let vars = unsafe { &mut *frame.vars_ptr };
-        for (name, idx) in ws.names.clone() {
-            if let Some(value) = vars.get_mut(idx) {
-                *value = Value::Num(0.0);
-            }
-            mark_slot_unassigned(ws, idx, name);
-        }
-        ws.names.clear();
-        ws.assigned.clear();
-        frame.global_aliases.unbind_all();
-        frame.vars_snapshot = vars.clone();
-        ws.data_ptr = vars.as_ptr();
-        ws.len = vars.len();
+        clear_workspace_frame(frame);
         Ok(())
     })
+}
+
+fn clear_workspace_frame(frame: &mut WorkspaceFrame) {
+    let ws = &mut frame.state;
+    for (name, idx) in ws.names.clone() {
+        if let Some(value) = ws.values.get_mut(idx) {
+            *value = Value::Num(0.0);
+        }
+        mark_slot_unassigned(ws, idx, name);
+        ws.pending_var_reconciliation.insert(idx);
+    }
+    ws.names.clear();
+    ws.assigned.clear();
+    frame.global_aliases.unbind_all();
 }
 
 pub fn workspace_remove(name: &str) -> Result<(), String> {
@@ -416,21 +504,22 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
         let frame = stack
             .last_mut()
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
-        let ws = &mut frame.state;
-        let vars = unsafe { &mut *frame.vars_ptr };
-        if let Some(idx) = ws.names.remove(name) {
-            if let Some(value) = vars.get_mut(idx) {
-                *value = Value::Num(0.0);
-            }
-            ws.assigned.remove(name);
-            frame.global_aliases.unbind_slot(idx);
-            mark_slot_unassigned(ws, idx, name.to_string());
-            frame.vars_snapshot = vars.clone();
-            ws.data_ptr = vars.as_ptr();
-            ws.len = vars.len();
-        }
+        remove_workspace_name(frame, name);
         Ok(())
     })
+}
+
+fn remove_workspace_name(frame: &mut WorkspaceFrame, name: &str) {
+    let ws = &mut frame.state;
+    if let Some(idx) = ws.names.remove(name) {
+        if let Some(value) = ws.values.get_mut(idx) {
+            *value = Value::Num(0.0);
+        }
+        ws.assigned.remove(name);
+        frame.global_aliases.unbind_slot(idx);
+        mark_slot_unassigned(ws, idx, name.to_string());
+        ws.pending_var_reconciliation.insert(idx);
+    }
 }
 
 pub fn workspace_snapshot() -> Vec<(String, Value)> {
@@ -441,16 +530,13 @@ pub fn workspace_snapshot() -> Vec<(String, Value)> {
                 .names
                 .iter()
                 .filter_map(|(name, idx)| {
-                    if *idx >= ws.len {
-                        return None;
-                    }
                     if !ws.assigned.contains(name) {
                         return None;
                     }
-                    unsafe {
-                        let ptr = ws.data_ptr.add(*idx);
-                        Some((name.clone(), (*ptr).clone()))
-                    }
+                    ws.values
+                        .get(*idx)
+                        .cloned()
+                        .map(|value| (name.clone(), value))
                 })
                 .collect();
             entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -473,7 +559,7 @@ pub fn workspace_target_snapshot(
         Ok(WorkspaceTargetSnapshot {
             names: frame.state.names.clone(),
             assigned: frame.state.assigned.clone(),
-            vars_ptr: frame.vars_ptr,
+            vars: frame.state.values.clone(),
         })
     })
 }
@@ -490,9 +576,14 @@ pub fn replace_workspace_target_vars_and_state(
         let frame = stack
             .get_mut(index)
             .ok_or_else(|| "workspace state unavailable".to_string())?;
-        let target_vars = unsafe { &mut *frame.vars_ptr };
-        *target_vars = vars;
-        frame.vars_snapshot = target_vars.clone();
+        let mut changed_slots = frame
+            .state
+            .slot_lifecycle
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        changed_slots.extend(names.values().copied());
+        frame.state.values = vars;
         for (slot, binding) in frame.global_aliases.snapshot() {
             let still_named = match binding {
                 FrameGlobalBinding::Named(name) => names.get(&name) == Some(&slot),
@@ -506,8 +597,7 @@ pub fn replace_workspace_target_vars_and_state(
         frame.state.assigned = assigned;
         frame.state.slot_lifecycle =
             lifecycle_from_names(&frame.state.names, &frame.state.assigned);
-        frame.state.data_ptr = target_vars.as_ptr();
-        frame.state.len = target_vars.len();
+        frame.state.pending_var_reconciliation.extend(changed_slots);
         Ok(())
     })
 }
@@ -522,7 +612,18 @@ pub fn set_workspace_variable(
         Some(frame) => set_workspace_variable_in_frame(frame, name, value),
         None => Err("load: workspace state unavailable".to_string()),
     })?;
-    let _ = vars;
+    if let Some(value) = workspace_lookup(name) {
+        let index = with_stack(current_owner(), |stack| {
+            stack
+                .last()
+                .and_then(|frame| frame.state.names.get(name).copied())
+        })
+        .ok_or_else(|| "load: workspace slot unavailable".to_string())?;
+        if vars.len() <= index {
+            vars.resize(index + 1, Value::Num(0.0));
+        }
+        vars[index] = value;
+    }
     Ok(())
 }
 
@@ -531,7 +632,15 @@ fn set_workspace_variable_in_frame(
     name: &str,
     value: Value,
 ) -> Result<(), String> {
-    let vars = unsafe { &mut *frame.vars_ptr };
+    set_workspace_variable_in_frame_with_reconciliation(frame, name, value, true)
+}
+
+fn set_workspace_variable_in_frame_with_reconciliation(
+    frame: &mut WorkspaceFrame,
+    name: &str,
+    value: Value,
+    reconcile_var: bool,
+) -> Result<(), String> {
     let ws = &mut frame.state;
     let idx = if let Some(idx) = ws.names.get(name).copied() {
         idx
@@ -539,26 +648,26 @@ fn set_workspace_variable_in_frame(
         ws.names.insert(name.to_string(), idx);
         idx
     } else {
-        let idx = vars.len();
+        let idx = ws.values.len();
         ws.names.insert(name.to_string(), idx);
         idx
     };
-    if idx >= vars.len() {
-        vars.resize(idx + 1, Value::Num(0.0));
+    if idx >= ws.values.len() {
+        ws.values.resize(idx + 1, Value::Num(0.0));
     }
-    vars[idx] = value;
+    ws.values[idx] = value;
+    if reconcile_var {
+        ws.pending_var_reconciliation.insert(idx);
+    }
     match frame.global_aliases.binding_for_slot(idx) {
         Some(FrameGlobalBinding::Named(bound)) if bound == name => {
-            runmat_runtime::workspace::session::store_global_named(name, vars[idx].clone());
+            runmat_runtime::workspace::session::store_global_named(name, ws.values[idx].clone());
         }
         Some(FrameGlobalBinding::LegacySlot) => {
-            runmat_runtime::workspace::session::store_global_slot(idx, vars[idx].clone());
+            runmat_runtime::workspace::session::store_global_slot(idx, ws.values[idx].clone());
         }
         Some(FrameGlobalBinding::Named(_)) | None => {}
     }
-    frame.vars_snapshot = vars.clone();
-    ws.data_ptr = vars.as_ptr();
-    ws.len = vars.len();
     ws.assigned.insert(name.to_string());
     ws.assigned_names_this_execution.insert(name.to_string());
     ws.assigned_ids_this_execution.insert(idx);
@@ -574,7 +683,7 @@ pub fn ensure_workspace_slot_name(index: usize, name: &str) {
     });
 }
 
-pub fn mark_workspace_assigned(index: usize) {
+pub fn mark_workspace_assigned(index: usize, value: &Value) {
     with_stack_mut(current_owner(), |stack| {
         if let Some(frame) = stack.last_mut() {
             let ws = &mut frame.state;
@@ -587,11 +696,47 @@ pub fn mark_workspace_assigned(index: usize) {
                 ws.assigned_names_this_execution.insert(name.clone());
                 ws.assigned_ids_this_execution.insert(index);
                 mark_slot_assigned(ws, index, name);
-                let vars = unsafe { &*frame.vars_ptr };
-                frame.vars_snapshot = vars.clone();
+                if ws.values.len() <= index {
+                    ws.values.resize(index + 1, Value::Num(0.0));
+                }
+                ws.values[index] = value.clone();
             }
         }
     });
+}
+
+/// Admit a language-visible named-slot write before changing the VM register
+/// file. Installed VM workspace services update both the exact frame and, for
+/// a top-level invocation, its Runtime-owned canonical projection.
+pub fn admit_workspace_slot_write(
+    index: usize,
+    value: &Value,
+) -> Result<(), runmat_runtime::RuntimeError> {
+    let name = workspace_slot_name(index);
+    let Some(name) = name else {
+        mark_workspace_assigned(index, value);
+        return Ok(());
+    };
+    if let Some(context) = runmat_runtime::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service.assign_executor_slot(index, &name, value.clone());
+        }
+    }
+    mark_workspace_assigned(index, value);
+    Ok(())
+}
+
+/// Read the authoritative language-visible value for a named workspace slot.
+/// Compiler temporaries and procedure locals are intentionally absent.
+pub fn workspace_slot_value(index: usize) -> Option<Value> {
+    with_stack(current_owner(), |stack| {
+        let frame = stack.last()?;
+        let lifecycle = frame.state.slot_lifecycle.get(&index)?;
+        lifecycle
+            .is_assigned()
+            .then(|| frame.state.values.get(index).cloned())
+            .flatten()
+    })
 }
 
 /// Snapshot the slots currently assigned in the innermost VM workspace.
@@ -617,6 +762,8 @@ pub(crate) fn reset_thread_state_for_tests() {
     PENDING_WORKSPACES.with(|workspaces| workspaces.borrow_mut().clear());
     LAST_WORKSPACE_STATES.with(|states| states.borrow_mut().clear());
     LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| reports.borrow_mut().clear());
+    PENDING_SERVICE_FRAMES.with(|frames| frames.borrow_mut().clear());
+    NEXT_WORKSPACE_FRAME_ID.with(|next| next.set(1));
 }
 
 #[cfg(test)]
@@ -737,10 +884,11 @@ mod tests {
             workspace_clear().unwrap();
 
             assert_eq!(vars.len(), 3);
-            assert_eq!(vars[0], Value::Num(0.0));
+            assert_eq!(vars[0], Value::Num(11.0));
             assert_eq!(vars[1], Value::Num(0.0));
             assert_eq!(vars[2], Value::Num(0.0));
             assert_eq!(workspace_lookup("x"), None);
+            assert_eq!(workspace_slot_value(0), None);
             assert_eq!(workspace_slot_assigned(0), Some(false));
         }
 
@@ -748,6 +896,59 @@ mod tests {
         assert_eq!(snapshot.vars.len(), 3);
         assert!(snapshot.names.is_empty());
         assert!(snapshot.assigned.is_empty());
+    }
+
+    #[test]
+    fn service_mutations_reconcile_only_changed_register_slots() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime_id = runtime.local_identity();
+        let (_reserved, _lifecycle) = reserve_workspace_service_frame(runtime_id);
+        futures::executor::block_on(runtime.scope(async {
+            let mut vars = vec![Value::Num(1.0), Value::Num(2.0)];
+            let guard = set_workspace_state(
+                HashMap::from([("x".to_string(), 0), ("y".to_string(), 1)]),
+                HashSet::from(["x".to_string(), "y".to_string()]),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
+            let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
+
+            workspace_frame_assign(frame, "x", Value::Num(9.0)).unwrap();
+            assert_eq!(vars, vec![Value::Num(1.0), Value::Num(2.0)]);
+            reconcile_workspace_vars(&mut vars);
+            assert_eq!(vars, vec![Value::Num(9.0), Value::Num(2.0)]);
+
+            workspace_frame_clear(frame).unwrap();
+            reconcile_workspace_vars(&mut vars);
+            assert_eq!(vars, vec![Value::Num(0.0), Value::Num(0.0)]);
+            drop(guard);
+        }));
+    }
+
+    #[test]
+    fn executor_admission_does_not_schedule_duplicate_register_reconciliation() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime_id = runtime.local_identity();
+        let (_reserved, _lifecycle) = reserve_workspace_service_frame(runtime_id);
+        futures::executor::block_on(runtime.scope(async {
+            let mut vars = vec![Value::Num(1.0)];
+            let guard = set_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
+            let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
+            workspace_frame_assign_from_executor(frame, "x", Value::Num(7.0)).unwrap();
+            vars[0] = Value::Num(7.0);
+            reconcile_workspace_vars(&mut vars);
+            assert_eq!(vars, vec![Value::Num(7.0)]);
+            drop(guard);
+        }));
     }
 
     #[test]
@@ -821,5 +1022,51 @@ mod tests {
             );
             assert_eq!(vars[0], Value::Num(9.0));
         }));
+    }
+
+    #[test]
+    fn workspace_frames_do_not_retain_raw_execution_storage_pointers() {
+        let source = include_str!("workspace.rs");
+        let raw_vec_pointer = ["*mut", "Vec<Value>"].join(" ");
+        let raw_value_pointer = ["*const", "Value"].join(" ");
+        assert!(!source.contains(&raw_vec_pointer));
+        assert!(!source.contains(&raw_value_pointer));
+    }
+
+    #[test]
+    fn asynchronous_language_visible_writers_use_checked_slot_admission() {
+        let writers = [
+            ("fusion", include_str!("../accel/fusion.rs")),
+            (
+                "prepared outputs",
+                include_str!("../interpreter/dispatch/prepared_outputs/commit.rs"),
+            ),
+            (
+                "parfor",
+                include_str!("../interpreter/dispatch/parallel/parfor.rs"),
+            ),
+            (
+                "spmd",
+                include_str!("../interpreter/dispatch/parallel/spmd.rs"),
+            ),
+            (
+                "expanded nested calls",
+                include_str!("../interpreter/dispatch/calls/dispatch/expanded.rs"),
+            ),
+            (
+                "nested user calls",
+                include_str!("../interpreter/dispatch/calls/dispatch/user.rs"),
+            ),
+            (
+                "catch variables",
+                include_str!("../interpreter/dispatch/exceptions.rs"),
+            ),
+        ];
+        for (domain, source) in writers {
+            assert!(
+                source.contains("admit_workspace_slot_write"),
+                "{domain} bypasses checked language-visible slot admission"
+            );
+        }
     }
 }

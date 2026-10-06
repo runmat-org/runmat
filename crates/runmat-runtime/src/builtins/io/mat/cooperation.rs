@@ -8,12 +8,14 @@ use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::BuiltinErrorDescriptor;
 use std::future::Future;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(in crate::builtins::io::mat) struct MatCodecCooperation<'a> {
     budget: Option<CpuCooperationBudget>,
     source: Option<&'a MatFsPath>,
     resource_liveness: Option<Arc<dyn HostEffectResourceLivenessLease>>,
+    workspace_liveness: Option<Rc<dyn crate::context::RuntimeWorkspaceService>>,
     builtin: &'static str,
     io_error: &'static BuiltinErrorDescriptor,
 }
@@ -29,6 +31,7 @@ impl<'a> MatCodecCooperation<'a> {
             budget: runtime.map(RuntimeContext::cpu_cooperation),
             source,
             resource_liveness: None,
+            workspace_liveness: None,
             builtin,
             io_error,
         }
@@ -44,6 +47,7 @@ impl<'a> MatCodecCooperation<'a> {
             budget: Some(budget),
             source: None,
             resource_liveness: None,
+            workspace_liveness: None,
             builtin,
             io_error,
         }
@@ -61,6 +65,14 @@ impl<'a> MatCodecCooperation<'a> {
         &self,
     ) -> Option<Arc<dyn HostEffectResourceLivenessLease>> {
         self.resource_liveness.clone()
+    }
+
+    pub(in crate::builtins::io::mat) fn with_workspace_liveness(
+        mut self,
+        workspace_liveness: Option<Rc<dyn crate::context::RuntimeWorkspaceService>>,
+    ) -> Self {
+        self.workspace_liveness = workspace_liveness;
+        self
     }
 
     pub(in crate::builtins::io::mat) async fn completed(
@@ -98,6 +110,12 @@ impl<'a> MatCodecCooperation<'a> {
     }
 
     fn check_source(&self) -> BuiltinResult<()> {
+        if let Some(service) = self.workspace_liveness.as_ref() {
+            service.ensure_effect_authority().map_err(|mut error| {
+                error.context = error.context.with_builtin(self.builtin);
+                error
+            })?;
+        }
         if self
             .resource_liveness
             .as_ref()

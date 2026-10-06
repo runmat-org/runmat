@@ -184,6 +184,16 @@ impl BaseWorkspaceOwner {
         Ok(state.revision)
     }
 
+    /// Confirm that this owner can still authorize a newly admitted external
+    /// effect without materializing or exposing its workspace contents.
+    pub fn ensure_effect_authority(&self) -> Result<(), BaseWorkspaceError> {
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()
+    }
+
     pub fn begin_projection(&self) -> Result<BaseWorkspaceProjection, BaseWorkspaceError> {
         BaseWorkspaceProjection::new(self)
     }

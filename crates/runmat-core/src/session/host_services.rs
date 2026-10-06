@@ -69,4 +69,31 @@ mod tests {
             same_service(before.distributed(), after.distributed());
         });
     }
+
+    #[test]
+    fn session_composes_one_base_workspace_and_revokes_it_on_drop() {
+        runmat_gc::gc_test_context(|| {
+            let session = RunMatSession::with_options(false, false).unwrap();
+            let ports = session.runtime_context.service_ports();
+            let current = ports.workspace().expect("current workspace service");
+            let owner = ports
+                .base_workspace()
+                .expect("base workspace authority")
+                .owner();
+
+            current
+                .assign("answer", runmat_value::Value::Num(42.0))
+                .unwrap();
+            assert_eq!(
+                owner.lookup("answer").unwrap(),
+                Some(runmat_value::Value::Num(42.0))
+            );
+
+            drop(session);
+            assert!(matches!(
+                owner.snapshot(),
+                Err(runmat_runtime::workspace::BaseWorkspaceError::Closed)
+            ));
+        });
+    }
 }

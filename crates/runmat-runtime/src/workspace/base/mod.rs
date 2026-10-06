@@ -9,6 +9,7 @@ mod error;
 mod journal;
 mod owner;
 mod projection;
+mod projection_service;
 mod revision;
 mod service;
 mod values;
@@ -19,9 +20,12 @@ pub use owner::{
     BaseWorkspaceCommit, BaseWorkspaceOwner, BaseWorkspaceReconciliation, BaseWorkspaceSnapshot,
 };
 pub use projection::BaseWorkspaceProjection;
+pub use projection_service::BaseWorkspaceProjectionService;
 pub use revision::WorkspaceRevision;
-pub(crate) use service::base_workspace_error_to_runtime;
+pub use service::base_workspace_error_to_runtime;
 pub use service::BaseWorkspaceService;
 
+#[cfg(test)]
+mod authority_tests;
 #[cfg(test)]
 mod tests;

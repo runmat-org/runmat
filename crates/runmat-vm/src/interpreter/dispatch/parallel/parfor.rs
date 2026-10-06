@@ -143,12 +143,14 @@ async fn execute_parfor_serial(
     )
     .await?;
     for (variable, output) in execution.executable.output_variables().zip(outputs) {
-        let Some(slot) = vars.get_mut(variable.slot) else {
+        if vars.get(variable.slot).is_none() {
             return Err(crate::interpreter::errors::mex(
                 "ParallelFrame",
                 "parallel task output is outside its compiled VM frame",
             ));
-        };
+        }
+        crate::runtime::workspace::admit_workspace_slot_write(variable.slot, &output)?;
+        let slot = &mut vars[variable.slot];
         *slot = output;
     }
     Ok(())
@@ -493,6 +495,10 @@ async fn assemble_sliced_results(
                         )
                         .await?;
                     }
+                    crate::runtime::workspace::admit_workspace_slot_write(
+                        variable.slot,
+                        &assembled,
+                    )?;
                     vars[variable.slot] = assembled;
                 }
                 runmat_types::ParallelVariableRole::Reduction { operator } => {
@@ -523,6 +529,10 @@ async fn assemble_sliced_results(
                         )
                         .await?;
                     }
+                    crate::runtime::workspace::admit_workspace_slot_write(
+                        variable.slot,
+                        &accumulator,
+                    )?;
                     vars[variable.slot] = accumulator;
                 }
                 _ => {

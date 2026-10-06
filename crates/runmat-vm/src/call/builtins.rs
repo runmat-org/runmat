@@ -646,7 +646,7 @@ async fn eval_workspace_source(
     else {
         return Ok(Value::OutputList(Vec::new()));
     };
-    let target_vars = unsafe { (*frame.vars_ptr).clone() };
+    let target_vars = frame.vars.clone();
     let (outcome, updated_workspace, effects) = interpret_dynamic_workspace_eval(
         bytecode,
         target_vars,
@@ -789,7 +789,8 @@ async fn interpret_dynamic_workspace_eval(
     ),
     RuntimeError,
 > {
-    let _pending_workspace = crate::runtime::workspace::push_pending_workspace(names, assigned);
+    let _pending_workspace =
+        crate::runtime::workspace::push_transactional_pending_workspace(names, assigned);
     let outcome = interpret_with_vars(&bytecode, &mut target_vars, Some(&source_label)).await;
     let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
     let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();

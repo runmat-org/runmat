@@ -176,7 +176,7 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
         );
         assert_eq!(calls.load(Ordering::SeqCst), before + 1, "no replay");
         assert_eq!(
-            session.get_variables().get("result"),
+            session.get_variables().unwrap().get("result"),
             Some(&Value::Num(10.0))
         );
 

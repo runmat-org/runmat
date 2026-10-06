@@ -79,34 +79,60 @@ impl MexHostServices for RuntimeMexHostServices {
     }
 
     fn get_variable(&self, workspace: &str, name: &str) -> Result<Option<Value>, MexDiagnostic> {
-        validate_workspace(workspace)?;
-        if workspace == "global" {
-            let _scope = self.runtime.enter();
-            return Ok(crate::workspace::session::global_value(name));
-        }
-        if let Some(service) = self.runtime.service_ports().workspace() {
-            Ok(service.lookup(name))
-        } else {
-            let _scope = self.runtime.enter();
-            Ok(crate::workspace::lookup(name))
+        let workspace = MexWorkspace::parse(workspace)?;
+        let _scope = self.runtime.enter();
+        match workspace {
+            MexWorkspace::Caller => self
+                .runtime
+                .service_ports()
+                .require_workspace("read the MEX caller workspace")
+                .map_err(capability_diagnostic)?
+                .try_lookup(name)
+                .map_err(runtime_diagnostic),
+            MexWorkspace::Base => self
+                .runtime
+                .service_ports()
+                .require_base_workspace("read the MEX base workspace")
+                .map_err(capability_diagnostic)?
+                .owner()
+                .lookup(name)
+                .map_err(crate::workspace::base_workspace_error_to_runtime)
+                .map_err(runtime_diagnostic),
+            MexWorkspace::Global => Ok(crate::workspace::session::global_value(name)),
         }
     }
 
     fn put_variable(&self, workspace: &str, name: &str, value: Value) -> Result<(), MexDiagnostic> {
-        validate_workspace(workspace)?;
-        if workspace == "global" {
-            let _scope = self.runtime.enter();
-            crate::workspace::session::store_global_named(name, value);
-            return Ok(());
-        }
-        if let Some(service) = self.runtime.service_ports().workspace() {
-            service.assign(name, value).map_err(runtime_diagnostic)
-        } else {
-            let _scope = self.runtime.enter();
-            crate::workspace::assign(name, value).map_err(|message| MexDiagnostic {
-                identifier: Some("RunMat:MEX:Workspace".into()),
-                message,
-            })
+        let workspace = MexWorkspace::parse(workspace)?;
+        let _scope = self.runtime.enter();
+        match workspace {
+            MexWorkspace::Caller => self
+                .runtime
+                .service_ports()
+                .require_workspace("write the MEX caller workspace")
+                .map_err(capability_diagnostic)?
+                .assign(name, value)
+                .map_err(runtime_diagnostic),
+            MexWorkspace::Base => {
+                let mut delta = crate::workspace::WorkspaceDelta::new();
+                delta
+                    .assign(name, value)
+                    .map_err(crate::workspace::base_workspace_error_to_runtime)
+                    .map_err(runtime_diagnostic)?;
+                self.runtime
+                    .service_ports()
+                    .require_base_workspace("write the MEX base workspace")
+                    .map_err(capability_diagnostic)?
+                    .owner()
+                    .apply(delta)
+                    .map(|_| ())
+                    .map_err(crate::workspace::base_workspace_error_to_runtime)
+                    .map_err(runtime_diagnostic)
+            }
+            MexWorkspace::Global => {
+                crate::workspace::session::store_global_named(name, value);
+                Ok(())
+            }
         }
     }
 
@@ -242,15 +268,29 @@ fn object_index_diagnostic(index: usize, length: usize) -> MexDiagnostic {
     }
 }
 
-fn validate_workspace(workspace: &str) -> Result<(), MexDiagnostic> {
-    if matches!(workspace, "base" | "caller" | "global") {
-        Ok(())
-    } else {
-        Err(MexDiagnostic {
-            identifier: Some("RunMat:MEX:Workspace".into()),
-            message: format!("unknown MEX workspace '{workspace}'"),
-        })
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MexWorkspace {
+    Base,
+    Caller,
+    Global,
+}
+
+impl MexWorkspace {
+    fn parse(workspace: &str) -> Result<Self, MexDiagnostic> {
+        match workspace {
+            "base" => Ok(Self::Base),
+            "caller" => Ok(Self::Caller),
+            "global" => Ok(Self::Global),
+            _ => Err(MexDiagnostic {
+                identifier: Some("RunMat:MEX:Workspace".into()),
+                message: format!("unknown MEX workspace '{workspace}'"),
+            }),
+        }
     }
+}
+
+fn capability_diagnostic(error: crate::context::RuntimeCapabilityError) -> MexDiagnostic {
+    runtime_diagnostic(error.into_runtime_error())
 }
 
 fn runtime_diagnostic(error: crate::RuntimeError) -> MexDiagnostic {
@@ -319,22 +359,137 @@ mod tests {
     }
 
     #[test]
-    fn workspace_callbacks_use_the_exact_invocation_service() {
-        let workspace = Rc::new(ScopedWorkspace::default());
+    fn workspace_callbacks_keep_base_caller_and_global_namespaces_distinct() {
+        let caller = Rc::new(ScopedWorkspace::default());
+        let base_owner = crate::workspace::BaseWorkspaceOwner::new();
+        let base = Rc::new(crate::workspace::BaseWorkspaceService::new(
+            base_owner.clone(),
+        ));
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
-            .with_service_ports(RuntimeServicePorts::default().with_workspace(workspace.clone()));
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_workspace(caller.clone())
+                    .with_base_workspace(base),
+            );
         let services = RuntimeMexHostServices::new(runtime);
 
         services
             .put_variable("caller", "answer", Value::Num(42.0))
             .expect("write scoped caller workspace");
+        services
+            .put_variable("base", "answer", Value::Num(7.0))
+            .expect("write session base workspace");
+        services
+            .put_variable("global", "answer", Value::Num(3.0))
+            .expect("write session global workspace");
         assert_eq!(
             services
                 .get_variable("base", "answer")
                 .expect("read scoped base workspace"),
+            Some(Value::Num(7.0))
+        );
+        assert_eq!(
+            services
+                .get_variable("caller", "answer")
+                .expect("read scoped caller workspace"),
             Some(Value::Num(42.0))
         );
-        assert_eq!(workspace.lookup("answer"), Some(Value::Num(42.0)));
+        assert_eq!(
+            services
+                .get_variable("global", "answer")
+                .expect("read scoped global workspace"),
+            Some(Value::Num(3.0))
+        );
+        assert_eq!(caller.lookup("answer"), Some(Value::Num(42.0)));
+        assert_eq!(base_owner.lookup("answer").unwrap(), Some(Value::Num(7.0)));
+    }
+
+    #[test]
+    fn base_workspace_callbacks_never_fall_back_to_the_caller() {
+        let caller = Rc::new(ScopedWorkspace::default());
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(RuntimeServicePorts::default().with_workspace(caller.clone()));
+        let services = RuntimeMexHostServices::new(runtime);
+
+        services
+            .put_variable("caller", "answer", Value::Num(42.0))
+            .expect("caller workspace remains available");
+        let error = services
+            .get_variable("base", "answer")
+            .expect_err("missing base authority must not read the caller");
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
+        );
+        assert_eq!(caller.lookup("answer"), Some(Value::Num(42.0)));
+    }
+
+    #[test]
+    fn base_revocation_does_not_revoke_the_retained_caller_service() {
+        let caller = Rc::new(ScopedWorkspace::default());
+        let base_owner = crate::workspace::BaseWorkspaceOwner::new();
+        let base = Rc::new(crate::workspace::BaseWorkspaceService::new(
+            base_owner.clone(),
+        ));
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_workspace(caller.clone())
+                    .with_base_workspace(base),
+            );
+        let services = RuntimeMexHostServices::new(runtime);
+        base_owner.close().unwrap();
+
+        services
+            .put_variable("caller", "answer", Value::Num(42.0))
+            .expect("caller remains independently live");
+        let error = services
+            .put_variable("base", "answer", Value::Num(7.0))
+            .expect_err("closed base authority must reject mutation");
+        assert_eq!(error.identifier.as_deref(), Some("RunMat:Workspace:Closed"));
+        assert_eq!(caller.lookup("answer"), Some(Value::Num(42.0)));
+    }
+
+    #[test]
+    fn missing_caller_authority_does_not_hide_the_explicit_base_port() {
+        let base_owner = crate::workspace::BaseWorkspaceOwner::new();
+        let base = Rc::new(crate::workspace::BaseWorkspaceService::new(
+            base_owner.clone(),
+        ));
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(RuntimeServicePorts::default().with_base_workspace(base));
+        let services = RuntimeMexHostServices::new(runtime);
+
+        services
+            .put_variable("base", "answer", Value::Num(7.0))
+            .expect("explicit base authority remains available");
+        let error = services
+            .get_variable("caller", "answer")
+            .expect_err("missing caller authority must not fall back to base");
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
+        );
+        assert_eq!(base_owner.lookup("answer").unwrap(), Some(Value::Num(7.0)));
+    }
+
+    #[test]
+    fn global_workspace_callbacks_are_session_scoped() {
+        let first = RuntimeMexHostServices::new(RuntimeContext::new(Rc::new(
+            RuntimeExecutionService::new(),
+        )));
+        let second = RuntimeMexHostServices::new(RuntimeContext::new(Rc::new(
+            RuntimeExecutionService::new(),
+        )));
+
+        first
+            .put_variable("global", "answer", Value::Num(3.0))
+            .unwrap();
+        assert_eq!(
+            first.get_variable("global", "answer").unwrap(),
+            Some(Value::Num(3.0))
+        );
+        assert_eq!(second.get_variable("global", "answer").unwrap(), None);
     }
 
     #[test]

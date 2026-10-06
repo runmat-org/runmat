@@ -66,15 +66,16 @@ pub(crate) use services::test_managed_selection;
 pub use services::RuntimeProcessService;
 pub use services::{
     ForeignCall, HostInteraction, NativeCapability, ParallelCapability, RuntimeAccelerationService,
-    RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
-    RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedInvocation,
-    RuntimeDistributedRetirement, RuntimeDistributedService, RuntimeDistributedSnapshot,
-    RuntimeErrorService, RuntimeForeignService, RuntimeHostEffectResourceService,
-    RuntimeHostService, RuntimeHttpService, RuntimeManagedWholeWorkSelection, RuntimeNativeService,
-    RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
-    RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
-    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
-    RuntimeSpmdService, RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
+    RuntimeBaseWorkspaceService, RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter,
+    RuntimeCallService, RuntimeCollectiveService, RuntimeDistributedCallRequest,
+    RuntimeDistributedInvocation, RuntimeDistributedRetirement, RuntimeDistributedService,
+    RuntimeDistributedSnapshot, RuntimeErrorService, RuntimeForeignService,
+    RuntimeHostEffectResourceService, RuntimeHostService, RuntimeHttpService,
+    RuntimeManagedWholeWorkSelection, RuntimeNativeService, RuntimeObjectService,
+    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
+    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
+    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
+    RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{

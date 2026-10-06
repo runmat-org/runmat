@@ -506,6 +506,13 @@ impl RunMatSession {
     /// Show detailed system information
     pub fn show_system_info(&self) {
         let gc_stats = self.gc_stats();
+        let workspace_vars = match self.base_workspace.snapshot() {
+            Ok(snapshot) => snapshot.len(),
+            Err(error) => {
+                tracing::warn!(%error, "could not inspect base workspace for session status");
+                0
+            }
+        };
         info!(
             jit = %if self.has_jit() { "available" } else { "disabled/failed" },
             verbose = self.verbose,
@@ -529,7 +536,7 @@ impl RunMatSession {
                 .load(std::sync::atomic::Ordering::Relaxed) as f64
                 / 1024.0
                 / 1024.0,
-            workspace_vars = self.workspace_values.len(),
+            workspace_vars,
             "RunMat Session Status"
         );
     }

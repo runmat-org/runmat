@@ -1,22 +1,31 @@
 use super::*;
 
+mod read_set;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod retained_tests;
+pub(super) use read_set::WorkspaceReadSet;
+
 pub(super) async fn ensure_workspace_entries<'a>(
     cache: &'a mut Option<Vec<(String, Value)>>,
+    workspace: &mut WorkspaceReadSet,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<&'a Vec<(String, Value)>> {
     if cache.is_none() {
-        let entries = collect_workspace_entries(cooperation).await?;
+        let entries = collect_workspace_entries(workspace, cooperation).await?;
         *cache = Some(entries);
     }
     Ok(cache.as_ref().unwrap())
 }
 
 pub(super) async fn collect_workspace_entries(
+    workspace: &mut WorkspaceReadSet,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    cooperation.completed(0).await?;
-    let snapshot = workspace::snapshot()
+    let snapshot = workspace
+        .snapshot()?
         .ok_or_else(|| save_error_with(&SAVE_ERROR_WORKSPACE, SAVE_ERROR_WORKSPACE.message))?;
+    workspace.retain_values(snapshot.iter().map(|(_, value)| value))?;
+    cooperation.completed(0).await?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
         let gathered = cooperation
@@ -24,6 +33,7 @@ pub(super) async fn collect_workspace_entries(
             .await??;
         entries.push((name, gathered));
     }
+    workspace.retain_values(entries.iter().map(|(_, value)| value))?;
     Ok(entries)
 }
 
@@ -130,12 +140,18 @@ pub(super) async fn append_struct_fields(
     Ok(())
 }
 
-pub(super) async fn lookup_workspace(name: &str) -> BuiltinResult<Value> {
-    let value = workspace::lookup(name).ok_or_else(|| {
+pub(super) async fn lookup_workspace(
+    workspace: &mut WorkspaceReadSet,
+    name: &str,
+) -> BuiltinResult<Value> {
+    let value = workspace.lookup(name)?.ok_or_else(|| {
         save_error_with(
             &SAVE_ERROR_SELECTION,
             format!("save: variable '{}' was not found in the workspace", name),
         )
     })?;
-    gather_if_needed_async(&value).await
+    workspace.retain_values(std::iter::once(&value))?;
+    let gathered = gather_if_needed_async(&value).await?;
+    workspace.retain_values(std::iter::once(&gathered))?;
+    Ok(gathered)
 }

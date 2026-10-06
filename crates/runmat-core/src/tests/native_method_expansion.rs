@@ -156,7 +156,7 @@ fn hot_native_compound_dotted_calls_preserve_per_segment_expansion() {
                 assert!(outcome.error.is_none(), "{:?}", outcome.error);
                 native_executions += usize::from(outcome.used_jit);
                 assert_eq!(
-                    session.get_variables().get("result"),
+                    session.get_variables().unwrap().get("result"),
                     Some(&Value::Num(10.0))
                 );
             }
@@ -184,7 +184,7 @@ fn hot_native_dotted_calls_keep_empty_and_multiple_csl_cardinalities() {
                 assert!(outcome.error.is_none(), "{:?}", outcome.error);
                 native_executions += usize::from(outcome.used_jit);
                 assert_eq!(
-                    session.get_variables().get("result"),
+                    session.get_variables().unwrap().get("result"),
                     Some(&Value::Num(expected))
                 );
             }
@@ -207,7 +207,7 @@ fn hot_native_prefix_invocation_precedes_later_effectful_argument_once() {
             assert!(outcome.error.is_none(), "{:?}", outcome.error);
             native_executions += usize::from(outcome.used_jit);
             assert_eq!(
-                session.get_variables().get("result"),
+                session.get_variables().unwrap().get("result"),
                 Some(&Value::Num(8.0))
             );
         }
@@ -236,7 +236,7 @@ fn hot_native_global_read_reflects_nested_invocation_before_top_level_assertion(
                 assert!(outcome.error.is_none(), "{:?}", outcome.error);
                 native_executions += usize::from(outcome.used_jit);
                 assert_eq!(
-                    session.get_variables().get("result"),
+                    session.get_variables().unwrap().get("result"),
                     Some(&Value::Num(8.0))
                 );
             }
@@ -262,7 +262,7 @@ fn warmed_prefix_failure_precedes_later_argument_preparation() {
             native_executions += usize::from(outcome.used_jit);
             assert!(outcome.error.is_none(), "{:?}", outcome.error);
             assert_eq!(
-                session.get_variables().get("result"),
+                session.get_variables().unwrap().get("result"),
                 Some(&Value::Num(10.0))
             );
         }
@@ -340,7 +340,7 @@ fn hot_native_dotted_invocation_retains_prefix_across_pending_later_argument() {
             );
             native_executions += usize::from(outcome.used_jit);
             assert_eq!(
-                session.get_variables().get("result"),
+                session.get_variables().unwrap().get("result"),
                 Some(&Value::Num(10.0))
             );
         }
@@ -371,7 +371,7 @@ fn hot_native_dotted_invocation_retains_prefix_across_pending_later_argument() {
         );
         assert_eq!(calls.load(Ordering::SeqCst), before + 1, "no input replay");
         assert_eq!(
-            session.get_variables().get("result"),
+            session.get_variables().unwrap().get("result"),
             Some(&Value::Num(10.0))
         );
 

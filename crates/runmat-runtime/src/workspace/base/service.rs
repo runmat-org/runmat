@@ -1,6 +1,6 @@
 use runmat_value::Value;
 
-use crate::context::RuntimeWorkspaceService;
+use crate::context::{RuntimeBaseWorkspaceService, RuntimeWorkspaceService};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
@@ -12,6 +12,10 @@ use super::{BaseWorkspaceError, BaseWorkspaceOwner, WorkspaceDelta};
 /// but those services do not gain base-workspace authority. Globals and
 /// persistents remain in the session-variable service and are only reported
 /// here through `global_names`.
+///
+/// The host invokes this adapter under its owning [`crate::context::RuntimeContext`].
+/// Outside a context, session-global lookup still reaches the transitional
+/// standalone store; that fallback is not canonical base-workspace state.
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceService {
     owner: BaseWorkspaceOwner,
@@ -38,6 +42,12 @@ impl BaseWorkspaceService {
             .apply(delta)
             .map(|_| ())
             .map_err(base_workspace_error_to_runtime)
+    }
+}
+
+impl RuntimeBaseWorkspaceService for BaseWorkspaceService {
+    fn owner(&self) -> BaseWorkspaceOwner {
+        BaseWorkspaceService::owner(self)
     }
 }
 
@@ -81,8 +91,26 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
         Ok(super::super::session::global_names())
     }
 
-    fn base_workspace_owner(&self) -> Option<BaseWorkspaceOwner> {
-        Some(self.owner())
+    fn begin_workspace_projection(
+        &self,
+    ) -> Result<Option<super::BaseWorkspaceProjection>, RuntimeError> {
+        self.owner
+            .begin_projection()
+            .map(Some)
+            .map_err(base_workspace_error_to_runtime)
+    }
+
+    fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
+        self.owner
+            .ensure_effect_authority()
+            .map_err(base_workspace_error_to_runtime)
+    }
+
+    fn workspace_revision(&self) -> Result<Option<super::WorkspaceRevision>, RuntimeError> {
+        self.owner
+            .revision()
+            .map(Some)
+            .map_err(base_workspace_error_to_runtime)
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
@@ -106,7 +134,12 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
     }
 }
 
-pub(crate) fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeError {
+/// Preserve a typed base-workspace failure at a Runtime error boundary.
+///
+/// Execution hosts use this adapter when they operate directly on a canonical
+/// owner or one of its projections. Keeping the mapping here prevents hosts
+/// from copying identifiers or erasing the original rooting/transient cause.
+pub fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeError {
     match error {
         BaseWorkspaceError::Rooting(source) => {
             let message = format!("could not retain a base workspace value: {source}");
@@ -115,17 +148,27 @@ pub(crate) fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> Runt
                 .with_source(source)
                 .build()
         }
-        error => {
-            let identifier = match &error {
-                BaseWorkspaceError::Closed => "RunMat:Workspace:Closed",
-                BaseWorkspaceError::BorrowConflict => "RunMat:Workspace:Busy",
-                BaseWorkspaceError::FutureRevision { .. } => "RunMat:Workspace:RevisionMismatch",
-                BaseWorkspaceError::RevisionExhausted => "RunMat:Workspace:RevisionExhausted",
-                BaseWorkspaceError::TransientValue(_) => "RunMat:TransientSequenceNotStorable",
-                BaseWorkspaceError::PendingChanges => "RunMat:Workspace:PendingChanges",
-                BaseWorkspaceError::Rooting(_) => unreachable!("handled above"),
-            };
-            semantic_error(identifier, error.to_string())
+        BaseWorkspaceError::TransientValue(source) => {
+            let message = format!("a workspace value is not storable: {source}");
+            crate::build_runtime_error(message)
+                .with_identifier("RunMat:TransientSequenceNotStorable")
+                .with_source(source)
+                .build()
+        }
+        error @ BaseWorkspaceError::Closed => {
+            semantic_error("RunMat:Workspace:Closed", error.to_string())
+        }
+        error @ BaseWorkspaceError::BorrowConflict => {
+            semantic_error("RunMat:Workspace:Busy", error.to_string())
+        }
+        error @ BaseWorkspaceError::FutureRevision { .. } => {
+            semantic_error("RunMat:Workspace:RevisionMismatch", error.to_string())
+        }
+        error @ BaseWorkspaceError::RevisionExhausted => {
+            semantic_error("RunMat:Workspace:RevisionExhausted", error.to_string())
+        }
+        error @ BaseWorkspaceError::PendingChanges => {
+            semantic_error("RunMat:Workspace:PendingChanges", error.to_string())
         }
     }
 }

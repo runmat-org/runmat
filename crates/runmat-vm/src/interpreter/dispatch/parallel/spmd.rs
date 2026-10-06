@@ -122,13 +122,13 @@ pub(super) async fn execute(
             ));
         }
         for (output, retained) in executable.outputs.iter().zip(handles) {
-            let destination = vars.get_mut(output.slot).ok_or_else(|| {
-                crate::interpreter::errors::mex(
+            if vars.get(output.slot).is_none() {
+                return Err(crate::interpreter::errors::mex(
                     "SpmdFrame",
                     "SPMD output is outside its compiler-bound VM frame",
-                )
-            })?;
-            *destination = match retained {
+                ));
+            }
+            let value = match retained {
                 runmat_runtime::context::RuntimeSpmdRetainedOutput::Composite(handle) => {
                     Value::Composite(Box::new(handle))
                 }
@@ -136,7 +136,14 @@ pub(super) async fn execute(
                     Value::Distributed(Box::new(handle))
                 }
             };
-            crate::runtime::workspace::mark_workspace_assigned(output.slot);
+            crate::runtime::workspace::admit_workspace_slot_write(output.slot, &value)?;
+            let destination = vars.get_mut(output.slot).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "SpmdFrame",
+                    "SPMD output is outside its compiler-bound VM frame",
+                )
+            })?;
+            *destination = value;
         }
         Ok(())
     }
