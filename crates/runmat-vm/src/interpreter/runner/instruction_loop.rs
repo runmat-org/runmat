@@ -50,6 +50,36 @@ pub(super) fn boxed(context: InstructionLoopContext<'_>) -> BoxedInstructionLoop
     Box::pin(run(context))
 }
 
+// Fusion planning owns a different execution future from ordinary instruction
+// dispatch. Allocate it only for a selected fusion candidate, so recursive VM
+// polling does not reserve space for its concrete provider future.
+#[cfg(feature = "native-accel")]
+type FusionExecutionFuture<'a> = Pin<
+    Box<
+        dyn Future<
+                Output = Result<
+                    runmat_accelerate::fusion_exec::FusionExecutionOutcome<Value>,
+                    RuntimeError,
+                >,
+            > + 'a,
+    >,
+>;
+
+#[cfg(feature = "native-accel")]
+#[inline(never)]
+fn boxed_fusion_execution<'a>(
+    plan: &'a runmat_accelerate::FusionGroupPlan,
+    graph: &'a runmat_accelerate::AccelGraph,
+    stack: &'a mut Vec<Value>,
+    vars: &'a mut Vec<Value>,
+    context: &'a mut crate::bytecode::program::ExecutionContext,
+    placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
+) -> FusionExecutionFuture<'a> {
+    Box::pin(accel_fusion::try_execute_fusion_group(
+        plan, graph, stack, vars, context, placement,
+    ))
+}
+
 async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult {
     let InstructionLoopContext {
         bytecode,
@@ -146,7 +176,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 if !has_barrier {
                     let _consumed_fusion = crate::runtime::gc::ManagedRoots::new(&*stack)
                         .map_err(RuntimeError::new)?;
-                    match accel_fusion::try_execute_fusion_group(
+                    match boxed_fusion_execution(
                         &plan,
                         graph,
                         &mut *stack,
