@@ -1,56 +1,65 @@
-use serde::Deserialize;
-use std::borrow::Cow;
+use serde::{Deserialize, Serialize};
 
 use crate::{ContractError, Digest};
+use runmat_types::ProgramSourceId;
 
-/// The v2 source-map component uses deterministic per-program ordinals and a
-/// revision tied to exact text. This validation runs when an envelope is
-/// imported as well as when one is built locally; a valid component hash
-/// alone cannot authorize forged provenance inside its payload.
-#[derive(Deserialize)]
+/// Exact source text and deterministic ordinal in one immutable program.
+/// Session-local `SourceId` values are intentionally absent from this wire
+/// contract; every executor must issue its own runtime source leases.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SourceMapV2<'a> {
-    #[serde(borrow)]
-    entries: Vec<SourceEntryV2<'a>>,
+pub struct ExecutableSourceRecordV2 {
+    pub source_id: ProgramSourceId,
+    pub owner_identity: String,
+    pub relative_path: String,
+    pub content_revision: Digest,
+    pub display_name: String,
+    pub text: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SourceEntryV2<'a> {
-    source_id: usize,
-    #[serde(borrow, rename = "owner_identity")]
-    _owner_identity: Cow<'a, str>,
-    #[serde(borrow, rename = "relative_path")]
-    _relative_path: Cow<'a, str>,
-    content_revision: Digest,
-    #[serde(borrow, rename = "display_name")]
-    _display_name: Cow<'a, str>,
-    #[serde(borrow)]
-    text: Cow<'a, str>,
+pub struct ExecutableSourceMapV2 {
+    pub entries: Vec<ExecutableSourceRecordV2>,
 }
 
-pub(super) fn validate_source_map_v2(bytes: &[u8]) -> Result<(), ContractError> {
-    let map: SourceMapV2<'_> = serde_json::from_slice(bytes)
-        .map_err(|error| ContractError::invalid("executable.source_map", error.to_string()))?;
-    if map.entries.is_empty() {
-        return Err(ContractError::invalid(
-            "executable.source_map",
-            "source map has no primary source",
-        ));
+impl ExecutableSourceMapV2 {
+    pub fn new(entries: Vec<ExecutableSourceRecordV2>) -> Result<Self, ContractError> {
+        let map = Self { entries };
+        map.validate()?;
+        Ok(map)
     }
-    for (ordinal, entry) in map.entries.iter().enumerate() {
-        if entry.source_id != ordinal {
+
+    /// Decode only after a caller admits source-map schema 2. A matching
+    /// component digest does not by itself authorize forged text provenance.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ContractError> {
+        let map: Self = serde_json::from_slice(bytes)
+            .map_err(|error| ContractError::invalid("executable.source_map", error.to_string()))?;
+        map.validate()?;
+        Ok(map)
+    }
+
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.entries.is_empty() {
             return Err(ContractError::invalid(
-                "executable.source_map.source_id",
-                "source ordinals must be dense, unique, and ordered from zero",
+                "executable.source_map",
+                "source map has no primary source",
             ));
         }
-        if entry.content_revision != Digest::sha256(entry.text.as_bytes()) {
-            return Err(ContractError::invalid(
-                "executable.source_map.content_revision",
-                "source content revision does not match exact text",
-            ));
+        for (ordinal, entry) in self.entries.iter().enumerate() {
+            if u32::try_from(ordinal).ok().map(ProgramSourceId) != Some(entry.source_id) {
+                return Err(ContractError::invalid(
+                    "executable.source_map.source_id",
+                    "source ordinals must be dense, unique, and ordered from zero",
+                ));
+            }
+            if entry.content_revision != Digest::sha256(entry.text.as_bytes()) {
+                return Err(ContractError::invalid(
+                    "executable.source_map.content_revision",
+                    "source content revision does not match exact text",
+                ));
+            }
         }
+        Ok(())
     }
-    Ok(())
 }

@@ -211,6 +211,9 @@ pub struct ProgramSourceRecord {
     pub fullpath_name: Option<Arc<str>>,
     pub text: Arc<str>,
 }
+#[path = "source_context/portable.rs"]
+mod portable;
+pub use portable::{bind_portable_source_map_v2, PortableSourceBindingError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProgramSourceBindingError {

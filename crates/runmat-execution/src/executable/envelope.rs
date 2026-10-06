@@ -109,7 +109,7 @@ impl ExecutableUnitEnvelope {
                 .ok_or_else(|| {
                     ContractError::invalid("executable.source_map", "source map is missing")
                 })?;
-            super::source_map::validate_source_map_v2(&source_map.bytes)?;
+            super::ExecutableSourceMapV2::decode(&source_map.bytes)?;
         }
         Ok(())
     }
