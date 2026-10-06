@@ -521,6 +521,7 @@ pub async fn vm_dynamic_workspace_builtin(
                 Some(std::sync::Arc::from(source.path.to_string_lossy().as_ref())),
                 source.text.as_str(),
             )
+            .map_err(runmat_runtime::source_context::NestedSourceIdentityError::Exhausted)
             .map_err(dynamic_source_identity_error)?;
             eval_workspace_source(
                 WorkspaceEvalRequest {

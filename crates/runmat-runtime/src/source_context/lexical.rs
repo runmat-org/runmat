@@ -170,4 +170,26 @@ mod tests {
         assert_eq!(inherited.name.as_ref(), "<eval>");
         assert_eq!(inherited.lexical_file_name(), "first.m");
     }
+
+    #[test]
+    fn unavailable_lexical_source_rejects_before_issuing_nested_identity() {
+        let runtime = runtime();
+        let unavailable = SourceId(77);
+        let error = lease_nested_source_context_in_context(
+            &runtime,
+            "<eval>",
+            "untrusted",
+            Some(unavailable),
+        )
+        .expect_err("unavailable lexical source must fail closed");
+        assert!(matches!(
+            error,
+            NestedSourceIdentityError::SourceUnavailable(source_id)
+                if source_id == unavailable
+        ));
+
+        let first = lease_source_context_in_context(&runtime, "first.m", None, "first")
+            .expect("rejection does not consume source identity");
+        assert_eq!(first.source_id(), SourceId(0));
+    }
 }
