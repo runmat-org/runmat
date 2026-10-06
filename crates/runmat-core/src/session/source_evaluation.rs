@@ -127,7 +127,7 @@ impl SessionSourceEvaluator {
         }
     }
 
-    pub(super) fn current_generation(&self) -> Rc<FunctionRegistryGeneration> {
+    fn current_generation(&self) -> Rc<FunctionRegistryGeneration> {
         self.generation.borrow().clone()
     }
 
@@ -145,7 +145,7 @@ impl SessionSourceEvaluator {
         Ok(())
     }
 
-    pub(super) fn prepare_import(
+    fn prepare_import(
         &self,
         registry: runmat_vm::FunctionRegistry,
         artifacts: CallableArtifactIndex,
@@ -154,7 +154,7 @@ impl SessionSourceEvaluator {
         PreparedGenerationImport::new(registry, artifacts, source_owners)
     }
 
-    pub(super) fn commit_import(
+    fn commit_import(
         &self,
         expected: &Rc<FunctionRegistryGeneration>,
         expected_epoch: &Rc<()>,
