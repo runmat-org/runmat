@@ -14403,14 +14403,11 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .functions()
         .resolve_name("nativeCacheCaller")
         .expect("published function identity");
-    let published_program_function = runmat_types::ProgramFunctionId(
+    let analysis_function = runmat_types::ProgramFunctionId(
         u32::try_from(published_function.0).expect("portable function identity"),
     );
     assert!(first_unit.mir().bodies.contains_key(&published_function));
-    assert!(first_unit
-        .analysis()
-        .function(published_program_function)
-        .is_some());
+    assert!(first_unit.analysis().function(analysis_function).is_some());
     assert!(first_unit
         .vm_layout()
         .functions
@@ -14420,10 +14417,23 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .get(published_function)
         .expect("published function body")
         .portable_function;
-    assert_eq!(published_portable_function, published_program_function);
     let envelope = first_unit
         .portable_envelope_for(Some("nativeCacheCaller"))
         .expect("portable product");
+    assert_eq!(
+        first_unit
+            .functions()
+            .get(published_function)
+            .expect("published function body")
+            .binding_origin,
+        Some(
+            runmat_execution::FunctionBindingOrigin::from_revision(
+                &envelope.manifest.identity.program,
+                published_portable_function,
+            )
+            .expect("published immutable origin")
+        )
+    );
     assert_eq!(
         envelope.manifest.identity.entrypoint_function,
         published_portable_function

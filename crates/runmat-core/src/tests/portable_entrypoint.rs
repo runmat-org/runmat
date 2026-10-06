@@ -60,6 +60,31 @@ fn portable_script_entrypoint_rejects_registry_and_layout_identity_mismatches() 
     assert!(
         error
             .to_string()
+            .contains("script entrypoint is absent from its admitted MIR metadata"),
+        "{error}"
+    );
+
+    let local_mir_function = unit
+        .functions()
+        .resolve_name("localPlusOne")
+        .expect("local MIR function identity");
+    assert_ne!(
+        unit.mir().functions[&local_mir_function].kind,
+        runmat_hir::FunctionKind::SyntheticEntrypoint
+    );
+    let mut nonsynthetic_identity = envelope.clone();
+    nonsynthetic_identity.manifest.identity.entrypoint_function = runmat_types::ProgramFunctionId(
+        u32::try_from(local_mir_function.0).expect("local MIR identity fits the wire"),
+    );
+    let error = runmat_vm::admit_executable_unit(
+        &nonsynthetic_identity
+            .canonical_bytes()
+            .expect("canonical nonsynthetic MIR mismatch"),
+    )
+    .expect_err("a script entrypoint must identify synthetic MIR");
+    assert!(
+        error
+            .to_string()
             .contains("script entrypoint does not identify synthetic MIR"),
         "{error}"
     );
