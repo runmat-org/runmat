@@ -1,6 +1,4 @@
-use crate::{
-    BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, Span, StmtId,
-};
+use crate::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, Span, StmtId};
 pub use runmat_types::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingName, BuiltinId,
     CallableFallbackPolicy, CallableIdentity, ClassDeclaration, ClassIdentity, DefPath,
@@ -14,6 +12,7 @@ pub use runmat_types::{
 };
 use runmat_types::{
     FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator, IntegerLiteral,
+    ProgramSourceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +68,7 @@ impl HirAssembly {
 pub struct HirModule {
     pub id: ModuleId,
     pub name: QualifiedName,
-    pub source_id: SourceId,
+    pub source_id: ProgramSourceId,
     pub source_unit: SourceUnitKind,
     pub imports: Vec<HirImport>,
     pub top_level_functions: Vec<FunctionId>,
@@ -837,7 +836,7 @@ mod tests {
             modules: vec![HirModule {
                 id: module,
                 name: QualifiedName(vec![SymbolName("demo".into())]),
-                source_id: SourceId(0),
+                source_id: ProgramSourceId(0),
                 source_unit: SourceUnitKind::ScriptFile,
                 imports: vec![],
                 top_level_functions: vec![],

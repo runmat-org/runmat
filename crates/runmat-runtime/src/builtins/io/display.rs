@@ -279,7 +279,8 @@ mod tests {
             SourceId(81),
             "/tmp/display_name.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("display source catalog admission");
         let _callsite_guard = crate::callsite::push_callsite(
             Some(SourceId(81)),
             Some(vec![span_of(source, "alpha")]),
@@ -299,7 +300,8 @@ mod tests {
             SourceId(82),
             "/tmp/display_expr.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("display source catalog admission");
         let _callsite_guard = crate::callsite::push_callsite(
             Some(SourceId(82)),
             Some(vec![span_of(source, "alpha + 1")]),

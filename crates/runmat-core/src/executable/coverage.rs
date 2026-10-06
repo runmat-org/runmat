@@ -116,11 +116,13 @@ impl<'a> CoveragePlanBuilder<'a> {
         &mut self,
         metric: CoverageMetric,
         semantic_path: &str,
-        source_id: Option<runmat_hir::SourceId>,
+        source_id: Option<runmat_vm::BytecodeSourceRef>,
         span: runmat_hir::Span,
         instrumented: bool,
     ) -> u64 {
-        let source_id = source_id.map_or(0, |id| id.0);
+        let source_id = source_id
+            .and_then(runmat_vm::BytecodeSourceRef::program)
+            .unwrap_or(runmat_types::ProgramSourceId(0));
         let source = self
             .source_map
             .entries()
@@ -170,7 +172,7 @@ impl<'a> CoveragePlanBuilder<'a> {
             owner_identity: key.owner_identity.clone(),
             relative_path: key.relative_path.clone(),
             semantic_path: key.semantic_path.clone(),
-            source_id,
+            source_id: usize::try_from(source_id.0).expect("validated program source ordinal"),
             start_byte: span.start,
             end_byte: span.end,
             start_line,
@@ -199,7 +201,7 @@ struct SiteKey {
 fn instrument_program(
     builder: &mut CoveragePlanBuilder<'_>,
     semantic_path: &str,
-    source_id: Option<runmat_hir::SourceId>,
+    source_id: Option<runmat_vm::BytecodeSourceRef>,
     spans: &[runmat_hir::Span],
     mapping: &mut Vec<Vec<u64>>,
 ) {

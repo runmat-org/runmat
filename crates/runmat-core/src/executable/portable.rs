@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use super::ExecutableUnit;
 
-const SOURCE_MAP_SCHEMA_VERSION: u16 = 1;
+const SOURCE_MAP_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Serialize)]
 struct PortableSourceMap<'a> {
@@ -11,9 +11,10 @@ struct PortableSourceMap<'a> {
 
 #[derive(Serialize)]
 struct PortableSourceEntry<'a> {
-    source_id: usize,
+    source_id: runmat_types::ProgramSourceId,
     owner_identity: &'a str,
     relative_path: &'a str,
+    content_revision: &'a runmat_execution::Digest,
     display_name: &'a str,
     text: &'a str,
 }
@@ -216,6 +217,8 @@ impl ExecutableUnit {
     ) -> Result<Vec<runmat_execution::ExecutableComponentPayload>, String> {
         use runmat_execution::{ExecutableComponentKind as Kind, ExecutableComponentPayload};
 
+        self.source_map().validate_content_revisions()?;
+
         let source_map = PortableSourceMap {
             entries: self
                 .source_map()
@@ -225,6 +228,7 @@ impl ExecutableUnit {
                     source_id: entry.source_id,
                     owner_identity: &entry.owner_identity,
                     relative_path: &entry.relative_path,
+                    content_revision: &entry.content_revision,
                     display_name: &entry.display_name,
                     text: &entry.text,
                 })
@@ -234,12 +238,33 @@ impl ExecutableUnit {
         bytecode.bound_functions.clear();
         bytecode.function_registry = runmat_vm::FunctionRegistry::default();
         bytecode.layout = None;
+        bytecode.validate_portable_source_origins()?;
+        let mut functions = self.functions().clone();
+        functions.validate_portable_source_origins()?;
+        for function in functions.functions.values_mut() {
+            function.binding_origin = Some(
+                runmat_execution::FunctionBindingOrigin::from_revision(
+                    &self.revision().program_revision,
+                    function.portable_function,
+                )
+                .map_err(|error| error.to_string())?,
+            );
+            function.source_file = function
+                .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::program)
+                .and_then(|ordinal| {
+                    self.source_map()
+                        .entries()
+                        .get(usize::try_from(ordinal.0).ok()?)
+                })
+                .map(|entry| entry.relative_path.clone());
+        }
         [
             (Kind::Mir, canonical_json(self.mir())?),
             (Kind::Analysis, canonical_json(self.analysis())?),
             (Kind::Bytecode, canonical_json(&bytecode)?),
             (Kind::VmLayout, canonical_json(self.vm_layout())?),
-            (Kind::FunctionRegistry, canonical_json(self.functions())?),
+            (Kind::FunctionRegistry, canonical_json(&functions)?),
             (Kind::SourceMap, canonical_json(&source_map)?),
         ]
         .into_iter()

@@ -140,28 +140,31 @@ async fn resume_interpreter(
         .functions
         .get(&function_id)
         .ok_or_else(|| super::error::stage("NativeDeoptimization", "VM layout is unavailable"))?;
-    let (bytecode, function_name, var_count) =
-        if let Some(function) = unit.functions().get(function_id) {
-            (
-                runmat_vm::Bytecode::for_function(
-                    function,
-                    unit.functions().clone(),
-                    unit.vm_layout().clone(),
-                ),
-                function.display_name.clone(),
-                function.var_count,
-            )
-        } else {
-            (
-                unit.bytecode().clone(),
-                unit.mir()
-                    .functions
-                    .get(&function_id)
-                    .map(|metadata| metadata.name.0.clone())
-                    .unwrap_or_else(|| "<main>".into()),
-                unit.bytecode().var_count,
-            )
-        };
+    let functions = unit
+        .runtime_functions(&runtime)
+        .map_err(|error| super::error::stage("NativeDeoptimization", error))?;
+    let (bytecode, function_name, var_count) = if let Some(function) = functions.get(function_id) {
+        (
+            runmat_vm::Bytecode::for_function(
+                function,
+                functions.clone(),
+                unit.vm_layout().clone(),
+            ),
+            function.display_name.clone(),
+            function.var_count,
+        )
+    } else {
+        (
+            unit.runtime_bytecode(&runtime)
+                .map_err(|error| super::error::stage("NativeDeoptimization", error))?,
+            unit.mir()
+                .functions
+                .get(&function_id)
+                .map(|metadata| metadata.name.0.clone())
+                .unwrap_or_else(|| "<main>".into()),
+            unit.bytecode().var_count,
+        )
+    };
     let pc = frame.site.bytecode_pc.ok_or_else(|| {
         super::error::stage(
             "NativeDeoptimization",

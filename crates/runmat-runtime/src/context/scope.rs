@@ -71,7 +71,7 @@ pub struct ContextFuture<F> {
 impl<F> ContextFuture<F> {
     pub(super) fn new(context: RuntimeContext, future: F) -> Self {
         Self {
-            context,
+            context: context.with_poll_source_catalog(),
             future: Some(Box::pin(future)),
         }
     }
@@ -328,7 +328,8 @@ mod tests {
                 source_id,
                 format!("session-{}.m", source_id.0),
                 source.to_string(),
-            )]);
+            )])
+            .expect("session source catalog admission");
             let _source = crate::source_context::replace_current_source_id(Some(source_id));
             let _outputs = crate::output_count::push_output_count(Some(outputs));
             let mut yielded = false;

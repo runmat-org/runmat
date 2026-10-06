@@ -38,8 +38,14 @@ fn evaluate_inner(
         return Ok(outputs);
     }
     let mut arguments = materialize_arguments(state, &call.args)?;
+    let source_id = state
+        .runtime
+        .program_source_id(state.function.source)
+        .ok_or_else(|| {
+            NativeExecutorError::Host("native source is absent from invocation binding".into())
+        })?;
     let input_callsite = CallsiteInfo {
-        source_id: Some(runmat_types::SourceId(state.function.source.0 as usize)),
+        source_id: Some(source_id),
         arg_spans: call.arg_spans.clone(),
     };
     if matches!(

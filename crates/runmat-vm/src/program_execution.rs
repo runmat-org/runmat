@@ -10,6 +10,9 @@ use runmat_runtime::execution::{DeferredCall, DeferredInvocation, ExecutionServi
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
+#[path = "program_execution/unit_sources.rs"]
+mod unit_sources;
+
 pub fn materialize_deferred_call(
     call: &DeferredCall,
     outputs: OutputContract,
@@ -669,14 +672,15 @@ async fn execute_unit_request(
             message: "worker rejected executable unit without a function registry".into(),
         };
     };
-    let registry: crate::FunctionRegistry = match serde_json::from_slice(&registry_payload.bytes) {
-        Ok(registry) => registry,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected invalid executable registry: {error}"),
+    let mut registry: crate::FunctionRegistry =
+        match serde_json::from_slice(&registry_payload.bytes) {
+            Ok(registry) => registry,
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker rejected invalid executable registry: {error}"),
+                }
             }
-        }
-    };
+        };
     let Some(layout_payload) =
         envelope.component(runmat_execution::ExecutableComponentKind::VmLayout)
     else {
@@ -692,8 +696,11 @@ async fn execute_unit_request(
             }
         }
     };
-    bytecode.bound_functions = registry.functions.clone();
-    bytecode.function_registry = registry.clone();
+    let runtime =
+        match unit_sources::bind_unit_sources(&envelope, &mut bytecode, &mut registry, runtime) {
+            Ok(runtime) => runtime,
+            Err(message) => return ProgramExecutionResponse::Failure { message },
+        };
     bytecode.layout = Some(layout);
 
     match envelope.manifest.identity.entrypoint_kind {
@@ -714,11 +721,12 @@ fn unsupported_executable_revisions(
         && revisions.bytecode_schema == crate::BYTECODE_SCHEMA_VERSION
         && revisions.vm_layout_schema == crate::VM_LAYOUT_SCHEMA_VERSION
         && revisions.function_registry_schema == crate::FUNCTION_REGISTRY_SCHEMA_VERSION
+        && revisions.source_map_schema == 2
         && revisions.contract_schema == runmat_types::RUNMAT_TYPES_SCHEMA.major
         && u32::from(revisions.catalog_schema) == runmat_builtins::BUILTIN_CATALOG_SCHEMA;
     (!supported).then(|| {
         format!(
-            "worker rejected stale executable component revisions: MIR actual {} expected {}; analysis actual {} expected {}; bytecode actual {} expected {}; VM layout actual {} expected {}; function registry actual {} expected {}; contract actual {} expected {}; catalog actual {} expected {}. Rebuild the program with this RunMat version",
+            "worker rejected stale executable component revisions: MIR actual {} expected {}; analysis actual {} expected {}; bytecode actual {} expected {}; VM layout actual {} expected {}; function registry actual {} expected {}; source map actual {} expected 2; contract actual {} expected {}; catalog actual {} expected {}. Rebuild the program with this RunMat version",
             revisions.mir_schema,
             runmat_mir::MIR_SCHEMA_VERSION,
             revisions.analysis_schema,
@@ -729,6 +737,7 @@ fn unsupported_executable_revisions(
             crate::VM_LAYOUT_SCHEMA_VERSION,
             revisions.function_registry_schema,
             crate::FUNCTION_REGISTRY_SCHEMA_VERSION,
+            revisions.source_map_schema,
             revisions.contract_schema,
             runmat_types::RUNMAT_TYPES_SCHEMA.major,
             revisions.catalog_schema,

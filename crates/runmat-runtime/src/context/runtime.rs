@@ -87,6 +87,9 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 pub struct RuntimeContext {
     execution: Rc<dyn RuntimeExecutionServices>,
     program_revision: Option<runmat_execution::ProgramRevision>,
+    program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
+    source_current: Option<Rc<RefCell<crate::source_context::SourceCurrentProjection>>>,
+    source_catalog_view: Option<Rc<RefCell<crate::source_context::SourceCatalogProjection>>>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
@@ -123,6 +126,9 @@ impl RuntimeContext {
         let context = Self {
             execution,
             program_revision: None,
+            program_sources: None,
+            source_current: None,
+            source_catalog_view: None,
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
@@ -242,6 +248,98 @@ impl RuntimeContext {
 
     pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
         self.program_revision.as_ref()
+    }
+
+    /// Issue session-local source leases for a complete immutable program.
+    /// No caller-provided numeric source identity is imported into the issuer.
+    pub fn with_program_sources(
+        mut self,
+        records: impl IntoIterator<Item = crate::source_context::ProgramSourceRecord>,
+    ) -> Result<Self, crate::source_context::ProgramSourceBindingError> {
+        let binding = crate::source_context::bind_program_sources(&self, records)?;
+        self.program_sources = Some(Rc::new(binding));
+        self.source_current = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCurrentProjection::new(None),
+        )));
+        self.source_catalog_view = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCatalogProjection::new(
+                self.state.source.borrow().catalog.clone(),
+            ),
+        )));
+        Ok(self)
+    }
+
+    pub(crate) fn source_catalog_view(
+        &self,
+    ) -> Option<&Rc<RefCell<crate::source_context::SourceCatalogProjection>>> {
+        self.source_catalog_view.as_ref()
+    }
+
+    pub(crate) fn same_source_projection_owner(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.state, &other.state)
+            && match (&self.program_sources, &other.program_sources) {
+                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+
+    pub(super) fn with_poll_source_catalog(mut self) -> Self {
+        let active = super::scope::active_runtime_context()
+            .filter(|active| active.same_source_projection_owner(&self));
+        let current = active
+            .as_ref()
+            .and_then(|active| {
+                active
+                    .source_current()
+                    .map(|current| current.borrow().snapshot())
+            })
+            .or_else(|| {
+                self.source_current
+                    .as_ref()
+                    .map(|current| current.borrow().snapshot())
+            })
+            .unwrap_or_else(|| self.state.source.borrow().current.clone());
+        self.source_current = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCurrentProjection::new(current),
+        )));
+        let snapshot = active
+            .as_ref()
+            .and_then(|active| {
+                active
+                    .source_catalog_view()
+                    .map(|view| view.borrow().snapshot_catalog())
+            })
+            .or_else(|| {
+                self.source_catalog_view
+                    .as_ref()
+                    .map(|view| view.borrow().snapshot_catalog())
+            })
+            .unwrap_or_else(|| self.state.source.borrow().catalog.clone());
+        self.source_catalog_view = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCatalogProjection::new(snapshot),
+        )));
+        self
+    }
+
+    pub(crate) fn source_current(
+        &self,
+    ) -> Option<&Rc<RefCell<crate::source_context::SourceCurrentProjection>>> {
+        self.source_current.as_ref()
+    }
+
+    pub fn program_source_id(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<runmat_types::SourceId> {
+        self.program_sources.as_ref()?.get(ordinal)
+    }
+
+    pub fn program_source_ref(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<crate::source_context::RuntimeSourceRef> {
+        self.program_sources.as_ref()?.source_ref(ordinal)
     }
 
     pub fn with_program_revision(
@@ -422,7 +520,23 @@ impl RuntimeContext {
         } else {
             child
         };
-        *child.state.source.borrow_mut() = self.state.source.borrow().clone();
+        *child.state.source.borrow_mut() = self.state.source.borrow().fork_snapshot();
+        let mut child = child;
+        if let Some(sources) = &self.program_sources {
+            child.program_sources = Some(Rc::new(sources.fork_snapshot()));
+        }
+        if let Some(current) = &self.source_current {
+            child.source_current = Some(Rc::new(RefCell::new(
+                crate::source_context::SourceCurrentProjection::new(current.borrow().snapshot()),
+            )));
+        }
+        if let Some(view) = &self.source_catalog_view {
+            child.source_catalog_view = Some(Rc::new(RefCell::new(
+                crate::source_context::SourceCatalogProjection::new(
+                    view.borrow().snapshot_catalog(),
+                ),
+            )));
+        }
         *child.state.call.borrow_mut() = self.state.call.borrow().clone();
         *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
         *child.state.session_variables.borrow_mut() = self.state.session_variables.borrow().clone();

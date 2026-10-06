@@ -65,6 +65,8 @@ impl RunMatSession {
     async fn invoke_generic_native(
         &mut self,
         unit: &crate::ExecutableUnit,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_functions: &runmat_vm::FunctionRegistry,
         preferred_function: Option<&str>,
         arguments: Vec<Value>,
         requested_outputs: usize,
@@ -80,10 +82,8 @@ impl RunMatSession {
                 preferred_function,
                 arguments,
                 requested_outputs,
-                runtime: self
-                    .runtime_context
-                    .clone()
-                    .with_program_revision(Some(unit.revision().program_revision.clone())),
+                runtime: runtime.clone(),
+                runtime_functions,
                 workspace: None,
             },
         )
@@ -158,9 +158,10 @@ impl RunMatSession {
     pub(super) async fn invoke_tiered_interactive(
         &mut self,
         unit: &crate::ExecutableUnit,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_functions: &runmat_vm::FunctionRegistry,
         workspace: &runmat_native_executor::execute::NativeWorkspaceInput,
         profile: Option<&runmat_jit::tiering::RepresentationProfile>,
-        runtime: runmat_runtime::context::RuntimeContext,
     ) -> std::result::Result<Option<crate::generic_native::NativeExecution>, RuntimeError> {
         let published = self
             .generic_native_cache
@@ -186,8 +187,8 @@ impl RunMatSession {
                 preferred_function: None,
                 arguments: Vec::new(),
                 requested_outputs: 0,
-                runtime: runtime
-                    .with_program_revision(Some(unit.revision().program_revision.clone())),
+                runtime: runtime.clone(),
+                runtime_functions,
                 workspace: Some(workspace.clone()),
             },
         )
@@ -228,9 +229,13 @@ impl RunMatSession {
     async fn invoke_tiered_entrypoint(
         &mut self,
         unit: &crate::ExecutableUnit,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_bytecode: &runmat_vm::Bytecode,
     ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         if !self.native_tiering_enabled {
-            return self.invoke_entrypoint_interpreted(unit).await;
+            return self
+                .invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode)
+                .await;
         }
         let profile = self.generic_native_cache.representation_profile(&[]);
         let started = std::time::Instant::now();
@@ -257,10 +262,8 @@ impl RunMatSession {
                         preferred_function: None,
                         arguments: Vec::new(),
                         requested_outputs: 0,
-                        runtime: self
-                            .runtime_context
-                            .clone()
-                            .with_program_revision(Some(unit.revision().program_revision.clone())),
+                        runtime: runtime.clone(),
+                        runtime_functions: &runtime_bytecode.function_registry,
                         workspace: None,
                     },
                 )
@@ -278,7 +281,8 @@ impl RunMatSession {
             None => {
                 self.stats.interpreter_fallback += 1;
                 (
-                    self.invoke_entrypoint_interpreted(unit).await,
+                    self.invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode)
+                        .await,
                     BTreeMap::new(),
                     None,
                     0,
@@ -311,6 +315,8 @@ impl RunMatSession {
     async fn invoke_tiered_procedure(
         &mut self,
         unit: &crate::ExecutableUnit,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_bytecode: &runmat_vm::Bytecode,
         function: runmat_hir::FunctionId,
         name: &str,
         arguments: Vec<Value>,
@@ -318,7 +324,14 @@ impl RunMatSession {
     ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         if !self.native_tiering_enabled {
             return self
-                .invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
+                .invoke_procedure_interpreted(
+                    unit,
+                    runtime,
+                    runtime_bytecode,
+                    function,
+                    arguments,
+                    requested_outputs,
+                )
                 .await;
         }
         let profile = self.generic_native_cache.representation_profile(&arguments);
@@ -346,10 +359,8 @@ impl RunMatSession {
                         preferred_function: Some(name),
                         arguments,
                         requested_outputs,
-                        runtime: self
-                            .runtime_context
-                            .clone()
-                            .with_program_revision(Some(unit.revision().program_revision.clone())),
+                        runtime: runtime.clone(),
+                        runtime_functions: &runtime_bytecode.function_registry,
                         workspace: None,
                     },
                 )
@@ -367,8 +378,15 @@ impl RunMatSession {
             None => {
                 self.stats.interpreter_fallback += 1;
                 (
-                    self.invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
-                        .await,
+                    self.invoke_procedure_interpreted(
+                        unit,
+                        runtime,
+                        runtime_bytecode,
+                        function,
+                        arguments,
+                        requested_outputs,
+                    )
+                    .await,
                     BTreeMap::new(),
                     None,
                     0,
@@ -452,8 +470,20 @@ impl RunMatSession {
             .runtime_context
             .clone()
             .with_program_revision(Some(unit.revision().program_revision.clone()));
+        let runtime = unit
+            .bind_runtime_sources(runtime)
+            .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
+        let runtime_bytecode = unit
+            .runtime_bytecode(&runtime)
+            .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
         runtime
-            .scope(self.invoke_executable_in_context(unit, invocation, control))
+            .scope(self.invoke_executable_in_context(
+                unit,
+                invocation,
+                control,
+                &runtime,
+                &runtime_bytecode,
+            ))
             .await
     }
 
@@ -462,6 +492,8 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_bytecode: &runmat_vm::Bytecode,
     ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
         let (_input_guard, _input_events) = self.install_execution_input();
         let _test_services = runmat_runtime::testing::install_test_services(
@@ -484,23 +516,16 @@ impl RunMatSession {
             Some(&unit.source().relative_path),
             Some(&unit.source().text),
         );
-        let _source_catalog_guard =
-            runmat_runtime::source_context::replace_source_catalog_with_fullpaths(
-                unit.source_map()
-                    .entries()
-                    .iter()
-                    .map(|entry| {
-                        (
-                            runmat_hir::SourceId(entry.source_id),
-                            entry.display_name.clone(),
-                            entry.full_path.clone(),
-                            entry.text.clone(),
-                        )
-                    })
-                    .collect(),
-            );
+        let primary_source = runtime
+            .program_source_id(runmat_types::ProgramSourceId(0))
+            .ok_or_else(|| {
+                runtime_error(
+                    "RunMat:ExecutableSourceIdentity",
+                    "executable primary source is absent from the invocation binding",
+                )
+            })?;
         let _source_id_guard =
-            runmat_runtime::source_context::replace_current_source_id(unit.bytecode().source_id);
+            runmat_runtime::source_context::replace_current_source_id(Some(primary_source));
 
         let result = match invocation.target {
             crate::ProcedureTarget::Entrypoint => {
@@ -512,12 +537,22 @@ impl RunMatSession {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
-                    self.invoke_generic_native(unit, None, Vec::new(), 0).await
+                    self.invoke_generic_native(
+                        unit,
+                        runtime,
+                        &runtime_bytecode.function_registry,
+                        None,
+                        Vec::new(),
+                        0,
+                    )
+                    .await
                 } else {
-                    self.invoke_tiered_entrypoint(unit).await
+                    self.invoke_tiered_entrypoint(unit, runtime, runtime_bytecode)
+                        .await
                 }
                 #[cfg(target_arch = "wasm32")]
-                self.invoke_entrypoint_interpreted(unit).await
+                self.invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode)
+                    .await
             }
             crate::ProcedureTarget::Function(name) => {
                 let function = unit.functions().resolve_name(&name).ok_or_else(|| {
@@ -530,6 +565,8 @@ impl RunMatSession {
                 if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
                     self.invoke_generic_native(
                         unit,
+                        runtime,
+                        &runtime_bytecode.function_registry,
                         Some(name.as_str()),
                         invocation.arguments,
                         invocation.requested_outputs,
@@ -538,6 +575,8 @@ impl RunMatSession {
                 } else {
                     self.invoke_tiered_procedure(
                         unit,
+                        runtime,
+                        runtime_bytecode,
                         function,
                         &name,
                         invocation.arguments,
@@ -548,6 +587,8 @@ impl RunMatSession {
                 #[cfg(target_arch = "wasm32")]
                 self.invoke_procedure_interpreted(
                     unit,
+                    runtime,
+                    runtime_bytecode,
                     function,
                     invocation.arguments,
                     invocation.requested_outputs,
@@ -555,7 +596,10 @@ impl RunMatSession {
                 .await
             }
         };
-        let outputs = result.map_err(RunError::Runtime)?;
+        let outputs = result.map_err(|mut error| {
+            self.populate_callstack(&mut error);
+            RunError::Runtime(error)
+        })?;
         ensure_invocation_allowed(control)?;
         Ok(outputs)
     }
@@ -572,15 +616,15 @@ impl RunMatSession {
     async fn invoke_entrypoint_interpreted(
         &mut self,
         unit: &crate::ExecutableUnit,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_bytecode: &runmat_vm::Bytecode,
     ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
-        let mut variables = vec![Value::Num(0.0); unit.bytecode().var_count];
+        let mut variables = vec![Value::Num(0.0); runtime_bytecode.var_count];
         match runmat_vm::interpret_with_vars_in_context(
-            unit.bytecode(),
+            runtime_bytecode,
             &mut variables,
             Some(&unit.source().relative_path),
-            self.runtime_context
-                .clone()
-                .with_program_revision(Some(unit.revision().program_revision.clone())),
+            runtime.clone(),
         )
         .await?
         {
@@ -590,7 +634,9 @@ impl RunMatSession {
 
     async fn invoke_procedure_interpreted(
         &mut self,
-        unit: &crate::ExecutableUnit,
+        _unit: &crate::ExecutableUnit,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        runtime_bytecode: &runmat_vm::Bytecode,
         function: runmat_hir::FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
@@ -599,10 +645,8 @@ impl RunMatSession {
             function.0,
             &arguments,
             requested_outputs,
-            unit.functions(),
-            self.runtime_context
-                .clone()
-                .with_program_revision(Some(unit.revision().program_revision.clone())),
+            &runtime_bytecode.function_registry,
+            runtime.clone(),
         )
         .await
     }

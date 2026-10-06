@@ -13103,7 +13103,7 @@ fn cellfun_session_function_uses_semantic_registry() {
         prepared
             .bytecode
             .function_registry
-            .functions_for_source(inc_source)
+            .functions_for_source_ref(inc_source)
             .contains(&inc_id),
         "session semantic callback target should be indexed by source ownership"
     );

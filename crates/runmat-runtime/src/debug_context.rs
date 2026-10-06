@@ -152,7 +152,8 @@ mod tests {
             "demo.m".to_string(),
             Some("/tmp/demo.m".to_string()),
             "a = 1;\nb = 2;\n".to_string(),
-        )]);
+        )])
+        .expect("debug source catalog admission");
         let _guard = push_frame("demo", Some(source_id), Some((8, 13)));
         let frames = current_frames();
         assert_eq!(frames.len(), 1);

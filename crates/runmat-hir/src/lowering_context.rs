@@ -1,5 +1,5 @@
 use crate::FunctionId;
-use runmat_types::ExternalClassDeclaration;
+use runmat_types::{ExternalClassDeclaration, ProgramSourceId};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -43,6 +43,9 @@ pub struct LoweringContext<'a> {
     pub runmat_extensions_enabled: bool,
     pub top_level_await_enabled: bool,
     pub external_class_declarations: &'a [ExternalClassDeclaration],
+    /// Deterministic source ordinal for each top-level statement. Empty uses
+    /// the ordinary single-source lowering contract.
+    pub top_level_sources: &'a [ProgramSourceId],
 }
 
 impl<'a> LoweringContext<'a> {
@@ -58,6 +61,7 @@ impl<'a> LoweringContext<'a> {
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
             external_class_declarations: &[],
+            top_level_sources: &[],
         }
     }
 
@@ -115,6 +119,11 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
+    pub fn with_top_level_sources(mut self, sources: &'a [ProgramSourceId]) -> Self {
+        self.top_level_sources = sources;
+        self
+    }
+
     pub fn empty() -> Self {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
@@ -128,6 +137,7 @@ impl<'a> LoweringContext<'a> {
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
             external_class_declarations: &[],
+            top_level_sources: &[],
         }
     }
 }

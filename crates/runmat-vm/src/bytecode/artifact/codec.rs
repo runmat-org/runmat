@@ -12,6 +12,9 @@ pub fn encode_interpreter_script_v2(
     bytecode: &Bytecode,
 ) -> Result<Vec<u8>, InterpreterPayloadError> {
     bytecode
+        .validate_portable_source_origins()
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    bytecode
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     encode_payload(
@@ -35,6 +38,9 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
     )?;
     let bytecode: Bytecode = decode_canonical_body(body, InterpreterPayloadForm::ScriptV2)?;
     bytecode
+        .validate_portable_source_origins()
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    bytecode
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     Ok(bytecode)
@@ -43,6 +49,9 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
 pub fn encode_interpreter_program_v2(
     registry: &FunctionRegistry,
 ) -> Result<Vec<u8>, InterpreterPayloadError> {
+    registry
+        .validate_portable_source_origins()
+        .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     for function in registry.functions.values() {
         function
             .validate_catch_scope_metadata()
@@ -81,6 +90,9 @@ pub fn decode_interpreter_program_v2(
     )?;
     let registry: FunctionRegistry =
         decode_canonical_body(body, InterpreterPayloadForm::ProgramV2)?;
+    registry
+        .validate_portable_source_origins()
+        .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     for function in registry.functions.values() {
         function
             .validate_catch_scope_metadata()

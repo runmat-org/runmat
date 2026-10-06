@@ -223,6 +223,71 @@ fn complete_envelope_round_trips_and_binds_every_payload() {
     assert!(reordered.validate().is_err());
 }
 
+fn source_map_v2_envelope(entries: serde_json::Value) -> ExecutableUnitEnvelope {
+    let mut manifest = manifest();
+    manifest.revisions.source_map_schema = 2;
+    let mut payloads = component_payloads();
+    let source_index = payloads
+        .iter()
+        .position(|payload| payload.kind == ExecutableComponentKind::SourceMap)
+        .unwrap();
+    let bytes = serde_json::to_vec(&serde_json::json!({ "entries": entries })).unwrap();
+    payloads[source_index] =
+        ExecutableComponentPayload::new(ExecutableComponentKind::SourceMap, bytes).unwrap();
+    manifest.components[source_index] = ExecutableComponentDescriptor::from_payload(
+        ExecutableComponentKind::SourceMap,
+        2,
+        &payloads[source_index].bytes,
+    )
+    .unwrap();
+    ExecutableUnitEnvelope {
+        schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
+        manifest,
+        payloads,
+    }
+}
+
+fn source_entry(ordinal: usize, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "source_id": ordinal,
+        "owner_identity": "example@1.0.0",
+        "relative_path": format!("source-{ordinal}.m"),
+        "content_revision": Digest::sha256(text.as_bytes()),
+        "display_name": format!("source-{ordinal}.m"),
+        "text": text,
+    })
+}
+
+#[test]
+fn imported_v2_source_map_checks_exact_text_after_component_digest() {
+    let valid = source_map_v2_envelope(serde_json::json!([source_entry(0, "x = 1;\n")]));
+    let bytes = valid.canonical_bytes().unwrap();
+    assert_eq!(
+        ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap(),
+        valid
+    );
+
+    let mut stale = source_entry(0, "x = 1;\n");
+    stale["text"] = serde_json::json!("x = 2;\n");
+    let forged = source_map_v2_envelope(serde_json::json!([stale]));
+    let imported = serde_json::to_vec(&forged).unwrap();
+    assert!(ExecutableUnitEnvelope::from_canonical_bytes(&imported).is_err());
+    assert!(forged.validate().is_err());
+}
+
+#[test]
+fn imported_v2_source_map_requires_dense_unique_ordinals() {
+    for entries in [
+        serde_json::json!([source_entry(0, "a"), source_entry(0, "b")]),
+        serde_json::json!([source_entry(0, "a"), source_entry(2, "b")]),
+        serde_json::json!([source_entry(1, "a")]),
+    ] {
+        let forged = source_map_v2_envelope(entries);
+        let imported = serde_json::to_vec(&forged).unwrap();
+        assert!(ExecutableUnitEnvelope::from_canonical_bytes(&imported).is_err());
+    }
+}
+
 #[test]
 fn manifest_requires_each_component_once_with_matching_schema() {
     let mut missing = manifest();

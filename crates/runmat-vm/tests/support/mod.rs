@@ -48,3 +48,33 @@ pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeEr
     let bytecode = bytecode.clone();
     run_with_stack(move || block_on(runmat_vm::interpret(&bytecode)))?
 }
+
+#[allow(dead_code)]
+pub fn interpret_with_program_source(
+    bytecode: &runmat_vm::Bytecode,
+    name: &str,
+    text: &str,
+) -> Result<Vec<Value>, RuntimeError> {
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_program_sources([runmat_runtime::source_context::ProgramSourceRecord {
+        ordinal: runmat_types::ProgramSourceId(0),
+        name: std::sync::Arc::from(name),
+        fullpath_name: None,
+        text: std::sync::Arc::from(text),
+    }])
+    .map_err(|error| RuntimeError::new(error.to_string()))?;
+    let bytecode = bytecode.clone();
+    run_with_stack(move || {
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let outcome = block_on(runmat_vm::interpret_with_vars_in_context(
+            &bytecode,
+            &mut vars,
+            Some("<main>"),
+            runtime,
+        ))?;
+        let runmat_vm::InterpreterOutcome::Completed(completion) = outcome;
+        Ok(completion.values)
+    })?
+}

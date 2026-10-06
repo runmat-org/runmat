@@ -11,6 +11,7 @@ pub struct NativeCompilationInput {
     mir: runmat_mir::MirAssembly,
     analysis: runmat_mir::analysis::AnalysisStore,
     manifest: runmat_execution::ExecutableUnitManifest,
+    source_map: runmat_execution::ExecutableSourceMapV2,
     binding_names: BTreeMap<runmat_types::BindingId, String>,
     entrypoint: runmat_types::ProgramFunctionId,
     program_capture: Vec<u8>,
@@ -163,6 +164,7 @@ impl NativeCompilationInput {
         let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
             assembly,
             runmat_execution::Digest::sha256(&native_ir),
+            self.source_map.clone(),
             options.runtime_binding_mode,
             options.builtin_bindings,
         )?
@@ -317,6 +319,10 @@ impl ExecutableUnit {
             analysis: self.analysis().clone(),
             entrypoint: envelope.manifest.identity.entrypoint_function,
             manifest: envelope.manifest,
+            source_map: self
+                .source_map
+                .portable_v2()
+                .map_err(native_product_error)?,
             binding_names: self.binding_names(),
             program_capture,
             interpreter_resume_points,
@@ -504,6 +510,29 @@ end
             runmat_native_codegen::aot::AotProgramManifest::from_canonical_bytes(program_bytes)
                 .expect("decode AOT program manifest");
         assert_eq!(program.functions.len(), 2);
+        assert_eq!(
+            program.source_map.entries.len(),
+            unit.source_map().entries().len()
+        );
+        for (embedded, original) in program
+            .source_map
+            .entries
+            .iter()
+            .zip(unit.source_map().entries())
+        {
+            assert_eq!(embedded.source_id, original.source_id);
+            assert_eq!(embedded.relative_path, original.relative_path);
+            assert_eq!(embedded.text, original.text);
+            assert_eq!(embedded.content_revision, original.content_revision);
+        }
+        let mut forged = program.clone();
+        forged.source_map.entries[0]
+            .text
+            .push_str("\nforged = true;");
+        assert!(forged.canonical_bytes().is_err());
+        let mut missing_source = program.clone();
+        missing_source.functions[0].source = runmat_types::ProgramSourceId(u32::MAX);
+        assert!(missing_source.canonical_bytes().is_err());
         assert!(program
             .functions
             .iter()

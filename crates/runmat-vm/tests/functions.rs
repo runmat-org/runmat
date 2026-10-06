@@ -35,15 +35,8 @@ fn execute_source_with_extensions(source: &str) -> Vec<runmat_value::Value> {
 
 fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_value::Value> {
     let bytecode = compile_source(source).expect("compile source");
-    let source_id = bytecode.source_id.unwrap_or(runmat_hir::SourceId(0));
-    let source_text = source.to_string();
-    let source_name = name.to_string();
-    let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
-        source_id,
-        source_name,
-        source_text,
-    )]);
-    interpret(&bytecode).expect("execute bytecode")
+    test_helpers::interpret_with_program_source(&bytecode, name, source)
+        .expect("execute bytecode with selected program source")
 }
 
 fn execute_source_result(
@@ -2160,7 +2153,8 @@ fn mfilename_reads_current_source_context() {
         runmat_hir::SourceId(0),
         "/tmp/runmat_vm_mfilename_probe.m".to_string(),
         source_text,
-    )]);
+    )])
+    .expect("source catalog admission");
     let vars = interpret(&bytecode).expect("execute bytecode");
     assert!(
         vars.iter().any(|v| {

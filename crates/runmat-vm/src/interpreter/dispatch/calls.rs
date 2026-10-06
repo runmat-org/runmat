@@ -283,6 +283,7 @@ async fn handle_builtin_call_inner(
     }
     if call_builtins::is_vm_dynamic_workspace_builtin(name) {
         let result = call_builtins::vm_dynamic_workspace_builtin(
+            runtime,
             stack,
             name,
             arg_count,
@@ -666,6 +667,7 @@ pub async fn handle_workspace_first_prepared_call(
             let mut temp_stack = args;
             let arg_count = temp_stack.len();
             let result = call_builtins::vm_dynamic_workspace_builtin(
+                runtime,
                 &mut temp_stack,
                 &id.0,
                 arg_count,

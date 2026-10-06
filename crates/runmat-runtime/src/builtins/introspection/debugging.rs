@@ -1028,7 +1028,8 @@ mod tests {
             "worker.m".to_string(),
             Some("/tmp/worker.m".to_string()),
             "function worker\nx = dbstack;\nend\n".to_string(),
-        )]);
+        )])
+        .expect("debugging source catalog admission");
         let _guard = crate::debug_context::push_frame("worker", Some(source_id), Some((16, 25)));
         let value = dispatch_dbstack(Vec::new()).expect("dbstack");
         assert_eq!(stack_len(&value), 1);
