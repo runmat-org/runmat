@@ -58,10 +58,16 @@ fn invalid_text_and_reference_line_leave_existing_scene_unchanged() {
     let _guard = lock_plot_registry();
     ensure_plot_test_env();
     reset_plot_state();
+    super::super::title::title_builtin(vec![Value::String("existing title".into())])
+        .expect("create the scene with a title");
+    super::super::xline::xline_builtin(vec![Value::Num(1.0)])
+        .expect("seed the scene with a reference line");
     let figure = current_figure_handle();
     let before = clone_figure(figure).unwrap();
     let original_title = before.axes_metadata(0).and_then(|meta| meta.title.clone());
     let original_plots = before.plots().count();
+    assert!(original_title.is_some());
+    assert!(original_plots > 0);
     assert!(super::super::title::title_builtin(invalid_style()).is_err());
     assert!(super::super::xline::xline_builtin(vec![Value::Num(f64::NAN)]).is_err());
     let after = clone_figure(figure).unwrap();
