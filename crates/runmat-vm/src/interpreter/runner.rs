@@ -1958,7 +1958,7 @@ mod tests {
         let source = runmat_runtime::source_context::lease_source_context_in_context(
             &runtime,
             "semantic_source.m",
-            Some("/workspace/private/semantic_source.m"),
+            Some("/workspace/private/semantic_source.m".into()),
             "error('semantic source failure');",
         )
         .expect("semantic source lease");
