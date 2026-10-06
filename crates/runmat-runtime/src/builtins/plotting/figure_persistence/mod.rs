@@ -55,15 +55,15 @@ use saveas::saveas_builtin;
 use savefig::savefig_builtin;
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use hgload::__runmat_wasm_register_builtin_hgload_builtin_registered as __runmat_wasm_register_builtin_hgload_builtin;
+pub(crate) use hgload::__runmat_wasm_register_builtin_hgload_builtin_registered;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use hgsave::__runmat_wasm_register_builtin_hgsave_builtin_registered as __runmat_wasm_register_builtin_hgsave_builtin;
+pub(crate) use hgsave::__runmat_wasm_register_builtin_hgsave_builtin_registered;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use openfig::__runmat_wasm_register_builtin_openfig_builtin_registered as __runmat_wasm_register_builtin_openfig_builtin;
+pub(crate) use openfig::__runmat_wasm_register_builtin_openfig_builtin_registered;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use saveas::__runmat_wasm_register_builtin_saveas_builtin_registered as __runmat_wasm_register_builtin_saveas_builtin;
+pub(crate) use saveas::__runmat_wasm_register_builtin_saveas_builtin_registered;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use savefig::__runmat_wasm_register_builtin_savefig_builtin_registered as __runmat_wasm_register_builtin_savefig_builtin;
+pub(crate) use savefig::__runmat_wasm_register_builtin_savefig_builtin_registered;
 
 mod arguments;
 mod archive;
