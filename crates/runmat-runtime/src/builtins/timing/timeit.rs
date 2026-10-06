@@ -64,7 +64,8 @@ async fn timeit_builtin(
     runtime
         .cpu_cooperation()
         .await_cancellable(callable.invoke(&runtime))
-        .await??;
+        .await
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
 
     let loop_count = determine_loop_count(&callable, &runtime).await?;
     let samples = collect_samples(&callable, &runtime, loop_count).await?;
@@ -111,7 +112,8 @@ async fn parse_num_outputs(
             let value = runtime
                 .cpu_cooperation()
                 .await_cancellable(gather_value_async(value))
-                .await?
+                .await
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
                 .map_err(|error| {
                     timeit_error_with_message(error.message(), &TIMEIT_ERROR_NUM_OUTPUTS_SCALAR)
                 })?;

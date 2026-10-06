@@ -116,7 +116,8 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
                 return runtime
                     .cpu_cooperation()
                     .await_cancellable(runtime.service_ports().timing().sleep(Duration::ZERO))
-                    .await?;
+                    .await
+                    .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
             }
             let duration = Duration::try_from_secs_f64(seconds).map_err(|_| {
                 pause_error_with_message(PAUSE_ERROR_INVALID_ARG.message, &PAUSE_ERROR_INVALID_ARG)
@@ -131,7 +132,8 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
             runtime
                 .cpu_cooperation()
                 .await_cancellable(runtime.service_ports().timing().sleep(duration))
-                .await??;
+                .await
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
             #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
             {
                 // Present again after the wait to ensure the compositor sees the most recent frame.
@@ -155,7 +157,8 @@ async fn wait_for_key_press(runtime: &RuntimeContext) -> Result<(), RuntimeError
         runtime
             .cpu_cooperation()
             .await_cancellable(interaction::wait_for_key_async(""))
-            .await?
+            .await
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
     }
 }
 

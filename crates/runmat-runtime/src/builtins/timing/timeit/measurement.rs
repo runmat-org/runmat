@@ -57,8 +57,12 @@ pub(super) async fn run_batch(
         // future. A completed invocation is never replayed on resumption.
         cooperation
             .await_cancellable(callable.invoke(runtime))
-            .await??;
-        cooperation.checkpoint(1).await?;
+            .await
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
+        cooperation
+            .checkpoint(1)
+            .await
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
     }
     let end = timing.monotonic_elapsed();
     Ok(end.saturating_sub(start).as_secs_f64())
