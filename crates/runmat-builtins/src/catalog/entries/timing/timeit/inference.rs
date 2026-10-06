@@ -34,19 +34,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 0,
             ));
         }
-        if let Some(literal) = request.literals.literal_args.first() {
-            match literal {
-                LiteralValue::String(text) | LiteralValue::Character(text) => {
-                    let trimmed = text.trim();
-                    if !trimmed.starts_with('@') || trimmed[1..].trim().is_empty() {
-                        diagnostics.push(argument_error(
-                            "RM-CATALOG-TIMEIT-HANDLE-TEXT",
-                            "timeit text handle must start with @ and name a function",
-                            0,
-                        ));
-                    }
-                }
-                _ => {}
+        if let Some(LiteralValue::String(text) | LiteralValue::Character(text)) =
+            request.literals.literal_args.first()
+        {
+            let trimmed = text.trim();
+            if !trimmed.starts_with('@') || trimmed[1..].trim().is_empty() {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-TIMEIT-HANDLE-TEXT",
+                    "timeit text handle must start with @ and name a function",
+                    0,
+                ));
             }
         }
     }
