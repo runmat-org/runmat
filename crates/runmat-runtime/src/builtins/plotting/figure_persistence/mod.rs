@@ -2,9 +2,7 @@
 
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(test)]
 use runmat_builtins::BuiltinIntegerAuditKind;
@@ -20,7 +18,6 @@ pub use runmat_builtins::{
     OPENFIG_DESCRIPTOR, OPENFIG_INTEGER_AUDIT, SAVEAS_DESCRIPTOR, SAVEAS_INTEGER_AUDIT,
     SAVEFIG_DESCRIPTOR, SAVEFIG_INTEGER_AUDIT,
 };
-use runmat_filesystem::OpenOptions;
 use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
@@ -29,7 +26,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::replay::limits::ReplayLimits;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::properties::{get_properties, resolve_plot_handle, set_properties, PlotHandle};
 use super::state::{current_figure_handle, set_figure_visible, FigureHandle};
@@ -44,7 +41,6 @@ const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
 const FIG_MAGIC: &[u8] = b"RUNMAT-FIGURE-BUNDLE-V1\n";
 const MAX_FIGURE_BUNDLE_COUNT: usize = 4096;
-static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::figure_persistence")]
 pub const SAVEAS_GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -104,18 +100,19 @@ pub use saveas::saveas_builtin;
 pub use savefig::savefig_builtin;
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use hgload::__runmat_wasm_register_builtin_hgload_builtin;
+pub(crate) use hgload::__runmat_wasm_register_builtin_hgload_builtin_registered as __runmat_wasm_register_builtin_hgload_builtin;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use hgsave::__runmat_wasm_register_builtin_hgsave_builtin;
+pub(crate) use hgsave::__runmat_wasm_register_builtin_hgsave_builtin_registered as __runmat_wasm_register_builtin_hgsave_builtin;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use openfig::__runmat_wasm_register_builtin_openfig_builtin;
+pub(crate) use openfig::__runmat_wasm_register_builtin_openfig_builtin_registered as __runmat_wasm_register_builtin_openfig_builtin;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use saveas::__runmat_wasm_register_builtin_saveas_builtin;
+pub(crate) use saveas::__runmat_wasm_register_builtin_saveas_builtin_registered as __runmat_wasm_register_builtin_saveas_builtin;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use savefig::__runmat_wasm_register_builtin_savefig_builtin;
+pub(crate) use savefig::__runmat_wasm_register_builtin_savefig_builtin_registered as __runmat_wasm_register_builtin_savefig_builtin;
 
 mod arguments;
 mod archive;
+mod filesystem;
 mod handles;
 mod operations;
 mod overrides;
@@ -128,6 +125,7 @@ mod tests;
 
 use archive::*;
 use arguments::*;
+use filesystem::*;
 use handles::*;
 use operations::*;
 use overrides::*;

@@ -1,7 +1,8 @@
 use super::*;
 
 pub(super) async fn save_figures(
-    path: &Path,
+    runtime: Option<&crate::context::RuntimeContext>,
+    selected: &FigureFsPath,
     figures: &[FigureHandle],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
@@ -18,22 +19,24 @@ pub(super) async fn save_figures(
         payloads.push(bytes);
     }
     let bytes = encode_figure_bundle(&payloads, builtin)?;
-    write_bytes(path, &bytes, builtin).await
+    write_bytes(runtime, selected, &bytes, builtin).await
 }
 
 pub(super) async fn open_figures(
+    runtime: Option<&crate::context::RuntimeContext>,
+    selected: &FigureFsPath,
     request: &OpenFigRequest,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<FigureHandle>> {
-    let bytes = runmat_filesystem::read_async(&request.path)
-        .await
+    let bytes = crate::execution::staged_file::await_cancellable(runtime, builtin, selected.read())
+        .await?
         .map_err(|err| {
             persistence_error_with_source(
                 &ERROR_IO,
                 builtin,
                 format!(
                     "{builtin}: unable to read figure file '{}'",
-                    request.path.display()
+                    selected.path().display()
                 ),
                 err,
             )

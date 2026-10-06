@@ -1,42 +1,166 @@
 use super::*;
 
-pub(super) async fn execute_saveas(args: Vec<Value>) -> BuiltinResult<bool> {
+async fn in_selected_runtime<T>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    match runtime {
+        Some(runtime) => runtime.scope(future).await,
+        None => future.await,
+    }
+}
+
+pub(super) async fn execute_saveas(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    let selected_runtime = runtime.clone();
+    in_selected_runtime(
+        selected_runtime.as_ref(),
+        execute_saveas_in_context(runtime.as_ref(), args),
+    )
+    .await
+}
+
+async fn execute_saveas_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
     reject_resident_persistence_arguments(&args, SAVEAS)?;
-    let args = gather_values(&args, SAVEAS).await?;
     let request = parse_saveas_args(&args)?;
+    let selected = FigureFsPath::capture(&request.output_path).map_err(|error| {
+        persistence_error_with_source(
+            &ERROR_IO,
+            SAVEAS,
+            "saveas: unable to capture output path",
+            error,
+        )
+    })?;
     match request.format {
-        SaveFormat::Fig => save_figures(&request.output_path, &[request.figure], SAVEAS).await?,
+        SaveFormat::Fig => save_figures(runtime, &selected, &[request.figure], SAVEAS).await?,
         SaveFormat::Png => {
             let bytes = render_png(request.figure, DEFAULT_WIDTH, DEFAULT_HEIGHT, SAVEAS).await?;
-            write_bytes(&request.output_path, &bytes, SAVEAS).await?;
+            write_bytes(runtime, &selected, &bytes, SAVEAS).await?;
         }
     }
     Ok(true)
 }
 
-pub(super) async fn execute_savefig(args: Vec<Value>) -> BuiltinResult<bool> {
+pub(super) async fn execute_savefig(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    let selected_runtime = runtime.clone();
+    in_selected_runtime(
+        selected_runtime.as_ref(),
+        execute_savefig_in_context(runtime.as_ref(), args),
+    )
+    .await
+}
+
+async fn execute_savefig_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
     reject_resident_persistence_arguments(&args, SAVEFIG)?;
-    let args = gather_values(&args, SAVEFIG).await?;
     let request = parse_savefig_args(&args, SAVEFIG)?;
-    save_figures(&request.output_path, &request.figures, SAVEFIG).await?;
+    let selected = FigureFsPath::capture(&request.output_path).map_err(|error| {
+        persistence_error_with_source(
+            &ERROR_IO,
+            SAVEFIG,
+            "savefig: unable to capture output path",
+            error,
+        )
+    })?;
+    save_figures(runtime, &selected, &request.figures, SAVEFIG).await?;
     Ok(true)
 }
 
-pub(super) async fn execute_openfig(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn execute_openfig(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let selected_runtime = runtime.clone();
+    in_selected_runtime(
+        selected_runtime.as_ref(),
+        execute_openfig_in_context(runtime.as_ref(), args),
+    )
+    .await
+}
+
+async fn execute_openfig_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let request = parse_openfig_args(&args, OPENFIG)?;
-    let handles = open_figures(&request, OPENFIG).await?;
+    let selected = FigureFsPath::capture(&request.path).map_err(|error| {
+        persistence_error_with_source(
+            &ERROR_IO,
+            OPENFIG,
+            "openfig: unable to capture input path",
+            error,
+        )
+    })?;
+    let handles = open_figures(runtime, &selected, &request, OPENFIG).await?;
     Ok(handles_value(&handles))
 }
 
-pub(super) async fn execute_hgsave(args: Vec<Value>) -> BuiltinResult<bool> {
+pub(super) async fn execute_hgsave(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    let selected_runtime = runtime.clone();
+    in_selected_runtime(
+        selected_runtime.as_ref(),
+        execute_hgsave_in_context(runtime.as_ref(), args),
+    )
+    .await
+}
+
+async fn execute_hgsave_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    reject_resident_persistence_arguments(&args, HGSAVE)?;
     let request = parse_savefig_args(&args, HGSAVE)?;
-    save_figures(&request.output_path, &request.figures, HGSAVE).await?;
+    let selected = FigureFsPath::capture(&request.output_path).map_err(|error| {
+        persistence_error_with_source(
+            &ERROR_IO,
+            HGSAVE,
+            "hgsave: unable to capture output path",
+            error,
+        )
+    })?;
+    save_figures(runtime, &selected, &request.figures, HGSAVE).await?;
     Ok(true)
 }
 
-pub(super) async fn execute_hgload(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn execute_hgload(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let selected_runtime = runtime.clone();
+    in_selected_runtime(
+        selected_runtime.as_ref(),
+        execute_hgload_in_context(runtime.as_ref(), args),
+    )
+    .await
+}
+
+async fn execute_hgload_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let (request, overrides) = parse_hgload_args(&args)?;
-    let handles = open_figures(&request, HGLOAD).await?;
+    let selected = FigureFsPath::capture(&request.path).map_err(|error| {
+        persistence_error_with_source(
+            &ERROR_IO,
+            HGLOAD,
+            "hgload: unable to capture input path",
+            error,
+        )
+    })?;
+    let handles = open_figures(runtime, &selected, &request, HGLOAD).await?;
     let old_values = apply_hgload_overrides(&handles, overrides.as_ref())?;
 
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -49,20 +173,6 @@ pub(super) async fn execute_hgload(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     Ok(handles_value(&handles))
-}
-
-pub(super) async fn gather_values(
-    values: &[Value],
-    builtin: &'static str,
-) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather_if_needed_async(value).await.map_err(|err| {
-            let message = err.message().to_string();
-            persistence_error_with_source(&ERROR_INTERNAL, builtin, message, err)
-        })?);
-    }
-    Ok(out)
 }
 
 pub(super) fn reject_resident_persistence_arguments(
