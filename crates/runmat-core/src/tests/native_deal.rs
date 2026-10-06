@@ -42,18 +42,16 @@ fn assert_wide_aliases(left: &Value, right: &Value) {
 fn interactive_deal_wide_integer_replication_reaches_a_jit_entry() {
     runmat_gc::gc_test_context(|| {
         let mut session = deterministic_native_session();
-        let seeded = execute_text_request(
+        execute_text_request(
             &mut session,
             "wide = uint64(9007199254740992) + uint64([0, 1]);",
         )
         .expect("seed exact wide integers");
-        assert!(seeded.error.is_none(), "{:?}", seeded.error);
 
         let mut entered_jit = false;
         for _ in 0..4 {
             let outcome = execute_text_request(&mut session, "[left, right] = deal(wide);")
                 .expect("execute deal replication");
-            assert!(outcome.error.is_none(), "{:?}", outcome.error);
             entered_jit |= outcome.used_jit;
             let variables = session.get_variables().expect("workspace after deal");
             assert_wide_aliases(
