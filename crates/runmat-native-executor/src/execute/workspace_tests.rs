@@ -194,3 +194,21 @@ fn admitted_native_write_remains_publishable_after_execution_state_drops() {
     projection.publish().unwrap();
     assert_eq!(owner.lookup("missing").unwrap(), Some(Value::Num(42.0)));
 }
+
+#[test]
+fn retained_native_workspace_service_rejects_effects_after_executor_drop() {
+    let (function, input) = fixture(Value::Num(1.0));
+    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
+    let service = state.service();
+    drop(state);
+
+    for error in [
+        service.assign("missing", Value::Num(2.0)).unwrap_err(),
+        service.remove("missing").unwrap_err(),
+        service.clear().unwrap_err(),
+    ] {
+        assert_eq!(error.identifier(), Some("RunMat:Workspace:FrameClosed"));
+    }
+    assert!(service.try_snapshot().is_err());
+    assert_eq!(service.lookup("missing"), None);
+}

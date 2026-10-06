@@ -184,7 +184,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
-        self.ensure_frame_active()?;
+        self.ensure_effect_authority()?;
         runmat_runtime::execution::validate_storable_value(&value)?;
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
@@ -202,7 +202,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         name: &str,
         value: Value,
     ) -> Result<(), RuntimeError> {
-        self.ensure_frame_active()?;
+        self.ensure_effect_authority()?;
         runmat_runtime::execution::validate_storable_value(&value)?;
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
@@ -216,7 +216,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     }
 
     fn clear(&self) -> Result<(), RuntimeError> {
-        self.ensure_frame_active()?;
+        self.ensure_effect_authority()?;
         if self.should_publish() {
             if let Some(delegate) = self.delegate.as_ref() {
                 delegate.clear()?;
@@ -226,7 +226,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     }
 
     fn remove(&self, name: &str) -> Result<(), RuntimeError> {
-        self.ensure_frame_active()?;
+        self.ensure_effect_authority()?;
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
         {
@@ -425,6 +425,17 @@ mod tests {
 
             let error = service.try_lookup("x").unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+            let error = service.assign("x", Value::Num(2.0)).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+            let error = service
+                .assign_executor_slot(0, "x", Value::Num(3.0))
+                .unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+            let error = service.remove("x").unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+            let error = service.clear().unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+            assert_eq!(service.lookup("x"), Some(Value::Num(1.0)));
             drop(guard);
         }));
     }
