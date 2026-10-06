@@ -522,7 +522,7 @@ async fn execute_spmd_region_request(
                 Err(message) => ProgramExecutionResponse::Failure { message },
             }
         }
-        Err(error) => runtime_failure_response(error),
+        Err(error) => runtime_failure_response(error, &runtime),
     }
 }
 
@@ -615,7 +615,7 @@ async fn execute_parallel_region_request(
             randomness: task.randomness.clone(),
             mode: crate::interpreter::runner::ParforTaskMode::IndependentIterations,
             current_function_name: &callable_name,
-            runtime,
+            runtime: runtime.clone(),
         },
     )
     .await
@@ -638,7 +638,7 @@ async fn execute_parallel_region_request(
                 message: format!("worker could not transfer its parallel task result: {error}"),
             },
         },
-        Err(error) => runtime_failure_response(error),
+        Err(error) => runtime_failure_response(error, &runtime),
     }
 }
 
@@ -846,7 +846,7 @@ async fn execute_function_request(
                 message: format!("worker could not transfer its result: {error}"),
             },
         },
-        Err(error) => runtime_failure_response(error),
+        Err(error) => runtime_failure_response(error, runtime),
     }
 }
 
@@ -859,12 +859,16 @@ async fn execute_unit_script(
         .iter()
         .find_map(|(slot, name)| (name == "ans").then_some(*slot));
     let mut variables = vec![runmat_value::Value::Num(0.0); bytecode.var_count];
-    let result =
-        crate::interpret_with_vars_in_context(&bytecode, &mut variables, Some("<main>"), runtime)
-            .await
-            .map(|outcome| match outcome {
-                crate::InterpreterOutcome::Completed(completion) => completion.values,
-            });
+    let result = crate::interpret_with_vars_in_context(
+        &bytecode,
+        &mut variables,
+        Some("<main>"),
+        runtime.clone(),
+    )
+    .await
+    .map(|outcome| match outcome {
+        crate::InterpreterOutcome::Completed(completion) => completion.values,
+    });
     match result {
         Ok(values) => {
             let value = result_slot
@@ -879,12 +883,15 @@ async fn execute_unit_script(
                 },
             }
         }
-        Err(error) => runtime_failure_response(error),
+        Err(error) => runtime_failure_response(error, &runtime),
     }
 }
 
-fn runtime_failure_response(error: runmat_runtime::RuntimeError) -> ProgramExecutionResponse {
-    match runmat_runtime::execution::encode_runtime_failure(&error) {
+fn runtime_failure_response(
+    error: runmat_runtime::RuntimeError,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> ProgramExecutionResponse {
+    match runmat_runtime::execution::encode_runtime_failure_in_context(&error, runtime) {
         Ok(failure) => ProgramExecutionResponse::RuntimeFailure { failure },
         Err(protocol_error) => ProgramExecutionResponse::Failure {
             message: format!(

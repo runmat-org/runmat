@@ -29,6 +29,9 @@ pub struct ProgramSourceSpan {
 #[serde(deny_unknown_fields)]
 pub struct ProgramCallFrame {
     pub function: String,
+    /// ProgramSourceId ordinal in the admitted artifact source map, never a
+    /// worker/session SourceId. A receiver without that map must not use this
+    /// number as a local runtime source identity.
     pub source_id: Option<u64>,
     pub span: Option<ProgramSourceSpan>,
 }
