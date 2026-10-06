@@ -371,14 +371,12 @@ impl ProgramSourceTable {
                 .source
                 .as_ref()
                 .expect("companion source was validated above");
-            let key = executable_source_identity(
-                root,
-                handoff,
-                root_full_path,
-                &context.display_name,
-                context.fullpath_name.as_deref(),
-            )?;
-            let source_id = ids[&SourceKey::new(key.0, key.1, context.text.clone())];
+            let key = source_identity(context)?;
+            let source_id = *ids
+                .get(&SourceKey::new(key.0, key.1, context.text.clone()))
+                .ok_or_else(|| {
+                    "companion source is absent from the admitted source table".to_string()
+                })?;
             statement_sources.push(source_id);
             for name in source_context_function_names_in_statements(std::slice::from_ref(
                 &discovered.statement,
