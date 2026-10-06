@@ -109,7 +109,10 @@ fn main() {
 /// to re-run after every proc-macro write during generation, forcing repeated
 /// runmat-runtime recompiles.
 fn ensure_wasm_registry_state() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Cargo may reuse this compiled build script across worktrees sharing a
+    // target directory. Select the source root for this execution, not the
+    // root embedded when the build-script executable was compiled.
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let generating = matches!(env::var(WASM_REGISTRY_ENV), Ok(value) if value == "1");
     println!("cargo:rerun-if-env-changed={WASM_REGISTRY_ENV}");
