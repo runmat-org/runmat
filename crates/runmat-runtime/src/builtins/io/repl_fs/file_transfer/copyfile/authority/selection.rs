@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 impl CopyFilesystem {
-    pub(super) async fn same_path(&self, left: &Path, right: &Path) -> bool {
+    pub(in super::super) async fn same_path(&self, left: &Path, right: &Path) -> bool {
         if self.path(left) == self.path(right) {
             return true;
         }
@@ -16,7 +16,7 @@ impl CopyFilesystem {
         }
     }
 
-    pub(super) async fn is_descendant(&self, parent: &Path, candidate: &Path) -> bool {
+    pub(in super::super) async fn is_descendant(&self, parent: &Path, candidate: &Path) -> bool {
         let parent = self.path(parent);
         let candidate = self.path(candidate);
         if candidate.starts_with(&parent) && candidate != parent {
@@ -31,7 +31,10 @@ impl CopyFilesystem {
         }
     }
 
-    pub(super) async fn wildcard_matches(&self, pattern: &str) -> io::Result<Vec<PathBuf>> {
+    pub(in super::super) async fn wildcard_matches(
+        &self,
+        pattern: &str,
+    ) -> io::Result<Vec<PathBuf>> {
         let path = Path::new(pattern);
         let name = path.file_name().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "pattern has no file name")
@@ -50,7 +53,11 @@ impl CopyFilesystem {
         Ok(matches)
     }
 
-    pub(super) async fn remove_existing(&self, path: &Path, directory: bool) -> io::Result<()> {
+    pub(in super::super) async fn remove_existing(
+        &self,
+        path: &Path,
+        directory: bool,
+    ) -> io::Result<()> {
         let result = if directory {
             self.remove_dir_all(path).await
         } else {
