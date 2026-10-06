@@ -23,7 +23,7 @@ mod source_facts;
 use source_facts::{ensure_all_origins, exact_origin_resolver};
 #[path = "callable_artifacts/dynamic.rs"]
 mod dynamic;
-pub(super) use dynamic::{admit_dynamic_callable, DynamicCallableAdmission};
+pub(in crate::session) use dynamic::admit_dynamic_callable;
 
 pub(super) struct SessionCallableArtifactService {
     evaluator: Weak<SessionSourceEvaluator>,

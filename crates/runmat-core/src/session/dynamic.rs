@@ -19,14 +19,14 @@ pub(super) fn path_matches_clear_name(path: &std::path::Path, name: &str) -> boo
 
 #[path = "dynamic/product.rs"]
 mod product;
-pub(super) use product::{
+use product::{
     attach_dynamic_function_origins, dynamic_executable_revision, dynamic_product_dependencies,
     reusable_dynamic_product,
 };
 
 #[path = "dynamic/completion.rs"]
 mod completion;
-pub(super) use completion::finish_dynamic_invocation;
+use completion::finish_dynamic_invocation;
 
 #[path = "dynamic/loader.rs"]
 mod loader;

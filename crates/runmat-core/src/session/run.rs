@@ -1,4 +1,5 @@
 use super::*;
+use std::rc::Rc;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn entrypoint_target_function(

@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
 use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::{build_runtime_error, RuntimeError};
@@ -47,7 +48,7 @@ pub(in crate::session) fn admit_dynamic_callable(
         },
     )
     .map_err(staging_error)?;
-    let exact_facts = exact_origin_resolver(Rc::clone(prepared.exact_origin_facts()));
+    let exact_facts = exact_origin_resolver(Arc::clone(prepared.exact_origin_facts()));
     let binding = {
         let _entry = runtime.enter();
         let _facts = runmat_runtime::user_functions::install_execution_source_resolver(Some(

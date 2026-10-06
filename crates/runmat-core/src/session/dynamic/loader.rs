@@ -1,7 +1,8 @@
 use super::super::*;
+use std::rc::Rc;
 use tracing::Instrument;
 
-pub(super) async fn load_dynamic_function(
+pub(in crate::session) async fn load_dynamic_function(
     runtime: runmat_runtime::context::RuntimeContext,
     name: String,
     args: runmat_runtime::execution::RootedValues,
@@ -461,12 +462,14 @@ pub(super) async fn load_dynamic_function(
 }
 
 #[derive(Clone)]
-pub(super) struct DynamicFunctionEnvironment {
-    pub(super) compat: CompatMode,
-    pub(super) top_level_await_enabled: bool,
-    pub(super) cache: Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
-    pub(super) project_handoff: Option<runmat_package::FrozenProjectHandoff>,
-    pub(super) source_evaluator: Rc<super::super::source_evaluation::SessionSourceEvaluator>,
+pub(in crate::session) struct DynamicFunctionEnvironment {
+    pub(in crate::session) compat: CompatMode,
+    pub(in crate::session) top_level_await_enabled: bool,
+    pub(in crate::session) cache:
+        Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
+    pub(in crate::session) project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    pub(in crate::session) source_evaluator:
+        Rc<super::super::source_evaluation::SessionSourceEvaluator>,
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) mex_runtime: std::rc::Rc<runmat_runtime::foreign::MexRuntimeSession>,
+    pub(in crate::session) mex_runtime: std::rc::Rc<runmat_runtime::foreign::MexRuntimeSession>,
 }

@@ -20,7 +20,6 @@ mod callable_artifacts;
 
 pub(super) use callable_artifacts::{
     admit_dynamic_callable, install_bound_invoker, service as callable_artifact_service,
-    DynamicCallableAdmission,
 };
 
 pub(super) struct SessionSourceEvaluator {
