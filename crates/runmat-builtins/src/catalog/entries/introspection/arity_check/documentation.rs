@@ -64,7 +64,7 @@ pub(super) const NARGINCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
         notes: &[],
     },
     introduced: None,
-    status: Some(BuiltinDocumentationStatus::Complete),
+    status: None,
 };
 
 pub(super) const NARGOUTCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
@@ -114,5 +114,5 @@ pub(super) const NARGOUTCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumen
         notes: &[],
     },
     introduced: None,
-    status: Some(BuiltinDocumentationStatus::Complete),
+    status: None,
 };
