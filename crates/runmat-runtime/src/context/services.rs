@@ -139,16 +139,31 @@ pub trait RuntimeWorkspaceService {
         Ok(self.global_names())
     }
 
-    /// Return the canonical base-workspace authority when this service owns
-    /// one. Caller-frame adapters deliberately return `None`: globals,
-    /// persistents, and procedure-local workspaces are separate authorities.
-    fn base_workspace_owner(&self) -> Option<crate::workspace::BaseWorkspaceOwner> {
-        None
+    /// Admit an ordered projection for this exact current-workspace service.
+    ///
+    /// Sequential caller-frame adapters return `None`; a service backed by a
+    /// transactional owner may return a projection without exposing ownership
+    /// or close authority. Callers must not substitute the session base port
+    /// when this current-frame operation is unavailable.
+    fn begin_workspace_projection(
+        &self,
+    ) -> Result<Option<crate::workspace::BaseWorkspaceProjection>, RuntimeError> {
+        Ok(None)
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError>;
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;
+}
+
+/// Session-lifetime authority for the canonical base workspace.
+///
+/// This is deliberately separate from [`RuntimeWorkspaceService`], whose
+/// installed value may describe a procedure or caller frame. Possessing a
+/// current-frame service never grants base-workspace ownership; the host must
+/// compose this port explicitly for the session.
+pub trait RuntimeBaseWorkspaceService {
+    fn owner(&self) -> crate::workspace::BaseWorkspaceOwner;
 }
 
 pub trait RuntimeObjectService {
@@ -940,6 +955,7 @@ pub struct RuntimeServicePorts {
     call: Option<Rc<dyn RuntimeCallService>>,
     builtin: Option<Rc<dyn RuntimeBuiltinService>>,
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
+    base_workspace: Option<Rc<dyn RuntimeBaseWorkspaceService>>,
     object: Option<Rc<dyn RuntimeObjectService>>,
     host: Option<Rc<dyn RuntimeHostService>>,
     http: Option<Rc<dyn RuntimeHttpService>>,
@@ -969,6 +985,7 @@ impl Default for RuntimeServicePorts {
             call: None,
             builtin: None,
             workspace: None,
+            base_workspace: None,
             object: None,
             host: None,
             http: None,
@@ -1001,6 +1018,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("call", &self.call.is_some())
             .field("builtin", &self.builtin.is_some())
             .field("workspace", &self.workspace.is_some())
+            .field("base_workspace", &self.base_workspace.is_some())
             .field("object", &self.object.is_some())
             .field("host", &self.host.is_some())
             .field("http", &self.http.is_some())
@@ -1118,6 +1136,14 @@ impl RuntimeServicePorts {
         Workspace
     );
     port_accessors!(
+        with_base_workspace,
+        base_workspace,
+        require_base_workspace,
+        base_workspace,
+        RuntimeBaseWorkspaceService,
+        BaseWorkspace
+    );
+    port_accessors!(
         with_source_evaluation,
         source_evaluation,
         require_source_evaluation,
@@ -1131,6 +1157,14 @@ impl RuntimeServicePorts {
     /// workspace authority without exposing or mutating the caller frame.
     pub fn without_workspace(mut self) -> Self {
         self.workspace = None;
+        self
+    }
+
+    /// Remove session base-workspace authority when constructing an isolated
+    /// runtime such as a parallel lab. Ordinary procedure frames use
+    /// [`Self::without_workspace`] and retain this separate session authority.
+    pub fn without_base_workspace(mut self) -> Self {
+        self.base_workspace = None;
         self
     }
     port_accessors!(
@@ -1331,6 +1365,7 @@ mod tests {
             missing(ports.require_builtin("resolve builtin")),
             missing(ports.require_call("invoke")),
             missing(ports.require_workspace("lookup")),
+            missing(ports.require_base_workspace("base workspace projection")),
             missing(ports.require_object("class lookup")),
             missing(ports.require_host("console write")),
             missing(ports.require_http("HTTP request")),
@@ -1356,6 +1391,7 @@ mod tests {
                 RuntimeCapability::Builtin,
                 RuntimeCapability::Call,
                 RuntimeCapability::Workspace,
+                RuntimeCapability::BaseWorkspace,
                 RuntimeCapability::Object,
                 RuntimeCapability::Host,
                 RuntimeCapability::Http,

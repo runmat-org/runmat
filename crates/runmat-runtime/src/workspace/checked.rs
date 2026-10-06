@@ -62,14 +62,20 @@ pub fn try_global_names() -> Result<Vec<String>, crate::RuntimeError> {
 /// Resolve the canonical session base-workspace owner. Procedure-local and
 /// legacy resolver services do not implicitly acquire this authority.
 pub fn base_workspace_owner() -> Result<BaseWorkspaceOwner, crate::RuntimeError> {
-    let context = crate::context::legacy::active().ok_or_else(workspace_capability_error)?;
+    let context = crate::context::legacy::active().ok_or_else(base_workspace_capability_error)?;
     let service = context
         .service_ports()
-        .require_workspace("access the canonical base workspace")
+        .require_base_workspace("access the canonical base workspace")
         .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
-    service
-        .base_workspace_owner()
-        .ok_or_else(workspace_capability_error)
+    Ok(service.owner())
+}
+
+fn base_workspace_capability_error() -> crate::RuntimeError {
+    crate::context::RuntimeCapabilityError::new(
+        crate::context::RuntimeCapability::BaseWorkspace,
+        "access the canonical base workspace",
+    )
+    .into_runtime_error()
 }
 
 pub fn begin_base_workspace_projection() -> Result<BaseWorkspaceProjection, crate::RuntimeError> {

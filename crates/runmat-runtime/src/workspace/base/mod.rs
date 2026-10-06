@@ -24,4 +24,6 @@ pub(crate) use service::base_workspace_error_to_runtime;
 pub use service::BaseWorkspaceService;
 
 #[cfg(test)]
+mod authority_tests;
+#[cfg(test)]
 mod tests;

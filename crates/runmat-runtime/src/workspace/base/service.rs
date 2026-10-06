@@ -1,6 +1,6 @@
 use runmat_value::Value;
 
-use crate::context::RuntimeWorkspaceService;
+use crate::context::{RuntimeBaseWorkspaceService, RuntimeWorkspaceService};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
@@ -45,6 +45,12 @@ impl BaseWorkspaceService {
     }
 }
 
+impl RuntimeBaseWorkspaceService for BaseWorkspaceService {
+    fn owner(&self) -> BaseWorkspaceOwner {
+        BaseWorkspaceService::owner(self)
+    }
+}
+
 impl RuntimeWorkspaceService for BaseWorkspaceService {
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         self.owner.visit_retained_values(visitor).ok().flatten()
@@ -85,8 +91,13 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
         Ok(super::super::session::global_names())
     }
 
-    fn base_workspace_owner(&self) -> Option<BaseWorkspaceOwner> {
-        Some(self.owner())
+    fn begin_workspace_projection(
+        &self,
+    ) -> Result<Option<super::BaseWorkspaceProjection>, RuntimeError> {
+        self.owner
+            .begin_projection()
+            .map(Some)
+            .map_err(base_workspace_error_to_runtime)
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
