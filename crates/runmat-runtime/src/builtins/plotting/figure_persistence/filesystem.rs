@@ -155,6 +155,7 @@ impl FigureFsPath {
         Ok(path)
     }
 
+    #[cfg(test)]
     pub(super) fn path(&self) -> &Path {
         &self.path
     }

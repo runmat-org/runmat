@@ -13,13 +13,6 @@ impl SaveFormat {
             SaveFormat::Png => "png",
         }
     }
-
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            SaveFormat::Fig => "fig",
-            SaveFormat::Png => "png",
-        }
-    }
 }
 
 #[derive(Debug)]
