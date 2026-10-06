@@ -106,6 +106,7 @@ pub struct RuntimeContext {
     program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
     source_current: Option<Rc<RefCell<crate::source_context::SourceCurrentProjection>>>,
     source_catalog_view: Option<Rc<RefCell<crate::source_context::SourceCatalogProjection>>>,
+    debug_projection: Rc<RefCell<crate::debug_context::DebugFrameProjection>>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
@@ -147,6 +148,7 @@ impl RuntimeContext {
             program_sources: None,
             source_current: None,
             source_catalog_view: None,
+            debug_projection: Rc::new(RefCell::new(Default::default())),
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
@@ -417,6 +419,26 @@ impl RuntimeContext {
         self.source_catalog_view = Some(Rc::new(RefCell::new(
             crate::source_context::SourceCatalogProjection::new(snapshot),
         )));
+        self
+    }
+
+    pub(super) fn with_poll_debug_frames(mut self) -> Self {
+        let snapshot = self.debug_projection.borrow().snapshot();
+        self.debug_projection = Rc::new(RefCell::new(snapshot));
+        self
+    }
+
+    pub(crate) fn debug_projection(
+        &self,
+    ) -> &Rc<RefCell<crate::debug_context::DebugFrameProjection>> {
+        &self.debug_projection
+    }
+
+    /// Add an immutable VM frame to this invocation only. Independently
+    /// pending siblings keep their own linked frame heads.
+    pub fn with_debug_frame(mut self, frame: crate::debug_context::DebugFrame) -> Self {
+        let projection = self.debug_projection.borrow().with_frame(frame);
+        self.debug_projection = Rc::new(RefCell::new(projection));
         self
     }
 

@@ -7,7 +7,6 @@ use runmat_types::SourceId;
 use runmat_value::Value;
 
 use crate::callsite::CallsiteInfo;
-use crate::debug_context::DebugFrame;
 use crate::source_context::SourceInfo;
 
 #[derive(Default)]
@@ -41,7 +40,6 @@ pub struct RuntimeContextState {
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
     pub(crate) output: RefCell<OutputState>,
-    pub(crate) debug: RefCell<Vec<DebugFrame>>,
     pub(crate) workspace: RefCell<Option<crate::workspace::WorkspaceResolver>>,
     pub(crate) session_variables: RefCell<crate::workspace::session::SessionVariableState>,
     pub(crate) warnings: RefCell<Vec<crate::warning_store::RuntimeWarning>>,
@@ -81,7 +79,6 @@ impl RuntimeContextState {
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
             output: RefCell::new(OutputState::default()),
-            debug: RefCell::new(Vec::new()),
             workspace: RefCell::new(None),
             session_variables: RefCell::new(
                 crate::workspace::session::SessionVariableState::default(),

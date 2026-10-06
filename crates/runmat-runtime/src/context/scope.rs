@@ -71,7 +71,7 @@ pub struct ContextFuture<F> {
 impl<F> ContextFuture<F> {
     pub(super) fn new(context: RuntimeContext, future: F) -> Self {
         Self {
-            context: context.with_poll_source_catalog(),
+            context: context.with_poll_source_catalog().with_poll_debug_frames(),
             future: Some(Box::pin(future)),
         }
     }

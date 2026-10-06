@@ -411,6 +411,11 @@ pub async fn interpret_with_workspace_in_context(
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, admission);
     let frame = workspace_activation.frame();
     let runtime = with_default_acceleration_service(runtime);
+    let runtime = runtime_with_bytecode_debug_frame(
+        runtime,
+        bytecode,
+        current_function_name.unwrap_or("<main>"),
+    );
     let outcome = workspace_activation
         .scope(runtime.scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_with_vars_inner(
@@ -438,6 +443,11 @@ pub async fn interpret_resume_in_context(
     let (runtime, workspace_activation) =
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let runtime = with_default_acceleration_service(runtime);
+    let runtime = runtime_with_bytecode_debug_frame(
+        runtime,
+        bytecode,
+        current_function_name.unwrap_or("<main>"),
+    );
     workspace_activation
         .scope(runtime.scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_resume_inner(bytecode, resume, current_function_name, runtime.clone()),
@@ -532,11 +542,6 @@ async fn interpret_resume_inner(
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&state.context.runtime));
-    let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
-        current_name,
-        source_id,
-        bytecode_frame_span(bytecode),
-    );
     let mut output_vars = vars;
     let result = run_interpreter(Box::new(state), &mut output_vars).await;
     match result {
@@ -562,11 +567,6 @@ async fn interpret_with_vars_inner(
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
-    let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
-        current_function_name.unwrap_or("<main>"),
-        source_id,
-        bytecode_frame_span(bytecode),
-    );
     let invocation_arity = runtime
         .invocation_arity()
         .unwrap_or(RuntimeInvocationArity::Script);
@@ -594,6 +594,21 @@ fn bytecode_frame_span(bytecode: &Bytecode) -> Option<(usize, usize)> {
         .instr_spans
         .first()
         .map(|span| (span.start, span.end))
+}
+
+fn runtime_with_bytecode_debug_frame(
+    runtime: runmat_runtime::context::RuntimeContext,
+    bytecode: &Bytecode,
+    name: &str,
+) -> runmat_runtime::context::RuntimeContext {
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&runtime));
+    runtime.with_debug_frame(runmat_runtime::debug_context::DebugFrame {
+        function: name.to_string(),
+        source_id,
+        span: bytecode_frame_span(bytecode),
+    })
 }
 
 async fn run_interpreter(
@@ -1626,6 +1641,7 @@ async fn interpret_function_with_counts_in_context(
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let frame = workspace_activation.frame();
     let runtime = with_default_acceleration_service(runtime);
+    let runtime = runtime_with_bytecode_debug_frame(runtime, bytecode, name);
     let result = workspace_activation
         .scope(
             runtime.scope(interpret_function_with_counts_in_context_inner(
@@ -1665,8 +1681,6 @@ async fn interpret_function_with_counts_in_context_inner(
         runtime,
     );
     state.missing_input_slots = missing_input_slots;
-    let _debug_frame_guard =
-        runmat_runtime::debug_context::push_frame(name, source_id, bytecode_frame_span(bytecode));
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
     let res = match res {
         Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
