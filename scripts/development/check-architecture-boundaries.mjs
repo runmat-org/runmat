@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 import { parseHandwrittenComposition } from "./builtin-migration/module-composition/handwritten-parser.mjs";
 import { companionDefinitions } from "./builtin-migration/module-composition/companions.mjs";
 import { expandComposedSource } from "./builtin-migration/module-composition/composed-source.mjs";
+import {
+  maskRustTriviaAndLiterals,
+  productionRust,
+  rustFunctionRegions,
+} from "./builtin-migration/rust-production-source.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 let failed = false;
@@ -155,29 +160,6 @@ function enforceBoundedModulePackage({
   }
 }
 
-function productionRust(text) {
-  return text.split(/#\s*\[cfg\s*\(test\)\]/, 1)[0];
-}
-
-function rustFunctionRegions(text) {
-  const regions = [];
-  const declarations = /\bfn\s+([A-Za-z_][A-Za-z0-9_]*)[^;{]*\{/g;
-  for (const match of text.matchAll(declarations)) {
-    const start = match.index;
-    const bodyStart = start + match[0].lastIndexOf("{");
-    let depth = 0;
-    for (let cursor = bodyStart; cursor < text.length; cursor += 1) {
-      if (text[cursor] === "{") depth += 1;
-      else if (text[cursor] === "}") depth -= 1;
-      if (depth === 0) {
-        regions.push({ name: match[1], start, end: cursor + 1 });
-        break;
-      }
-    }
-  }
-  return regions;
-}
-
 function enforceTransientSequenceQuarantine() {
   const roots = [
     "crates/runmat-native-executor/src/execute",
@@ -217,8 +199,27 @@ function enforceTransientSequenceQuarantine() {
   }
 
   const projectorCallers = new Map([
-    ["crates/runmat-runtime/src/lib.rs", ["dispatch_callable_with_policy", "feval_builtin"]],
-    ["crates/runmat-runtime/src/dispatcher.rs", ["try_distributed_builtin"]],
+    [
+      "crates/runmat-runtime/src/lib.rs",
+      [
+        "dispatch_callable_with_policy",
+        "call_feval_async_with_outputs",
+        "call_feval_async_with_outputs_in_context",
+        "call_feval_async_with_outputs_and_callsite_in_context",
+      ],
+    ],
+    [
+      "crates/runmat-runtime/src/dispatcher.rs",
+      [
+        "call_builtin_async_impl",
+        "try_call_builtin_async_with_outputs",
+        "try_call_registered_instance_method",
+        "call_builtin_async",
+        "call_builtin_async_in_context",
+        "call_builtin_async_with_outputs",
+        "call_builtin_async_with_outputs_in_context",
+      ],
+    ],
     [
       "crates/runmat-runtime/src/builtins/common/mapped_callable/invoke.rs",
       ["invoke_resolved", "invoke_external", "invoke_closure"],
@@ -229,10 +230,11 @@ function enforceTransientSequenceQuarantine() {
   for (const source of rustSources("crates")) {
     if (source.path === adapterPath) continue;
     const body = productionRust(source.text);
-    if (!body.includes("project_legacy_builtin_value_abi")) continue;
+    const code = maskRustTriviaAndLiterals(body);
+    if (!code.includes("project_legacy_builtin_value_abi")) continue;
     const roles = projectorCallers.get(source.path) ?? [];
-    const regions = rustFunctionRegions(body);
-    const calls = [...body.matchAll(/\bproject_legacy_builtin_value_abi\b/g)];
+    const regions = rustFunctionRegions(code);
+    const calls = [...code.matchAll(/\bproject_legacy_builtin_value_abi\b/g)];
     const owners = calls.map((call) =>
       regions
         .filter((region) => region.start <= call.index && call.index < region.end)
