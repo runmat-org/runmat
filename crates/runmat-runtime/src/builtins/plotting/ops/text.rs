@@ -55,9 +55,13 @@ fn text_error_with_source(
 #[runtime_builtin(
     name = "text",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::text"
 )]
-pub fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn text_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &TEXT_DESCRIPTOR,
         &TEXT_ERROR_TOO_MANY_OUTPUTS,
@@ -107,10 +111,20 @@ pub fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "expected text(x, y, label) or text(x, y, z, label)",
         ));
     }
+    let mut cooperation = runtime.as_ref().map(|context| context.cpu_cooperation());
     let (z, text_idx) = if let Some(text) = value_as_text_string(&rest[2]) {
-        let (position, source) = position_source(&rest[0], &rest[1], None)?;
         let style =
             parse_text_style_pairs(BUILTIN_NAME, &rest[3..]).map_err(map_text_invalid_argument)?;
+        validate_coordinate(&rest[0], "x")?;
+        validate_coordinate(&rest[1], "y")?;
+        let (position, source) =
+            position_source(&rest[0], &rest[1], None, cooperation.as_ref()).await?;
+        if let Some(cooperation) = cooperation.as_mut() {
+            cooperation
+                .checkpoint(0)
+                .await
+                .map_err(map_execution_error)?;
+        }
         return add_text_annotation_for_axes_with_source(
             target.0,
             target.1,
@@ -135,7 +149,17 @@ pub fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     })?;
     let style = parse_text_style_pairs(BUILTIN_NAME, &rest[text_idx + 1..])
         .map_err(map_text_invalid_argument)?;
-    let (position, source) = position_source(&rest[0], &rest[1], Some(&z))?;
+    validate_coordinate(&rest[0], "x")?;
+    validate_coordinate(&rest[1], "y")?;
+    validate_coordinate(&z, "z")?;
+    let (position, source) =
+        position_source(&rest[0], &rest[1], Some(&z), cooperation.as_ref()).await?;
+    if let Some(cooperation) = cooperation.as_mut() {
+        cooperation
+            .checkpoint(0)
+            .await
+            .map_err(map_execution_error)?;
+    }
     add_text_annotation_for_axes_with_source(
         target.0,
         target.1,
@@ -147,15 +171,22 @@ pub fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     .map_err(|err| map_text_internal(map_figure_error(BUILTIN_NAME, err)))
 }
 
-fn position_source(
+fn map_execution_error(source: crate::execution::ExecutionServiceError) -> RuntimeError {
+    let mut error = source.clone().into_runtime_error();
+    error.source = Some(Box::new(source));
+    error
+}
+
+async fn position_source(
     x: &Value,
     y: &Value,
     z: Option<&Value>,
+    cooperation: Option<&crate::execution::CpuCooperationBudget>,
 ) -> crate::BuiltinResult<(glam::Vec3, runmat_plot::plots::NumericPlotData)> {
-    let x = scalar_numeric_tensor(x, "x")?;
-    let y = scalar_numeric_tensor(y, "y")?;
+    let x = scalar_numeric_tensor(x, "x", cooperation).await?;
+    let y = scalar_numeric_tensor(y, "y", cooperation).await?;
     let z = match z {
-        Some(value) => scalar_numeric_tensor(value, "z")?,
+        Some(value) => scalar_numeric_tensor(value, "z", cooperation).await?,
         None => {
             Tensor::from_numeric_storage(NumericStorage::zeros(x.numeric_dtype(), 1), vec![1, 1])
                 .map_err(|err| text_error_with_detail(&TEXT_ERROR_INTERNAL, err))?
@@ -195,11 +226,57 @@ fn position_source(
     ))
 }
 
-fn scalar_numeric_tensor(value: &Value, role: &str) -> crate::BuiltinResult<Tensor> {
+fn validate_coordinate(value: &Value, role: &str) -> crate::BuiltinResult<()> {
+    if let Value::GpuTensor(handle) = value {
+        if handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, dim| count.checked_mul(*dim))
+            == Some(1)
+        {
+            return Ok(());
+        }
+        return Err(text_error_with_detail(
+            &TEXT_ERROR_INVALID_ARGUMENT,
+            format!("{role} must be a real numeric scalar"),
+        ));
+    }
+    let tensor =
+        crate::builtins::common::tensor::value_into_tensor_for(BUILTIN_NAME, value.clone())
+            .map_err(|_| {
+                text_error_with_detail(
+                    &TEXT_ERROR_INVALID_ARGUMENT,
+                    format!("{role} must be a real numeric scalar"),
+                )
+            })?;
+    if crate::builtins::common::tensor::is_scalar_tensor(&tensor) {
+        Ok(())
+    } else {
+        Err(text_error_with_detail(
+            &TEXT_ERROR_INVALID_ARGUMENT,
+            format!("{role} must be a real numeric scalar"),
+        ))
+    }
+}
+
+async fn scalar_numeric_tensor(
+    value: &Value,
+    role: &str,
+    cooperation: Option<&crate::execution::CpuCooperationBudget>,
+) -> crate::BuiltinResult<Tensor> {
     let gathered;
     let value = if matches!(value, Value::GpuTensor(_)) {
-        gathered = futures::executor::block_on(crate::gather_if_needed_async(value))
-            .map_err(|err| text_error_with_detail(&TEXT_ERROR_INTERNAL, err.message()))?;
+        gathered = if let Some(cooperation) = cooperation {
+            cooperation
+                .await_cancellable(crate::gather_if_needed_async(value))
+                .await
+                .map_err(map_execution_error)?
+                .map_err(map_text_internal)?
+        } else {
+            crate::gather_if_needed_async(value)
+                .await
+                .map_err(map_text_internal)?
+        };
         &gathered
     } else {
         value
@@ -224,6 +301,7 @@ fn scalar_numeric_tensor(value: &Value, role: &str) -> crate::BuiltinResult<Tens
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::state::PlotTestLockGuard;
@@ -232,6 +310,11 @@ mod tests {
         clear_figure, current_figure_handle, reset_hold_state_for_run,
     };
     use runmat_value::Tensor;
+    use std::error::Error;
+
+    fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        futures::executor::block_on(super::text_builtin(None, args))
+    }
 
     fn setup() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -380,19 +463,119 @@ mod tests {
         let fig = crate::builtins::plotting::clone_figure(current_figure_handle()).unwrap();
         assert!(fig.axes_text_annotations(0).is_empty());
     }
+
+    #[test]
+    fn text_explicit_gpu_scalar_coordinates_materialize_without_releasing_inputs() {
+        let _guard = setup();
+        test_support::with_test_provider(|provider| {
+            let x = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![2.0], 1, 1).unwrap())
+                .unwrap();
+            let y = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![3.0], 1, 1).unwrap())
+                .unwrap();
+            let handle = futures::executor::block_on(super::text_builtin(
+                None,
+                vec![
+                    Value::GpuTensor(x.clone()),
+                    Value::GpuTensor(y.clone()),
+                    Value::String("resident".into()),
+                ],
+            ))
+            .expect("explicit resident coordinates");
+            let position = Tensor::try_from(
+                &get_builtin(vec![Value::Num(handle), Value::String("Position".into())]).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(position.materialize_f64(), vec![2.0, 3.0, 0.0]);
+            assert!(
+                futures::executor::block_on(crate::gather_if_needed_async(&Value::GpuTensor(x)))
+                    .is_ok()
+            );
+            assert!(
+                futures::executor::block_on(crate::gather_if_needed_async(&Value::GpuTensor(y)))
+                    .is_ok()
+            );
+        });
+    }
+
+    #[test]
+    fn malformed_host_label_rejects_before_resident_coordinate_download() {
+        let _guard = setup();
+        test_support::with_test_provider(|provider| {
+            let x = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![2.0], 1, 1).unwrap())
+                .unwrap();
+            let before = crate::builtins::plotting::clone_figure(current_figure_handle())
+                .unwrap()
+                .axes_text_annotations(0)
+                .len();
+            let error = futures::executor::block_on(super::text_builtin(
+                None,
+                vec![Value::GpuTensor(x), Value::Num(3.0), Value::Num(4.0)],
+            ))
+            .expect_err("text label is required");
+            assert_eq!(error.identifier(), TEXT_ERROR_INVALID_ARGUMENT.identifier);
+            let after = crate::builtins::plotting::clone_figure(current_figure_handle())
+                .unwrap()
+                .axes_text_annotations(0)
+                .len();
+            assert_eq!(before, after);
+        });
+    }
+
+    #[test]
+    fn cancelled_context_does_not_materialize_or_publish_resident_annotation() {
+        let _guard = setup();
+        test_support::with_test_provider(|provider| {
+            let x = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![2.0], 1, 1).unwrap())
+                .unwrap();
+            let source = runmat_execution::cancellation::CancellationSource::new();
+            source.cancel(runmat_execution::CancellationReason::User);
+            let runtime = crate::context::RuntimeContext::with_cancellation(
+                std::rc::Rc::new(crate::execution::RuntimeExecutionService::default()),
+                source.token(),
+            );
+            let before = crate::builtins::plotting::clone_figure(current_figure_handle())
+                .unwrap()
+                .axes_text_annotations(0)
+                .len();
+            let error = futures::executor::block_on(super::text_builtin(
+                Some(runtime),
+                vec![
+                    Value::GpuTensor(x),
+                    Value::Num(3.0),
+                    Value::String("cancelled".into()),
+                ],
+            ))
+            .expect_err("cancelled materialization must not publish a text annotation");
+            assert!(matches!(
+                error.source().and_then(
+                    |source| source.downcast_ref::<crate::execution::ExecutionServiceError>()
+                ),
+                Some(crate::execution::ExecutionServiceError::Cancelled)
+            ));
+            let after = crate::builtins::plotting::clone_figure(current_figure_handle())
+                .unwrap()
+                .axes_text_annotations(0)
+                .len();
+            assert_eq!(before, after);
+        });
+    }
 }
 
 #[cfg(test)]
 mod output_contract_tests {
+    fn text_builtin(args: Vec<runmat_value::Value>) -> crate::BuiltinResult<f64> {
+        futures::executor::block_on(super::text_builtin(None, args))
+    }
+
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::text_builtin(vec![]).expect_err("missing annotation input");
+        let error = text_builtin(vec![]).expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:text:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let error = super::text_builtin(vec![]).expect_err("excess outputs");
+        let error = text_builtin(vec![]).expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:text:TooManyOutputs"));
     }
 }
