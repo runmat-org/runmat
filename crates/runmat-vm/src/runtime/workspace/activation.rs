@@ -18,7 +18,7 @@ pub(crate) struct WorkspaceFrameActivation {
 }
 
 impl WorkspaceFrameActivation {
-    pub(crate) fn new(owner: WorkspaceOwner, frame: WorkspaceFrameId) -> Self {
+    pub(super) fn new(owner: WorkspaceOwner, frame: WorkspaceFrameId) -> Self {
         Self { owner, frame }
     }
 
