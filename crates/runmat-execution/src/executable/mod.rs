@@ -4,6 +4,7 @@ mod identity;
 mod manifest;
 mod revision;
 mod section;
+mod source_map;
 
 pub use component::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,

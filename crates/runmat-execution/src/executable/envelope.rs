@@ -103,6 +103,14 @@ impl ExecutableUnitEnvelope {
                 ));
             }
         }
+        if self.manifest.revisions.source_map_schema == 2 {
+            let source_map = self
+                .component(ExecutableComponentKind::SourceMap)
+                .ok_or_else(|| {
+                    ContractError::invalid("executable.source_map", "source map is missing")
+                })?;
+            super::source_map::validate_source_map_v2(&source_map.bytes)?;
+        }
         Ok(())
     }
 
