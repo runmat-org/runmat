@@ -29,6 +29,14 @@ impl PlannedResourceUsageGraph {
                 .plan
                 .validate_identity()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            if !allocation_matches_plan(
+                &attempt.accounting.resources.allocation,
+                &attempt.plan.request,
+            ) {
+                return Err(AnalysisBridgeError::Identity(
+                    "original attempt allocation differs from the admitted plan",
+                ));
+            }
         }
         AttemptResourceAggregate::new(
             attempts
@@ -71,18 +79,11 @@ impl PlannedResourceUsageGraph {
         let attempts = aggregate
             .attempts
             .into_iter()
-            .map(|accounting| {
-                if !allocation_matches_plan(&accounting.resources.allocation, &plan.request) {
-                    return Err(AnalysisBridgeError::Identity(
-                        "original attempt allocation differs from the admitted plan",
-                    ));
-                }
-                Ok(PlannedResourceUsageAttempt {
-                    plan: plan.clone(),
-                    accounting,
-                })
+            .map(|accounting| PlannedResourceUsageAttempt {
+                plan: plan.clone(),
+                accounting,
             })
-            .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+            .collect();
         Self::new(attempts, wall_millis)
     }
 }

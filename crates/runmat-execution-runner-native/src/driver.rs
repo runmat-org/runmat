@@ -395,6 +395,7 @@ impl LocalDriver {
             };
             let mut report = BackendReport::for_request(&request, report);
             report.execution = Some(Box::new(observed.execution));
+            report.unsuccessful_resources = observed.unsuccessful_resources;
             let (actions, snapshot, checkpoint) = {
                 let mut driver = this.driver.lock().expect("local driver poisoned");
                 let actions = driver

@@ -18,6 +18,9 @@ pub struct BackendReport {
     pub report: AttemptReport,
     /// Original provider evidence; absent when the provider cannot establish it.
     pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+    /// Original accounting for an unsuccessful terminal report. Absence leaves
+    /// consumption unknown; successful accounting belongs to AttemptSuccess.
+    pub unsuccessful_resources: Option<Box<crate::task::AttemptResourceAccounting>>,
 }
 
 impl BackendReport {
@@ -29,6 +32,7 @@ impl BackendReport {
             driver_fence: request.driver_fence,
             report,
             execution: None,
+            unsuccessful_resources: None,
         }
     }
 }

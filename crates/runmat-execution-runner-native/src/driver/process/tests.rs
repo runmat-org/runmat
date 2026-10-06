@@ -33,3 +33,5 @@ async fn cancellation_polling_preserves_a_fragmented_frame() {
     sender.await.unwrap();
     assert_eq!(received, payload);
 }
+
+mod preflight;

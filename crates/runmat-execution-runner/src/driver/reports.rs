@@ -50,6 +50,20 @@ impl Driver {
                 return Ok(());
             }
         }
+        if let Some(resources) = &report.unsuccessful_resources {
+            if matches!(
+                report.report,
+                AttemptReport::Started | AttemptReport::Succeeded { .. }
+            ) || resources.validate_against(&attempt.request).is_err()
+                || report.execution.as_ref().is_some_and(|execution| {
+                    resources.resources.usage.wall_millis != execution.wall_millis
+                })
+            {
+                self.discard_backend_report(report, "invalid unsuccessful accounting", actions);
+                return Ok(());
+            }
+        }
+        let resources = report.unsuccessful_resources.clone();
         let execution = report.execution.clone();
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
@@ -70,6 +84,7 @@ impl Driver {
                     self.fail_attempt(
                         &attempt,
                         AttemptFailureKind::Rejected,
+                        None,
                         execution,
                         Some(
                             "worker success contradicts admitted accounting or execution evidence"
@@ -107,13 +122,13 @@ impl Driver {
                 }
             }
             AttemptReport::Failed { kind, message } => {
-                self.fail_attempt(&attempt, kind, execution, Some(message))?;
+                self.fail_attempt(&attempt, kind, resources, execution, Some(message))?;
             }
             AttemptReport::Lost { message } => {
                 self.finish_attempt(
                     &attempt,
                     AttemptDisposition::Lost,
-                    None,
+                    resources,
                     execution,
                     Some(message),
                 )?;
@@ -127,7 +142,7 @@ impl Driver {
                 self.finish_attempt(
                     &attempt,
                     AttemptDisposition::Cancelled,
-                    None,
+                    resources,
                     execution,
                     None,
                 )?;
@@ -164,6 +179,7 @@ impl Driver {
         &mut self,
         attempt: &AttemptRecord,
         kind: AttemptFailureKind,
+        resources: Option<Box<crate::task::AttemptResourceAccounting>>,
         execution: Option<Box<crate::task::AttemptExecutionObservation>>,
         diagnostic: Option<String>,
     ) -> RunnerResult<()> {
@@ -172,7 +188,7 @@ impl Driver {
         self.finish_attempt(
             attempt,
             AttemptDisposition::Failed { kind },
-            None,
+            resources,
             execution,
             diagnostic,
         )?;

@@ -3,7 +3,8 @@ use crate::protocol::{
     StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_runner::{
-    AttemptExecutionObservation, AttemptExecutionTermination, AttemptRequest, AttemptSuccess,
+    AttemptExecutionObservation, AttemptExecutionTermination, AttemptRequest,
+    AttemptResourceAccounting, AttemptSuccess,
 };
 use runmat_process_host::environment::EnvironmentPolicy;
 use runmat_process_host::ipc::IpcByteCounter;
@@ -21,6 +22,7 @@ struct TransportMeters {
 pub(super) struct ObservedAttempt {
     pub result: TransferResult,
     pub execution: AttemptExecutionObservation,
+    pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
 }
 
 pub(super) fn execute_attempt(
@@ -43,7 +45,7 @@ pub(super) fn execute_attempt(
         local_ipc_sent_bytes: meters.sent.bytes(),
         local_ipc_received_bytes: meters.received.bytes(),
     };
-    let result = response.and_then(|response| match response {
+    let mut result = response.and_then(|response| match response {
         WorkerResponse::Success { value } => {
             AttemptSuccess::new(request, vec![value], Vec::new(), wall_millis, 0, 0)
         }
@@ -53,7 +55,29 @@ pub(super) fn execute_attempt(
         } => AttemptSuccess::new(request, outputs, result_objects, wall_millis, 0, 0),
         WorkerResponse::Failure { message } => Err(message),
     });
-    ObservedAttempt { result, execution }
+    // Preflight only reads the admitted program. No process or result producer has
+    // been invoked, so output/egress/relay consumption is known zero. Once launch
+    // is attempted, no such claim can be inferred from its eventual error.
+    let unsuccessful_resources =
+        if result.is_err() && termination == AttemptExecutionTermination::NotStarted {
+            match AttemptResourceAccounting::for_attempt(request, wall_millis, 0, 0, 0) {
+                Ok(resources) => Some(Box::new(resources)),
+                Err(error) => {
+                    result = Err(format!(
+                        "{}; preflight accounting unavailable: {error}",
+                        result.as_ref().expect_err("unsuccessful preflight")
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+    ObservedAttempt {
+        result,
+        execution,
+        unsuccessful_resources,
+    }
 }
 
 fn prepare_and_run(
@@ -124,8 +148,10 @@ async fn run_process(
         );
     }
     command.max_stderr_bytes = driver.config.max_stderr_bytes;
-    let mut child = command.spawn().await.map_err(|error| error.to_string())?;
+    // Spawn can fail after creating a child (for example during containment).
+    // Until root exit is observed, even an error leaves launch unconfirmed.
     *termination = AttemptExecutionTermination::Unconfirmed;
+    let mut child = command.spawn().await.map_err(|error| error.to_string())?;
     let stderr = child.captured_stderr();
     let response = exchange::exchange(driver, &mut child, &request, completion, meters).await;
     let exit = if response.is_err() {

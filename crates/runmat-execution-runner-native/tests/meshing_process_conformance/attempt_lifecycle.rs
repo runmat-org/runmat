@@ -1,5 +1,7 @@
 //! Actual native host deadlines without an analysis coordinator or remote scheduler.
 use super::*;
+#[path = "attempt_lifecycle/spawn_failure.rs"]
+mod spawn_failure;
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_execution_runner::{AttemptDisposition, AttemptExecutionTermination};
 use runmat_execution_runner_native::WorkerProcessMessage;
@@ -252,4 +254,5 @@ pub(super) async fn run() {
         assert_eq!(cold, history);
     }
     fault_parent().await;
+    spawn_failure::run().await;
 }
