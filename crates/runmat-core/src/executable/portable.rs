@@ -11,7 +11,7 @@ struct PortableSourceMap<'a> {
 
 #[derive(Serialize)]
 struct PortableSourceEntry<'a> {
-    source_id: usize,
+    source_id: runmat_types::ProgramSourceId,
     owner_identity: &'a str,
     relative_path: &'a str,
     content_revision: &'a runmat_execution::Digest,

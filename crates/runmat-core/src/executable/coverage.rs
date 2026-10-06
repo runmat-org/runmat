@@ -120,7 +120,10 @@ impl<'a> CoveragePlanBuilder<'a> {
         span: runmat_hir::Span,
         instrumented: bool,
     ) -> u64 {
-        let source_id = source_id.map_or(0, |id| id.0);
+        let source_id = source_id.and_then(|id| u32::try_from(id.0).ok()).map_or(
+            runmat_types::ProgramSourceId(0),
+            runmat_types::ProgramSourceId,
+        );
         let source = self
             .source_map
             .entries()

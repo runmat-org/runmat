@@ -5,7 +5,7 @@ pub struct ExecutableSourceMap {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceMapEntry {
-    pub source_id: usize,
+    pub source_id: runmat_types::ProgramSourceId,
     pub owner_identity: String,
     pub relative_path: String,
     pub content_revision: runmat_execution::Digest,
@@ -26,7 +26,11 @@ impl ExecutableSourceMap {
 
     pub(crate) fn validate_content_revisions(&self) -> Result<(), String> {
         for (ordinal, entry) in self.entries.iter().enumerate() {
-            if entry.source_id != ordinal {
+            if u32::try_from(ordinal)
+                .ok()
+                .map(runmat_types::ProgramSourceId)
+                != Some(entry.source_id)
+            {
                 return Err(format!(
                     "source map ordinal {} is missing or duplicated",
                     ordinal
@@ -53,7 +57,7 @@ mod tests {
     #[test]
     fn source_revision_is_checked_against_exact_text() {
         let entry = SourceMapEntry {
-            source_id: 0,
+            source_id: runmat_types::ProgramSourceId(0),
             owner_identity: "package".into(),
             relative_path: "main.m".into(),
             content_revision: runmat_execution::Digest::sha256(b"x = 1;"),

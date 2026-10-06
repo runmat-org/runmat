@@ -31,11 +31,8 @@ impl ExecutableUnit {
             .entries()
             .iter()
             .map(|entry| {
-                let ordinal = u32::try_from(entry.source_id)
-                    .map(runmat_types::ProgramSourceId)
-                    .map_err(|_| "program source ordinal exceeds portable identity".to_string())?;
                 Ok(runmat_runtime::source_context::ProgramSourceRecord {
-                    ordinal,
+                    ordinal: entry.source_id,
                     name: std::sync::Arc::from(entry.display_name.as_str()),
                     fullpath_name: entry.full_path.as_deref().map(std::sync::Arc::<str>::from),
                     text: std::sync::Arc::from(entry.text.as_str()),
@@ -197,14 +194,7 @@ impl ExecutableUnit {
             .source_map
             .entries()
             .iter()
-            .filter_map(|entry| {
-                u32::try_from(entry.source_id).ok().map(|source_id| {
-                    (
-                        runmat_types::ProgramSourceId(source_id),
-                        entry.relative_path.clone(),
-                    )
-                })
-            })
+            .map(|entry| (entry.source_id, entry.relative_path.clone()))
             .collect();
         let names = runmat_mir::analysis::ReachabilityNames {
             sources,

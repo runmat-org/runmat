@@ -13,7 +13,7 @@ use crate::{
     IndexingSemantics, InheritanceDeclaration, LoweringContext, LoweringResult, MemberAccess,
     MemberName, MethodDeclaration, ModuleId, OperatorKind, PackageName, PlaceMutation,
     PlaceMutationKind, PropertyDeclaration, QualifiedName, ReferenceKind, ReferenceResolution,
-    RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName,
+    RequestedOutputCount, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName,
     WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME,
     NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
@@ -307,7 +307,7 @@ impl LoweringCtx {
             ctx.assembly.modules.push(HirModule {
                 id,
                 name: QualifiedName(vec![SymbolName("main".into())]),
-                source_id: SourceId(source.0 as usize),
+                source_id: source,
                 source_unit,
                 imports: Vec::new(),
                 top_level_functions: Vec::new(),

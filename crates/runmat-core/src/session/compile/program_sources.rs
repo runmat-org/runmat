@@ -46,8 +46,26 @@ pub(super) struct ProgramSourceTable {
 }
 
 pub(super) struct SourceCompileProjection {
-    pub runtime_to_program: HashMap<runmat_hir::SourceId, runmat_hir::SourceId>,
-    pub program_to_runtime: HashMap<runmat_hir::SourceId, runmat_hir::SourceId>,
+    pub runtime_to_program: HashMap<runmat_hir::SourceId, ProgramSourceId>,
+    pub program_to_runtime: HashMap<ProgramSourceId, runmat_hir::SourceId>,
+}
+
+impl SourceCompileProjection {
+    pub fn program_ordinal_in_registry(
+        &self,
+        runtime: runmat_hir::SourceId,
+    ) -> Option<runmat_hir::SourceId> {
+        let ordinal = self.runtime_to_program.get(&runtime)?.0;
+        usize::try_from(ordinal).ok().map(runmat_hir::SourceId)
+    }
+
+    pub fn runtime_from_registry_ordinal(
+        &self,
+        ordinal: runmat_hir::SourceId,
+    ) -> Option<runmat_hir::SourceId> {
+        let ordinal = ProgramSourceId(u32::try_from(ordinal.0).ok()?);
+        self.program_to_runtime.get(&ordinal).copied()
+    }
 }
 
 struct CompanionSource {
@@ -64,7 +82,7 @@ impl ProgramSourceTable {
         let mut program_to_runtime = HashMap::new();
         let mut runtime_to_program = HashMap::new();
         for entry in self.source_map.entries() {
-            let program = runmat_hir::SourceId(entry.source_id);
+            let program = entry.source_id;
             let runtime = pool.intern_with_fullpath(
                 &entry.display_name,
                 entry.full_path.as_deref(),
@@ -78,7 +96,7 @@ impl ProgramSourceTable {
             program_to_runtime.insert(program, runtime);
         }
         for (runtime, program) in &self.retained_runtime_sources {
-            let program = runmat_hir::SourceId(program.0 as usize);
+            let program = *program;
             if let Some(previous) = runtime_to_program.insert(*runtime, program) {
                 if previous != program {
                     return Err("retained source identity disagrees with the source table".into());
@@ -174,7 +192,7 @@ impl ProgramSourceTable {
 
         let mut entries = Vec::with_capacity(companions.len() + 1);
         entries.push(crate::SourceMapEntry {
-            source_id: 0,
+            source_id: ProgramSourceId(0),
             owner_identity: root.owner_identity.clone(),
             relative_path: root.relative_path.clone(),
             content_revision: runmat_execution::Digest::sha256(root.text.as_bytes()),
@@ -189,7 +207,7 @@ impl ProgramSourceTable {
                 .map_err(|_| "portable program has too many source units".to_string())?;
             ids.insert(key, ProgramSourceId(ordinal));
             entries.push(crate::SourceMapEntry {
-                source_id: ordinal as usize,
+                source_id: ProgramSourceId(ordinal),
                 owner_identity: source.owner_identity,
                 relative_path: source.relative_path,
                 content_revision: runmat_execution::Digest::sha256(source.context.text.as_bytes()),

@@ -21,9 +21,10 @@ impl PreparedExecution {
             };
             function.binding_origin = Some(origin);
             function.source_file = function.source_id.and_then(|source_id| {
+                let ordinal = runmat_types::ProgramSourceId(u32::try_from(source_id.0).ok()?);
                 source_map
                     .entries()
-                    .binary_search_by_key(&source_id.0, |entry| entry.source_id)
+                    .binary_search_by_key(&ordinal, |entry| entry.source_id)
                     .ok()
                     .and_then(|index| source_map.entries().get(index))
                     .and_then(|entry| entry.full_path.clone())

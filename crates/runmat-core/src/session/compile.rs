@@ -880,7 +880,10 @@ impl RunMatSession {
                     full_path.as_deref(),
                 )?;
                 Ok(crate::SourceMapEntry {
-                    source_id: source_id.0,
+                    source_id: runmat_types::ProgramSourceId(
+                        u32::try_from(source_id.0)
+                            .map_err(|_| "source ordinal exceeds portable identity")?,
+                    ),
                     owner_identity,
                     relative_path,
                     content_revision: runmat_execution::Digest::sha256(entry.text.as_bytes()),
@@ -1244,7 +1247,7 @@ impl RunMatSession {
         if let Some(projection) = source_projection {
             execution_registry
                 .project_current_source_ids(|runtime| {
-                    projection.runtime_to_program.get(&runtime).copied()
+                    projection.program_ordinal_in_registry(runtime)
                 })
                 .map_err(|missing| {
                     RunError::Runtime(
@@ -1350,7 +1353,7 @@ impl RunMatSession {
             if persist_function {
                 if let Some(projection) = source_projection {
                     if let Some(program) = function.source_id {
-                        let runtime = projection.program_to_runtime.get(&program).copied().ok_or_else(|| {
+                        let runtime = projection.runtime_from_registry_ordinal(program).ok_or_else(|| {
                             RunError::Runtime(
                                 build_runtime_error("published function source is absent from executable provenance")
                                     .with_identifier("RunMat:ExecutableSourceIdentity")
