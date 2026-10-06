@@ -36,6 +36,9 @@ use super::{
 };
 use crate::{NativeExecutionResult, NativeProgramFailure};
 
+#[path = "pool_tests/source_lifetime.rs"]
+mod source_lifetime;
+
 struct FakeWorker {
     node: String,
     spec: WorkerSpec,
