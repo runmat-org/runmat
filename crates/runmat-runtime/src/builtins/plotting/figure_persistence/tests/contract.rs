@@ -26,14 +26,24 @@ fn figure_load_and_save_forms_are_explicitly_integer_inapplicable() {
         assert!(audit.canonical_builtin.is_none());
     }
     for name in [OPENFIG, HGSAVE, HGLOAD] {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
-            .expect("registered graphics persistence builtin");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .expect("canonical graphics persistence builtin");
         assert_eq!(
             builtin.integer_audit.map(|audit| audit.kind),
             Some(BuiltinIntegerAuditKind::NotApplicable),
             "{name}"
         );
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
+        assert!(
+            crate::builtin::runtime_builtin_bindings_by_name(name)
+                .iter()
+                .any(|binding| binding.identity.variant == "default"),
+            "{name} must have its canonical runtime binding"
+        );
+        assert!(
+            runmat_builtins::builtin_function_by_name(name).is_none(),
+            "{name} must not retain a legacy registration"
+        );
     }
 }
 
