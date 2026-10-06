@@ -496,10 +496,10 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
     let expected = binding.clone();
 
     let _invoker_guard = runmat_runtime::user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |actual, args, requested_outputs| {
+        std::rc::Rc::new(move |_runtime, actual, args, requested_outputs| {
             assert_eq!(actual, expected);
             assert_eq!(requested_outputs, 1);
-            assert_eq!(args, &[Value::Num(10.0), Value::Num(2.0)]);
+            assert_eq!(args.values(), &[Value::Num(10.0), Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
         }),
     );
@@ -748,10 +748,10 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
     let binding = runmat_value::BoundFunctionBinding::portable(4242, origin);
     let expected_binding = binding.clone();
     let _invoker_guard = runmat_runtime::user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |actual, args, requested_outputs| {
+        std::rc::Rc::new(move |_runtime, actual, args, requested_outputs| {
             assert_eq!(actual, expected_binding);
             assert_eq!(requested_outputs, 1);
-            assert_eq!(args, &[Value::Num(2.0)]);
+            assert_eq!(args.values(), &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     );

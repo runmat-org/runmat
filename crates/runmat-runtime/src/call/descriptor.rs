@@ -750,7 +750,27 @@ async fn execute_callable_descriptor_with_runtime(
             let function = binding.function;
             crate::callsite::with_function_input_callsite(
                 metadata.function_input_callsite.clone(),
-                crate::user_functions::try_call_bound_function(binding, &args, requested_outputs),
+                async {
+                    match runtime {
+                        Some(runtime) => {
+                            crate::user_functions::try_call_bound_function_in_context(
+                                runtime,
+                                binding,
+                                &args,
+                                requested_outputs,
+                            )
+                            .await
+                        }
+                        None => {
+                            crate::user_functions::try_call_bound_function(
+                                binding,
+                                &args,
+                                requested_outputs,
+                            )
+                            .await
+                        }
+                    }
+                },
             )
             .await
             .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
@@ -834,7 +854,27 @@ async fn try_execute_callable_descriptor_with_runtime(
             let function = binding.function;
             crate::callsite::with_function_input_callsite(
                 metadata.function_input_callsite.clone(),
-                crate::user_functions::try_call_bound_function(binding, &args, requested_outputs),
+                async {
+                    match runtime {
+                        Some(runtime) => {
+                            crate::user_functions::try_call_bound_function_in_context(
+                                runtime,
+                                binding,
+                                &args,
+                                requested_outputs,
+                            )
+                            .await
+                        }
+                        None => {
+                            crate::user_functions::try_call_bound_function(
+                                binding,
+                                &args,
+                                requested_outputs,
+                            )
+                            .await
+                        }
+                    }
+                },
             )
             .await
             .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))

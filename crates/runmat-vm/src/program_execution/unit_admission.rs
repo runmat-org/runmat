@@ -28,6 +28,10 @@ impl AdmittedExecutableUnit {
         &self.envelope
     }
 
+    pub fn registry(&self) -> &FunctionRegistry {
+        &self.registry
+    }
+
     pub fn bind_runtime_sources(
         mut self,
         runtime: runmat_runtime::context::RuntimeContext,
@@ -50,6 +54,15 @@ impl AdmittedExecutableUnit {
 }
 
 impl RuntimeBoundExecutableUnit {
+    /// Whether a decoded value or an in-flight staged graph still owns any
+    /// definition from this source-bearing unit.
+    pub fn has_live_definition_owners(&self) -> bool {
+        self.registry
+            .functions
+            .values()
+            .any(|body| body.definition_owner.has_handles())
+    }
+
     /// Confirm that this unit's fresh source leases were issued into the
     /// selected destination session. Matching serialized or numeric source
     /// identities are not sufficient authority.

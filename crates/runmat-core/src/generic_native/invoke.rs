@@ -166,14 +166,11 @@ pub(crate) async fn invoke(
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
     let direct_invoker = user_functions::current_semantic_function_invoker();
     let bound_registry = Arc::clone(&registry);
-    let bound_runtime = runtime.clone();
     let bound_invoker = user_functions::install_local_bound_function_invoker(Rc::new(
-        move |binding, arguments, requested_outputs| {
-            let arguments = arguments.to_vec();
+        move |runtime, binding, arguments, requested_outputs| {
             let previous = previous_bound_invoker.clone();
             let direct = direct_invoker.clone();
             let registry = Arc::clone(&bound_registry);
-            let runtime = bound_runtime.clone();
             Box::pin(async move {
                 let function = runmat_hir::FunctionId(binding.function);
                 let (view, current_definition) = match &binding.authority {
@@ -208,12 +205,16 @@ pub(crate) async fn invoke(
                     let runtime = isolated_procedure_runtime(runtime);
                     if let Some(direct) = direct {
                         return runtime
-                            .scope(direct(binding.function, &arguments, requested_outputs))
+                            .scope(direct(
+                                binding.function,
+                                arguments.values(),
+                                requested_outputs,
+                            ))
                             .await;
                     }
                     return runmat_vm::invoke_semantic_function_value_in_context(
                         binding.function,
-                        &arguments,
+                        arguments.values(),
                         requested_outputs,
                         &registry,
                         runtime,
@@ -224,7 +225,7 @@ pub(crate) async fn invoke(
                     let runtime = isolated_procedure_runtime(runtime);
                     return runmat_vm::invoke_semantic_function_value_in_context(
                         binding.function,
-                        &arguments,
+                        arguments.values(),
                         requested_outputs,
                         &view,
                         runtime,
@@ -232,7 +233,7 @@ pub(crate) async fn invoke(
                     .await;
                 }
                 if let Some(previous) = previous {
-                    return previous(binding, &arguments, requested_outputs).await;
+                    return previous(runtime, binding, arguments, requested_outputs).await;
                 }
                 Err(super::error::stage(
                     "UnavailableBoundFunction",

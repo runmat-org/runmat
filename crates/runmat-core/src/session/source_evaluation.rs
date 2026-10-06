@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -9,8 +9,20 @@ use runmat_runtime::context::{
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::ValueSequence;
 
+#[path = "source_evaluation/generation.rs"]
+mod generation;
+use generation::{
+    CallableArtifactIndex, CallableArtifactSelectionError, FunctionRegistryGeneration,
+    GenerationRetirement, PreparedGenerationImport,
+};
+#[path = "source_evaluation/callable_artifacts.rs"]
+mod callable_artifacts;
+
+pub(super) use callable_artifacts::{install_bound_invoker, service as callable_artifact_service};
+
 pub(super) struct SessionSourceEvaluator {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
+    runtime_owner: runmat_runtime::context::RuntimeContextLocalId,
     generation: RefCell<Rc<FunctionRegistryGeneration>>,
 }
 
@@ -29,74 +41,12 @@ impl FunctionRegistryPublication {
 
 impl Drop for FunctionRegistryPublication {
     fn drop(&mut self) {
-        self.active.invalidate();
         if let Some(restore) = self.restore.take() {
+            self.active.retain_escaped_into(&restore);
+            self.active.invalidate();
             self.evaluator.restore_generation(&self.active, restore);
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FunctionRegistryGenerationState {
-    Active,
-    Committed,
-    Invalidated,
-}
-
-#[derive(Debug)]
-struct FunctionRegistryGeneration {
-    registry: RefCell<Rc<runmat_vm::FunctionRegistry>>,
-    state: Cell<FunctionRegistryGenerationState>,
-}
-
-impl FunctionRegistryGeneration {
-    fn committed(registry: runmat_vm::FunctionRegistry) -> Self {
-        Self {
-            registry: RefCell::new(Rc::new(registry)),
-            state: Cell::new(FunctionRegistryGenerationState::Committed),
-        }
-    }
-
-    fn active(registry: runmat_vm::FunctionRegistry) -> Self {
-        Self {
-            registry: RefCell::new(Rc::new(registry)),
-            state: Cell::new(FunctionRegistryGenerationState::Active),
-        }
-    }
-
-    fn registry(&self) -> Result<Rc<runmat_vm::FunctionRegistry>, RuntimeError> {
-        if self.state.get() == FunctionRegistryGenerationState::Invalidated {
-            return Err(build_runtime_error(
-                "source evaluation executable generation did not commit",
-            )
-            .with_identifier("RunMat:SourceEvaluation:GenerationInvalidated")
-            .build());
-        }
-        Ok(self.registry.borrow().clone())
-    }
-
-    fn commit(&self, committed: runmat_vm::FunctionRegistry) {
-        if self.state.get() == FunctionRegistryGenerationState::Active {
-            let retired = {
-                let mut registry = self.registry.borrow_mut();
-                std::mem::replace(&mut *registry, Rc::new(committed))
-            };
-            self.state.set(FunctionRegistryGenerationState::Committed);
-            drop(retired);
-        }
-    }
-
-    fn invalidate(&self) {
-        if self.state.get() == FunctionRegistryGenerationState::Active {
-            self.state.set(FunctionRegistryGenerationState::Invalidated);
-            let retired = {
-                let mut registry = self.registry.borrow_mut();
-                std::mem::replace(
-                    &mut *registry,
-                    Rc::new(runmat_vm::FunctionRegistry::default()),
-                )
-            };
-            drop(retired);
+        } else {
+            self.active.invalidate();
         }
     }
 }
@@ -164,13 +114,61 @@ struct BoundSessionSourceEvaluator {
 }
 
 impl SessionSourceEvaluator {
-    pub(super) fn new(base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner) -> Self {
+    pub(super) fn new(
+        base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
+        runtime_owner: runmat_runtime::context::RuntimeContextLocalId,
+    ) -> Self {
         Self {
             base_workspace,
+            runtime_owner,
             generation: RefCell::new(Rc::new(FunctionRegistryGeneration::committed(
                 runmat_vm::FunctionRegistry::default(),
             ))),
         }
+    }
+
+    pub(super) fn current_generation(&self) -> Rc<FunctionRegistryGeneration> {
+        self.generation.borrow().clone()
+    }
+
+    pub(super) fn ensure_runtime_owner(
+        &self,
+        runtime: &RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        if runtime.local_identity() != self.runtime_owner {
+            return Err(build_runtime_error(
+                "callable artifact operation belongs to a different runtime session",
+            )
+            .with_identifier("RunMat:CallableArtifact:ForeignSession")
+            .build());
+        }
+        Ok(())
+    }
+
+    pub(super) fn prepare_import(
+        &self,
+        registry: runmat_vm::FunctionRegistry,
+        artifacts: CallableArtifactIndex,
+        source_owners: Vec<Rc<runmat_vm::RuntimeBoundExecutableUnit>>,
+    ) -> PreparedGenerationImport {
+        PreparedGenerationImport::new(registry, artifacts, source_owners)
+    }
+
+    pub(super) fn commit_import(
+        &self,
+        expected: &Rc<FunctionRegistryGeneration>,
+        expected_epoch: &Rc<()>,
+        prepared: PreparedGenerationImport,
+    ) -> Result<GenerationRetirement, RuntimeError> {
+        let current = self.generation.borrow();
+        if !Rc::ptr_eq(&current, expected) {
+            return Err(build_runtime_error(
+                "callable artifact destination changed during admission",
+            )
+            .with_identifier("RunMat:CallableArtifact:DestinationChanged")
+            .build());
+        }
+        expected.commit_import(expected_epoch, prepared)
     }
 
     fn replace_generation(
@@ -202,14 +200,32 @@ impl SessionSourceEvaluator {
     pub(super) fn publish_for_execution(
         self: &Rc<Self>,
         active: runmat_vm::FunctionRegistry,
-    ) -> FunctionRegistryPublication {
-        let active = Rc::new(FunctionRegistryGeneration::active(active));
+        unit_bytes: Option<Vec<u8>>,
+    ) -> Result<FunctionRegistryPublication, RuntimeError> {
+        let current = self.generation.borrow().clone();
+        let inherited = current.registry()?;
+        let mut artifacts = current.artifacts()?.as_ref().clone();
+        let source_owners = current.source_owners()?;
+        if let Some(bytes) = unit_bytes {
+            artifacts.insert_canonical_unit(bytes).map_err(|source| {
+                build_runtime_error(source.to_string())
+                    .with_identifier("RunMat:CallableArtifact:InvalidExecutable")
+                    .with_source(source)
+                    .build()
+            })?;
+        }
+        let active = Rc::new(FunctionRegistryGeneration::active(
+            active,
+            artifacts,
+            source_owners,
+            &inherited,
+        ));
         let restore = self.replace_generation(active.clone());
-        FunctionRegistryPublication {
+        Ok(FunctionRegistryPublication {
             evaluator: self.clone(),
             active,
             restore: Some(restore),
-        }
+        })
     }
 
     fn capture_with_generation(
@@ -361,12 +377,15 @@ mod tests {
     #[test]
     fn closed_session_owner_rejects_prepared_source_before_execution() {
         let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
-        let evaluator = Rc::new(SessionSourceEvaluator::new(owner.clone()));
-        let base = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
-            owner.clone(),
-        ));
         let runtime = RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let evaluator = Rc::new(SessionSourceEvaluator::new(
+            owner.clone(),
+            runtime.local_identity(),
+        ));
+        let base = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
         ));
         let runtime = runtime.with_service_ports(
             runmat_runtime::context::RuntimeServicePorts::default()
@@ -391,15 +410,20 @@ mod tests {
     #[test]
     fn failed_foreground_generation_invalidates_prepared_background_source() {
         let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
-        let evaluator = Rc::new(SessionSourceEvaluator::new(owner.clone()));
-        let publication = evaluator.publish_for_execution(runmat_vm::FunctionRegistry::default());
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let evaluator = Rc::new(SessionSourceEvaluator::new(
+            owner.clone(),
+            runtime.local_identity(),
+        ));
+        let publication = evaluator
+            .publish_for_execution(runmat_vm::FunctionRegistry::default(), None)
+            .expect("publish active generation");
         let bound = evaluator
             .bind_background_authority()
             .expect("bind active executable generation");
         let base = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(owner));
-        let runtime = RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
         let runtime = runtime.with_service_ports(
             runmat_runtime::context::RuntimeServicePorts::default()
                 .with_workspace(base.clone())

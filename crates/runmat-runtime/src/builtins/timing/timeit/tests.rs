@@ -270,7 +270,7 @@ fn install_test_callbacks(
             .collect(),
     )));
     let bound = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
-        move |binding, arguments, outputs| {
+        move |_runtime, binding, arguments, outputs| {
             let lease = binding
                 .authority
                 .local_definition()
@@ -280,7 +280,11 @@ fn install_test_callbacks(
             }));
             let invoker = crate::user_functions::current_semantic_function_invoker()
                 .expect("timeit fixture numeric callback");
-            invoker(binding.function, arguments, outputs)
+            let future = invoker(binding.function, arguments.values(), outputs);
+            Box::pin(async move {
+                let _arguments = arguments;
+                future.await
+            })
         },
     ));
     let resolver = crate::user_functions::install_semantic_function_resolver(Some(Arc::new(

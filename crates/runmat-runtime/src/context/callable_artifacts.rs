@@ -1,4 +1,5 @@
 use super::{RuntimeContext, RuntimeServiceFuture};
+use crate::execution::RootedValues;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::ExecutableUnitEnvelope;
@@ -14,6 +15,8 @@ pub struct RuntimeCallableArtifactLimits {
     pub max_values: usize,
     pub max_units: usize,
     pub max_unit_bytes: usize,
+    pub max_functions: usize,
+    pub max_instructions: usize,
     pub value_limits: ValueLimits,
 }
 
@@ -23,6 +26,8 @@ impl Default for RuntimeCallableArtifactLimits {
             max_values: 4_096,
             max_units: 1_024,
             max_unit_bytes: runmat_execution::EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
+            max_functions: 65_536,
+            max_instructions: 10_000_000,
             value_limits: ValueLimits::default(),
         }
     }
@@ -135,19 +140,89 @@ pub trait RuntimeCallableArtifactService {
         limits: RuntimeCallableArtifactLimits,
     ) -> RuntimeServiceFuture<Result<RuntimeCallableArtifactBundle, RuntimeError>>;
 
+    fn prepare_admit(
+        &self,
+        runtime: RuntimeContext,
+        bundle: RuntimeCallableArtifactBundle,
+        limits: RuntimeCallableArtifactLimits,
+    ) -> RuntimeServiceFuture<Result<Box<dyn RuntimePreparedCallableAdmission>, RuntimeError>>;
+
     fn admit(
         &self,
         runtime: RuntimeContext,
         bundle: RuntimeCallableArtifactBundle,
         limits: RuntimeCallableArtifactLimits,
-    ) -> RuntimeServiceFuture<Result<Vec<Value>, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<Vec<Value>, RuntimeError>> {
+        let prepared = self.prepare_admit(runtime, bundle, limits);
+        Box::pin(async move {
+            let committed = prepared.await?.commit()?;
+            Ok(committed.into_values())
+        })
+    }
+}
+
+/// A fully decoded callable import that has not published any executable
+/// authority. Dropping it is a rollback with no destination mutation.
+pub trait RuntimePreparedCallableAdmission {
+    fn values(&self) -> &[Value];
+
+    /// Publish into the exact generation captured during preparation. This is
+    /// synchronous: it performs no callbacks, polling, or host effects.
+    fn commit(self: Box<Self>) -> Result<RuntimeCallableArtifactCommit, RuntimeError>;
+}
+
+/// Type-erased owner retained after publication so replaced generations and
+/// their finalizers can retire outside a downstream domain lock.
+pub trait RuntimeCallableArtifactRetirement: 'static {}
+
+impl<T: 'static> RuntimeCallableArtifactRetirement for T {}
+
+/// Successful callable publication and the decoded values it authorized.
+/// Keep this receipt alive until a downstream owner has adopted the values.
+pub struct RuntimeCallableArtifactCommit {
+    values: RootedValues,
+    retirement: Box<dyn RuntimeCallableArtifactRetirement>,
+}
+
+impl RuntimeCallableArtifactCommit {
+    #[doc(hidden)]
+    pub fn new(
+        values: RootedValues,
+        retirement: Box<dyn RuntimeCallableArtifactRetirement>,
+    ) -> Self {
+        Self { values, retirement }
+    }
+
+    pub fn values(&self) -> &[Value] {
+        self.values.values()
+    }
+
+    pub fn into_values(self) -> Vec<Value> {
+        let Self { values, retirement } = self;
+        drop(retirement);
+        values.into_values()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_execution::value::InlineValue;
+    use std::cell::Cell;
     use std::rc::Rc;
+
+    struct CollectingRetirement {
+        handle: runmat_gc::GcHandle,
+        observed_live: Rc<Cell<bool>>,
+    }
+
+    impl Drop for CollectingRetirement {
+        fn drop(&mut self) {
+            runmat_gc::gc_collect_major().expect("collect while retiring replaced generation");
+            self.observed_live
+                .set(runmat_gc::gc_clone_value(&self.handle).is_ok());
+        }
+    }
 
     fn scalar() -> ValuePayload {
         ValuePayload::Inline(Box::new(InlineValue::Logical(true)))
@@ -213,6 +288,41 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn commit_retires_replaced_owner_before_releasing_returned_value_roots() {
+        runmat_gc::gc_test_context(|| {
+            let target = runmat_gc::gc_allocate_rooted(Value::String("retained".into()))
+                .expect("allocate managed target");
+            let handle = target.handle();
+            let values = RootedValues::new(vec![Value::HandleObject(runmat_value::HandleRef {
+                class_name: "RetainedCallableValue".into(),
+                target: handle,
+                valid: true,
+            })])
+            .expect("root returned callable value");
+            target.unroot().expect("transfer root to commit receipt");
+            let observed_live = Rc::new(Cell::new(false));
+            let committed = RuntimeCallableArtifactCommit::new(
+                values,
+                Box::new(CollectingRetirement {
+                    handle,
+                    observed_live: Rc::clone(&observed_live),
+                }),
+            );
+
+            let returned = committed.into_values();
+            assert!(
+                observed_live.get(),
+                "retirement must run while returned values remain explicitly rooted"
+            );
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("returned target remains readable"),
+                Value::String("retained".into())
+            );
+            assert!(matches!(returned.as_slice(), [Value::HandleObject(_)]));
+        });
+    }
+
     struct StubService;
 
     impl RuntimeCallableArtifactService for StubService {
@@ -225,12 +335,13 @@ mod tests {
             unreachable!("port ownership test never invokes the service")
         }
 
-        fn admit(
+        fn prepare_admit(
             &self,
             _runtime: RuntimeContext,
             _bundle: RuntimeCallableArtifactBundle,
             _limits: RuntimeCallableArtifactLimits,
-        ) -> RuntimeServiceFuture<Result<Vec<Value>, RuntimeError>> {
+        ) -> RuntimeServiceFuture<Result<Box<dyn RuntimePreparedCallableAdmission>, RuntimeError>>
+        {
             unreachable!("port ownership test never invokes the service")
         }
     }

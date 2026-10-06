@@ -17,8 +17,8 @@ mod unit_admission;
 #[path = "program_execution/region_sources.rs"]
 mod region_sources;
 pub use crate::bytecode::program::retained_artifacts::{
-    prepare_retained_callable_units, PreparedRetainedCallableUnits, RetainedCallableStageError,
-    RetainedCallableStageLimits,
+    prepare_retained_callable_units, retained_callable_origin_fingerprints,
+    PreparedRetainedCallableUnits, RetainedCallableStageError, RetainedCallableStageLimits,
 };
 pub use region_sources::encode_portable_region_sources_v1;
 pub use unit_admission::{

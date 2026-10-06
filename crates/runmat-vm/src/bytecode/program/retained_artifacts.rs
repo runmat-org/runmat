@@ -178,6 +178,15 @@ pub fn prepare_retained_callable_units(
     ))
 }
 
+/// Canonical per-origin definition fingerprints used by an artifact owner to
+/// admit alternate packaging of the same immutable callable body without
+/// treating envelope bytes or destination-local IDs as semantic identity.
+pub fn retained_callable_origin_fingerprints(
+    registry: &FunctionRegistry,
+) -> Result<HashMap<FunctionBindingOrigin, String>, RetainedCallableStageError> {
+    fingerprints::normalized(registry)
+}
+
 fn owners_graph(owners: &[(FunctionId, Arc<FunctionDefinitionOwner>)]) -> DefinitionOwnerGraph {
     Arc::new(
         owners
@@ -188,6 +197,23 @@ fn owners_graph(owners: &[(FunctionId, Arc<FunctionDefinitionOwner>)]) -> Defini
 }
 
 impl FunctionRegistry {
+    /// Exact origins whose executable envelopes remain exportable. Published
+    /// named definitions remain eligible; retired-only definitions require a
+    /// live exact owner graph.
+    pub fn retained_callable_origins(&self) -> HashSet<FunctionBindingOrigin> {
+        self.functions
+            .values()
+            .filter_map(|body| body.binding_origin)
+            .chain(
+                self.retired
+                    .values()
+                    .flatten()
+                    .filter(|body| body.definition_owner.has_handles())
+                    .filter_map(|body| body.binding_origin),
+            )
+            .collect()
+    }
+
     fn insert_retained_definitions(
         &mut self,
         definitions: impl IntoIterator<Item = FunctionBytecode>,

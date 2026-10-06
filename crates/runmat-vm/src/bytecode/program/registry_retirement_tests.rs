@@ -347,6 +347,27 @@ fn unchanged_origin_refresh_keeps_existing_definition_lease() {
 }
 
 #[test]
+fn failed_candidate_can_retain_only_escaped_exact_bodies() {
+    let mut published = registry();
+    let candidate = FunctionRegistry::new(HashMap::from([
+        (FunctionId(7), function(7, "escaped", 7)),
+        (FunctionId(8), function(8, "unescaped", 8)),
+    ]));
+    let escaped = runmat_value::FunctionDefinitionOwner::issue(
+        &candidate.get(FunctionId(7)).unwrap().definition_owner,
+        7,
+    );
+
+    let programs = published.retain_live_owned_definitions_from(&candidate);
+
+    assert!(published.get(FunctionId(7)).is_none());
+    assert!(published.resolve_name("escaped").is_none());
+    assert!(published.get_owned(FunctionId(7), &escaped).is_some());
+    assert!(!published.retired.contains_key(&FunctionId(8)));
+    assert!(programs.is_empty(), "fixture has no portable origins");
+}
+
+#[test]
 fn old_caller_view_retains_old_helper_without_name_fallback() {
     let mut registry = registry();
     registry

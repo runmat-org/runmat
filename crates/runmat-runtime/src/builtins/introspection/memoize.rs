@@ -1390,11 +1390,15 @@ mod tests {
         let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
         let expected = binding.clone();
         let guard = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
-            move |actual, arguments, outputs| {
+            move |_runtime, actual, arguments, outputs| {
                 assert_eq!(actual, expected, "wrong memoized callback binding");
                 let invoker = crate::user_functions::current_semantic_function_invoker()
                     .expect("numeric unit callback fixture");
-                invoker(actual.function, arguments, outputs)
+                let future = invoker(actual.function, arguments.values(), outputs);
+                Box::pin(async move {
+                    let _arguments = arguments;
+                    future.await
+                })
             },
         ));
         let value = block_on(memoize_builtin(Value::BoundFunctionHandle {

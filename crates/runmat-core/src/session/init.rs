@@ -37,9 +37,11 @@ impl RunMatSession {
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
         let local_tasks = std::rc::Rc::new(SessionLocalTaskSupervisor::new());
         let base_workspace = runmat_runtime::workspace::BaseWorkspaceOwner::new();
-        let source_evaluator = std::rc::Rc::new(
-            super::source_evaluation::SessionSourceEvaluator::new(base_workspace.clone()),
-        );
+        let source_evaluator =
+            std::rc::Rc::new(super::source_evaluation::SessionSourceEvaluator::new(
+                base_workspace.clone(),
+                runtime_context.local_identity(),
+            ));
         let base_workspace_service = std::rc::Rc::new(
             runmat_runtime::workspace::BaseWorkspaceService::new(base_workspace.clone()),
         );
@@ -47,6 +49,9 @@ impl RunMatSession {
             .with_workspace(base_workspace_service.clone())
             .with_base_workspace(base_workspace_service)
             .with_source_evaluation(source_evaluator.clone())
+            .with_callable_artifacts(super::source_evaluation::callable_artifact_service(
+                &source_evaluator,
+            ))
             .with_local_tasks(local_tasks.submission_port(runtime_context.local_identity()))
             .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
             .with_http(super::http_host::default_http_service())
@@ -121,6 +126,8 @@ impl RunMatSession {
                 mex,
             )
         };
+        let runtime_context = runtime_context.with_service_ports(runtime_services);
+        super::source_evaluation::install_bound_invoker(&runtime_context, &source_evaluator);
         let session = Self {
             verbose,
             stats: ExecutionStats::default(),
@@ -152,7 +159,7 @@ impl RunMatSession {
             source_pool: SourcePool::default(),
             source_evaluator,
             cancellation: cancellation.clone(),
-            runtime_context: runtime_context.with_service_ports(runtime_services),
+            runtime_context,
             local_tasks,
             placement_session: placement,
             is_executing: false,

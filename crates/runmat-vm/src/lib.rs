@@ -56,9 +56,9 @@ pub use layout::{
     VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,
 };
 pub use program_execution::{
-    admit_executable_unit, prepare_retained_callable_units, AdmittedExecutableUnit,
-    ExecutableUnitAdmissionError, PreparedRetainedCallableUnits, RetainedCallableStageError,
-    RetainedCallableStageLimits, RuntimeBoundExecutableUnit,
+    admit_executable_unit, prepare_retained_callable_units, retained_callable_origin_fingerprints,
+    AdmittedExecutableUnit, ExecutableUnitAdmissionError, PreparedRetainedCallableUnits,
+    RetainedCallableStageError, RetainedCallableStageLimits, RuntimeBoundExecutableUnit,
 };
 pub use program_execution::{
     encode_portable_region_sources_v1, execute_deferred_program_in_context,

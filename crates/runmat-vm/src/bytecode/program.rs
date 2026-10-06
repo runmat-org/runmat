@@ -627,6 +627,36 @@ impl FunctionRegistry {
         });
     }
 
+    /// Retain exact bodies whose definition owners escaped from a candidate
+    /// publication. Names and current-source membership remain unchanged;
+    /// only an exact bound authority can select these bodies later.
+    pub fn retain_live_owned_definitions_from(
+        &mut self,
+        candidate: &Self,
+    ) -> std::collections::HashSet<runmat_execution::FunctionBindingOrigin> {
+        self.execution_stacks.take();
+        self.prune_retired();
+        let mut origins = std::collections::HashSet::new();
+        for body in candidate
+            .functions
+            .values()
+            .chain(candidate.retired.values().flatten())
+            .filter(|body| body.definition_owner.has_handles())
+        {
+            if let Some(origin) = body.binding_origin {
+                origins.insert(origin);
+            }
+            let retained = self.retired.entry(body.function).or_default();
+            if retained.iter().any(|existing| {
+                std::sync::Arc::ptr_eq(&existing.definition_owner, &body.definition_owner)
+            }) {
+                continue;
+            }
+            retained.push(body.clone());
+        }
+        origins
+    }
+
     pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
         self.names.get(name).copied()
     }

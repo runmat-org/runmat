@@ -28,11 +28,12 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
     let expected_binding = binding.clone();
     let _invoker = runmat_runtime::user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |actual, args, requested| {
+        std::rc::Rc::new(move |_runtime, actual, args, requested| {
             assert_eq!(actual, expected_binding, "wrong portable callback binding");
             let observed = observed.clone();
-            let first = args.first().cloned().unwrap();
+            let first = args.values().first().cloned().unwrap();
             Box::pin(async move {
+                let _args = args;
                 *observed.lock().unwrap() += 1;
                 if requested == 2 {
                     runmat_runtime::sequence::ValueSequence::comma_separated(vec![

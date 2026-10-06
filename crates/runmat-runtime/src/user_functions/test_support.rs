@@ -59,11 +59,15 @@ pub fn install_bound_forwarders(
     expected: Vec<BoundFunctionBinding>,
 ) -> super::BoundFunctionInvokerGuard {
     super::install_local_bound_function_invoker(std::rc::Rc::new(
-        move |binding, arguments, requested_outputs| {
+        move |_runtime, binding, arguments, requested_outputs| {
             assert!(expected.contains(&binding), "wrong exact callback owner");
             let invoker = super::current_semantic_function_invoker()
                 .expect("numeric fixture invoker in same runtime");
-            invoker(binding.function, arguments, requested_outputs)
+            let future = invoker(binding.function, arguments.values(), requested_outputs);
+            Box::pin(async move {
+                let _arguments = arguments;
+                future.await
+            })
         },
     ))
 }

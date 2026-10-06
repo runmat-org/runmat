@@ -77,10 +77,11 @@ pub async fn try_call_bound_function(
     args: &[Value],
     requested_outputs: usize,
 ) -> Option<Result<ValueSequence, RuntimeError>> {
+    let runtime = crate::context::legacy::active()?;
     if matches!(
         &binding.authority,
         runmat_value::BoundFunctionAuthority::Local { .. }
-    ) && !binding.authority.admits_local(&current_session_lease())
+    ) && !binding.authority.admits_local(&runtime.session_lease())
     {
         return Some(Err(crate::runtime_error::semantic_error(
             "UnavailableBoundFunction",
@@ -88,7 +89,35 @@ pub async fn try_call_bound_function(
         )));
     }
     let invoker = current_bound_function_invoker()?;
-    Some(invoker(binding, args, requested_outputs).await)
+    let args = match crate::execution::RootedValues::new(args.to_vec()) {
+        Ok(args) => args,
+        Err(error) => return Some(Err(error.into_runtime_error())),
+    };
+    Some(invoker(runtime, binding, args, requested_outputs).await)
+}
+
+pub async fn try_call_bound_function_in_context(
+    runtime: &crate::context::RuntimeContext,
+    binding: runmat_value::BoundFunctionBinding,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Option<Result<ValueSequence, RuntimeError>> {
+    if matches!(
+        &binding.authority,
+        runmat_value::BoundFunctionAuthority::Local { .. }
+    ) && !binding.authority.admits_local(&runtime.session_lease())
+    {
+        return Some(Err(crate::runtime_error::semantic_error(
+            "UnavailableBoundFunction",
+            "bound function belongs to another or ended session",
+        )));
+    }
+    let invoker = runtime.state().call.borrow().bound_invoker.clone()?;
+    let args = match crate::execution::RootedValues::new(args.to_vec()) {
+        Ok(args) => args,
+        Err(error) => return Some(Err(error.into_runtime_error())),
+    };
+    Some(invoker(runtime.clone(), binding, args, requested_outputs).await)
 }
 
 pub async fn try_call_external_function(

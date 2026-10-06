@@ -17,8 +17,12 @@ pub type DynamicFunctionLoadFuture =
     Pin<Box<dyn Future<Output = Option<Result<ValueSequence, RuntimeError>>>>>;
 pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
-pub type BoundFunctionInvoker =
-    dyn Fn(runmat_value::BoundFunctionBinding, &[Value], usize) -> UserFunctionFuture;
+pub type BoundFunctionInvoker = dyn Fn(
+    crate::context::RuntimeContext,
+    runmat_value::BoundFunctionBinding,
+    crate::execution::RootedValues,
+    usize,
+) -> UserFunctionFuture;
 #[derive(Debug, Clone)]
 pub struct ExternalFunctionCall {
     pub function: usize,

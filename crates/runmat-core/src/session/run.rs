@@ -925,9 +925,35 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
+        let active_registry = bytecode.function_registry();
+        let callable_artifact = if active_registry
+            .functions
+            .values()
+            .any(|body| body.binding_origin.is_some())
+        {
+            Some(
+                interactive_unit
+                    .portable_envelope()
+                    .and_then(|envelope| {
+                        envelope
+                            .canonical_bytes()
+                            .map_err(|error| error.to_string())
+                    })
+                    .map_err(|error| {
+                        RunError::Runtime(
+                            build_runtime_error(error)
+                                .with_identifier("RunMat:CallableArtifact:ExecutableProduct")
+                                .build(),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
         let source_registry_publication = self
             .source_evaluator
-            .publish_for_execution(bytecode.function_registry());
+            .publish_for_execution(active_registry, callable_artifact)
+            .map_err(RunError::Runtime)?;
         let _source_id_guard = runmat_runtime::source_context::replace_current_source_id_in_context(
             &execution_runtime,
             bytecode

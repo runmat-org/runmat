@@ -93,7 +93,7 @@ fn exact_origin_binding_owns_the_selected_definition_graph() {
     let foreign_entry = foreign.enter();
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = Rc::clone(&calls);
-    let invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _| {
+    let invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _, _| {
         observed.set(observed.get() + 1);
         Box::pin(async { Ok(ValueSequence::empty()) })
     }));
@@ -226,7 +226,7 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
     let _next_entry = next.enter();
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = Rc::clone(&calls);
-    let _invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _| {
+    let _invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _, _| {
         observed.set(observed.get() + 1);
         Box::pin(async { Ok(ValueSequence::empty()) })
     }));
@@ -250,9 +250,10 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn legacy_entry_context_inherits_exact_bound_invoker() {
     let exact: Rc<BoundFunctionInvoker> = Rc::new(
-        |_binding: runmat_value::BoundFunctionBinding, _args: &[Value], _outputs: usize| {
-            Box::pin(async { Ok(runmat_value::ValueSequence::empty()) })
-        },
+        |_,
+         _binding: runmat_value::BoundFunctionBinding,
+         _args: crate::execution::RootedValues,
+         _outputs: usize| { Box::pin(async { Ok(runmat_value::ValueSequence::empty()) }) },
     );
     let _guard = install_local_bound_function_invoker(exact);
     let context = crate::context::RuntimeContext::new(Rc::new(
@@ -272,4 +273,61 @@ fn legacy_entry_context_inherits_exact_bound_invoker() {
     .expect("inherited exact invoker")
     .expect("exact call succeeds");
     assert_eq!(result, runmat_value::ValueSequence::empty());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn selected_bound_future_roots_arguments_until_drop() {
+    runmat_gc::gc_test_context(|| {
+        let runtime = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let binding = test_support::exact_local_binding(&runtime, 17);
+        let reached = Rc::new(std::cell::Cell::new(false));
+        let observed = Rc::clone(&reached);
+        let entry = runtime.enter();
+        let _invoker = install_local_bound_function_invoker(Rc::new(
+            move |_, _binding, arguments, _outputs| {
+                observed.set(true);
+                Box::pin(async move {
+                    let _arguments = arguments;
+                    std::future::pending::<()>().await;
+                    Ok(ValueSequence::empty())
+                })
+            },
+        ));
+        drop(entry);
+
+        let initial = runmat_gc::gc_allocate_rooted(Value::String("argument".into()))
+            .expect("allocate argument target");
+        let handle = initial.handle();
+        let arguments = [Value::HandleObject(runmat_value::HandleRef {
+            class_name: "BoundArgument".into(),
+            target: handle,
+            valid: true,
+        })];
+        let mut call = Box::pin(try_call_bound_function_in_context(
+            &runtime, binding, &arguments, 0,
+        ));
+        let waker = futures::task::noop_waker();
+        let mut context = std::task::Context::from_waker(&waker);
+        assert!(matches!(
+            std::future::Future::poll(call.as_mut(), &mut context),
+            std::task::Poll::Pending
+        ));
+        assert!(
+            reached.get(),
+            "selected invoker must reach its pending body"
+        );
+        initial.unroot().expect("transfer root to invocation");
+        runmat_gc::gc_collect_major().expect("collect pending invocation");
+        assert_eq!(
+            runmat_gc::gc_clone_value(&handle).expect("pending argument remains rooted"),
+            Value::String("argument".into())
+        );
+
+        drop(call);
+        runmat_gc::gc_collect_major().expect("collect dropped invocation");
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    });
 }

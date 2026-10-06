@@ -12,10 +12,10 @@ fn bound_callback_uses_semantic_identity() {
     let expected = binding.clone();
     let entry = runtime.enter();
     let _invoker = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
-        move |actual, arguments, outputs| {
+        move |_runtime, actual, arguments, outputs| {
             assert_eq!(actual, expected);
             assert_eq!(outputs, 1);
-            let [Value::Num(seed), Value::Num(value)] = arguments else {
+            let [Value::Num(seed), Value::Num(value)] = arguments.values() else {
                 panic!("unexpected callback arguments: {arguments:?}");
             };
             let result = seed + value;

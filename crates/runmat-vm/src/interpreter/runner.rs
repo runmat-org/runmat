@@ -728,13 +728,10 @@ async fn run_interpreter_inner(
         ));
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
     let registry_for_bound_invoker = Arc::clone(&function_registry);
-    let bound_runtime = context.runtime.clone();
     let _bound_function_guard = user_functions::install_local_bound_function_invoker(
-        std::rc::Rc::new(move |binding, args, requested_outputs| {
-            let args = args.to_vec();
+        std::rc::Rc::new(move |runtime, binding, args, requested_outputs| {
             let previous = previous_bound_invoker.clone();
             let registry = Arc::clone(&registry_for_bound_invoker);
-            let runtime = bound_runtime.clone();
             Box::pin(async move {
                 let function = runmat_hir::FunctionId(binding.function);
                 if let runmat_value::BoundFunctionAuthority::Portable { origin } =
@@ -746,7 +743,7 @@ async fn run_interpreter_inner(
                     {
                         return invoke_semantic_function_value_with_capture_updates(
                             binding.function,
-                            &args,
+                            args.values(),
                             requested_outputs,
                             &registry,
                             runtime,
@@ -759,7 +756,7 @@ async fn run_interpreter_inner(
                 if let Some(view) = view {
                     return invoke_semantic_function_value_with_capture_updates(
                         binding.function,
-                        &args,
+                        args.values(),
                         requested_outputs,
                         &view,
                         runtime,
@@ -768,7 +765,7 @@ async fn run_interpreter_inner(
                     .map(|(value, _)| value);
                 }
                 if let Some(previous) = previous {
-                    return previous(binding, &args, requested_outputs).await;
+                    return previous(runtime, binding, args, requested_outputs).await;
                 }
                 Err(mex(
                     "UnavailableBoundFunction",

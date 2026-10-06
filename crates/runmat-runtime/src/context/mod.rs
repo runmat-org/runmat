@@ -40,8 +40,9 @@ pub mod preparation;
 
 pub use arity::RuntimeInvocationArity;
 pub use callable_artifacts::{
-    RuntimeCallableArtifactBundle, RuntimeCallableArtifactError, RuntimeCallableArtifactLimits,
-    RuntimeCallableArtifactService,
+    RuntimeCallableArtifactBundle, RuntimeCallableArtifactCommit, RuntimeCallableArtifactError,
+    RuntimeCallableArtifactLimits, RuntimeCallableArtifactRetirement,
+    RuntimeCallableArtifactService, RuntimePreparedCallableAdmission,
 };
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
