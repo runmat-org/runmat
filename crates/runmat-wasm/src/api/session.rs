@@ -85,7 +85,7 @@ pub struct RunMatWasm {
     execution_service: std::rc::Rc<BrowserExecutionService>,
 }
 
-struct InFlightSession<'a> {
+pub(crate) struct InFlightSession<'a> {
     host: &'a RunMatWasm,
     session: Option<RunMatSession>,
 }
@@ -211,7 +211,7 @@ impl RunMatWasm {
         Ok(())
     }
 
-    fn take_session(&self) -> Result<InFlightSession<'_>, JsValue> {
+    pub(crate) fn take_session(&self) -> Result<InFlightSession<'_>, JsValue> {
         self.ensure_not_disposed()?;
         if self.in_flight_session.replace(true) {
             return Err(js_error("RunMat session already has an in-flight request"));
