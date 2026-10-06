@@ -241,9 +241,10 @@ mod tests {
             .with_callable_artifacts(Rc::new(StubService));
         assert!(ports.callable_artifacts().is_some());
         let isolated = ports.without_callable_artifacts();
-        let error = isolated
-            .require_callable_artifacts("admit a worker callable")
-            .expect_err("isolated worker must install its own artifact authority");
+        let error = match isolated.require_callable_artifacts("admit a worker callable") {
+            Ok(_) => panic!("isolated worker must install its own artifact authority"),
+            Err(error) => error,
+        };
         assert_eq!(
             error.capability,
             super::super::RuntimeCapability::CallableArtifacts
