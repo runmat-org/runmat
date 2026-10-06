@@ -261,10 +261,13 @@ fn admitted_pending_callback_finishes_once_after_its_generation_is_invalidated()
 
     let waited = execute_text_request(&mut session, "wait(pending_callback_timer);")
         .expect("later invalidated firing is reported as a language outcome");
-    assert!(waited
-        .diagnostics
-        .iter()
-        .any(|diagnostic| { diagnostic.code == "RunMat:SourceEvaluation:GenerationInvalidated" }));
+    assert!(
+        waited.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:SourceEvaluation:GenerationInvalidated"
+        }),
+        "{:?}",
+        waited.diagnostics
+    );
 
     let observed = execute_text_request(
         &mut session,
