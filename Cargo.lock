@@ -7566,6 +7566,7 @@ dependencies = [
  "serde_json",
  "stacker",
  "tempfile",
+ "thiserror 1.0.69",
  "tracing",
  "wasm-bindgen-test",
 ]
