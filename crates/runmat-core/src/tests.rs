@@ -14509,6 +14509,77 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn portable_entrypoint_rejects_matching_function_id_from_another_revision() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = ExecutableSource::new(
+        "entrypoint-origin-test@1",
+        "entrypointOrigin.m",
+        "function y = entrypointOrigin(x)\ny = x + 1;\nend\n",
+    );
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile canonical executable unit");
+    let mut envelope = unit
+        .portable_envelope_for(Some("entrypointOrigin"))
+        .expect("portable function product");
+    let portable_function = envelope.manifest.identity.entrypoint_function;
+    let wrong_revision = runmat_execution::ProgramRevision::new(
+        envelope.manifest.identity.program.graph_digest().clone(),
+        runmat_execution::Digest::sha256(b"different-entrypoint-source-revision"),
+        envelope.manifest.identity.program.environment(),
+    )
+    .expect("valid distinct revision");
+    let wrong_origin =
+        runmat_execution::FunctionBindingOrigin::from_revision(&wrong_revision, portable_function)
+            .expect("valid wrong-revision origin");
+
+    let payload = envelope
+        .payloads
+        .iter_mut()
+        .find(|payload| payload.kind == runmat_execution::ExecutableComponentKind::FunctionRegistry)
+        .expect("function registry payload");
+    let mut registry: runmat_vm::FunctionRegistry =
+        serde_json::from_slice(&payload.bytes).expect("canonical function registry");
+    let function = registry
+        .resolve_name("entrypointOrigin")
+        .expect("entrypoint function");
+    let body = registry
+        .functions
+        .get_mut(&function)
+        .expect("entrypoint body");
+    assert_eq!(body.portable_function, portable_function);
+    body.binding_origin = Some(wrong_origin);
+    payload.bytes = serde_json::to_vec(&registry).expect("re-encode function registry");
+    let descriptor = envelope
+        .manifest
+        .components
+        .iter_mut()
+        .find(|descriptor| {
+            descriptor.kind == runmat_execution::ExecutableComponentKind::FunctionRegistry
+        })
+        .expect("function registry descriptor");
+    *descriptor = runmat_execution::ExecutableComponentDescriptor::from_payload(
+        descriptor.kind,
+        descriptor.schema_version,
+        &payload.bytes,
+    )
+    .expect("updated function registry descriptor");
+
+    let error = runmat_vm::admit_executable_unit(
+        &envelope
+            .canonical_bytes()
+            .expect("canonical mismatched executable"),
+    )
+    .expect_err("matching portable ID from another revision is not entrypoint authority");
+    assert!(
+        error
+            .to_string()
+            .contains("executable entrypoint lies outside its admitted revision"),
+        "{error}"
+    );
+}
+
 #[test]
 fn portable_product_preserves_and_validates_explicit_interop_contract() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
