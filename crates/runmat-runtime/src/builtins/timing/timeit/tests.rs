@@ -105,6 +105,14 @@ impl crate::context::RuntimeTimingService for TestMonotonicClock {
         std::time::Duration::ZERO
     }
 
+    fn local_datetime_to_epoch(&self, _: chrono::NaiveDateTime) -> Option<std::time::Duration> {
+        panic!("timeit must not use a calendar clock")
+    }
+
+    fn local_datetime_at_epoch(&self, _: std::time::Duration) -> Option<chrono::NaiveDateTime> {
+        panic!("timeit must not use a calendar clock")
+    }
+
     fn process_cpu_seconds(&self) -> Option<f64> {
         None
     }

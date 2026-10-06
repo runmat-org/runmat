@@ -112,12 +112,13 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     running
         .properties
         .insert("Running".into(), Value::String("on".into()));
-    let error = futures::executor::block_on(set_timer_property_object(
-        Value::Object(running),
-        "StartDelay",
-        resident.clone(),
-    ))
-    .expect_err("frozen running property");
+    let error =
+        futures::executor::block_on(super::super::setter_bindings::set_timer_property_object(
+            Value::Object(running),
+            "StartDelay",
+            resident.clone(),
+        ))
+        .expect_err("frozen running property");
     assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
 

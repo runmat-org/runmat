@@ -69,7 +69,7 @@ timer_setter_builtin!(
     TimerProperty::UserData
 );
 
-async fn set_timer_property_object(
+pub(super) async fn set_timer_property_object(
     obj: Value,
     property: TimerProperty,
     value: Value,

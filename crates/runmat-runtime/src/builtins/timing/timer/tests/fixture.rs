@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) struct TestClock(pub(super) Arc<Mutex<Duration>>);
+pub(in crate::builtins::timing::timer) struct TestClock(
+    pub(in crate::builtins::timing::timer) Arc<Mutex<Duration>>,
+);
 
 #[derive(Debug)]
 struct TestSourceProvenance(SourceId);
@@ -11,7 +13,9 @@ impl SourceEvaluationProvenance for TestSourceProvenance {
     }
 }
 
-pub(super) struct RecordingSourceEvaluator(pub(super) Arc<Mutex<Vec<String>>>);
+pub(in crate::builtins::timing::timer) struct RecordingSourceEvaluator(
+    pub(in crate::builtins::timing::timer) Arc<Mutex<Vec<String>>>,
+);
 
 impl RuntimeSourceEvaluationService for RecordingSourceEvaluator {
     fn capture_session_source(
@@ -87,7 +91,7 @@ struct TimerTestSession {
     bindings: Vec<BoundFunctionBinding>,
 }
 
-pub(super) struct TimerInvokerGuards {
+pub(in crate::builtins::timing::timer) struct TimerInvokerGuards {
     _semantic: crate::user_functions::FunctionInvokerGuard,
     _bound: crate::user_functions::BoundFunctionInvokerGuard,
 }
@@ -96,7 +100,10 @@ thread_local! {
     static TEST_SESSION: RefCell<Option<TimerTestSession>> = const { RefCell::new(None) };
 }
 
-fn set_test_session(runtime: RuntimeContext, supervisor: Rc<RuntimeLocalTaskSupervisor>) {
+pub(in crate::builtins::timing::timer) fn set_test_session(
+    runtime: RuntimeContext,
+    supervisor: Rc<RuntimeLocalTaskSupervisor>,
+) {
     let bindings = (1..=3)
         .map(|function| {
             crate::user_functions::test_support::exact_local_binding(&runtime, function)
@@ -111,7 +118,10 @@ fn set_test_session(runtime: RuntimeContext, supervisor: Rc<RuntimeLocalTaskSupe
     });
 }
 
-pub(super) fn timer_callback_value(name: &str, function: usize) -> Value {
+pub(in crate::builtins::timing::timer) fn timer_callback_value(
+    name: &str,
+    function: usize,
+) -> Value {
     TEST_SESSION.with(|session| {
         let session = session.borrow();
         let binding = session
@@ -126,11 +136,13 @@ pub(super) fn timer_callback_value(name: &str, function: usize) -> Value {
     })
 }
 
-pub(super) fn reset_timer_state_for_tests() {
+pub(in crate::builtins::timing::timer) fn reset_timer_state_for_tests() {
     reset_timer_state_for_tests_with_clock(None);
 }
 
-pub(super) fn reset_timer_state_for_tests_with_clock(clock: Option<Arc<Mutex<Duration>>>) {
+pub(in crate::builtins::timing::timer) fn reset_timer_state_for_tests_with_clock(
+    clock: Option<Arc<Mutex<Duration>>>,
+) {
     let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let owner = runtime.local_identity();
@@ -142,7 +154,7 @@ pub(super) fn reset_timer_state_for_tests_with_clock(clock: Option<Arc<Mutex<Dur
     set_test_session(runtime.with_service_ports(ports), supervisor);
 }
 
-pub(super) fn test_runtime() -> RuntimeContext {
+pub(in crate::builtins::timing::timer) fn test_runtime() -> RuntimeContext {
     TEST_SESSION.with(|session| {
         session
             .borrow()
@@ -153,7 +165,7 @@ pub(super) fn test_runtime() -> RuntimeContext {
     })
 }
 
-pub(super) fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
+pub(in crate::builtins::timing::timer) fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
     TEST_SESSION.with(|session| {
         session
             .borrow()
@@ -164,7 +176,7 @@ pub(super) fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
     })
 }
 
-pub(super) fn install_timer_invoker(
+pub(in crate::builtins::timing::timer) fn install_timer_invoker(
     invoker: Option<Arc<crate::user_functions::FunctionInvoker>>,
 ) -> TimerInvokerGuards {
     let _scope = test_runtime().enter();
@@ -176,7 +188,8 @@ pub(super) fn install_timer_invoker(
     }
 }
 
-pub(super) fn install_timer_bound_forwarders() -> crate::user_functions::BoundFunctionInvokerGuard {
+pub(in crate::builtins::timing::timer) fn install_timer_bound_forwarders(
+) -> crate::user_functions::BoundFunctionInvokerGuard {
     let bindings = TEST_SESSION.with(|session| {
         session
             .borrow()
@@ -188,33 +201,47 @@ pub(super) fn install_timer_bound_forwarders() -> crate::user_functions::BoundFu
     crate::user_functions::test_support::install_bound_forwarders(bindings)
 }
 
-pub(super) async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::timer_builtin(Some(test_runtime()), args).await
+pub(in crate::builtins::timing::timer) async fn timer_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::super::timer_builtin(Some(test_runtime()), args).await
 }
 
-pub(super) async fn timerfind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::timerfind_builtin(Some(test_runtime()), args).await
+pub(in crate::builtins::timing::timer) async fn timerfind_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::super::timerfind_builtin(Some(test_runtime()), args).await
 }
 
-pub(super) async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::timerfindall_builtin(Some(test_runtime()), args).await
+pub(in crate::builtins::timing::timer) async fn timerfindall_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::super::timerfindall_builtin(Some(test_runtime()), args).await
 }
 
-pub(super) async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
-    super::timer_start_builtin(Some(test_runtime()), None, value).await
+pub(in crate::builtins::timing::timer) async fn timer_start_builtin(
+    value: Value,
+) -> BuiltinResult<Value> {
+    super::super::timer_start_builtin(Some(test_runtime()), None, value).await
 }
 
-pub(super) async fn timer_wait_builtin(value: Value) -> BuiltinResult<Value> {
+pub(in crate::builtins::timing::timer) async fn timer_wait_builtin(
+    value: Value,
+) -> BuiltinResult<Value> {
     let runtime = test_runtime();
     test_supervisor()
-        .drive_until(super::timer_wait_builtin(Some(runtime), None, value))
+        .drive_until(super::super::timer_wait_builtin(Some(runtime), None, value))
         .await?
 }
 
-pub(super) async fn timer_delete_builtin(value: Value) -> BuiltinResult<Value> {
-    super::timer_delete_builtin(Some(test_runtime()), None, value).await
+pub(in crate::builtins::timing::timer) async fn timer_delete_builtin(
+    value: Value,
+) -> BuiltinResult<Value> {
+    super::super::timer_delete_builtin(Some(test_runtime()), None, value).await
 }
 
-pub(super) async fn timer_stop_builtin(value: Value) -> BuiltinResult<Value> {
-    super::timer_stop_builtin(Some(test_runtime()), None, value).await
+pub(in crate::builtins::timing::timer) async fn timer_stop_builtin(
+    value: Value,
+) -> BuiltinResult<Value> {
+    super::super::timer_stop_builtin(Some(test_runtime()), None, value).await
 }
