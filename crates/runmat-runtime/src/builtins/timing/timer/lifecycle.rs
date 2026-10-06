@@ -85,7 +85,7 @@ impl TimerRunConfig {
     }
 }
 
-fn duration_property(seconds: f64, name: &str) -> BuiltinResult<Duration> {
+pub(super) fn duration_property(seconds: f64, name: &str) -> BuiltinResult<Duration> {
     Duration::try_from_secs_f64(seconds).map_err(|_| {
         timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
