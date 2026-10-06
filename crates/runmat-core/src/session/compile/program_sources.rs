@@ -143,7 +143,7 @@ impl ProgramSourceTable {
         Ok(crate::ExecutableSource::new(owner, relative, text))
     }
 
-    pub fn intern_runtime_projection(
+    pub(super) fn intern_runtime_projection(
         &self,
         pool: &mut crate::source_pool::SourcePool,
         runtime_context: &runmat_runtime::context::RuntimeContext,

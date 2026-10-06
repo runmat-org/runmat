@@ -81,10 +81,6 @@ impl SourcePool {
         id
     }
 
-    pub(crate) fn get(&self, id: SourceId) -> Option<&SourceText> {
-        self.sources.get(id.0)
-    }
-
     pub(crate) fn issued_source_ref(
         &mut self,
         id: SourceId,
