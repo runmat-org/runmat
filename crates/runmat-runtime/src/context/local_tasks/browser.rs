@@ -130,7 +130,7 @@ mod tests {
     use crate::context::RuntimeContext;
     use crate::execution::RuntimeExecutionService;
     use std::marker::PhantomPinned;
-    use std::task::Context;
+    use std::task::{Context, Poll};
     use wasm_bindgen_test::wasm_bindgen_test;
 
     fn owner() -> RuntimeContextLocalId {
