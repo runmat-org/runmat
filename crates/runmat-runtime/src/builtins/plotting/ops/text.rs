@@ -86,8 +86,12 @@ pub async fn text_builtin(
         args.first(),
         Some(Value::Tensor(tensor)) if tensor.integer_storage().is_some()
     );
-    let (target, rest) = if typed_tensor_coordinate {
-        (None, args.as_slice())
+    let super::op_common::text::DeferredAxesArguments { target, rest } = if typed_tensor_coordinate
+    {
+        super::op_common::text::DeferredAxesArguments {
+            target: None,
+            rest: args.as_slice(),
+        }
     } else {
         super::op_common::text::split_axes_target_deferred(BUILTIN_NAME, &args)
             .map_err(map_text_invalid_argument)?
