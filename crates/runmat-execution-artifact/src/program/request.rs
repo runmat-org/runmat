@@ -10,6 +10,13 @@ use serde::{Deserialize, Serialize};
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
+fn contract_error(error: runmat_execution::ContractError) -> ArtifactError {
+    match error {
+        runmat_execution::ContractError::Limit { .. } => ArtifactError::Limit(error.to_string()),
+        _ => ArtifactError::Invalid(error.to_string()),
+    }
+}
+
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V6: u16 = 6;
 /// V7 makes failure-frame source IDs program ordinals, never worker-local IDs.
@@ -48,7 +55,7 @@ pub struct ProgramExecutionDescriptor {
 
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
-        self.artifact.validate_against(&self.recipe)?;
+        let artifact = self.artifact.validate_context(&self.recipe)?;
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
             || self.callable.validate().is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
@@ -58,7 +65,7 @@ impl ProgramExecutionDescriptor {
                 "program descriptor has an inconsistent callable or output contract".into(),
             ));
         }
-        if let Some(admission) = self.artifact.executable_unit_admission()? {
+        if let Some(admission) = artifact.unit_admission.as_ref() {
             if self.callable.semantic_function() != Some(admission.identity.entrypoint_function) {
                 return Err(ArtifactError::Invalid(
                     "program descriptor callable does not match its executable-unit entrypoint"
@@ -95,7 +102,7 @@ impl ProgramExecutionInputs {
         for argument in &self.arguments {
             argument
                 .validate(ValueLimits::default())
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                .map_err(contract_error)?;
         }
         Ok(())
     }
@@ -142,12 +149,16 @@ impl ProgramExecutionRequest {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
+        self.validate_context().map(|_| ())
+    }
+
+    fn validate_context(&self) -> ArtifactResult<super::artifact::ValidatedArtifactContext> {
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
         }
-        self.artifact.validate_against(&self.recipe)?;
+        let artifact = self.artifact.validate_context(&self.recipe)?;
         if self.callable.validate().is_err()
             || self
                 .assignment
@@ -165,9 +176,9 @@ impl ProgramExecutionRequest {
             ));
         }
         if self.artifact.form == ExecutableForm::ExecutableUnitV3 {
-            let admission = self
-                .artifact
-                .executable_unit_admission()?
+            let admission = artifact
+                .unit_admission
+                .as_ref()
                 .expect("executable-unit form returns its validated admission header");
             if self.callable.semantic_function() != Some(admission.identity.entrypoint_function)
                 || (admission.identity.entrypoint_kind
@@ -181,10 +192,10 @@ impl ProgramExecutionRequest {
         }
         for argument in &self.arguments {
             argument
-                .validate(ValueLimits::default())
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                .validate_for_program_sources(ValueLimits::default(), artifact.source_map.as_ref())
+                .map_err(contract_error)?;
         }
-        Ok(())
+        Ok(artifact)
     }
 
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
@@ -275,7 +286,8 @@ pub enum ProgramExecutionResponse {
 
 impl ProgramExecutionResponse {
     pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
-        request.validate()?;
+        let artifact = request.validate_context()?;
+        let source_map = artifact.source_map.as_ref();
         match self {
             Self::Success { outputs } => {
                 if outputs.len() != usize::from(request.requested_outputs) {
@@ -283,12 +295,12 @@ impl ProgramExecutionResponse {
                         "program response differs from its output contract".into(),
                     ));
                 }
-                validate_output_payloads(outputs)
+                validate_output_payloads(outputs, source_map)
             }
             Self::ExternalizedSuccess {
                 outputs,
                 result_objects,
-            } => validate_externalized_success(request, outputs, result_objects),
+            } => validate_externalized_success(request, outputs, result_objects, source_map),
             Self::SpmdSuccess { outputs } => {
                 if !matches!(request.callable, ProgramCallable::SpmdRegion { .. })
                     || outputs.len() != usize::from(request.requested_outputs)
@@ -299,8 +311,8 @@ impl ProgramExecutionResponse {
                 }
                 for output in outputs.iter().flatten() {
                     output
-                        .validate()
-                        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                        .validate_for_program_sources(source_map)
+                        .map_err(contract_error)?;
                 }
                 Ok(())
             }
@@ -313,17 +325,20 @@ impl ProgramExecutionResponse {
                 Ok(())
             }
             Self::RuntimeFailure { failure } => failure
-                .validate()
-                .map_err(|error| ArtifactError::Limit(error.to_string())),
+                .validate_for_program_sources(source_map)
+                .map_err(contract_error),
         }
     }
 }
 
-fn validate_output_payloads(outputs: &[ValuePayload]) -> ArtifactResult<()> {
+fn validate_output_payloads(
+    outputs: &[ValuePayload],
+    source_map: Option<&runmat_execution::ExecutableSourceMapV2>,
+) -> ArtifactResult<()> {
     for output in outputs {
         output
-            .validate(ValueLimits::default())
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            .validate_for_program_sources(ValueLimits::default(), source_map)
+            .map_err(contract_error)?;
     }
     Ok(())
 }
@@ -332,6 +347,7 @@ fn validate_externalized_success(
     request: &ProgramExecutionRequest,
     outputs: &[ValuePayload],
     result_objects: &[ValueRef],
+    source_map: Option<&runmat_execution::ExecutableSourceMapV2>,
 ) -> ArtifactResult<()> {
     if outputs.len() != usize::from(request.requested_outputs)
         || result_objects.is_empty()
@@ -341,13 +357,13 @@ fn validate_externalized_success(
             "externalized program response exceeds its output or object inventory contract".into(),
         ));
     }
-    validate_output_payloads(outputs)?;
+    validate_output_payloads(outputs, source_map)?;
     let mut value_ids = BTreeSet::new();
     let mut logical_digests = BTreeSet::new();
     for object in result_objects {
         ValuePayload::Object(Box::new(object.clone()))
             .validate(ValueLimits::default())
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            .map_err(contract_error)?;
         if object.kind != ValueRefKind::ResultObject
             || object.resident_fence.is_some()
             || !value_ids.insert(object.id)
@@ -382,6 +398,24 @@ mod tests {
 
     use super::*;
     use crate::ExecutableForm;
+
+    #[test]
+    fn contract_failure_categories_survive_artifact_admission() {
+        assert!(matches!(
+            contract_error(runmat_execution::ContractError::Limit {
+                field: "frames",
+                limit: 4,
+            }),
+            ArtifactError::Limit(_)
+        ));
+        assert!(matches!(
+            contract_error(runmat_execution::ContractError::Invalid {
+                field: "source",
+                reason: "out of map".into(),
+            }),
+            ArtifactError::Invalid(_)
+        ));
+    }
 
     fn request() -> ProgramExecutionRequest {
         let revision = ProgramRevision::new(
@@ -475,6 +509,200 @@ mod tests {
         ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::String(
             value.into(),
         )))
+    }
+
+    fn source_exception(ordinal: u32) -> ValuePayload {
+        use runmat_execution::value::{
+            ExceptionCallFrame, ExceptionFailureOrigin, ExceptionGpuGatherRetry,
+            ExceptionRuntimeMetadata, ExceptionValue, InlineValue,
+        };
+        ValuePayload::Inline(Box::new(InlineValue::Cell {
+            shape: vec![1, 1],
+            values: vec![ValuePayload::Inline(Box::new(InlineValue::Exception(
+                ExceptionValue {
+                    identifier: "RunMat:test:Nested".into(),
+                    message: "nested source".into(),
+                    stack: vec!["source_function".into()],
+                    causes: Vec::new(),
+                    runtime: Some(ExceptionRuntimeMetadata {
+                        span: None,
+                        builtin: None,
+                        task_id: None,
+                        call_frames: vec![ExceptionCallFrame {
+                            function: "source_function".into(),
+                            program_source_id: Some(runmat_types::ProgramSourceId(ordinal)),
+                            span: None,
+                        }],
+                        call_frames_elided: 0,
+                        call_stack: vec!["source_function @ source.m:1:1".into()],
+                        phase: None,
+                        gpu_gather_retry: ExceptionGpuGatherRetry::Never,
+                        failure_origin: ExceptionFailureOrigin::LanguageEvaluation,
+                    }),
+                },
+            )))],
+        }))
+    }
+
+    fn source_region_request() -> ProgramExecutionRequest {
+        let region = runmat_types::ParallelRegionId(runmat_types::RegionId {
+            function: runmat_types::ProgramFunctionId(7),
+            ordinal: 3,
+        });
+        let mut request = request();
+        request.callable = ProgramCallable::parallel_region(region);
+        request.context = ProgramInvocationContext::ParallelTask {
+            task: runmat_execution::ParallelTaskContext {
+                region,
+                chunk: runmat_execution::ParallelChunk {
+                    ordinal: 0,
+                    start: 0,
+                    len: 1,
+                },
+                randomness: runmat_execution::ParallelRandomnessContext::Inherit,
+            },
+        };
+        request.recipe.entrypoint = request.callable.recipe_entrypoint();
+        let text = "source_function = 1;";
+        let map = runmat_execution::ExecutableSourceMapV2::new(vec![
+            runmat_execution::ExecutableSourceRecordV2 {
+                source_id: runmat_types::ProgramSourceId(0),
+                owner_identity: "fixture".into(),
+                relative_path: "source.m".into(),
+                display_name: "source.m".into(),
+                text: text.into(),
+                content_revision: Digest::sha256(text.as_bytes()),
+            },
+        ])
+        .unwrap();
+        let payload = crate::InterpreterRegionSourcesV1::new(
+            request.recipe.program_revision.clone(),
+            map,
+            b"opaque interpreter script".to_vec(),
+        )
+        .unwrap();
+        request.artifact = ProgramArtifact::materialize(
+            &request.recipe,
+            ExecutableForm::InterpreterRegionSourcesV1,
+            payload.encode().unwrap(),
+        )
+        .unwrap();
+        request
+    }
+
+    #[test]
+    fn exact_artifact_map_bounds_nested_exception_arguments_outputs_and_failures() {
+        let mut source_less = request();
+        source_less.arguments.push(source_exception(0));
+        assert!(source_less.validate().is_err());
+        let source_less_output = ProgramExecutionResponse::Success {
+            outputs: vec![source_exception(0)],
+        };
+        assert!(source_less_output.validate_against(&request()).is_err());
+
+        let mut selected = source_region_request();
+        selected.arguments.push(source_exception(0));
+        selected
+            .validate()
+            .expect("last valid source ordinal is admitted");
+        selected.arguments[0] = source_exception(1);
+        assert!(selected.validate().is_err());
+        selected.arguments[0] = source_exception(0);
+        let valid = ProgramExecutionResponse::Success {
+            outputs: vec![source_exception(0)],
+        };
+        valid.validate_against(&selected).unwrap();
+        let invalid = ProgramExecutionResponse::Success {
+            outputs: vec![source_exception(1)],
+        };
+        assert!(invalid.validate_against(&selected).is_err());
+        let external_object = result_reference(b"source-bearing-result");
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![source_exception(0)],
+            result_objects: vec![external_object.clone()],
+        }
+        .validate_against(&selected)
+        .unwrap();
+        assert!(ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![source_exception(1)],
+            result_objects: vec![external_object],
+        }
+        .validate_against(&selected)
+        .is_err());
+
+        let region = runmat_types::ParallelRegionId(runmat_types::RegionId {
+            function: runmat_types::ProgramFunctionId(7),
+            ordinal: 3,
+        });
+        let scope_id = ExecutionScopeId::derive(&[b"source-bound-spmd-scope"]);
+        let pool = runmat_execution::PoolHandle {
+            id: PoolId::derive(&[b"source-bound-spmd-pool"]),
+            scope_id,
+            generation: 1,
+        };
+        let spmd_context = runmat_execution::SpmdTaskContext {
+            gang: runmat_execution::GangHandle {
+                id: runmat_execution::GangId::derive(&[b"source-bound-spmd-gang"]),
+                scope_id,
+                generation: 1,
+                pool,
+                labs: runmat_types::LabCount(1),
+            },
+            region,
+            rank: runmat_types::LabRank(1),
+        };
+        let mut spmd = selected.clone();
+        spmd.callable = ProgramCallable::spmd_region(region);
+        spmd.context = ProgramInvocationContext::SpmdTask { task: spmd_context };
+        spmd.recipe.entrypoint = spmd.callable.recipe_entrypoint();
+        spmd.artifact = ProgramArtifact::materialize(
+            &spmd.recipe,
+            ExecutableForm::InterpreterRegionSourcesV1,
+            selected.artifact.executable_bytes.clone(),
+        )
+        .unwrap();
+        ProgramExecutionResponse::SpmdSuccess {
+            outputs: vec![Some(runmat_execution::SpmdOutputValue::Value(
+                source_exception(0),
+            ))],
+        }
+        .validate_against(&spmd)
+        .unwrap();
+        assert!(ProgramExecutionResponse::SpmdSuccess {
+            outputs: vec![Some(runmat_execution::SpmdOutputValue::Value(
+                source_exception(1),
+            ))],
+        }
+        .validate_against(&spmd)
+        .is_err());
+
+        let failure = ProgramRuntimeFailure {
+            message: "source failure".into(),
+            identifier: None,
+            span: None,
+            builtin: None,
+            task_id: None,
+            call_frames: vec![runmat_execution::ProgramCallFrame {
+                function: "source_function".into(),
+                program_source_id: Some(runmat_types::ProgramSourceId(1)),
+                span: None,
+            }],
+            call_frames_elided: 0,
+            call_stack: vec!["source_function @ source.m:1:1".into()],
+            phase: None,
+        };
+        assert!(ProgramExecutionResponse::RuntimeFailure {
+            failure: failure.clone(),
+        }
+        .validate_against(&selected)
+        .is_err());
+        let mut valid_failure = failure;
+        valid_failure.call_frames[0].program_source_id = Some(runmat_types::ProgramSourceId(0));
+        ProgramExecutionResponse::RuntimeFailure {
+            failure: valid_failure,
+        }
+        .validate_against(&selected)
+        .unwrap();
     }
 
     fn result_reference(bytes: &[u8]) -> ValueRef {

@@ -45,6 +45,21 @@ fn definition(id: usize, name: &str, callee: usize) -> FunctionBytecode {
     }
 }
 
+#[test]
+fn session_source_revision_is_semantic_without_portable_serialization() {
+    let mut function = definition(71, "bound_callback", 71);
+    let original = super::fingerprint(&function).expect("bound source has a semantic revision");
+    assert!(
+        serde_json::to_vec(&function).is_err(),
+        "runtime authority remains nonportable"
+    );
+    function.source_id = Some(runtime_ref(6));
+    assert_ne!(
+        original,
+        super::fingerprint(&function).expect("changed source has a semantic revision")
+    );
+}
+
 fn group(base: usize) -> FunctionRegistry {
     FunctionRegistry::new(HashMap::from([
         (FunctionId(base), definition(base, "first", base + 1)),

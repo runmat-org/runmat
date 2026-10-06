@@ -1,6 +1,12 @@
 //! Complete canonical semantic definition fingerprint shared by publication and invalidation.
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(serde::Serialize)]
+enum SemanticSourceRevision {
+    Program(runmat_types::ProgramSourceId),
+    Runtime(runmat_execution::Digest),
+}
+
 pub(crate) fn fingerprint(
     function: &runmat_vm::FunctionBytecode,
 ) -> Result<String, serde_json::Error> {
@@ -15,7 +21,8 @@ pub(crate) fn fingerprint(
         private_owner_scope,
         source_id,
         // Derived display provenance is assigned after unchanged-definition
-        // matching; source_id already carries the source-pool identity here.
+        // matching. The source reference is normalized below without using
+        // the portable serializer on session-issued authority.
         source_file: _,
         source_role,
         portable_function: _,
@@ -59,7 +66,12 @@ pub(crate) fn fingerprint(
     append!(display_name);
     append!(class_method_owner);
     append!(private_owner_scope);
-    append!(source_id);
+    append!(&source_id.map(|source| match source {
+        runmat_vm::BytecodeSourceRef::Program(id) => SemanticSourceRevision::Program(id),
+        runmat_vm::BytecodeSourceRef::Runtime(reference) => {
+            SemanticSourceRevision::Runtime(reference.semantic_content_revision())
+        }
+    }));
     append!(source_role);
     append!(capabilities);
     append!(instructions);

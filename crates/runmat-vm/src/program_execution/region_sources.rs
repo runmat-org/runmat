@@ -1,21 +1,12 @@
 use crate::{Bytecode, BytecodeSourceRef};
 use runmat_execution::ExecutableSourceMapV2;
+use runmat_execution_artifact::InterpreterRegionSourcesV1;
 use runmat_runtime::context::RuntimeContext;
-use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
 const PREFIX: &[u8] = b"runmat-region-sources-v1\n";
+#[cfg(test)]
 const SCHEMA: u16 = 1;
-
-/// One artifact-identified payload: bytecode and exact source text cannot be
-/// separated or replaced by a transport sidecar after recipe materialization.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RegionSourcesPayload {
-    schema_version: u16,
-    program_revision: runmat_execution::ProgramRevision,
-    source_map: ExecutableSourceMapV2,
-    script: Vec<u8>,
-}
 
 pub(super) fn capture(bytecode: &Bytecode, runtime: &RuntimeContext) -> Result<Vec<u8>, String> {
     let source_map = runtime
@@ -105,15 +96,9 @@ pub fn encode_portable_region_sources_v1(
     }
     let script =
         crate::encode_interpreter_script_v2(portable).map_err(|error| error.to_string())?;
-    let payload = RegionSourcesPayload {
-        schema_version: SCHEMA,
-        program_revision: revision.clone(),
-        source_map: source_map.clone(),
-        script,
-    };
-    let mut bytes = PREFIX.to_vec();
-    bytes.extend(serde_json::to_vec(&payload).map_err(|error| error.to_string())?);
-    Ok(bytes)
+    InterpreterRegionSourcesV1::new(revision.clone(), source_map.clone(), script)
+        .and_then(|payload| payload.encode())
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn bind(
@@ -121,25 +106,9 @@ pub(super) fn bind(
     runtime: RuntimeContext,
     expected_revision: &runmat_execution::ProgramRevision,
 ) -> Result<(Bytecode, RuntimeContext), String> {
-    let payload = bytes
-        .strip_prefix(PREFIX)
-        .ok_or_else(|| "worker rejected region source payload preamble".to_string())?;
-    let payload: RegionSourcesPayload = serde_json::from_slice(payload)
-        .map_err(|error| format!("worker rejected region source payload: {error}"))?;
-    if payload.schema_version != SCHEMA {
-        return Err(format!(
-            "worker rejected region source schema {}",
-            payload.schema_version
-        ));
-    }
-    if &payload.program_revision != expected_revision {
-        return Err("worker rejected region source revision outside its recipe".into());
-    }
-    payload
-        .source_map
-        .validate()
+    let payload = InterpreterRegionSourcesV1::decode(bytes, expected_revision)
         .map_err(|error| error.to_string())?;
-    let mut bytecode = crate::decode_interpreter_script_v2(&payload.script)
+    let mut bytecode = crate::decode_interpreter_script_v2(payload.script())
         .map_err(|error| format!("worker rejected region bytecode: {error}"))?;
     bytecode
         .validate_portable_source_origins()
@@ -148,7 +117,7 @@ pub(super) fn bind(
         source
             .program()
             .and_then(|ordinal| usize::try_from(ordinal.0).ok())
-            .is_some_and(|index| index < payload.source_map.entries.len())
+            .is_some_and(|index| index < payload.source_map().entries.len())
     };
     if bytecode.source_id.is_some_and(|source| !in_map(source))
         || bytecode
@@ -172,13 +141,13 @@ pub(super) fn bind(
             return Err("worker rejected region function key/body identity mismatch".into());
         }
         super::unit_sources::validate_function_component(
-            &payload.source_map,
+            payload.source_map(),
             expected_revision,
             body,
         )?;
     }
     let runtime =
-        runmat_runtime::source_context::bind_portable_source_map_v2(runtime, &payload.source_map)
+        runmat_runtime::source_context::bind_portable_source_map_v2(runtime, payload.source_map())
             .map_err(|error| error.to_string())?;
     let project = |source: BytecodeSourceRef| {
         source

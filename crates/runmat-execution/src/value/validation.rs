@@ -11,6 +11,25 @@ pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<()
         limits,
         transport: None,
         durable: false,
+        program_sources: None,
+        nodes: 0,
+        inline_bytes: 0,
+        elements: 0,
+        text_bytes: 0,
+    }
+    .payload(payload, 0)
+}
+
+pub(super) fn validate_for_program_sources(
+    payload: &ValuePayload,
+    limits: ValueLimits,
+    source_map: Option<&crate::ExecutableSourceMapV2>,
+) -> Result<(), ContractError> {
+    ValidationBudget {
+        limits,
+        transport: None,
+        durable: false,
+        program_sources: Some(source_map),
         nodes: 0,
         inline_bytes: 0,
         elements: 0,
@@ -27,6 +46,7 @@ pub(super) fn validate_for_durable_storage(
         limits,
         transport: None,
         durable: true,
+        program_sources: None,
         nodes: 0,
         inline_bytes: 0,
         elements: 0,
@@ -44,6 +64,7 @@ pub(super) fn validate_for_transport(
         limits,
         transport: Some(context),
         durable: false,
+        program_sources: None,
         nodes: 0,
         inline_bytes: 0,
         elements: 0,
@@ -56,6 +77,9 @@ struct ValidationBudget<'a> {
     limits: ValueLimits,
     transport: Option<ValueTransportContext<'a>>,
     durable: bool,
+    /// None is ordinary local validation; Some(None) is a portable route
+    /// without a source map and must reject source-bearing frames.
+    program_sources: Option<Option<&'a crate::ExecutableSourceMapV2>>,
     nodes: u64,
     inline_bytes: u64,
     elements: u64,
@@ -310,6 +334,16 @@ impl ValidationBudget<'_> {
             self.elements(runtime.call_frames.len() as u64)?;
             for frame in &runtime.call_frames {
                 self.text(&frame.function)?;
+                if let (Some(source_map), Some(source_id)) =
+                    (self.program_sources, frame.program_source_id)
+                {
+                    if source_map.is_none_or(|map| !map.contains_source(source_id)) {
+                        return Err(ContractError::invalid(
+                            "portable exception source",
+                            "source ordinal is absent from the selected artifact map",
+                        ));
+                    }
+                }
             }
             self.elements(runtime.call_stack.len() as u64)?;
             for frame in &runtime.call_stack {
