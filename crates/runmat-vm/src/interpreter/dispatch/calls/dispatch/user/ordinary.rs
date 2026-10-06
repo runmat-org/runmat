@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+enum OutputPublication {
+    Fixed(usize),
+    Sequence,
+}
+
 pub(super) async fn dispatch(
     ctx: CallDispatchContext<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
@@ -19,130 +25,41 @@ pub(super) async fn dispatch(
         current_function_name,
         ..
     } = ctx;
-    match instr {
-        Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
-                    bound: function_registry.static_binding(*function),
-                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
-                    out_count: *out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                *arg_count,
-                refresh_workspace_state,
-            )
-            .await?
-            {
-                UserCallHandling::Completed(sequence) => {
-                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
-                }
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
+    // Decode the instruction and its output count before collecting arguments or
+    // entering a callable. One prepared call then owns the only suspending path.
+    let (identity, bound, fallback_policy, arg_count, out_count, publication) = match instr {
+        Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => (
+            runmat_hir::CallableIdentity::BoundFunction(*function),
+            function_registry.static_binding(*function),
+            runmat_hir::CallableFallbackPolicy::None,
+            *arg_count,
+            *out_count,
+            OutputPublication::Fixed(*out_count),
+        ),
         Instr::CallSemanticFunctionMultiUsingOutputSlot(function, arg_count, out_count_slot) => {
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
-                    bound: function_registry.static_binding(*function),
-                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
-                    out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
+            (
+                runmat_hir::CallableIdentity::BoundFunction(*function),
+                function_registry.static_binding(*function),
+                runmat_hir::CallableFallbackPolicy::None,
                 *arg_count,
-                refresh_workspace_state,
+                out_count,
+                OutputPublication::Sequence,
             )
-            .await?
-            {
-                UserCallHandling::Completed(sequence) => {
-                    sequence_register.stage_call_output_sequence(stack, sequence)?;
-                }
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
         }
         Instr::CallFunctionMulti {
             identity,
             fallback_policy,
             arg_count,
             out_count,
-        } => {
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    identity: identity.clone(),
-                    bound: None,
-                    fallback_policy: *fallback_policy,
-                    out_count: *out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                *arg_count,
-                refresh_workspace_state,
-            )
-            .await?
-            {
-                UserCallHandling::Completed(sequence) => {
-                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
-                }
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
+        } => (
+            identity.clone(),
+            None,
+            *fallback_policy,
+            *arg_count,
+            *out_count,
+            OutputPublication::Fixed(*out_count),
+        ),
         Instr::CallFunctionMultiUsingOutputSlot {
             identity,
             fallback_policy,
@@ -150,44 +67,57 @@ pub(super) async fn dispatch(
             out_count_slot,
         } => {
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    runtime: &context.runtime,
-                    identity: identity.clone(),
-                    bound: None,
-                    fallback_policy: *fallback_policy,
-                    out_count,
-                    source_id,
-                    call_arg_spans: call_arg_spans.as_ref().cloned(),
-                    current_function_name,
-                    imports: imports.as_slice(),
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
+            (
+                identity.clone(),
+                None,
+                *fallback_policy,
                 *arg_count,
-                refresh_workspace_state,
+                out_count,
+                OutputPublication::Sequence,
             )
-            .await?
-            {
-                UserCallHandling::Completed(sequence) => {
-                    sequence_register.stage_call_output_sequence(stack, sequence)?;
-                }
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
         }
         _ => unreachable!("ordinary semantic-call route received another instruction"),
+    };
+    let result = handle_user_function_call(
+        calls::UserCallContext {
+            stack,
+            runtime: &context.runtime,
+            identity,
+            bound,
+            fallback_policy,
+            out_count,
+            source_id,
+            call_arg_spans: call_arg_spans.as_ref().cloned(),
+            current_function_name,
+            imports: imports.as_slice(),
+            exception: calls::ExceptionRouteContext {
+                try_stack,
+                vars,
+                last_exception,
+                pc,
+            },
+        },
+        arg_count,
+        refresh_workspace_state,
+    )
+    .await?;
+    match result {
+        UserCallHandling::Completed(sequence) => match publication {
+            OutputPublication::Fixed(count) => {
+                calls::publish_fixed_outputs(stack, sequence, count)?
+            }
+            OutputPublication::Sequence => {
+                sequence_register.stage_call_output_sequence(stack, sequence)?;
+            }
+        },
+        UserCallHandling::Caught => {
+            return Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::ContinueLoop,
+            )));
+        }
+        UserCallHandling::Uncaught(error) => return Err(*error),
     }
+    Ok(Some(DispatchHandled::Generic(
+        DispatchDecision::FallThrough,
+    )))
 }
