@@ -13,7 +13,11 @@ use crate::{ArtifactError, ArtifactResult};
 fn contract_error(error: runmat_execution::ContractError) -> ArtifactError {
     match error {
         runmat_execution::ContractError::Limit { .. } => ArtifactError::Limit(error.to_string()),
-        _ => ArtifactError::Invalid(error.to_string()),
+        runmat_execution::ContractError::Invalid { .. }
+        | runmat_execution::ContractError::UnsupportedSchema { .. }
+        | runmat_execution::ContractError::MalformedProtocol(_) => {
+            ArtifactError::Invalid(error.to_string())
+        }
     }
 }
 
