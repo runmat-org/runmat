@@ -1,6 +1,3 @@
-use super::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest};
-
 mod acceleration_semantics;
 mod array;
 mod distributed;
@@ -24,6 +21,7 @@ mod support;
 mod unary_logical_scalar;
 
 pub use distributed::infer_partition_local_call;
+pub use routing::infer as infer_catalog_call;
 pub(crate) use support::facts::materialize;
 pub(crate) use support::materialization::gathered_value_fact;
 pub(crate) use support::text::known_invalid_text_scalar;
@@ -34,7 +32,3 @@ pub(super) use support::{
     default_double_scalar, finish_fixed_outputs, literal_text, numeric_kind,
     preserved_binary_residency,
 };
-
-pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
-    routing::infer(entry, request)
-}

@@ -11,7 +11,7 @@ pub(super) mod stats;
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest};
 
-pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
+pub fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     distributed::infer(entry, request)
 }
 
