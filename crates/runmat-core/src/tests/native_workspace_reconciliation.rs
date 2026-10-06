@@ -38,6 +38,7 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                     ..Default::default()
                 });
             }
+            let workspace = session.workspace_handle().0;
 
             let initial = execute_text_request_for_testing(&mut session, "g = 1;").unwrap();
             assert!(initial.error.is_none(), "jit={jit}: {:?}", initial.error);
@@ -51,7 +52,8 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                 .clone();
             assert!(matches!(
                 &local_key,
-                crate::abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "g"
+                crate::abi::WorkspaceBindingKey::Interactive { session, name }
+                    if *session == workspace && name.0 == "g"
             ));
             let binding =
                 execute_text_request_for_testing(&mut session, "global g; g = 9; observed = g;")
@@ -60,8 +62,12 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
             assert!(binding.workspace_delta.upserts.iter().any(|entry| {
                 matches!(
                     &entry.key,
-                    crate::abi::WorkspaceBindingKey::Global { name, .. }
-                        if name.0 == "g" && entry.value == runmat_value::Value::Num(9.0)
+                    crate::abi::WorkspaceBindingKey::Global {
+                        scope: crate::abi::GlobalScopeKey::Session(session),
+                        name,
+                    } if *session == workspace
+                        && name.0 == "g"
+                        && entry.value == runmat_value::Value::Num(9.0)
                 )
             }));
             assert!(binding.workspace_delta.removals.contains(&local_key));
@@ -102,13 +108,22 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
 fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_store() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(false, false).unwrap();
+        let workspace = session.workspace_handle().0;
         let bind = execute_text_request_for_testing(&mut session, "global g; g = 9;").unwrap();
         assert!(bind.error.is_none(), "{:?}", bind.error);
         let global_key = bind
             .workspace_delta
             .upserts
             .iter()
-            .find(|entry| workspace_key_name(&entry.key) == "g")
+            .find(|entry| {
+                matches!(
+                    &entry.key,
+                    crate::abi::WorkspaceBindingKey::Global {
+                        scope: crate::abi::GlobalScopeKey::Session(session),
+                        name,
+                    } if *session == workspace && name.0 == "g"
+                )
+            })
             .expect("global g upsert")
             .key
             .clone();
@@ -119,8 +134,10 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
         assert!(local.workspace_delta.upserts.iter().any(|entry| {
             matches!(
                 &entry.key,
-                crate::abi::WorkspaceBindingKey::Interactive { name, .. }
-                    if name.0 == "g" && entry.value == runmat_value::Value::Num(3.0)
+                crate::abi::WorkspaceBindingKey::Interactive { session, name }
+                    if *session == workspace
+                        && name.0 == "g"
+                        && entry.value == runmat_value::Value::Num(3.0)
             )
         }));
         assert_eq!(
