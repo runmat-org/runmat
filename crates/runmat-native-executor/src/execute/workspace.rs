@@ -172,7 +172,7 @@ impl NativeWorkspaceState {
             frame: Rc::downgrade(&self.frame),
             global_aliases: self.global_aliases.clone(),
             local_names: self.local_names.clone(),
-            canonical: self.canonical.clone(),
+            canonical: self.canonical.as_ref().map(Rc::downgrade),
             publish: self.publish,
         })
     }
@@ -291,7 +291,7 @@ struct NativeWorkspaceService {
     frame: Weak<NativeWorkspaceFrame>,
     global_aliases: FrameGlobalBindings,
     local_names: BTreeMap<usize, String>,
-    canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+    canonical: Option<Weak<dyn RuntimeWorkspaceService>>,
     publish: bool,
 }
 
@@ -302,6 +302,10 @@ impl NativeWorkspaceService {
             return Err(native_workspace_closed());
         }
         Ok(frame)
+    }
+
+    fn canonical(&self) -> Option<Rc<dyn RuntimeWorkspaceService>> {
+        self.canonical.as_ref().and_then(Weak::upgrade)
     }
 }
 
@@ -381,7 +385,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
 
     fn ensure_effect_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
         let frame = self.frame()?;
-        if let Some(canonical) = self.canonical.as_ref() {
+        if let Some(canonical) = self.canonical() {
             canonical.ensure_effect_authority()?;
             if !self.publish {
                 return Ok(());
@@ -430,7 +434,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
 
     fn ensure_mutation_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
         self.frame()?;
-        if let Some(canonical) = self.canonical.as_ref() {
+        if let Some(canonical) = self.canonical() {
             canonical.ensure_mutation_authority()?;
         }
         Ok(())
@@ -459,7 +463,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .map(drop)
             .map_err(workspace_borrow_error)?;
         if self.publish && !publish_global {
-            if let Some(canonical) = self.canonical.as_ref() {
+            if let Some(canonical) = self.canonical() {
                 canonical.assign(name, rooted.value.clone())?;
             }
         }
@@ -486,7 +490,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .map(drop)
             .map_err(workspace_borrow_error)?;
         if self.publish {
-            if let Some(canonical) = self.canonical.as_ref() {
+            if let Some(canonical) = self.canonical() {
                 canonical.clear()?;
             }
         }
@@ -511,7 +515,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .map(drop)
             .map_err(workspace_borrow_error)?;
         if self.publish {
-            if let Some(canonical) = self.canonical.as_ref() {
+            if let Some(canonical) = self.canonical() {
                 canonical.remove(name)?;
             }
         }
