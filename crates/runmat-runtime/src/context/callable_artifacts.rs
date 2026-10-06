@@ -1,6 +1,7 @@
 use super::{RuntimeContext, RuntimeServiceFuture};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_execution::{ExecutableUnitEnvelope, ValueLimits, ValuePayload};
+use runmat_execution::value::{ValueLimits, ValuePayload};
+use runmat_execution::ExecutableUnitEnvelope;
 use runmat_value::Value;
 
 /// Finite admission limits for one callable-bearing value transfer.
