@@ -17,7 +17,7 @@ fn compiled_inventory_is_deterministic_and_self_digesting() {
 #[test]
 fn canonical_iir_bindings_have_no_legacy_gpu_or_fusion_spec_rows() {
     let observed = &migration_inventory().snapshot.observed;
-    for name in ["filter", "filtfilt"] {
+    for name in ["filter", "filtfilt", "print"] {
         assert!(observed.gpu_specs.iter().all(|spec| spec.key != name));
         assert!(observed.fusion_specs.iter().all(|spec| spec.key != name));
         let bindings = observed

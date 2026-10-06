@@ -27,3 +27,19 @@ mod publication;
 mod resident;
 
 use fixtures::{await_operation_start, PausedDownloadProvider, PausedProvider, RevocableLease};
+
+fn selected_runtime() -> crate::context::RuntimeContext {
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
+    runtime.set_runmat_extensions_enabled(true);
+    runtime
+}
+
+async fn dispatch_print(
+    runtime: &crate::context::RuntimeContext,
+    args: &[Value],
+) -> BuiltinResult<Value> {
+    crate::call_builtin_async_with_outputs_in_context(runtime, "print", args, 0).await
+}

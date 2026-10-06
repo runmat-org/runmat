@@ -27,11 +27,10 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
         lease: RevocableLease::live(),
     });
     let _selected = fs::replace_provider(provider.clone());
-    let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin_direct(
-        None,
-        vec![Value::from("/selected.png")],
-    ));
+    let runtime = selected_runtime();
+    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let arguments = [Value::from("/selected.png")];
+    let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),
@@ -40,7 +39,10 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
     super::super::super::state::clear_figure(None)
         .expect("clear ambient scene during pending call");
     sender.send(()).expect("retained stage receiver");
-    assert!(futures::executor::block_on(call).expect("public print completes"));
+    assert!(matches!(
+        futures::executor::block_on(call).expect("public print completes"),
+        Value::OutputList(values) if values.is_empty()
+    ));
     assert_eq!(
         published.lock().unwrap().as_deref(),
         Some(expected.as_slice())
@@ -77,11 +79,11 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
         std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
         source.token(),
     );
-    let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin_direct(
-        Some(runtime),
-        vec![Value::from("/cancelled.png")],
-    ));
+    runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
+    runtime.set_runmat_extensions_enabled(true);
+    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let arguments = [Value::from("/cancelled.png")];
+    let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),
@@ -89,9 +91,12 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
     );
     source.cancel(runmat_execution::CancellationReason::User);
     let error = futures::executor::block_on(call).expect_err("pending print cancelled");
-    assert!(error
-        .identifier()
-        .is_some_and(|id| id.ends_with(":Cancelled")));
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
     assert!(
         sender.send(()).is_err(),
         "dropped stage must drop pending read owner"
@@ -125,11 +130,10 @@ fn revoked_selected_print_lease_after_pending_write_prevents_publication() {
         lease: lease.clone(),
     });
     let _selected = fs::replace_provider(provider.clone());
-    let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin_direct(
-        None,
-        vec![Value::from("/revoked.png")],
-    ));
+    let runtime = selected_runtime();
+    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let arguments = [Value::from("/revoked.png")];
+    let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),

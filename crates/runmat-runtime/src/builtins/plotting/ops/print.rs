@@ -14,10 +14,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -25,33 +21,6 @@ use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 #[cfg(feature = "plot-core")]
 use super::state::clone_figure;
 use super::state::{current_figure_handle, FigureHandle};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::print")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "print",
-    op_kind: GpuOpKind::Custom("figure-export"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Exports the current figure through the plotting renderer. String/options arguments are gathered; figure content may still render through the shared WGPU plotting path.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::print")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "print",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "print performs figure export I/O and terminates fusion graphs.",
-};
 
 const BUILTIN_NAME: &str = "print";
 

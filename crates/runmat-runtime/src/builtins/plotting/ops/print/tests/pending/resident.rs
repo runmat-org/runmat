@@ -46,11 +46,10 @@ fn resident_handle_selects_scene_after_pending_gather_then_retains_it_through_ex
         lease: RevocableLease::live(),
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
-    let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin_direct(
-        None,
-        vec![Value::GpuTensor(handle), Value::from("/resident.png")],
-    ));
+    let runtime = selected_runtime();
+    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let arguments = [Value::GpuTensor(handle), Value::from("/resident.png")];
+    let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(download_started_receiver, call.as_mut());
     assert_eq!(accelerator.downloads.load(Ordering::SeqCst), 1);
     assert!(
@@ -78,7 +77,10 @@ fn resident_handle_selects_scene_after_pending_gather_then_retains_it_through_ex
     super::super::super::state::clear_figure(Some(figure))
         .expect("clear ambient figure after resolved scene was captured");
     stage_sender.send(()).expect("retained stage receiver");
-    assert!(futures::executor::block_on(call).expect("public resident print"));
+    assert!(matches!(
+        futures::executor::block_on(call).expect("public resident print"),
+        Value::OutputList(values) if values.is_empty()
+    ));
     assert_eq!(
         published.lock().unwrap().as_deref(),
         Some(updated_png.as_slice())
@@ -139,11 +141,10 @@ fn wide_resident_integer_handle_uses_one_authenticated_download() {
         lease: RevocableLease::live(),
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
-    let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin_direct(
-        None,
-        vec![Value::GpuTensor(handle), Value::from("/integer.png")],
-    ));
+    let runtime = selected_runtime();
+    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let arguments = [Value::GpuTensor(handle), Value::from("/integer.png")];
+    let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(download_started_receiver, call.as_mut());
     assert_eq!(accelerator.downloads.load(Ordering::SeqCst), 1);
     assert!(provider.gate.lock().unwrap().is_some());
@@ -155,7 +156,10 @@ fn wide_resident_integer_handle_uses_one_authenticated_download() {
         "the prepared integer payload must not be downloaded again"
     );
     stage_sender.send(()).expect("retained stage receiver");
-    assert!(futures::executor::block_on(call).expect("resident integer print"));
+    assert!(matches!(
+        futures::executor::block_on(call).expect("resident integer print"),
+        Value::OutputList(values) if values.is_empty()
+    ));
     assert_eq!(
         published.lock().unwrap().as_deref(),
         Some(expected.as_slice())
@@ -211,21 +215,24 @@ fn cancelled_pending_resident_gather_has_no_stage_or_download_replay() {
         std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
         cancellation.token(),
     );
-    let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin_direct(
-        Some(runtime),
-        vec![
-            Value::GpuTensor(handle),
-            Value::from("/cancelled-gather.png"),
-        ],
-    ));
+    runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
+    runtime.set_runmat_extensions_enabled(true);
+    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let arguments = [
+        Value::GpuTensor(handle),
+        Value::from("/cancelled-gather.png"),
+    ];
+    let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(download_started_receiver, call.as_mut());
     assert_eq!(accelerator.downloads.load(Ordering::SeqCst), 1);
     cancellation.cancel(runmat_execution::CancellationReason::User);
     let error = futures::executor::block_on(call).expect_err("cancelled resident gather");
-    assert!(error
-        .identifier()
-        .is_some_and(|id| id.ends_with(":Cancelled")));
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
     assert!(
         download_sender.send(()).is_err(),
         "download future must be dropped"
