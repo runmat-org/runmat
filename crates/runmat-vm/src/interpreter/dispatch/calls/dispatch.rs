@@ -82,7 +82,7 @@ fn suspend_builtin(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
 
 #[inline(never)]
 fn suspend_user(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(user::dispatch(ctx))
+    user::dispatch(ctx)
 }
 
 #[inline(never)]
