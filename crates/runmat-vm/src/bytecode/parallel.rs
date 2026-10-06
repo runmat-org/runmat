@@ -623,7 +623,8 @@ mod tests {
     use super::*;
     use crate::{FunctionBytecode, FunctionRegistry, VmAssemblyLayout};
     use runmat_types::{
-        CollectiveId, CollectiveOperation, RegionId, SpmdContract, SpmdLabRequirement,
+        CollectiveContract, CollectiveId, CollectiveOperation, RegionId, SpmdContract,
+        SpmdLabRequirement,
     };
     use std::collections::HashMap;
 
