@@ -1,4 +1,4 @@
-error[E0308]: mismatched types
+error[E0271]: expected `{async block@$DIR/tests/ui/fail_output_sequence_type.rs:38:1: 43:3}` to be a future that resolves to `Result<ValueSequence, String>`, but it resolves to `Result<Value, _>`
   --> tests/ui/fail_output_sequence_type.rs:38:1
    |
 38 | / #[runtime_builtin(
@@ -7,21 +7,9 @@ error[E0308]: mismatched types
 41 | |     output_sequence = true,
 42 | |     builtin_path = "tests::wrong_sequence_type"
 43 | | )]
-   | |__^ expected `ValueSequence`, found `Value`
+   | |__^ expected `Result<ValueSequence, String>`, found `Result<Value, _>`
    |
-help: the type constructed contains `Value` due to the type of the argument passed
-  --> tests/ui/fail_output_sequence_type.rs:38:1
-   |
-38 | / #[runtime_builtin(
-39 | |     name = "wrong_sequence_type",
-40 | |     binding_variant = "default",
-41 | |     output_sequence = true,
-42 | |     builtin_path = "tests::wrong_sequence_type"
-43 | | )]
-   | |__^ this argument influences the type of `Ok`
-note: tuple variant defined here
-  --> $RUST/core/src/result.rs
-   |
-   |     Ok(T),
-   |     ^^
+   = note: expected enum `Result<runmat_value::ValueSequence, std::string::String>`
+              found enum `Result<runmat_value::Value, _>`
+   = note: required for the cast from `std::pin::Pin<Box<{async block@$DIR/tests/ui/fail_output_sequence_type.rs:38:1: 43:3}>>` to `std::pin::Pin<Box<(dyn std::future::Future<Output = Result<runmat_value::ValueSequence, std::string::String>> + 'static)>>`
    = note: this error originates in the attribute macro `runtime_builtin` (in Nightly builds, run with -Z macro-backtrace for more info)
