@@ -168,6 +168,7 @@ impl NativeWorkspaceState {
             canonical: self.canonical.clone(),
             canonical_revision: Rc::clone(&self.canonical_revision),
             active: Rc::clone(&self.active),
+            publish: self.publish,
         })
     }
 
@@ -288,6 +289,7 @@ struct NativeWorkspaceService {
     canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
     canonical_revision: Rc<Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>>,
     active: Rc<Cell<bool>>,
+    publish: bool,
 }
 
 impl NativeWorkspaceService {
@@ -363,6 +365,9 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         self.ensure_active()?;
         if let Some(canonical) = self.canonical.as_ref() {
             canonical.ensure_effect_authority()?;
+            if !self.publish {
+                return Ok(());
+            }
             let revision = canonical.workspace_revision()?;
             if revision.is_some() && revision == self.canonical_revision.get() {
                 return Ok(());
@@ -425,7 +430,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
-        if !publish_global {
+        if self.publish && !publish_global {
             if let Some(canonical) = self.canonical.as_ref() {
                 canonical.assign(name, rooted.value.clone())?;
             }
@@ -450,8 +455,10 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
-        if let Some(canonical) = self.canonical.as_ref() {
-            canonical.clear()?;
+        if self.publish {
+            if let Some(canonical) = self.canonical.as_ref() {
+                canonical.clear()?;
+            }
         }
         let mut values = self
             .values
@@ -471,8 +478,10 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
-        if let Some(canonical) = self.canonical.as_ref() {
-            canonical.remove(name)?;
+        if self.publish {
+            if let Some(canonical) = self.canonical.as_ref() {
+                canonical.remove(name)?;
+            }
         }
         let mut values = self
             .values

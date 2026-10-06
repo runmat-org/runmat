@@ -274,3 +274,38 @@ fn internal_native_stores_check_authority_for_global_and_function_frames() {
     assert_eq!(state.initial_value(0), Some(Value::Num(1.0)));
     assert_eq!(function_state.initial_value(0), None);
 }
+
+#[test]
+fn procedure_workspace_isolated_from_live_parent_but_inherits_revocation() {
+    let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let mut parent = runmat_runtime::workspace::WorkspaceDelta::new();
+    parent.assign("missing", Value::Num(1.0)).unwrap();
+    owner.apply(parent).unwrap();
+    let canonical: std::rc::Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> =
+        std::rc::Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
+        ));
+    let (function, _) = fixture(Value::Num(0.0));
+    let state =
+        NativeWorkspaceState::function_frame(&function, Default::default(), Some(canonical));
+    state.initialize_local(0, Value::Num(2.0)).unwrap();
+    let service = state.service();
+
+    assert_eq!(
+        service.try_lookup("missing").unwrap(),
+        Some(Value::Num(2.0))
+    );
+    service.assign("missing", Value::Num(3.0)).unwrap();
+    assert_eq!(
+        service.try_lookup("missing").unwrap(),
+        Some(Value::Num(3.0))
+    );
+    assert_eq!(owner.lookup("missing").unwrap(), Some(Value::Num(1.0)));
+    service.clear().unwrap();
+    assert!(service.try_snapshot().unwrap().is_empty());
+    assert_eq!(owner.lookup("missing").unwrap(), Some(Value::Num(1.0)));
+
+    owner.close().unwrap();
+    let error = service.assign("missing", Value::Num(4.0)).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+}
