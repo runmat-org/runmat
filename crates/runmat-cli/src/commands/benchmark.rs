@@ -57,12 +57,13 @@ pub async fn execute_benchmark(
             engine.workspace_handle(),
         );
         let callbacks = engine.graphics_callback_queue().cloned();
-        let response = drive_with_graphics_callbacks(
-            callbacks,
-            local_tasks.drive_until(engine.execute_request(request)),
-        )
-        .await?
-        .context("Local callback driver stopped during benchmark warm-up")?;
+        let response = local_tasks
+            .drive_until(drive_with_graphics_callbacks(
+                callbacks,
+                engine.execute_request(request),
+            ))
+            .await
+            .context("Local callback driver stopped during benchmark warm-up")??;
         match response.result {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
@@ -133,12 +134,13 @@ pub async fn execute_benchmark(
             engine.workspace_handle(),
         );
         let callbacks = engine.graphics_callback_queue().cloned();
-        let response = drive_with_graphics_callbacks(
-            callbacks,
-            local_tasks.drive_until(engine.execute_request(request)),
-        )
-        .await?
-        .context("Local callback driver stopped during benchmark execution")?;
+        let response = local_tasks
+            .drive_until(drive_with_graphics_callbacks(
+                callbacks,
+                engine.execute_request(request),
+            ))
+            .await
+            .context("Local callback driver stopped during benchmark execution")??;
         let outcome = match response.result {
             Ok(outcome) => outcome,
             Err(err) => {

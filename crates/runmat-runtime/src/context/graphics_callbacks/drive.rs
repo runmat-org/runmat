@@ -69,11 +69,93 @@ impl RuntimeGraphicsCallbackQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::context::{RuntimeLocalTaskService, RuntimeLocalTaskSupervisor};
     use crate::execution::RuntimeExecutionService;
     use futures::channel::oneshot;
     use futures::FutureExt;
     use std::cell::Cell;
     use std::cell::RefCell;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn idle_callback_participates_in_the_same_local_task_supervisor_poll() {
+        futures::executor::block_on(async {
+            let selected = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+            let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
+            let queue = RuntimeGraphicsCallbackQueue::new(
+                NonZeroUsize::new(1).expect("nonzero pending"),
+                NonZeroUsize::new(1).expect("nonzero registrations"),
+            );
+            let (begin, begun) = oneshot::channel::<()>();
+            let (callback_done, callback_complete) = oneshot::channel::<()>();
+            let (execution_done, execution_complete) = oneshot::channel::<()>();
+            let task = supervisor
+                .submission_port(selected.local_identity())
+                .spawn_local(
+                    selected.local_identity(),
+                    Box::pin(async move {
+                        begun.await.expect("callback starts local task");
+                        callback_done.send(()).expect("callback still waiting");
+                        execution_done.send(()).expect("execution still waiting");
+                    }),
+                )
+                .expect("admit local task");
+            let begin = Rc::new(RefCell::new(Some(begin)));
+            let callback_complete = Rc::new(RefCell::new(Some(callback_complete)));
+            let observed = Rc::new(Cell::new(false));
+            let callback: Rc<GraphicsCallbackResponder> = {
+                let supervisor = Rc::clone(&supervisor);
+                let begin = Rc::clone(&begin);
+                let callback_complete = Rc::clone(&callback_complete);
+                let observed = Rc::clone(&observed);
+                Rc::new(move |_| {
+                    let begin = begin.borrow_mut().take().expect("one callback");
+                    let done = callback_complete
+                        .borrow_mut()
+                        .take()
+                        .expect("one completion");
+                    let supervisor = Rc::clone(&supervisor);
+                    let observed = Rc::clone(&observed);
+                    Box::pin(async move {
+                        begin.send(()).expect("local task retained");
+                        supervisor
+                            .participate_foreground(async {
+                                done.await.expect("supervisor-owned local task progressed");
+                            })
+                            .await
+                            .expect("callback runs inside the active supervisor poll");
+                        observed.set(true);
+                        Ok(GraphicsCallbackResult::Completed)
+                    })
+                })
+            };
+            let (_registration, ingress) = queue
+                .register_response(selected, 9, GraphicsCallbackKind::PanActionPre, callback)
+                .expect("register callback");
+            ingress
+                .send(GraphicsCallbackHostEvent {
+                    figure: 9,
+                    kind: GraphicsCallbackKind::PanActionPre,
+                    position: None,
+                })
+                .expect("admit host event");
+            supervisor
+                .drive_until(queue.drive_execution_with_host_callbacks(async move {
+                    execution_complete
+                        .await
+                        .expect("local execution completion");
+                }))
+                .await
+                .expect("local supervisor")
+                .expect("idle graphics driver");
+            assert!(observed.get());
+            assert_eq!(
+                task.outcome(),
+                Some(crate::context::RuntimeLocalTaskOutcome::Completed)
+            );
+        });
+    }
 
     #[test]
     fn idle_host_event_runs_once_while_execution_is_pending() {

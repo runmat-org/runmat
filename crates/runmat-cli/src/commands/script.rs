@@ -162,13 +162,14 @@ async fn execute_script_request(
     tokio::task::yield_now().await;
     let local_tasks = engine.local_task_driver();
     let callbacks = engine.graphics_callback_queue().cloned();
-    let response = drive_with_graphics_callbacks(
-        callbacks,
-        local_tasks.drive_until(engine.execute_request(request)),
-    )
-    .await;
+    let response = local_tasks
+        .drive_until(drive_with_graphics_callbacks(
+            callbacks,
+            engine.execute_request(request),
+        ))
+        .await;
     signal_task.abort();
-    let response = response?.context("Local callback driver stopped during script execution")?;
+    let response = response.context("Local callback driver stopped during script execution")??;
     engine.shutdown_local_tasks();
     let source_context = response.source_context;
     let outcome = match response.result {

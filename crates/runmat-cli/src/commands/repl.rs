@@ -62,12 +62,13 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
             .read_to_string(&mut buffer)
             .context("Failed to read piped input")?;
         let callbacks = engine.graphics_callback_queue().cloned();
-        if !drive_with_graphics_callbacks(
-            callbacks,
-            local_tasks.drive_until(process_repl_input(&buffer, &mut engine, config)),
-        )
-        .await?
-        .context("Local callback driver stopped during piped REPL input")??
+        if !local_tasks
+            .drive_until(drive_with_graphics_callbacks(
+                callbacks,
+                process_repl_input(&buffer, &mut engine, config),
+            ))
+            .await
+            .context("Local callback driver stopped during piped REPL input")??
         {
             engine.shutdown_local_tasks();
             engine
@@ -115,9 +116,8 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
     let mut background_services_available = true;
     loop {
         let callbacks = engine.graphics_callback_queue().cloned();
-        let wake = drive_with_graphics_callbacks(
-            callbacks,
-            local_tasks.drive_until(async {
+        let wake = local_tasks
+            .drive_until(drive_with_graphics_callbacks(callbacks, async {
                 if background_services_available {
                     let input_ready = input.next().fuse();
                     let background_ready = engine.service_background_once().fuse();
@@ -129,10 +129,9 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
                 } else {
                     ReplWake::Input(input.next().await)
                 }
-            }),
-        )
-        .await?
-        .context("Local callback driver stopped while waiting for REPL input")?;
+            }))
+            .await
+            .context("Local callback driver stopped while waiting for REPL input")??;
         let ReplWake::Input(event) = wake else {
             if let ReplWake::Background(serviced) = wake {
                 background_services_available = serviced;
@@ -142,12 +141,13 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         match event {
             Some(ReplInputEvent::Line(line)) => {
                 let callbacks = engine.graphics_callback_queue().cloned();
-                let keep_running = drive_with_graphics_callbacks(
-                    callbacks,
-                    local_tasks.drive_until(process_repl_input(&line, &mut engine, config)),
-                )
-                .await?
-                .context("Local callback driver stopped during REPL execution")??;
+                let keep_running = local_tasks
+                    .drive_until(drive_with_graphics_callbacks(
+                        callbacks,
+                        process_repl_input(&line, &mut engine, config),
+                    ))
+                    .await
+                    .context("Local callback driver stopped during REPL execution")??;
                 let _ = continue_sender.send(keep_running);
                 if !keep_running {
                     break;
