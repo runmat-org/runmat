@@ -16,6 +16,8 @@ pub(crate) async fn execute_callable_descriptor(
 ) -> Result<ValueSequence, RuntimeError> {
     let callable = match &descriptor.target {
         CallableTarget::FevalForward(value) => Some(value),
+        // Bound authority retains definition leases, not captured GC values.
+        CallableTarget::Bound(_) => None,
         CallableTarget::Resolved { .. } => None,
     };
     let _roots = root_values(descriptor.args.iter().chain(callable))?;

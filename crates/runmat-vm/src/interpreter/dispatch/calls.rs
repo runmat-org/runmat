@@ -206,7 +206,7 @@ pub fn handle_builtin_outcome(
     let ExceptionRouteContext {
         try_stack,
         vars,
-        last_exception,
+        last_exception: _,
         pc,
     } = ctx;
     match result {
