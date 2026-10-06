@@ -137,7 +137,7 @@ impl RunMatSession {
             active_source_identity: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
-            dynamic_function_cache: Arc::new(Mutex::new(HashMap::new())),
+            dynamic_function_cache: Rc::new(dynamic_cache::DynamicFunctionCache::default()),
             startup_user_path_authority,
             startup_environment_path,
             user_path_hydrated: false,

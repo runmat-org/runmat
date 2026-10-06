@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Mutex;
 
 impl RunMatSession {
     /// Install session input in the currently entered runtime context. Both

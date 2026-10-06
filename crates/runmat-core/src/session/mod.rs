@@ -14,7 +14,8 @@ use runmat_time::Instant;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::execution::{
@@ -51,6 +52,7 @@ pub(crate) mod semantic_definition;
 mod cancellation;
 mod config;
 mod dynamic;
+mod dynamic_cache;
 mod executable;
 mod host_services;
 mod input;
@@ -95,7 +97,7 @@ pub struct RunMatSession {
     function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
     /// Canonically compiled functions discovered through the runtime search path.
-    dynamic_function_cache: Arc<Mutex<HashMap<PathBuf, DynamicFunctionCacheEntry>>>,
+    dynamic_function_cache: Rc<dynamic_cache::DynamicFunctionCache>,
     /// Startup path facts are captured before an async application-settings
     /// read; no later ambient provider/CWD can redefine this session owner.
     startup_user_path_authority:
@@ -239,7 +241,7 @@ struct WorkspaceMaterializeTicket {
 struct DynamicFunctionCacheEntry {
     selection: DynamicFunctionCacheSelection,
     unit_bytes: Arc<[u8]>,
-    admitted: Arc<runmat_vm::AdmittedExecutableUnit>,
+    admitted: Rc<runmat_vm::AdmittedExecutableUnit>,
     entrypoint_origin: runmat_execution::FunctionBindingOrigin,
     binding: runmat_value::BoundFunctionBinding,
     dependencies: Arc<[DynamicFunctionDependency]>,
@@ -325,10 +327,7 @@ mod dynamic_source_product_tests;
 #[cfg(test)]
 impl RunMatSession {
     pub(crate) fn cached_source_count(&self) -> usize {
-        self.dynamic_function_cache
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .len()
+        self.dynamic_function_cache.len()
     }
 }
 

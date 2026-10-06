@@ -111,18 +111,13 @@ pub(in crate::session) async fn load_dynamic_function(
                 .map(|context| context.dynamic_inventory_revision())
                 .unwrap_or_else(|| runmat_execution::Digest::sha256("empty-source-inventory"));
             let primary_revision = runmat_execution::Digest::sha256(source_text.as_bytes());
-            let cached_candidate = cache
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .get(&path)
-                .filter(|entry| {
-                    entry.selection.matches_selection(
-                        &primary_revision,
-                        &inventory_revision,
-                        path_origin,
-                    )
-                })
-                .cloned();
+            let cached_candidate = cache.get(&path).filter(|entry| {
+                entry.selection.matches_selection(
+                    &primary_revision,
+                    &inventory_revision,
+                    path_origin,
+                )
+            });
             let cached = if let Some(entry) = cached_candidate {
                 super::reusable_dynamic_product(&entry)
                     .await
@@ -159,13 +154,7 @@ pub(in crate::session) async fn load_dynamic_function(
                         bound,
                     )?;
                     let binding = admission.binding().clone();
-                    if let Some(cached) = cache
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner())
-                        .get_mut(&path)
-                    {
-                        cached.binding = binding.clone();
-                    }
+                    cache.replace_binding(&path, binding.clone());
                     (selected_runtime, binding, Some(admission))
                 }
             } else {
@@ -399,7 +388,7 @@ pub(in crate::session) async fn load_dynamic_function(
                         .build()
                 })?;
                 let unit_bytes = Arc::<[u8]>::from(unit_bytes);
-                let admitted = Arc::new(admitted);
+                let admitted = Rc::new(admitted);
                 let bound = admitted
                     .as_ref()
                     .clone()
@@ -422,24 +411,21 @@ pub(in crate::session) async fn load_dynamic_function(
                 let publish_span =
                     info_span!("runtime.function_registry.publish", source_kind = "m-file");
                 let _publish_guard = publish_span.enter();
-                cache
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner())
-                    .insert(
-                        path.clone(),
-                        DynamicFunctionCacheEntry {
-                            selection: DynamicFunctionCacheSelection {
-                                primary_revision,
-                                inventory_revision,
-                                path_origin: (*path_origin).clone(),
-                            },
-                            unit_bytes: Arc::clone(&unit_bytes),
-                            admitted: Arc::clone(&admitted),
-                            entrypoint_origin,
-                            binding: binding.clone(),
-                            dependencies,
+                cache.insert(
+                    path.clone(),
+                    DynamicFunctionCacheEntry {
+                        selection: DynamicFunctionCacheSelection {
+                            primary_revision,
+                            inventory_revision,
+                            path_origin: (*path_origin).clone(),
                         },
-                    );
+                        unit_bytes: Arc::clone(&unit_bytes),
+                        admitted: Rc::clone(&admitted),
+                        entrypoint_origin,
+                        binding: binding.clone(),
+                        dependencies,
+                    },
+                );
                 (selected_runtime, binding, Some(admission))
             };
             let result =
@@ -473,8 +459,7 @@ pub(in crate::session) async fn load_dynamic_function(
 pub(in crate::session) struct DynamicFunctionEnvironment {
     pub(in crate::session) compat: CompatMode,
     pub(in crate::session) top_level_await_enabled: bool,
-    pub(in crate::session) cache:
-        Arc<Mutex<HashMap<std::path::PathBuf, DynamicFunctionCacheEntry>>>,
+    pub(in crate::session) cache: Rc<super::super::dynamic_cache::DynamicFunctionCache>,
     pub(in crate::session) project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     pub(in crate::session) source_evaluator:
         Rc<super::super::source_evaluation::SessionSourceEvaluator>,

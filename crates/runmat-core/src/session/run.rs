@@ -61,7 +61,7 @@ impl RunMatSession {
         let dynamic_environment = super::dynamic::DynamicFunctionEnvironment {
             compat: self.compat_mode,
             top_level_await_enabled: self.top_level_await_enabled,
-            cache: Arc::clone(&self.dynamic_function_cache),
+            cache: Rc::clone(&self.dynamic_function_cache),
             project_handoff: self.project_handoff.clone(),
             source_evaluator: Rc::clone(&self.source_evaluator),
             #[cfg(not(target_arch = "wasm32"))]
@@ -91,12 +91,12 @@ impl RunMatSession {
         self.runtime_context
             .set_dynamic_function_loader(Some(loader));
 
-        let dynamic_function_cache = Arc::clone(&self.dynamic_function_cache);
+        let dynamic_function_cache = Rc::clone(&self.dynamic_function_cache);
         #[cfg(not(target_arch = "wasm32"))]
         let mex_runtime = std::rc::Rc::clone(&self.mex_runtime);
         let clearer: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionClearer> =
             std::rc::Rc::new(move |runtime, request| {
-                let dynamic_function_cache = Arc::clone(&dynamic_function_cache);
+                let dynamic_function_cache = Rc::clone(&dynamic_function_cache);
                 #[cfg(not(target_arch = "wasm32"))]
                 let mex_runtime = std::rc::Rc::clone(&mex_runtime);
                 Box::pin(async move {
@@ -106,19 +106,14 @@ impl RunMatSession {
                         request,
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
                     ) {
-                        let mut cache = dynamic_function_cache
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner());
                         match &request {
                             runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
-                                cache.clear();
+                                dynamic_function_cache.clear();
                             }
                             runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(
                                 name,
                             ) => {
-                                cache.retain(|path, _| {
-                                    !super::dynamic::path_matches_clear_name(path, name)
-                                });
+                                dynamic_function_cache.clear_named(name);
                             }
                             runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
                         }
@@ -131,10 +126,10 @@ impl RunMatSession {
         self.runtime_context
             .set_dynamic_function_clearer(Some(clearer));
 
-        let refresh_cache = Arc::clone(&self.dynamic_function_cache);
+        let refresh_cache = Rc::clone(&self.dynamic_function_cache);
         let refresher: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionRefresher> =
             std::rc::Rc::new(move |runtime, _request| {
-                let cache = Arc::clone(&refresh_cache);
+                let cache = Rc::clone(&refresh_cache);
                 Box::pin(async move {
                     // This refresh is one invocation-owned cache mutation.
                     // Yield/cancel before changing either revision or entries;
@@ -156,10 +151,7 @@ impl RunMatSession {
                                 .build()
                         })?;
                     }
-                    cache
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner())
-                        .clear();
+                    cache.clear();
                     Ok(())
                 })
             });

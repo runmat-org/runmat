@@ -47,10 +47,7 @@ impl RunMatSession {
             })?;
         self.project_handoff = Some(handoff);
         self.pending_companion_source_discovery = None;
-        self.dynamic_function_cache
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
+        self.dynamic_function_cache.clear();
         Ok(revision)
     }
 
@@ -195,10 +192,7 @@ impl RunMatSession {
         self.project_handoff = None;
         self.runtime_context = self.runtime_context.clone().with_program_revision(None);
         self.pending_companion_source_discovery = None;
-        self.dynamic_function_cache
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
+        self.dynamic_function_cache.clear();
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = self.mex_runtime.clear(
             &runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions,

@@ -14537,7 +14537,7 @@ fn portable_entrypoint_rejects_matching_function_id_from_another_revision() {
         .expect("portable function product");
     let portable_function = envelope.manifest.identity.entrypoint_function;
     let wrong_revision = runmat_execution::ProgramRevision::new(
-        envelope.manifest.identity.program.graph_digest().clone(),
+        *envelope.manifest.identity.program.graph_digest(),
         runmat_execution::Digest::sha256(b"different-entrypoint-source-revision"),
         envelope.manifest.identity.program.environment(),
     )

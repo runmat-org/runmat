@@ -1,5 +1,44 @@
 use super::*;
 
+#[test]
+fn dynamic_cache_reader_snapshot_does_not_hold_mutation_access() {
+    let _serial = runmat_filesystem::provider_override_lock();
+    let temporary = tempfile::TempDir::new().expect("source root");
+    std::fs::write(
+        temporary.path().join("snapshot_helper.m"),
+        "function y = snapshot_helper()\n y = 17;\nend\n",
+    )
+    .expect("helper source");
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    let root = temporary.path().to_string_lossy().replace('\'', "''");
+    let first = crate::execute_text_request_for_testing(
+        &mut session,
+        &format!("addpath('{root}'); first = snapshot_helper();"),
+    )
+    .expect("dynamic call");
+    assert!(first.error.is_none(), "{first:?}");
+    let reader = session.dynamic_function_cache.snapshot();
+    assert_eq!(reader.len(), 1);
+
+    session
+        .dynamic_function_cache
+        .clear_named("snapshot_helper");
+    assert_eq!(session.cached_source_count(), 0);
+    assert_eq!(reader.len(), 1, "a reader retains its exact owned product");
+    let second =
+        crate::execute_text_request_for_testing(&mut session, "second = snapshot_helper();")
+            .expect("rebuild with old reader retained");
+    assert!(second.error.is_none(), "{second:?}");
+    assert_eq!(
+        session.get_variables().unwrap().get("second"),
+        Some(&Value::Num(17.0))
+    );
+    assert_eq!(session.cached_source_count(), 1);
+    session.dynamic_function_cache.clear();
+    assert_eq!(session.cached_source_count(), 0);
+    assert_eq!(reader.len(), 1);
+}
+
 fn execute_helper(session: &mut RunMatSession) -> crate::abi::RuntimeDiagnostic {
     let request = crate::abi::ExecutionRequest::for_source(
         crate::abi::SourceInput::Text {
@@ -69,7 +108,7 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
         "private source must own the failure: {first:?}"
     );
     let (admitted, unit_bytes, entrypoint_origin) = {
-        let cache = session.dynamic_function_cache.lock().expect("cache lock");
+        let cache = session.dynamic_function_cache.snapshot();
         assert_eq!(cache.len(), 1, "the entry was dynamically resolved");
         let entry = cache.values().next().expect("resolved helper");
         assert_eq!(
@@ -77,7 +116,7 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
             "helper"
         );
         (
-            Arc::clone(&entry.admitted),
+            Rc::clone(&entry.admitted),
             Arc::clone(&entry.unit_bytes),
             entry.entrypoint_origin,
         )
@@ -87,11 +126,11 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
     assert_eq!(second.code, first.code);
     assert_eq!(second.message, first.message);
     assert_eq!(second.callstack, first.callstack);
-    let cache = session.dynamic_function_cache.lock().expect("cache lock");
+    let cache = session.dynamic_function_cache.snapshot();
     assert_eq!(cache.len(), 1);
     let entry = cache.values().next().expect("same dynamic entry");
     assert!(
-        Arc::ptr_eq(&entry.admitted, &admitted),
+        Rc::ptr_eq(&entry.admitted, &admitted),
         "admitted product cache hit"
     );
     assert!(
@@ -117,9 +156,9 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
             .any(|frame| frame.contains("private/secret.m")),
         "the rebuilt companion retains its exact source: {changed:?}"
     );
-    let cache = session.dynamic_function_cache.lock().expect("cache lock");
+    let cache = session.dynamic_function_cache.snapshot();
     let changed_entry = cache.values().next().expect("rebuilt helper");
-    assert!(!Arc::ptr_eq(&changed_entry.admitted, &admitted));
+    assert!(!Rc::ptr_eq(&changed_entry.admitted, &admitted));
     assert!(!Arc::ptr_eq(&changed_entry.unit_bytes, &unit_bytes));
     assert_ne!(changed_entry.entrypoint_origin, entrypoint_origin);
 }
@@ -164,8 +203,7 @@ fn committed_dynamic_binding_reuses_incoming_session_and_exact_private_source() 
     );
     let binding = session
         .dynamic_function_cache
-        .lock()
-        .expect("cache lock")
+        .snapshot()
         .values()
         .next()
         .expect("committed dynamic product")
@@ -187,8 +225,7 @@ fn committed_dynamic_binding_reuses_incoming_session_and_exact_private_source() 
     assert_eq!(
         session
             .dynamic_function_cache
-            .lock()
-            .expect("cache lock")
+            .snapshot()
             .values()
             .next()
             .expect("same cached product")

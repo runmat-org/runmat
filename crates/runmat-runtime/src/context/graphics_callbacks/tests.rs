@@ -536,11 +536,10 @@ fn deferred_events_keep_order_origin_and_reentrant_arrivals() {
         "Defer must not invoke callback"
     );
     let mut processing = Box::pin(queue.process());
-    let pending = futures::executor::block_on(futures::future::poll_fn(|context| {
+    futures::executor::block_on(futures::future::poll_fn(|context| {
         assert!(processing.as_mut().poll(context).is_pending());
         std::task::Poll::Ready(())
     }));
-    assert_eq!(pending, ());
     ingress
         .send(GraphicsCallbackHostEvent {
             position: Some((4.0, 5.0)),
