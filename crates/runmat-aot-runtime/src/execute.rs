@@ -197,7 +197,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
             };
         let native_lifecycle = native_ffi.shutdown().await;
         let mex_lifecycle = mex_guard.shutdown_gracefully().await;
-        let execution = execution.map_err(execution_diagnostic)?;
+        let execution = execution.map_err(|error| execution_diagnostic(error, &runtime))?;
         native_lifecycle
             .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
         mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
@@ -214,14 +214,40 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     result.map_err(|error| format!("standalone local task driver failed: {error}"))?
 }
 
-fn execution_diagnostic(error: runmat_runtime::RuntimeError) -> String {
-    match error.identifier() {
+fn execution_diagnostic(
+    error: runmat_runtime::RuntimeError,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> String {
+    let mut rendered = match error.identifier() {
         Some(identifier) => format!(
             "standalone native execution failed: {identifier}: {}",
             error.message
         ),
         None => format!("standalone native execution failed: {error}"),
+    };
+    if let Some(span) = error.span {
+        rendered.push_str(&format!(
+            " [source span {}..{}]",
+            span.offset(),
+            span.offset().saturating_add(span.len())
+        ));
     }
+    let frames = if error.context.call_stack.is_empty() {
+        runmat_runtime::execution::render_source_call_stack_in_context(&error, runtime)
+    } else {
+        error.context.call_stack.clone()
+    };
+    for frame in frames {
+        rendered.push_str("\n  at ");
+        rendered.push_str(&frame);
+    }
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        rendered.push_str("\n  caused by: ");
+        rendered.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    rendered
 }
 
 /// Initialize language policy from the verified program, independent of the
