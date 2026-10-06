@@ -82,21 +82,44 @@ pub fn source_function_for(function: usize) -> Option<SourceFunctionInfo> {
 /// Resolve only an exact immutable program/function binding. A reused numeric
 /// session ID or matching display name is never sufficient authority.
 pub fn resolve_binding_origin(origin: runmat_execution::FunctionBindingOrigin) -> Option<usize> {
-    fn unique(
-        catalog: &[SourceFunctionInfo],
-        origin: runmat_execution::FunctionBindingOrigin,
-    ) -> Option<usize> {
-        let mut matches = catalog
-            .iter()
-            .filter(|info| info.binding_origin == Some(origin))
-            .map(|info| info.function);
-        let function = matches.next()?;
-        matches.next().is_none().then_some(function)
+    fn function(info: &SourceFunctionInfo) -> usize {
+        info.function
     }
     if let Some(state) = active_state() {
-        return unique(state.call.borrow().source_functions.as_deref()?, origin);
+        return unique_origin(state.call.borrow().source_functions.as_deref()?, origin)
+            .map(function);
     }
-    SOURCE_FUNCTION_CATALOG.with(|slot| unique(slot.borrow().as_deref()?, origin))
+    SOURCE_FUNCTION_CATALOG
+        .with(|slot| unique_origin(slot.borrow().as_deref()?, origin).map(function))
+}
+
+/// Resolve an immutable portable origin into the exact selected definition
+/// graph. When the catalog owns definitions, the returned value carries local
+/// definition leases; copying the value therefore retains its callable graph.
+pub fn resolve_binding_origin_binding(
+    origin: runmat_execution::FunctionBindingOrigin,
+) -> Option<runmat_value::BoundFunctionBinding> {
+    let info = if let Some(state) = active_state() {
+        unique_origin(state.call.borrow().source_functions.as_deref()?, origin)?.clone()
+    } else {
+        SOURCE_FUNCTION_CATALOG
+            .with(|slot| unique_origin(slot.borrow().as_deref()?, origin).cloned())?
+    };
+    Some(runmat_value::BoundFunctionBinding {
+        function: info.function,
+        authority: authority_for_selected_info(info.function, Some(&info)),
+    })
+}
+
+fn unique_origin(
+    catalog: &[SourceFunctionInfo],
+    origin: runmat_execution::FunctionBindingOrigin,
+) -> Option<&SourceFunctionInfo> {
+    let mut matches = catalog
+        .iter()
+        .filter(|info| info.binding_origin == Some(origin));
+    let info = matches.next()?;
+    matches.next().is_none().then_some(info)
 }
 
 /// Bind a semantic function while preserving its source role at the value

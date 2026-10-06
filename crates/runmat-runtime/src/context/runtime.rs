@@ -664,7 +664,8 @@ impl RuntimeContext {
         let services = services
             .without_workspace()
             .without_base_workspace()
-            .without_graphics_presentation();
+            .without_graphics_presentation()
+            .without_callable_artifacts();
         let child = Self::with_cancellation(self.execution.clone(), self.cancellation())
             .with_program_revision(self.program_revision.clone())
             .with_service_ports(services);

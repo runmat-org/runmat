@@ -1,7 +1,7 @@
 use super::{
-    RuntimeCapability, RuntimeCapabilityError, RuntimeGraphicsPresentationService,
-    RuntimePreferenceService, RuntimeSourceEvaluationService, RuntimeTcpService,
-    RuntimeTimingService, RuntimeUserPathService,
+    RuntimeCallableArtifactService, RuntimeCapability, RuntimeCapabilityError,
+    RuntimeGraphicsPresentationService, RuntimePreferenceService, RuntimeSourceEvaluationService,
+    RuntimeTcpService, RuntimeTimingService, RuntimeUserPathService,
 };
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
@@ -1069,6 +1069,7 @@ pub struct RuntimeServicePorts {
     timing: Rc<dyn RuntimeTimingService>,
     local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
     source_evaluation: Option<Rc<dyn super::RuntimeSourceEvaluationService>>,
+    callable_artifacts: Option<Rc<dyn super::RuntimeCallableArtifactService>>,
 }
 
 impl Default for RuntimeServicePorts {
@@ -1100,6 +1101,7 @@ impl Default for RuntimeServicePorts {
             timing: super::timing::platform_service(),
             local_tasks: None,
             source_evaluation: None,
+            callable_artifacts: None,
         }
     }
 }
@@ -1138,6 +1140,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
         debug.field("timing", &"installed");
         debug.field("local_tasks", &self.local_tasks.is_some());
         debug.field("source_evaluation", &self.source_evaluation.is_some());
+        debug.field("callable_artifacts", &self.callable_artifacts.is_some());
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
         debug.finish()
@@ -1248,6 +1251,14 @@ impl RuntimeServicePorts {
         RuntimeSourceEvaluationService,
         SourceEvaluation
     );
+    port_accessors!(
+        with_callable_artifacts,
+        callable_artifacts,
+        require_callable_artifacts,
+        callable_artifacts,
+        RuntimeCallableArtifactService,
+        CallableArtifacts
+    );
 
     /// Remove an inherited caller-workspace service before entering an
     /// isolated procedure frame. The callee may then install its own scoped
@@ -1269,6 +1280,13 @@ impl RuntimeServicePorts {
     /// queue authority merely because their service ports were cloned.
     pub fn without_graphics_presentation(mut self) -> Self {
         self.graphics_presentation = None;
+        self
+    }
+
+    /// Parallel labs do not inherit the parent session's definition
+    /// publication authority. A worker must install its own artifact owner.
+    pub fn without_callable_artifacts(mut self) -> Self {
+        self.callable_artifacts = None;
         self
     }
     port_accessors!(

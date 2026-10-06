@@ -45,6 +45,75 @@ fn exact_origin_resolves_relocated_id_not_reused_numeric_id() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn exact_origin_binding_owns_the_selected_definition_graph() {
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("imported program"),
+        function: runmat_types::ProgramFunctionId(4),
+    };
+    let root = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let helper = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let entry = runtime.enter();
+    let catalog = install_source_function_catalog(Some(Arc::new(vec![SourceFunctionInfo {
+        source_id: SourceId(7),
+        name: "imported".into(),
+        function: 41,
+        role: runmat_types::FunctionSourceRole::Primary,
+        binding_origin: Some(origin),
+        source_file: Some("imported.m".into()),
+        definition_owners: Some(Arc::new(vec![
+            (41, Arc::clone(&root)),
+            (42, Arc::clone(&helper)),
+        ])),
+    }])));
+
+    let binding = resolve_binding_origin_binding(origin).expect("exact binding");
+    let copied = binding.clone();
+    drop(binding);
+    drop(catalog);
+    assert!(copied.authority.admits_local(&runtime.session_lease()));
+    assert!(copied
+        .authority
+        .local_lease(41)
+        .is_some_and(|lease| lease.matches(&root)));
+    assert!(copied
+        .authority
+        .local_lease(42)
+        .is_some_and(|lease| lease.matches(&helper)));
+    assert!(root.has_handles());
+    assert!(helper.has_handles());
+
+    drop(entry);
+    drop(runtime);
+    let foreign = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let foreign_entry = foreign.enter();
+    let calls = Rc::new(std::cell::Cell::new(0));
+    let observed = Rc::clone(&calls);
+    let invoker = install_local_bound_function_invoker(Rc::new(move |_, _, _| {
+        observed.set(observed.get() + 1);
+        Box::pin(async { Ok(ValueSequence::empty()) })
+    }));
+    let result = futures::executor::block_on(try_call_bound_function(copied.clone(), &[], 0))
+        .expect("bound route is installed");
+    assert!(
+        result.is_err(),
+        "foreign session must reject the local lease"
+    );
+    assert_eq!(calls.get(), 0, "foreign rejection must precede invocation");
+    drop(invoker);
+    drop(foreign_entry);
+    drop(foreign);
+    drop(copied);
+    assert!(!root.has_handles());
+    assert!(!helper.has_handles());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn retained_execution_facts_do_not_replace_published_portable_resolution() {
     let published_origin = runmat_execution::FunctionBindingOrigin {
         program: runmat_execution::Digest::sha256("published"),

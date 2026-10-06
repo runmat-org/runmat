@@ -30,6 +30,7 @@ pub enum RuntimeCapability {
     Collective,
     LocalTasks,
     SourceEvaluation,
+    CallableArtifacts,
 }
 
 impl RuntimeCapability {
@@ -59,6 +60,7 @@ impl RuntimeCapability {
             Self::Collective => "collective",
             Self::LocalTasks => "local_tasks",
             Self::SourceEvaluation => "source_evaluation",
+            Self::CallableArtifacts => "callable_artifacts",
         }
     }
 }

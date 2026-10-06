@@ -7,6 +7,21 @@ use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 mod durable;
 
 pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<(), ContractError> {
+    validation_budget(limits).payload(payload, 0)
+}
+
+pub(super) fn validate_all(
+    payloads: &[ValuePayload],
+    limits: ValueLimits,
+) -> Result<(), ContractError> {
+    let mut budget = validation_budget(limits);
+    for payload in payloads {
+        budget.payload(payload, 0)?;
+    }
+    Ok(())
+}
+
+fn validation_budget(limits: ValueLimits) -> ValidationBudget<'static> {
     ValidationBudget {
         limits,
         transport: None,
@@ -17,7 +32,6 @@ pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<()
         elements: 0,
         text_bytes: 0,
     }
-    .payload(payload, 0)
 }
 
 pub(super) fn validate_for_program_sources(

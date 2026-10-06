@@ -509,13 +509,11 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
         .collect::<Result<Vec<_>, _>>()?;
     let binding = match value.owner {
         runmat_execution::value::CallableOwner::Bound(origin) => {
-            let function =
-                crate::user_functions::resolve_binding_origin(origin).ok_or_else(|| {
+            let binding = crate::user_functions::resolve_binding_origin_binding(origin)
+                .ok_or_else(|| {
                     ValueCodecError::unsupported(path, "exact bound callable origin is unavailable")
                 })?;
-            Some(runmat_value::BoundFunctionBinding::portable(
-                function, origin,
-            ))
+            Some(binding)
         }
         _ => None,
     };
@@ -538,10 +536,13 @@ fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCode
         runmat_execution::value::CallableOwner::Method => {
             Ok(Value::MethodFunctionHandle(value.qualified_name.clone()))
         }
-        runmat_execution::value::CallableOwner::Bound(origin) => Ok(Value::BoundFunctionHandle {
+        runmat_execution::value::CallableOwner::Bound(_) => Ok(Value::BoundFunctionHandle {
             name: value.qualified_name.clone(),
-            function: binding.expect("resolved exact origin above").function,
-            authority: runmat_value::BoundFunctionAuthority::portable(origin),
+            function: binding
+                .as_ref()
+                .expect("resolved exact origin above")
+                .function,
+            authority: binding.expect("resolved exact origin above").authority,
             source_role: value.source_role,
             source_file: value.source_file.clone(),
         }),

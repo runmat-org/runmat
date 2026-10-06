@@ -12,9 +12,15 @@ use std::collections::{HashMap, HashSet};
 
 #[path = "program_execution/unit_sources.rs"]
 mod unit_sources;
+#[path = "program_execution/unit_admission.rs"]
+mod unit_admission;
 #[path = "program_execution/region_sources.rs"]
 mod region_sources;
 pub use region_sources::encode_portable_region_sources_v1;
+pub use unit_admission::{
+    admit_executable_unit, AdmittedExecutableUnit, ExecutableUnitAdmissionError,
+    RuntimeBoundExecutableUnit,
+};
 
 pub(crate) fn capture_region_sources(
     bytecode: &crate::Bytecode,
@@ -648,100 +654,26 @@ async fn execute_unit_request(
     request: ProgramExecutionRequest,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
-    let admission = match runmat_execution::ExecutableUnitEnvelope::admission(
-        &request.artifact.executable_bytes,
-    ) {
-        Ok(admission) => admission,
+    let admitted = match unit_admission::admit_executable_unit(&request.artifact.executable_bytes) {
+        Ok(admitted) => admitted,
         Err(error) => {
             return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected an invalid executable unit header: {error}"),
+                message: error.worker_message(),
             }
         }
     };
-    if let Some(message) = unsupported_executable_revisions(&admission.revisions) {
-        return ProgramExecutionResponse::Failure { message };
-    }
-    let envelope = match request.artifact.executable_unit() {
-        Ok(Some(envelope)) => envelope,
-        Ok(None) => {
-            return ProgramExecutionResponse::Failure {
-                message: "worker received a non-unit artifact on the unit execution path".into(),
-            }
-        }
+    let entrypoint_kind = admitted.envelope().manifest.identity.entrypoint_kind;
+    let bound = match admitted.bind_runtime_sources(runtime) {
+        Ok(bound) => bound,
         Err(error) => {
             return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected an invalid executable unit: {error}"),
+                message: error.worker_message(),
             }
         }
     };
-    let revisions = &envelope.manifest.revisions;
-    if let Some(message) = unsupported_executable_revisions(revisions) {
-        return ProgramExecutionResponse::Failure { message };
-    }
-    let Some(bytecode_payload) =
-        envelope.component(runmat_execution::ExecutableComponentKind::Bytecode)
-    else {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected executable unit without bytecode".into(),
-        };
-    };
-    let mut bytecode: crate::Bytecode = match serde_json::from_slice(&bytecode_payload.bytes) {
-        Ok(bytecode) => bytecode,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected invalid executable bytecode: {error}"),
-            }
-        }
-    };
+    let (bytecode, registry, _layout, runtime) = bound.into_parts();
 
-    if !bytecode.bound_functions.is_empty()
-        || !bytecode.function_registry.functions.is_empty()
-        || bytecode.layout.is_some()
-    {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected executable bytecode with duplicate component authorities"
-                .into(),
-        };
-    }
-    let Some(registry_payload) =
-        envelope.component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
-    else {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected executable unit without a function registry".into(),
-        };
-    };
-    let mut registry: crate::FunctionRegistry =
-        match serde_json::from_slice(&registry_payload.bytes) {
-            Ok(registry) => registry,
-            Err(error) => {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker rejected invalid executable registry: {error}"),
-                }
-            }
-        };
-    let Some(layout_payload) =
-        envelope.component(runmat_execution::ExecutableComponentKind::VmLayout)
-    else {
-        return ProgramExecutionResponse::Failure {
-            message: "worker rejected executable unit without a VM layout".into(),
-        };
-    };
-    let layout: crate::VmAssemblyLayout = match serde_json::from_slice(&layout_payload.bytes) {
-        Ok(layout) => layout,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected invalid executable VM layout: {error}"),
-            }
-        }
-    };
-    let runtime =
-        match unit_sources::bind_unit_sources(&envelope, &mut bytecode, &mut registry, runtime) {
-            Ok(runtime) => runtime,
-            Err(message) => return ProgramExecutionResponse::Failure { message },
-        };
-    bytecode.layout = Some(layout);
-
-    match envelope.manifest.identity.entrypoint_kind {
+    match entrypoint_kind {
         runmat_execution::ExecutableEntrypointKind::Script => {
             execute_unit_script(bytecode, runtime).await
         }
@@ -1131,6 +1063,10 @@ mod tests {
         let stale_components = include_bytes!(
             "../../runmat-execution/tests/fixtures/executable-unit-stale-components.json"
         );
+        assert!(matches!(
+            admit_executable_unit(stale_components),
+            Err(ExecutableUnitAdmissionError::ComponentRevisions(_))
+        ));
         let response = futures::executor::block_on(execute_program_request(
             executable_unit_request(stale_components),
         ));
@@ -1147,6 +1083,10 @@ mod tests {
 
         let compiler_one =
             include_bytes!("../../runmat-execution/tests/fixtures/executable-unit-compiler-1.json");
+        assert!(matches!(
+            admit_executable_unit(compiler_one),
+            Err(ExecutableUnitAdmissionError::CompilerRevision(_))
+        ));
         let response = futures::executor::block_on(execute_program_request(
             executable_unit_request(compiler_one),
         ));

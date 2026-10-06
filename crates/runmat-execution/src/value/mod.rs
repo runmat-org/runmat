@@ -50,6 +50,12 @@ impl ValuePayload {
         validation::validate(self, limits)
     }
 
+    /// Validate a complete aggregate under one shared budget. Validating each
+    /// member independently would multiply every limit by the member count.
+    pub fn validate_all(values: &[Self], limits: ValueLimits) -> Result<(), ContractError> {
+        validation::validate_all(values, limits)
+    }
+
     /// Validate portable exception source ordinals against the exact selected
     /// artifact map, including nested cells, structures, and callable captures.
     /// A source-less artifact admits no source-bearing exception frame.

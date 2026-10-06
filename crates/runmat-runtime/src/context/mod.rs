@@ -5,6 +5,7 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod callable_artifacts;
 mod graphics_presentation;
 mod arity;
 mod catch;
@@ -38,6 +39,10 @@ pub mod legacy;
 pub mod preparation;
 
 pub use arity::RuntimeInvocationArity;
+pub use callable_artifacts::{
+    RuntimeCallableArtifactBundle, RuntimeCallableArtifactError, RuntimeCallableArtifactLimits,
+    RuntimeCallableArtifactService,
+};
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use graphics_presentation::{

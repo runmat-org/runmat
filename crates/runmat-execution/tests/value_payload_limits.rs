@@ -24,6 +24,65 @@ fn nested_payloads_obey_depth_and_node_limits() {
 }
 
 #[test]
+fn top_level_payloads_share_byte_element_and_text_budgets() {
+    let dense = || {
+        ValuePayload::Inline(Box::new(InlineValue::Dense(DenseValue {
+            element_type: ElementType::U8,
+            shape: vec![1],
+            little_endian_data: vec![1],
+        })))
+    };
+    let error = ValuePayload::validate_all(
+        &[dense(), dense()],
+        ValueLimits {
+            max_inline_bytes: 1,
+            ..ValueLimits::default()
+        },
+    )
+    .expect_err("top-level payload bytes share one budget");
+    assert!(matches!(
+        error,
+        runmat_execution::ContractError::Limit {
+            field: "inline value bytes",
+            limit: 1
+        }
+    ));
+
+    let error = ValuePayload::validate_all(
+        &[dense(), dense()],
+        ValueLimits {
+            max_elements: 1,
+            ..ValueLimits::default()
+        },
+    )
+    .expect_err("top-level payload elements share one budget");
+    assert!(matches!(
+        error,
+        runmat_execution::ContractError::Limit {
+            field: "value elements",
+            limit: 1
+        }
+    ));
+
+    let text = || ValuePayload::Inline(Box::new(InlineValue::String("four".into())));
+    let error = ValuePayload::validate_all(
+        &[text(), text()],
+        ValueLimits {
+            max_text_bytes: 7,
+            ..ValueLimits::default()
+        },
+    )
+    .expect_err("top-level payload text shares one budget");
+    assert!(matches!(
+        error,
+        runmat_execution::ContractError::Limit {
+            field: "value text bytes",
+            limit: 7
+        }
+    ));
+}
+
+#[test]
 fn durable_object_array_elements_count_as_nodes_and_depth() {
     use runmat_execution::value::{DurableObjectArray, DurablePlainObject};
     let object = DurablePlainObject {
