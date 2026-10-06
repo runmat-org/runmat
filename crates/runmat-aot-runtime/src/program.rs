@@ -16,7 +16,8 @@ pub async fn invoke(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let runtime = install_acceleration_services(runtime);
-    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)?;
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)
+        .map_err(|error| *error)?;
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
         .invoke_async(function, arguments, requested_outputs, runtime)
@@ -36,7 +37,8 @@ pub async fn invoke_workspace(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let runtime = install_acceleration_services(runtime);
-    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)?;
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)
+        .map_err(|error| *error)?;
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
         .invoke_workspace_async(function, workspace, requested_outputs, runtime)
@@ -60,7 +62,7 @@ impl ProgramInvocationGuards {
         executor: Rc<runmat_native_executor::NativeExecutor>,
         program: &runmat_native_codegen::aot::AotProgramManifest,
         runtime: &runmat_runtime::context::RuntimeContext,
-    ) -> Result<Self, runmat_runtime::RuntimeError> {
+    ) -> Result<Self, Box<runmat_runtime::RuntimeError>> {
         let mut functions = program
             .functions
             .iter()

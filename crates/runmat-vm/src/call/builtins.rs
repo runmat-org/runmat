@@ -511,7 +511,6 @@ async fn eval_workspace_source(
         frame.names.clone(),
         frame.assigned,
         frame.global_aliases,
-        builtin,
         source_label,
         runtime,
     )
@@ -617,7 +616,6 @@ async fn interpret_dynamic_workspace_eval(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     global_aliases: HashMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
-    _builtin: &'static str,
     source_label: String,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<

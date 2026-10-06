@@ -451,7 +451,7 @@ pub fn set_transient_workspace_state(
 fn install_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     policy: WorkspaceFramePolicy,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
@@ -489,7 +489,7 @@ fn install_workspace_state(
                 assigned_ids_this_execution: HashSet::new(),
                 removed_slots_this_execution: HashMap::new(),
                 slot_lifecycle,
-                values: vars.clone(),
+                values: vars.to_vec(),
                 pending_var_reconciliation: HashSet::new(),
             },
             policy,
@@ -731,10 +731,8 @@ pub fn replace_workspace_target_vars_and_state(
                 if let Some(delegate) = delegate.as_ref() {
                     delegate.assign_base_local(&name, value)?;
                 }
-            } else {
-                if let Some(delegate) = delegate.as_ref() {
-                    delegate.unbind_base_global(&name)?;
-                }
+            } else if let Some(delegate) = delegate.as_ref() {
+                delegate.unbind_base_global(&name)?;
             }
         }
     }
