@@ -8,18 +8,7 @@ use runmat_execution::{
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
-use crate::{ArtifactError, ArtifactResult};
-
-fn contract_error(error: runmat_execution::ContractError) -> ArtifactError {
-    match error {
-        runmat_execution::ContractError::Limit { .. } => ArtifactError::Limit(error.to_string()),
-        runmat_execution::ContractError::Invalid { .. }
-        | runmat_execution::ContractError::UnsupportedSchema { .. }
-        | runmat_execution::ContractError::MalformedProtocol(_) => {
-            ArtifactError::Invalid(error.to_string())
-        }
-    }
-}
+use crate::{error::contract_error, ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V6: u16 = 6;
@@ -509,6 +498,51 @@ mod tests {
         }
     }
 
+    fn source_unit_request() -> ProgramExecutionRequest {
+        let mut request = executable_unit_request();
+        let mut envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
+            &request.artifact.executable_bytes,
+        )
+        .unwrap();
+        let text = "source = 1;";
+        let map = runmat_execution::ExecutableSourceMapV2::new(vec![
+            runmat_execution::ExecutableSourceRecordV2 {
+                source_id: runmat_types::ProgramSourceId(0),
+                owner_identity: "fixture".into(),
+                relative_path: "source.m".into(),
+                display_name: "source.m".into(),
+                content_revision: Digest::sha256(text.as_bytes()),
+                text: text.into(),
+            },
+        ])
+        .unwrap();
+        let bytes = serde_json::to_vec(&map).unwrap();
+        envelope.manifest.revisions.source_map_schema = 2;
+        let source = runmat_execution::ExecutableComponentKind::SourceMap;
+        let descriptor = envelope
+            .manifest
+            .components
+            .iter_mut()
+            .find(|component| component.kind == source)
+            .expect("source descriptor");
+        *descriptor =
+            runmat_execution::ExecutableComponentDescriptor::from_payload(source, 2, &bytes)
+                .unwrap();
+        envelope
+            .payloads
+            .iter_mut()
+            .find(|payload| payload.kind == source)
+            .expect("source payload")
+            .bytes = bytes;
+        request.artifact = ProgramArtifact::materialize(
+            &request.recipe,
+            ExecutableForm::ExecutableUnitV3,
+            envelope.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        request
+    }
+
     fn inline_argument(value: &str) -> ValuePayload {
         ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::String(
             value.into(),
@@ -707,6 +741,67 @@ mod tests {
         }
         .validate_against(&selected)
         .unwrap();
+    }
+
+    #[test]
+    fn executable_unit_map_bounds_nested_arguments_outputs_and_failure_frames() {
+        let mut legacy = executable_unit_request();
+        legacy.arguments.push(source_exception(0));
+        assert!(
+            legacy.validate().is_err(),
+            "schema-1 unit has no source map"
+        );
+        let legacy = executable_unit_request();
+        assert!(ProgramExecutionResponse::Success {
+            outputs: vec![source_exception(0)],
+        }
+        .validate_against(&legacy)
+        .is_err());
+
+        let mut selected = source_unit_request();
+        selected.arguments.push(source_exception(0));
+        selected.validate().expect("last valid unit source ordinal");
+        selected.arguments[0] = source_exception(1);
+        assert!(selected.validate().is_err());
+        selected.arguments[0] = source_exception(0);
+        ProgramExecutionResponse::Success {
+            outputs: vec![source_exception(0)],
+        }
+        .validate_against(&selected)
+        .unwrap();
+        assert!(ProgramExecutionResponse::Success {
+            outputs: vec![source_exception(1)],
+        }
+        .validate_against(&selected)
+        .is_err());
+
+        let failure = ProgramRuntimeFailure {
+            message: "unit source failure".into(),
+            identifier: None,
+            span: None,
+            builtin: None,
+            task_id: None,
+            call_frames: vec![runmat_execution::ProgramCallFrame {
+                function: "source_function".into(),
+                program_source_id: Some(runmat_types::ProgramSourceId(0)),
+                span: None,
+            }],
+            call_frames_elided: 0,
+            call_stack: vec!["source_function @ source.m:1:1".into()],
+            phase: None,
+        };
+        ProgramExecutionResponse::RuntimeFailure {
+            failure: failure.clone(),
+        }
+        .validate_against(&selected)
+        .unwrap();
+        let mut outside = failure;
+        outside.call_frames[0].program_source_id = Some(runmat_types::ProgramSourceId(1));
+        assert!(
+            ProgramExecutionResponse::RuntimeFailure { failure: outside }
+                .validate_against(&selected)
+                .is_err()
+        );
     }
 
     fn result_reference(bytes: &[u8]) -> ValueRef {
