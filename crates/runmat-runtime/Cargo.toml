@@ -58,7 +58,6 @@ num-traits = "0.2"
 nalgebra = "0.32"
 rustfft = "6.2"
 futures = "0.3"
-async-io = "2"
 async-recursion = "1.1"
 flate2 = "1.1"
 
@@ -94,6 +93,7 @@ openblas-src = { version = "0.10", features = ["system", "cblas"], optional = tr
 hdf5 = { package = "hdf5-metno", version = "0.13.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+async-io = "2"
 runmat-process-host = { workspace = true }
 runmat-native-ffi = { workspace = true }
 runmat-java = { workspace = true }
