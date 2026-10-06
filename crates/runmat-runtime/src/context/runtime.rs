@@ -107,6 +107,7 @@ pub struct RuntimeContext {
     source_current: Option<Rc<RefCell<crate::source_context::SourceCurrentProjection>>>,
     source_catalog_view: Option<Rc<RefCell<crate::source_context::SourceCatalogProjection>>>,
     debug_projection: Rc<RefCell<crate::debug_context::DebugFrameProjection>>,
+    output_projection: Rc<RefCell<super::output_projection::InvocationOutputProjection>>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
@@ -149,6 +150,7 @@ impl RuntimeContext {
             source_current: None,
             source_catalog_view: None,
             debug_projection: Rc::new(RefCell::new(Default::default())),
+            output_projection: Rc::new(RefCell::new(Default::default())),
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
@@ -426,6 +428,22 @@ impl RuntimeContext {
         let snapshot = self.debug_projection.borrow().snapshot();
         self.debug_projection = Rc::new(RefCell::new(snapshot));
         self
+    }
+
+    pub(super) fn with_poll_output_projection(mut self) -> Self {
+        let owner = super::scope::active_runtime_context()
+            .filter(|active| Rc::ptr_eq(active.state(), self.state()))
+            .map(|active| Rc::clone(active.output_projection()))
+            .unwrap_or_else(|| Rc::clone(&self.output_projection));
+        let snapshot = owner.borrow().snapshot();
+        self.output_projection = Rc::new(RefCell::new(snapshot));
+        self
+    }
+
+    pub(crate) fn output_projection(
+        &self,
+    ) -> &Rc<RefCell<super::output_projection::InvocationOutputProjection>> {
+        &self.output_projection
     }
 
     pub(crate) fn debug_projection(

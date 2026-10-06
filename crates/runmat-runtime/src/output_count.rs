@@ -1,17 +1,21 @@
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::context::output_projection::{InvocationOutputProjection, RequestedOutputToken};
 
 mod validation;
 pub(crate) use validation::validate_fixed_outputs;
 
 runmat_thread_local! {
-    static OUTPUT_COUNT_STACK: RefCell<Vec<Option<usize>>> = const { RefCell::new(Vec::new()) };
+    static OUTPUT_COUNT_PROJECTION: RefCell<InvocationOutputProjection> =
+        const { RefCell::new(InvocationOutputProjection::new()) };
 }
 
 pub struct OutputCountGuard {
-    did_push: bool,
-    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    token: RequestedOutputToken,
+    owner: Option<Rc<RefCell<InvocationOutputProjection>>>,
 }
 
 /// Output request scoped to the current runtime builtin dispatch. `Implicit`
@@ -26,33 +30,27 @@ pub enum InvocationOutputScope {
 
 impl Drop for OutputCountGuard {
     fn drop(&mut self) {
-        if !self.did_push {
-            return;
-        }
-        if let Some(state) = &self.state {
-            state.output.borrow_mut().requested_outputs.pop();
+        if let Some(owner) = &self.owner {
+            owner.borrow_mut().remove_requested(self.token);
         } else {
-            OUTPUT_COUNT_STACK.with(|stack| {
-                let mut stack = stack.borrow_mut();
-                let _ = stack.pop();
+            OUTPUT_COUNT_PROJECTION.with(|projection| {
+                projection.borrow_mut().remove_requested(self.token);
             });
         }
     }
 }
 
 pub fn push_output_count(count: Option<usize>) -> OutputCountGuard {
-    if let Some(state) = active_state() {
-        state.output.borrow_mut().requested_outputs.push(count);
+    if let Some(owner) = active_projection() {
+        let token = owner.borrow_mut().push_requested(count);
         OutputCountGuard {
-            did_push: true,
-            state: Some(state),
+            token,
+            owner: Some(owner),
         }
     } else {
-        OUTPUT_COUNT_STACK.with(|stack| stack.borrow_mut().push(count));
-        OutputCountGuard {
-            did_push: true,
-            state: None,
-        }
+        let token = OUTPUT_COUNT_PROJECTION
+            .with(|projection| projection.borrow_mut().push_requested(count));
+        OutputCountGuard { token, owner: None }
     }
 }
 
@@ -64,22 +62,22 @@ pub fn current_output_count() -> Option<usize> {
 }
 
 pub fn current_output_scope() -> InvocationOutputScope {
-    if let Some(state) = active_state() {
-        return match state.output.borrow().requested_outputs.last().copied() {
+    if let Some(owner) = active_projection() {
+        return match owner.borrow().current_requested() {
             Some(Some(count)) => InvocationOutputScope::Requested(count),
             Some(None) => InvocationOutputScope::Implicit,
             None => InvocationOutputScope::Unscoped,
         };
     }
-    OUTPUT_COUNT_STACK.with(|stack| match stack.borrow().last().copied() {
+    OUTPUT_COUNT_PROJECTION.with(|projection| match projection.borrow().current_requested() {
         Some(Some(count)) => InvocationOutputScope::Requested(count),
         Some(None) => InvocationOutputScope::Implicit,
         None => InvocationOutputScope::Unscoped,
     })
 }
 
-fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
-    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
+fn active_projection() -> Option<Rc<RefCell<InvocationOutputProjection>>> {
+    crate::context::legacy::active().map(|context| Rc::clone(context.output_projection()))
 }
 
 pub fn output_list_with_padding(out_count: usize, mut outputs: Vec<Value>) -> Value {

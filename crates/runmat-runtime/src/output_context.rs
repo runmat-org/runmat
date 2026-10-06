@@ -1,56 +1,51 @@
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::context::output_projection::{InvocationOutputProjection, PresentationOutputToken};
 
 runmat_thread_local! {
-    static REQUESTED_OUTPUTS: RefCell<Option<usize>> = const { RefCell::new(None) };
+    static PRESENTATION_OUTPUT_PROJECTION: RefCell<InvocationOutputProjection> =
+        const { RefCell::new(InvocationOutputProjection::new()) };
 }
 
 pub struct OutputCountGuard {
-    prev: Option<usize>,
-    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    token: PresentationOutputToken,
+    owner: Option<Rc<RefCell<InvocationOutputProjection>>>,
 }
 
 impl Drop for OutputCountGuard {
     fn drop(&mut self) {
-        if let Some(state) = &self.state {
-            let mut output = state.output.borrow_mut();
-            output.presentation_outputs.pop();
-            if let Some(previous) = self.prev {
-                output.presentation_outputs.push(previous);
-            }
+        if let Some(owner) = &self.owner {
+            owner.borrow_mut().remove_presentation(self.token);
         } else {
-            REQUESTED_OUTPUTS.with(|cell| {
-                *cell.borrow_mut() = self.prev;
+            PRESENTATION_OUTPUT_PROJECTION.with(|projection| {
+                projection.borrow_mut().remove_presentation(self.token);
             });
         }
     }
 }
 
 pub fn push_output_count(count: usize) -> OutputCountGuard {
-    if let Some(state) = active_state() {
-        let prev = state.output.borrow_mut().presentation_outputs.pop();
-        state.output.borrow_mut().presentation_outputs.push(count);
+    if let Some(owner) = active_projection() {
+        let token = owner.borrow_mut().push_presentation(count);
         return OutputCountGuard {
-            prev,
-            state: Some(state),
+            token,
+            owner: Some(owner),
         };
     }
-    let prev = REQUESTED_OUTPUTS.with(|cell| {
-        let mut guard = cell.borrow_mut();
-        let prev = guard.take();
-        *guard = Some(count);
-        prev
-    });
-    OutputCountGuard { prev, state: None }
+    let token = PRESENTATION_OUTPUT_PROJECTION
+        .with(|projection| projection.borrow_mut().push_presentation(count));
+    OutputCountGuard { token, owner: None }
 }
 
 pub fn requested_output_count() -> Option<usize> {
-    if let Some(state) = active_state() {
-        return state.output.borrow().presentation_outputs.last().copied();
+    if let Some(owner) = active_projection() {
+        return owner.borrow().current_presentation();
     }
-    REQUESTED_OUTPUTS.with(|cell| *cell.borrow())
+    PRESENTATION_OUTPUT_PROJECTION.with(|projection| projection.borrow().current_presentation())
 }
 
-fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
-    crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()))
+fn active_projection() -> Option<Rc<RefCell<InvocationOutputProjection>>> {
+    crate::context::legacy::active().map(|context| Rc::clone(context.output_projection()))
 }

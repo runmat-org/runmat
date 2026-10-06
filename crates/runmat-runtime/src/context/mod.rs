@@ -14,6 +14,7 @@ pub(crate) mod process_invocation;
 mod user_path;
 mod host_document;
 mod managed_observations;
+pub(crate) mod output_projection;
 pub mod host_effect;
 pub(crate) mod host_presentation;
 pub(crate) mod provider_operation;

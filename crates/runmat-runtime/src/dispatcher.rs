@@ -17,6 +17,9 @@ pub use owned_gather::gather_if_needed_owned_async;
 
 #[cfg(test)]
 mod provenance_tests;
+#[cfg(test)]
+#[path = "dispatcher/output_projection_tests.rs"]
+mod output_projection_tests;
 
 thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<ClassIdentity>> = const { RefCell::new(None) };

@@ -39,7 +39,6 @@ pub struct RuntimeContextState {
     pub(crate) resource_cleanup: SessionResourceCleanup,
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
-    pub(crate) output: RefCell<OutputState>,
     pub(crate) workspace: RefCell<Option<crate::workspace::WorkspaceResolver>>,
     pub(crate) session_variables: RefCell<crate::workspace::session::SessionVariableState>,
     pub(crate) warnings: RefCell<Vec<crate::warning_store::RuntimeWarning>>,
@@ -78,7 +77,6 @@ impl RuntimeContextState {
             resource_cleanup: SessionResourceCleanup::default(),
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
-            output: RefCell::new(OutputState::default()),
             workspace: RefCell::new(None),
             session_variables: RefCell::new(
                 crate::workspace::session::SessionVariableState::default(),
@@ -193,10 +191,4 @@ impl std::fmt::Debug for CallState {
             .field("class_access", &self.class_access)
             .finish()
     }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct OutputState {
-    pub requested_outputs: Vec<Option<usize>>,
-    pub presentation_outputs: Vec<usize>,
 }
