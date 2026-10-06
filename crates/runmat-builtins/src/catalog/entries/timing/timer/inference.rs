@@ -26,7 +26,7 @@ fn timer_fact() -> ValueFact {
 
 fn validate_pairs(request: &CallRequest, filter: bool) -> Vec<InferenceDiagnostic> {
     let mut diagnostics = Vec::new();
-    if request.arguments.len() % 2 != 0 {
+    if !request.arguments.len().is_multiple_of(2) {
         diagnostics.push(argument_error(
             "RM-CATALOG-TIMER-PAIRS",
             "timer properties require name/value pairs",
