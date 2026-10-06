@@ -51,7 +51,8 @@ fn failed_retirement_retains_payload_and_failure_record_without_reviving_view() 
             )],
             &mut vars,
             &mut context,
-        );
+        )
+        .expect("materialized stores must be adopted");
         assert!(runmat_accelerate::fusion_residency::is_resident(&owned));
         assert_eq!(provider.pull(&owned).unwrap(), (vec![11.0], vec![1, 1]));
         drop(vars);
@@ -295,7 +296,8 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
             vec![(store(0), Value::Num(0.0)), (store(1), Value::Num(0.0))],
             &mut vars,
             &mut context,
-        );
+        )
+        .expect("overwritten stores must preserve nested caller aliases");
         assert_eq!(provider.pull(&borrowed).unwrap(), (vec![7.0], vec![1, 1]));
         assert_eq!(
             provider.frees.lock().unwrap().get(&borrowed.buffer_id()),
@@ -319,7 +321,8 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
             vec![(store(0), Value::Num(0.0)), (store(1), Value::Num(0.0))],
             &mut vars,
             &mut context,
-        );
+        )
+        .expect("overwritten stores must preserve owned allocation leases");
         let owned_id = owned.buffer_id();
         assert!(provider.buffers.lock().unwrap().contains_key(&owned_id));
         owned.release().expect("last owned view retires allocation");
