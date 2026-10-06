@@ -33,6 +33,7 @@ pub struct GraphicsFlushRequest {
 pub enum GraphicsPresentation {
     Presented,
     DeferredByRate,
+    DeferredByBusy,
     NoFigure,
 }
 
