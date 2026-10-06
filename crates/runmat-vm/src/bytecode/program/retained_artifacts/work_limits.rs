@@ -26,7 +26,7 @@ pub(super) fn validate(
                         )
                     },
                 )?;
-                Ok((functions, instructions))
+                Ok::<_, RetainedCallableStageError>((functions, instructions))
             })?;
     check(
         "callable_artifact.functions",
