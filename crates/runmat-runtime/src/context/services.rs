@@ -183,22 +183,33 @@ pub trait RuntimeWorkspaceService {
 
     /// Names whose base-workspace identity resolves through the separate
     /// session-global value store. Canonical base services override this with
-    /// their revisioned namespace authority; procedure-local services inherit
-    /// it only through their captured delegate.
+    /// their revisioned namespace authority. Executor frame services must
+    /// explicitly route authorized operations through their captured delegate.
+    /// A generic current-workspace service does not acquire this authority by
+    /// implementing ordinary value reads and writes, so the defaults fail
+    /// closed.
     fn base_global_binding_names(&self) -> Result<Vec<String>, RuntimeError> {
-        Ok(Vec::new())
+        Err(base_namespace_capability_error(
+            "enumerate base-workspace global bindings",
+        ))
     }
 
     fn is_base_global_binding(&self, _name: &str) -> Result<bool, RuntimeError> {
-        Ok(false)
+        Err(base_namespace_capability_error(
+            "inspect a base-workspace global binding",
+        ))
     }
 
     fn bind_base_global(&self, _name: &str) -> Result<(), RuntimeError> {
-        self.ensure_mutation_authority()
+        Err(base_namespace_capability_error(
+            "bind a base-workspace global",
+        ))
     }
 
     fn unbind_base_global(&self, _name: &str) -> Result<(), RuntimeError> {
-        self.ensure_mutation_authority()
+        Err(base_namespace_capability_error(
+            "unbind a base-workspace global",
+        ))
     }
 
     fn assign_base_local(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
@@ -224,10 +235,16 @@ pub trait RuntimeWorkspaceService {
     /// service owns frame scope and decides whether the declaration also
     /// removes a shadowed base-workspace value.
     fn declare_global_binding(&self, _slot: usize, _name: &str) -> Result<(), RuntimeError> {
-        self.ensure_mutation_authority()
+        Err(base_namespace_capability_error(
+            "declare a workspace global binding",
+        ))
     }
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;
+}
+
+fn base_namespace_capability_error(operation: &'static str) -> RuntimeError {
+    RuntimeCapabilityError::new(RuntimeCapability::BaseWorkspace, operation).into_runtime_error()
 }
 
 /// Session-lifetime authority for the canonical base workspace.
@@ -1385,6 +1402,61 @@ impl RuntimeServicePorts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct ValueOnlyWorkspace {
+        assignments: std::cell::Cell<usize>,
+    }
+
+    impl RuntimeWorkspaceService for ValueOnlyWorkspace {
+        fn lookup(&self, _name: &str) -> Option<Value> {
+            None
+        }
+
+        fn snapshot(&self) -> Vec<(String, Value)> {
+            Vec::new()
+        }
+
+        fn global_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn assign(&self, _name: &str, _value: Value) -> Result<(), RuntimeError> {
+            self.assignments.set(self.assignments.get() + 1);
+            Ok(())
+        }
+
+        fn clear(&self) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+
+        fn remove(&self, _name: &str) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn value_only_workspace_cannot_claim_global_namespace_authority() {
+        let workspace = ValueOnlyWorkspace::default();
+        let failures = [
+            workspace.base_global_binding_names().unwrap_err(),
+            workspace.is_base_global_binding("g").unwrap_err(),
+            workspace.bind_base_global("g").unwrap_err(),
+            workspace.unbind_base_global("g").unwrap_err(),
+            workspace
+                .assign_base_local("g", Value::Num(1.0))
+                .unwrap_err(),
+            workspace.declare_global_binding(0, "g").unwrap_err(),
+        ];
+
+        assert!(failures.iter().all(|error| {
+            error.identifier() == Some(RuntimeCapabilityError::IDENTIFIER)
+                && error
+                    .message()
+                    .contains(RuntimeCapability::BaseWorkspace.as_str())
+        }));
+        assert_eq!(workspace.assignments.get(), 0);
+    }
 
     #[test]
     fn third_party_placement_service_has_no_invented_observation() {
