@@ -161,7 +161,7 @@ pub(crate) fn workspace_frame_snapshot(id: WorkspaceFrameId) -> Option<Vec<(Stri
 }
 
 pub(crate) fn workspace_frame_publishes(id: WorkspaceFrameId) -> Option<bool> {
-    with_frame(id, |frame| frame.publish_on_drop)
+    with_frame(id, |frame| frame.policy.publishes_mutations())
 }
 
 pub(crate) fn workspace_frame_name_is_global(id: WorkspaceFrameId, name: &str) -> Option<bool> {

@@ -62,13 +62,35 @@ struct WorkspaceFrame {
     delegate: Rc<RefCell<Option<Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
     state: WorkspaceState,
     global_aliases: FrameGlobalBindings,
-    publish_on_drop: bool,
+    policy: WorkspaceFramePolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WorkspaceFramePolicy {
+    /// A top-level execution publishes admitted mutations as they occur and
+    /// retains its completed slot state for the host result adapter.
+    TopLevel,
+    /// Dynamic evaluation captures its completed slot state for an explicit
+    /// commit by the caller, but never publishes mutations while evaluating.
+    Transactional,
+    /// Procedure-local frames neither publish nor become a host completion.
+    Transient,
+}
+
+impl WorkspaceFramePolicy {
+    fn publishes_mutations(self) -> bool {
+        matches!(self, Self::TopLevel)
+    }
+
+    fn captures_completion(self) -> bool {
+        matches!(self, Self::TopLevel | Self::Transactional)
+    }
 }
 
 pub(crate) struct PendingWorkspace {
     pub(crate) names: HashMap<String, usize>,
     pub(crate) assigned: HashSet<String>,
-    pub(crate) publish_to_current_service: bool,
+    pub(crate) policy: WorkspaceFramePolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -215,7 +237,7 @@ impl Drop for WorkspaceStateGuard {
         };
         frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
         let retired_delegate = frame.delegate.borrow_mut().take();
-        if frame.publish_on_drop {
+        if frame.policy.captures_completion() {
             let ws = frame.state;
             let removed_ids = ws.removed_slots_this_execution.keys().copied().collect();
             let removed_names = ws.removed_slots_this_execution.values().cloned().collect();
@@ -261,20 +283,20 @@ pub fn push_pending_workspace(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> PendingWorkspaceGuard {
-    push_pending_workspace_with_publication(names, assigned, true)
+    push_pending_workspace_with_policy(names, assigned, WorkspaceFramePolicy::TopLevel)
 }
 
 pub(crate) fn push_transactional_pending_workspace(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> PendingWorkspaceGuard {
-    push_pending_workspace_with_publication(names, assigned, false)
+    push_pending_workspace_with_policy(names, assigned, WorkspaceFramePolicy::Transactional)
 }
 
-fn push_pending_workspace_with_publication(
+fn push_pending_workspace_with_policy(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
-    publish_to_current_service: bool,
+    policy: WorkspaceFramePolicy,
 ) -> PendingWorkspaceGuard {
     let owner = current_owner();
     PENDING_WORKSPACES.with(|workspaces| {
@@ -283,7 +305,7 @@ fn push_pending_workspace_with_publication(
             PendingWorkspace {
                 names,
                 assigned,
-                publish_to_current_service,
+                policy,
             },
         );
     });
@@ -316,7 +338,13 @@ pub fn set_workspace_state(
     vars: &mut Vec<Value>,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
-    set_workspace_state_with_publish(names, assigned, vars, true, global_aliases)
+    set_workspace_state_with_policy(
+        names,
+        assigned,
+        vars,
+        WorkspaceFramePolicy::TopLevel,
+        global_aliases,
+    )
 }
 
 pub fn set_transient_workspace_state(
@@ -325,14 +353,20 @@ pub fn set_transient_workspace_state(
     vars: &mut Vec<Value>,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
-    set_workspace_state_with_publish(names, assigned, vars, false, global_aliases)
+    set_workspace_state_with_policy(
+        names,
+        assigned,
+        vars,
+        WorkspaceFramePolicy::Transient,
+        global_aliases,
+    )
 }
 
-fn set_workspace_state_with_publish(
+fn install_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
-    publish_on_drop: bool,
+    policy: WorkspaceFramePolicy,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
     let mut slot_lifecycle = HashMap::new();
@@ -363,26 +397,20 @@ fn set_workspace_state_with_publish(
                 values: vars.clone(),
                 pending_var_reconciliation: HashSet::new(),
             },
-            publish_on_drop,
+            policy,
         });
     });
     WorkspaceStateGuard { owner }
 }
 
-pub(crate) fn set_workspace_state_with_publication(
+pub(crate) fn set_workspace_state_with_policy(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
-    publish_to_current_service: bool,
+    policy: WorkspaceFramePolicy,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
-    set_workspace_state_with_publish(
-        names,
-        assigned,
-        vars,
-        publish_to_current_service,
-        global_aliases,
-    )
+    install_workspace_state(names, assigned, vars, policy, global_aliases)
 }
 
 pub fn refresh_workspace_state(vars: &[Value]) {
@@ -800,6 +828,47 @@ mod tests {
         }
 
         take_updated_workspace_assigned_report().expect("workspace report should be recorded")
+    }
+
+    #[test]
+    fn transactional_frames_capture_completion_without_live_publication() {
+        let _ = take_updated_workspace_state();
+        let _ = take_updated_workspace_assigned_report();
+        let mut vars = vec![Value::Num(1.0)];
+        {
+            let _guard = install_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut vars,
+                WorkspaceFramePolicy::Transactional,
+                FrameGlobalBindings::default(),
+            );
+            let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
+            assert_eq!(workspace_frame_publishes(frame), Some(false));
+            workspace_frame_assign_from_executor(frame, "x", Value::Num(7.0)).unwrap();
+        }
+
+        let completed = take_updated_workspace_state()
+            .expect("transactional caller must receive the completed frame");
+        assert_eq!(completed.vars, vec![Value::Num(7.0)]);
+        assert_eq!(completed.names.get("x"), Some(&0));
+        assert!(completed.assigned.contains("x"));
+    }
+
+    #[test]
+    fn transient_frames_do_not_become_host_completions() {
+        let _ = take_updated_workspace_state();
+        let mut vars = vec![Value::Num(1.0)];
+        {
+            let _guard = install_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut vars,
+                WorkspaceFramePolicy::Transient,
+                FrameGlobalBindings::default(),
+            );
+        }
+        assert!(take_updated_workspace_state().is_none());
     }
 
     #[test]
