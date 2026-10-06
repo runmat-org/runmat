@@ -263,7 +263,7 @@ fn partial_path_is_gated_before_filesystem_or_application_settings() {
 #[test]
 fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let search = Arc::new(SearchPath::new("factory".into()));
+    let search = Arc::new(SearchPath::new(String::new()));
     search.replace_entries(vec![crate::builtins::common::path_state::PathEntry::new(
         "manual".into(),
         crate::builtins::common::path_state::PathOrigin::Manual,
@@ -282,11 +282,37 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
     }
     {
         let _output = crate::output_count::push_output_count(Some(0));
+        let rejected = restore(Some(runtime.clone()), vec![])
+            .expect_err("a statement cannot restore an uncaptured user-path factory");
+        assert_eq!(
+            rejected.identifier(),
+            Some("RunMat:restoredefaultpath:StaleUserPath")
+        );
+        assert_eq!(search.current_string(), "manual");
+    }
+    assert!(search.install_captured_factory(
+        crate::builtins::common::path_state::ResolvedUserPath {
+            presentation: String::new(),
+            search_segment: None,
+        },
+        0,
+        "factory",
+        None,
+    ));
+    assert!(search.user_authority_current());
+    search.replace_entries(vec![crate::builtins::common::path_state::PathEntry::new(
+        "manual".into(),
+        crate::builtins::common::path_state::PathOrigin::Manual,
+    )]);
+    {
+        let _output = crate::output_count::push_output_count(Some(0));
         restore(Some(runtime.clone()), vec![]).expect("statement restores the path");
         assert_eq!(search.current_string(), "factory");
     }
     drop(_strict);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let _output = crate::output_count::push_output_count(Some(1));
-    restore(Some(runtime), vec![]).expect("RunMat mode may request the restored path");
+    let restored =
+        restore(Some(runtime), vec![]).expect("RunMat mode may request the restored path");
+    assert_eq!(text(&restored), "factory");
 }
