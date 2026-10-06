@@ -7,11 +7,9 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
-use runmat_thread_local::runmat_thread_local;
 use runmat_types::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_value::Value;
 use runmat_value::{CharArray, StructValue};
-use std::cell::RefCell;
 
 use crate::builtins::common::tensor;
 
@@ -238,32 +236,6 @@ pub const NARGOUTCHK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &NARGOUTCHK_ERRORS,
 };
 
-runmat_thread_local! {
-    static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
-}
-
-pub struct ArityCallCountsGuard {
-    previous: Vec<(usize, usize)>,
-}
-
-impl Drop for ArityCallCountsGuard {
-    fn drop(&mut self) {
-        let previous = std::mem::take(&mut self.previous);
-        CALL_COUNTS.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
-    }
-}
-
-pub fn replace_call_counts(call_counts: Vec<(usize, usize)>) -> ArityCallCountsGuard {
-    let previous = CALL_COUNTS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), call_counts));
-    ArityCallCountsGuard { previous }
-}
-
-pub(crate) fn current_input_count() -> Option<usize> {
-    CALL_COUNTS.with(|slot| slot.borrow().last().map(|(inputs, _)| *inputs))
-}
-
 #[derive(Clone, Copy)]
 enum ArityBound {
     Finite(usize),
@@ -431,7 +403,10 @@ fn validate_arg_count(
     }
 }
 
-pub(crate) fn dispatch_narginchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) fn dispatch_narginchk_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let builtin = NARGINCHK_BUILTIN_NAME;
     validate_arg_count(
         &args,
@@ -439,8 +414,9 @@ pub(crate) fn dispatch_narginchk(args: Vec<Value>) -> crate::BuiltinResult<Value
         &NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
         &NARGINCHK_ERROR_TOO_MANY_INPUTS,
     )?;
-    let (actual_inputs, _) = CALL_COUNTS
-        .with(|slot| slot.borrow().last().copied())
+    let (actual_inputs, _) = runtime
+        .and_then(|runtime| runtime.invocation_arity())
+        .and_then(|arity| arity.function_counts())
         .ok_or_else(|| descriptor_error(builtin, &NARGINCHK_ERROR_CONTEXT_UNAVAILABLE))?;
     let (min, max) = validate_bounds(
         &args,
@@ -461,6 +437,13 @@ pub(crate) fn dispatch_narginchk(args: Vec<Value>) -> crate::BuiltinResult<Value
 }
 
 pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    dispatch_nargoutchk_in_context(None, args)
+}
+
+pub fn dispatch_nargoutchk_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let builtin = NARGOUTCHK_BUILTIN_NAME;
     if !(2..=4).contains(&args.len()) {
         return Err(descriptor_error(
@@ -498,8 +481,9 @@ pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             structured,
         ));
     }
-    let (_, actual_outputs) = CALL_COUNTS
-        .with(|slot| slot.borrow().last().copied())
+    let (_, actual_outputs) = runtime
+        .and_then(|runtime| runtime.invocation_arity())
+        .and_then(|arity| arity.function_counts())
         .ok_or_else(|| descriptor_error(builtin, &NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE))?;
     match arity_violation(actual_outputs, min, max) {
         Some(ArityViolation::TooFew) => {
@@ -521,6 +505,7 @@ pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "narginchk",
+    context = true,
     category = "introspection",
     summary = "Validate current function input arity.",
     sink = true,
@@ -529,12 +514,16 @@ pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     integer_capabilities(self::NARGINCHK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
-pub fn narginchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    dispatch_narginchk(args)
+pub fn narginchk_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    dispatch_narginchk_in_context(runtime.as_ref(), args)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "nargoutchk",
+    context = true,
     category = "introspection",
     summary = "Validate current function output arity.",
     sink = true,
@@ -543,8 +532,11 @@ pub fn narginchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Va
     integer_capabilities(self::NARGOUTCHK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
-pub fn nargoutchk_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    dispatch_nargoutchk(args)
+pub fn nargoutchk_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    dispatch_nargoutchk_in_context(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
@@ -552,25 +544,34 @@ mod tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
+    fn runtime_with_arity(inputs: usize, outputs: usize) -> crate::context::RuntimeContext {
+        let execution = std::rc::Rc::new(crate::execution::RuntimeExecutionService::new());
+        crate::context::RuntimeContext::new(execution).with_invocation_arity(
+            crate::context::RuntimeInvocationArity::function(inputs, outputs),
+        )
+    }
+
     #[test]
     fn narginchk_uses_runtime_call_count_context() {
-        let _guard = replace_call_counts(vec![(2, 1)]);
+        let runtime = runtime_with_arity(2, 1);
         let value =
-            dispatch_narginchk(vec![Value::Num(1.0), Value::Num(2.0)]).expect("narginchk succeeds");
+            dispatch_narginchk_in_context(Some(&runtime), vec![Value::Num(1.0), Value::Num(2.0)])
+                .expect("narginchk succeeds");
         assert_eq!(value, Value::Num(0.0));
     }
 
     #[test]
     fn nargoutchk_uses_runtime_call_count_context() {
-        let _guard = replace_call_counts(vec![(2, 1)]);
-        let value = dispatch_nargoutchk(vec![Value::Num(1.0), Value::Num(1.0)])
-            .expect("nargoutchk succeeds");
+        let runtime = runtime_with_arity(2, 1);
+        let value =
+            dispatch_nargoutchk_in_context(Some(&runtime), vec![Value::Num(1.0), Value::Num(1.0)])
+                .expect("nargoutchk succeeds");
         assert_eq!(value, Value::Num(0.0));
     }
 
     #[test]
     fn runtime_arity_helpers_report_context_unavailable_without_vm_context() {
-        let err = dispatch_narginchk(vec![Value::Num(0.0), Value::Num(1.0)])
+        let err = dispatch_narginchk_in_context(None, vec![Value::Num(0.0), Value::Num(1.0)])
             .expect_err("missing context should fail");
         assert_eq!(err.identifier(), Some("RunMat:NarginchkContextUnavailable"));
 
@@ -583,15 +584,89 @@ mod tests {
     }
 
     #[test]
+    fn script_context_keeps_function_checks_unavailable_but_legacy_count_is_explicit() {
+        let execution = std::rc::Rc::new(crate::execution::RuntimeExecutionService::new());
+        let script = crate::context::RuntimeContext::new(execution)
+            .with_invocation_arity(crate::context::RuntimeInvocationArity::Script);
+        let error =
+            dispatch_narginchk_in_context(Some(&script), vec![Value::Num(0.0), Value::Num(0.0)])
+                .expect_err("scripts have no function input count");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:NarginchkContextUnavailable")
+        );
+        let error =
+            dispatch_nargoutchk_in_context(Some(&script), vec![Value::Num(0.0), Value::Num(0.0)])
+                .expect_err("scripts have no function output count");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:NargoutchkContextUnavailable")
+        );
+        let explicit = dispatch_nargoutchk_in_context(
+            Some(&script),
+            vec![Value::Num(0.0), Value::Num(0.0), Value::Num(0.0)],
+        )
+        .expect("legacy explicit count has no function-context dependency");
+        assert!(matches!(explicit, Value::CharArray(value) if value.data.is_empty()));
+    }
+
+    #[test]
+    fn interleaved_sibling_call_futures_keep_their_selected_arity_after_drop() {
+        use std::future::Future;
+        use std::task::{Context, Poll};
+
+        let execution = std::rc::Rc::new(crate::execution::RuntimeExecutionService::new());
+        let parent = crate::context::RuntimeContext::new(execution);
+        let first = parent
+            .clone()
+            .with_invocation_arity(crate::context::RuntimeInvocationArity::function(1, 0));
+        let second = parent
+            .clone()
+            .with_invocation_arity(crate::context::RuntimeInvocationArity::function(3, 2));
+        let (first_sender, first_gate) = futures::channel::oneshot::channel::<()>();
+        let (second_sender, second_gate) = futures::channel::oneshot::channel::<()>();
+        let first_selected = first.clone();
+        let second_selected = second.clone();
+        let mut first_future = Box::pin(first.scope(async move {
+            let _ = first_gate.await;
+            dispatch_narginchk_in_context(
+                Some(&first_selected),
+                vec![Value::Num(1.0), Value::Num(1.0)],
+            )
+        }));
+        let mut second_future = Box::pin(second.scope(async move {
+            let _ = second_gate.await;
+            dispatch_nargoutchk_in_context(
+                Some(&second_selected),
+                vec![Value::Num(2.0), Value::Num(2.0)],
+            )
+        }));
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(first_future.as_mut().poll(&mut context).is_pending());
+        assert!(second_future.as_mut().poll(&mut context).is_pending());
+        drop(first_future);
+        assert!(first_sender.send(()).is_err());
+        second_sender.send(()).expect("second call remains live");
+        assert!(matches!(
+            second_future.as_mut().poll(&mut context),
+            Poll::Ready(Ok(Value::Num(0.0)))
+        ));
+        assert_eq!(parent.invocation_arity(), None);
+    }
+
+    #[test]
     fn arity_bounds_read_typed_integer_tensor_storage_exactly() {
-        let _guard = replace_call_counts(vec![(2, 1)]);
+        let runtime = runtime_with_arity(2, 1);
         let min =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer min");
         let max =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer max");
 
-        let value = dispatch_narginchk(vec![Value::Tensor(min), Value::Tensor(max)])
-            .expect("narginchk succeeds");
+        let value = dispatch_narginchk_in_context(
+            Some(&runtime),
+            vec![Value::Tensor(min), Value::Tensor(max)],
+        )
+        .expect("narginchk succeeds");
         assert_eq!(value, Value::Num(0.0));
 
         assert_eq!(
@@ -618,7 +693,7 @@ mod tests {
 
     #[test]
     fn arity_checks_accept_every_documented_integer_class() {
-        let _guard = replace_call_counts(vec![(1, 1)]);
+        let runtime = runtime_with_arity(1, 1);
         let cases = [
             (IntValue::I8(0), IntValue::I8(2), IntValue::I8(3)),
             (IntValue::I16(0), IntValue::I16(2), IntValue::I16(3)),
@@ -631,13 +706,19 @@ mod tests {
         ];
         for (min, max, invalid_outputs) in cases {
             assert_eq!(
-                dispatch_narginchk(vec![Value::Int(min.clone()), Value::Int(max.clone())])
-                    .expect("documented integer narginchk bounds"),
+                dispatch_narginchk_in_context(
+                    Some(&runtime),
+                    vec![Value::Int(min.clone()), Value::Int(max.clone())]
+                )
+                .expect("documented integer narginchk bounds"),
                 Value::Num(0.0)
             );
             assert_eq!(
-                dispatch_nargoutchk(vec![Value::Int(min.clone()), Value::Int(max.clone())])
-                    .expect("documented integer nargoutchk bounds"),
+                dispatch_nargoutchk_in_context(
+                    Some(&runtime),
+                    vec![Value::Int(min.clone()), Value::Int(max.clone())]
+                )
+                .expect("documented integer nargoutchk bounds"),
                 Value::Num(0.0)
             );
             let text = dispatch_nargoutchk(vec![
@@ -687,7 +768,7 @@ mod tests {
 
     #[test]
     fn arity_checks_reject_resident_bounds_before_provider_access() {
-        let _guard = replace_call_counts(vec![(1, 1)]);
+        let runtime = runtime_with_arity(1, 1);
         let resident = Value::GpuTensor(
             runmat_accelerate_api::test_support::TestAllocationOwner::new()
                 .allocate_zeroed(
@@ -698,11 +779,13 @@ mod tests {
                 .expect("valid unregistered resident fixture")
                 .handle,
         );
-        let nargin = dispatch_narginchk(vec![resident.clone(), Value::Num(2.0)])
-            .expect_err("resident nargin bound must reject");
+        let nargin =
+            dispatch_narginchk_in_context(Some(&runtime), vec![resident.clone(), Value::Num(2.0)])
+                .expect_err("resident nargin bound must reject");
         assert_eq!(nargin.identifier(), Some("RunMat:NarginchkArgumentInvalid"));
-        let nargout = dispatch_nargoutchk(vec![resident, Value::Num(2.0)])
-            .expect_err("resident nargout bound must reject");
+        let nargout =
+            dispatch_nargoutchk_in_context(Some(&runtime), vec![resident, Value::Num(2.0)])
+                .expect_err("resident nargout bound must reject");
         assert_eq!(
             nargout.identifier(),
             Some("RunMat:NargoutchkArgumentInvalid")

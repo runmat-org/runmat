@@ -186,6 +186,20 @@ fn omitted_input_state() -> HostState {
     .0
 }
 
+#[test]
+fn native_function_frame_owns_exact_arity_even_when_fixed_input_is_omitted() {
+    runmat_gc::gc_test_context(|| {
+        let state = omitted_input_state();
+        assert_eq!(
+            state.runtime.invocation_arity(),
+            Some(runmat_runtime::context::RuntimeInvocationArity::function(
+                0, 0
+            ))
+        );
+        assert_eq!(state.supplied_inputs, 0);
+    });
+}
+
 fn missing_error(state: &mut HostState) {
     assert!(
         matches!(state.assignment_root(0, true), Err(NativeExecutorError::Runtime(error)) if error.identifier() == Some("RunMat:NotEnoughInputs"))

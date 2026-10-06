@@ -5,6 +5,7 @@ use log::debug;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
+use runmat_runtime::context::RuntimeInvocationArity;
 use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
@@ -80,7 +81,6 @@ pub struct InterpreterState {
     pub persistent_aliases: HashMap<usize, String>,
     pub missing_input_slots: HashSet<usize>,
     pub current_function_name: String,
-    pub call_counts: Vec<(usize, usize)>,
     pub initial_assigned_var_count: usize,
     #[cfg(feature = "native-accel")]
     pub fusion_plan: Option<FusionPlanRef>,
@@ -93,13 +93,13 @@ impl InterpreterState {
         bytecode: Bytecode,
         initial_vars: &mut [Value],
         current_function_name: Option<&str>,
-        call_counts: Vec<(usize, usize)>,
+        invocation_arity: RuntimeInvocationArity,
     ) -> Self {
         Self::new_in_context(
             bytecode,
             initial_vars,
             current_function_name,
-            call_counts,
+            invocation_arity,
             runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             )),
@@ -110,7 +110,7 @@ impl InterpreterState {
         bytecode: Bytecode,
         initial_vars: &mut [Value],
         current_function_name: Option<&str>,
-        call_counts: Vec<(usize, usize)>,
+        invocation_arity: RuntimeInvocationArity,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
         let initial_assigned_var_count = initial_vars.len();
@@ -152,7 +152,7 @@ impl InterpreterState {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                runtime,
+                runtime: runtime.with_invocation_arity(invocation_arity),
             },
             try_stack: Vec::new(),
             last_exception: None,
@@ -164,7 +164,6 @@ impl InterpreterState {
             pc: 0,
             completion_boundary: None,
             completion_assigned_slots: None,
-            call_counts,
             initial_assigned_var_count,
             current_function_name: current_function_name
                 .map(|s| s.to_string())
@@ -183,6 +182,7 @@ mod tests {
     use super::InterpreterState;
     use crate::bytecode::{Bytecode, FusionInstructionKind, FusionInstructionWindow};
     use runmat_accelerate::graph::{AccelNodeLabel, InstrSpan, PrimitiveOp};
+    use runmat_runtime::context::RuntimeInvocationArity;
 
     #[test]
     fn runtime_materialized_graph_is_retained_for_fusion_execution() {
@@ -204,7 +204,12 @@ mod tests {
         }];
 
         let mut initial_vars = Vec::new();
-        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        let state = InterpreterState::new(
+            bytecode,
+            &mut initial_vars,
+            Some("<main>"),
+            RuntimeInvocationArity::Script,
+        );
         assert!(
             state.fusion_plan.is_some(),
             "expected runtime fusion plan when semantic windows exist"
@@ -244,7 +249,12 @@ mod tests {
         }];
 
         let mut initial_vars = Vec::new();
-        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        let state = InterpreterState::new(
+            bytecode,
+            &mut initial_vars,
+            Some("<main>"),
+            RuntimeInvocationArity::Script,
+        );
         let graph = state
             .fusion_accel_graph
             .as_ref()

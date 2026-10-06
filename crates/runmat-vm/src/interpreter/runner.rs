@@ -14,13 +14,13 @@ use crate::runtime::workspace::{
 use runmat_runtime::call::function_abi::{
     collect_function_outputs, prepare_function_inputs_async, FunctionInputSpec,
 };
+use runmat_runtime::context::RuntimeInvocationArity;
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     RuntimeError,
 };
 use runmat_value::{CellArray, Value};
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Once;
@@ -51,9 +51,6 @@ impl Drop for FusionPlanGuard {
 }
 
 type VmResult<T> = Result<T, RuntimeError>;
-runmat_thread_local::runmat_thread_local! {
-    static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
-}
 
 fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
     initial.clear();
@@ -406,6 +403,10 @@ pub async fn interpret_with_workspace_in_context(
     runtime: runmat_runtime::context::RuntimeContext,
     admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
 ) -> WorkspaceInterpreterOutcome {
+    let arity = runtime
+        .invocation_arity()
+        .unwrap_or(RuntimeInvocationArity::Script);
+    let runtime = runtime.with_invocation_arity(arity);
     let (runtime, workspace_activation) =
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, admission);
     let frame = workspace_activation.frame();
@@ -430,6 +431,10 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = runtime.with_invocation_arity(RuntimeInvocationArity::function(
+        resume.supplied_inputs,
+        resume.requested_outputs,
+    ));
     let (runtime, workspace_activation) =
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let runtime = with_default_acceleration_service(runtime);
@@ -496,14 +501,13 @@ async fn interpret_resume_inner(
             }
         }
     }
-    let previous_call_counts = CALL_COUNTS.with(|counts| counts.borrow().clone());
-    let mut call_counts = previous_call_counts.clone();
-    call_counts.push((resume.supplied_inputs, resume.requested_outputs));
+    let invocation_arity =
+        RuntimeInvocationArity::function(resume.supplied_inputs, resume.requested_outputs);
     let mut state = InterpreterState::new_in_context(
         resumed_bytecode,
         &mut vars,
         current_function_name,
-        call_counts,
+        invocation_arity,
         runtime,
     );
     state.pc = resume.pc;
@@ -535,7 +539,6 @@ async fn interpret_resume_inner(
     );
     let mut output_vars = vars;
     let result = run_interpreter(Box::new(state), &mut output_vars).await;
-    CALL_COUNTS.with(|counts| *counts.borrow_mut() = previous_call_counts);
     match result {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
@@ -564,14 +567,16 @@ async fn interpret_with_vars_inner(
         source_id,
         bytecode_frame_span(bytecode),
     );
-    let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+    let invocation_arity = runtime
+        .invocation_arity()
+        .unwrap_or(RuntimeInvocationArity::Script);
     let _borrowed_inputs =
         crate::runtime::gc::ManagedRoots::new(initial_vars).map_err(RuntimeError::new)?;
     let state = Box::new(InterpreterState::new_in_context(
         bytecode.clone(),
         initial_vars,
         current_function_name,
-        call_counts,
+        invocation_arity,
         runtime,
     ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
@@ -640,7 +645,6 @@ async fn run_interpreter_inner(
         mut persistent_aliases,
         mut missing_input_slots,
         current_function_name,
-        call_counts,
         initial_assigned_var_count,
         #[cfg(feature = "native-accel")]
             fusion_plan: _,
@@ -653,10 +657,10 @@ async fn run_interpreter_inner(
             .source_id
             .and_then(|source| source.resolve_in(&context.runtime)),
     );
-    let _arity_call_counts_guard =
-        runmat_runtime::builtins::introspection::arity_check::replace_call_counts(
-            call_counts.clone(),
-        );
+    let invocation_arity = context
+        .runtime
+        .invocation_arity()
+        .expect("interpreter state has selected script or function arity");
     let function_registry = Arc::new(bytecode.function_registry());
     let catch_runtime = context.runtime.clone();
     let mut catch_exceptions: HashMap<
@@ -824,9 +828,6 @@ async fn run_interpreter_inner(
     source_function_catalog.sort_by_key(|info| info.function);
     let _source_function_catalog_guard =
         user_functions::install_source_function_catalog(Some(Arc::new(source_function_catalog)));
-    CALL_COUNTS.with(|cc| {
-        *cc.borrow_mut() = call_counts.clone();
-    });
     let _workspace_guard = interp_engine::prepare_workspace_guard(
         &bytecode.var_names,
         &mut vars,
@@ -996,7 +997,6 @@ async fn run_interpreter_inner(
                 &bytecode.instructions[pc],
                 stack.len(),
             );
-            let call_counts_snapshot = CALL_COUNTS.with(|cc| cc.borrow().clone());
             let store_var_global_aliases = match &bytecode.instructions[pc] {
                 Instr::StoreVar(_) => Some(global_aliases.clone()),
                 _ => None,
@@ -1050,7 +1050,7 @@ async fn run_interpreter_inner(
                         .source_id
                         .and_then(|source| source.resolve_in(&context.runtime)),
                     call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
-                    call_counts: &call_counts_snapshot,
+                    invocation_arity,
                     current_function_name: &current_function_name,
                 },
                 interp_dispatch::DispatchState {
@@ -1620,6 +1620,8 @@ async fn interpret_function_with_counts_in_context(
     missing_input_slots: HashSet<usize>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
+    let runtime =
+        runtime.with_invocation_arity(RuntimeInvocationArity::function(in_count, out_count));
     let (runtime, workspace_activation) =
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let frame = workspace_activation.frame();
@@ -1651,10 +1653,7 @@ async fn interpret_function_with_counts_in_context_inner(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vars;
-    CALL_COUNTS.with(|cc| {
-        cc.borrow_mut().push((in_count, out_count));
-    });
-    let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+    let invocation_arity = RuntimeInvocationArity::function(in_count, out_count);
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
@@ -1662,16 +1661,13 @@ async fn interpret_function_with_counts_in_context_inner(
         bytecode.clone(),
         &mut vars,
         Some(name),
-        call_counts,
+        invocation_arity,
         runtime,
     );
     state.missing_input_slots = missing_input_slots;
     let _debug_frame_guard =
         runmat_runtime::debug_context::push_frame(name, source_id, bytecode_frame_span(bytecode));
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
-    CALL_COUNTS.with(|cc| {
-        cc.borrow_mut().pop();
-    });
     let res = match res {
         Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
         Err(error) => {
@@ -1703,6 +1699,7 @@ mod tests {
         value_is_nonpositive, value_is_nonzero, value_is_numeric_or_logical, value_is_positive,
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
+    use runmat_runtime::context::RuntimeInvocationArity;
     use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
     #[cfg(feature = "native-accel")]
     use {
@@ -1993,7 +1990,6 @@ mod tests {
 
     #[test]
     fn interpreter_resume_starts_at_exact_pc_without_replaying_prefix() {
-        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
         let bytecode = Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(99.0),
@@ -2018,6 +2014,7 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
+        let parent = runtime.clone();
         let super::InterpreterOutcome::Completed(completion) = block_on(
             interpret_resume_in_context(&bytecode, resume, Some("resume_test"), runtime),
         )
@@ -2029,7 +2026,7 @@ mod tests {
             completion.assigned_slots,
             std::collections::HashSet::from([0, 1])
         );
-        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
+        assert_eq!(parent.invocation_arity(), None);
     }
 
     #[test]
@@ -2087,7 +2084,6 @@ mod tests {
 
     #[test]
     fn interpreter_resume_stops_before_the_declared_completion_boundary() {
-        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
         let bytecode = Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(7.0),
@@ -2114,6 +2110,7 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
+        let parent = runtime.clone();
         let super::InterpreterOutcome::Completed(completion) = block_on(
             interpret_resume_in_context(&bytecode, resume, Some("bounded_resume_test"), runtime),
         )
@@ -2123,7 +2120,7 @@ mod tests {
             completion.assigned_slots,
             std::collections::HashSet::from([0])
         );
-        super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
+        assert_eq!(parent.invocation_arity(), None);
     }
 
     #[test]
@@ -2357,8 +2354,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(Vec::new(), 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::Num(0.0)];
             drop(handle);
@@ -2390,8 +2391,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::Pop, Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::Num(0.0)];
 
@@ -2420,8 +2425,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::Pop, Instr::Return], 1);
             let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::GpuTensor(handle.clone())];
 
@@ -2458,8 +2467,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.context.locals.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::Num(0.0)];
 
@@ -2488,8 +2501,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
             let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.context.locals.push(Value::GpuTensor(handle.clone()));
             state.vars = vec![Value::GpuTensor(handle.clone())];
 
@@ -2526,8 +2543,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -2567,8 +2588,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -2619,8 +2644,12 @@ mod tests {
                 Value::GpuTensor(handle.clone()),
                 Value::GpuTensor(handle.clone()),
             ];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::Num(0.0));
             state.vars = vec![
                 Value::GpuTensor(handle.clone()),
@@ -2660,8 +2689,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::Num(0.0));
             state.vars = vec![Value::GpuTensor(handle.clone())];
             state.context.locals.push(Value::GpuTensor(handle.clone()));
@@ -2699,8 +2732,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -2741,8 +2778,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 2);
             let mut seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -2791,8 +2832,12 @@ mod tests {
 
             let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -2842,8 +2887,12 @@ mod tests {
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::Num(0.0));
             state.vars = vec![Value::GpuTensor(handle.clone())];
             state
@@ -2892,8 +2941,12 @@ mod tests {
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::Num(0.0));
             state.vars = vec![Value::Num(0.0)];
             state
@@ -2943,8 +2996,12 @@ mod tests {
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             state.stack.push(Value::Num(0.0));
             state.vars = vec![Value::Num(0.0)];
             state
@@ -2985,8 +3042,12 @@ mod tests {
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -3038,8 +3099,12 @@ mod tests {
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields
@@ -3100,8 +3165,12 @@ mod tests {
             let bytecode =
                 Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
             let mut seed_vars = vec![Value::Num(0.0)];
-            let mut state =
-                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut state = InterpreterState::new(
+                bytecode,
+                &mut seed_vars,
+                Some("<main>"),
+                RuntimeInvocationArity::Script,
+            );
             let mut payload = StructValue::new();
             payload
                 .fields

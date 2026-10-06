@@ -15,7 +15,7 @@ pub(super) async fn dispatch(
         pc,
         source_id,
         call_arg_spans,
-        call_counts,
+        invocation_arity,
         function_registry,
         current_function_name,
     } = ctx;
@@ -30,7 +30,7 @@ pub(super) async fn dispatch(
                     source_id,
                     call_arg_spans: call_arg_spans.as_ref().cloned(),
                     imports: imports.as_slice(),
-                    call_counts,
+                    invocation_arity,
                     function_registry,
                     current_function_name,
                     exception: calls::ExceptionRouteContext {
@@ -70,7 +70,7 @@ pub(super) async fn dispatch(
                     source_id,
                     call_arg_spans: call_arg_spans.as_ref().cloned(),
                     imports: imports.as_slice(),
-                    call_counts,
+                    invocation_arity,
                     function_registry,
                     current_function_name,
                     exception: calls::ExceptionRouteContext {

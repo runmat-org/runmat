@@ -126,7 +126,15 @@ fn contains_comma_list_indexing(text: &str) -> bool {
     false
 }
 
+#[cfg(test)]
 pub(crate) fn dispatch_inputname(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    dispatch_inputname_in_context(None, args)
+}
+
+pub(crate) fn dispatch_inputname_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => return Err(descriptor_error(&INPUTNAME_ERROR_NOT_ENOUGH_INPUTS)),
         1 => {}
@@ -136,8 +144,10 @@ pub(crate) fn dispatch_inputname(args: Vec<Value>) -> crate::BuiltinResult<Value
         .ok_or_else(|| descriptor_error(&INPUTNAME_ERROR_ARGUMENT_INVALID))?;
     let callsite = crate::callsite::current_function_input_callsite()
         .ok_or_else(|| descriptor_error(&INPUTNAME_ERROR_ARGUMENT_EXCEEDS_INPUTS))?;
-    let actual_inputs =
-        super::arity_check::current_input_count().unwrap_or(callsite.arg_spans.len());
+    let actual_inputs = runtime
+        .and_then(|runtime| runtime.invocation_arity())
+        .and_then(|arity| arity.function_counts())
+        .map_or(callsite.arg_spans.len(), |(inputs, _)| inputs);
     if index > actual_inputs {
         return Err(descriptor_error(&INPUTNAME_ERROR_ARGUMENT_EXCEEDS_INPUTS));
     }
@@ -161,10 +171,14 @@ pub(crate) fn dispatch_inputname(args: Vec<Value>) -> crate::BuiltinResult<Value
 #[runmat_macros::runtime_builtin(
     name = "inputname",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::inputname"
 )]
-pub fn inputname_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    dispatch_inputname(args)
+pub fn inputname_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    dispatch_inputname_in_context(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
@@ -201,6 +215,31 @@ mod tests {
 
         let name = dispatch_inputname(vec![Value::Num(1.0)]).expect("inputname succeeds");
         assert_eq!(name, Value::CharArray(CharArray::new_row("alpha")));
+    }
+
+    #[test]
+    fn selected_function_arity_bounds_inputname_before_callsite_text() {
+        let source = "out = probe(alpha, beta);";
+        let _catalog_guard = crate::source_context::replace_source_catalog(vec![(
+            SourceId(71),
+            "/tmp/selected_caller.m".to_string(),
+            source.to_string(),
+        )])
+        .expect("inputname source catalog admission");
+        let _callsite_guard = crate::callsite::push_function_input_callsite(
+            Some(SourceId(71)),
+            Some(vec![span_of(source, "alpha"), span_of(source, "beta")]),
+        );
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_invocation_arity(crate::context::RuntimeInvocationArity::function(1, 1));
+        let error = dispatch_inputname_in_context(Some(&runtime), vec![Value::Num(2.0)])
+            .expect_err("selected function supplied only one argument");
+        assert_eq!(
+            error.identifier(),
+            INPUTNAME_ERROR_ARGUMENT_EXCEEDS_INPUTS.identifier
+        );
     }
 
     #[test]

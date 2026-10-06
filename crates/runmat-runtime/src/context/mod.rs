@@ -5,6 +5,7 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod arity;
 mod catch;
 mod local_tasks;
 mod preferences;
@@ -34,6 +35,7 @@ mod cancellation_tests;
 pub mod legacy;
 pub mod preparation;
 
+pub use arity::RuntimeInvocationArity;
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};

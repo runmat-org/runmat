@@ -54,7 +54,7 @@ pub struct DispatchMeta<'a> {
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
-    pub call_counts: &'a [(usize, usize)],
+    pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
     pub current_function_name: &'a str,
 }
 
@@ -701,7 +701,7 @@ pub async fn dispatch_instruction(
         function_registry,
         source_id,
         call_arg_spans,
-        call_counts,
+        invocation_arity,
         current_function_name,
     } = meta;
     let DispatchState {
@@ -769,7 +769,7 @@ pub async fn dispatch_instruction(
         pc: &mut *pc,
         source_id,
         call_arg_spans: &call_arg_spans,
-        call_counts,
+        invocation_arity,
         function_registry,
         current_function_name,
     })
@@ -802,7 +802,7 @@ pub async fn dispatch_instruction(
                 runtime: &context.runtime,
                 current_function_name,
                 bytecode,
-                call_counts,
+                invocation_arity,
             },
         )
         .await? =>

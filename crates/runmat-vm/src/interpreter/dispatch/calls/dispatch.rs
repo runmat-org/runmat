@@ -27,7 +27,7 @@ pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub pc: &'a mut usize,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: &'a Option<Vec<runmat_hir::Span>>,
-    pub call_counts: &'a [(usize, usize)],
+    pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub current_function_name: &'a str,
 }

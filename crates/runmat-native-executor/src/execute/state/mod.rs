@@ -130,6 +130,18 @@ impl HostState {
             optimized_regions,
             workspace,
         } = input;
+        // Workspace entry is a script frame; ordinary native invocation owns
+        // the exact supplied/requested function arity. Project it before any
+        // callsite can suspend or reach the runtime builtin dispatcher.
+        let invocation_arity = if workspace.is_some() {
+            runmat_runtime::context::RuntimeInvocationArity::Script
+        } else {
+            runmat_runtime::context::RuntimeInvocationArity::function(
+                arguments.len(),
+                requested_outputs,
+            )
+        };
+        let runtime = runtime.with_invocation_arity(invocation_arity);
         let inherited_catch = runtime.active_catch_exception_shared();
         let construction_values = arguments
             .iter()

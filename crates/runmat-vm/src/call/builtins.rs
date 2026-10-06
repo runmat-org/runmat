@@ -348,7 +348,7 @@ pub fn vm_intrinsic_builtin(
     stack: &mut Vec<Value>,
     name: &str,
     arg_count: usize,
-    call_counts: &[(usize, usize)],
+    invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
 ) -> Result<Value, RuntimeError> {
     let Some(intrinsic) = VmIntrinsicBuiltin::classify(name) else {
         return Err(mex(
@@ -360,17 +360,17 @@ pub fn vm_intrinsic_builtin(
     match intrinsic {
         VmIntrinsicBuiltin::Nargin => {
             validate_intrinsic_arg_count(intrinsic.name(), args.len(), 0)?;
-            let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
+            let (nin, _) = invocation_arity.intrinsic_counts();
             Ok(Value::Num(nin as f64))
         }
         VmIntrinsicBuiltin::Nargout => {
             validate_intrinsic_arg_count(intrinsic.name(), args.len(), 0)?;
-            let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
+            let (_, nout) = invocation_arity.intrinsic_counts();
             Ok(Value::Num(nout as f64))
         }
         VmIntrinsicBuiltin::Narginchk => {
             validate_intrinsic_arg_count(intrinsic.name(), args.len(), 2)?;
-            let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
+            let (nin, _) = invocation_arity.intrinsic_counts();
             validate_narginchk(&args, nin)?;
             Ok(Value::Num(0.0))
         }
@@ -381,7 +381,7 @@ pub fn vm_intrinsic_builtin(
                 );
             }
             validate_intrinsic_arg_count(intrinsic.name(), args.len(), 2)?;
-            let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
+            let (_, nout) = invocation_arity.intrinsic_counts();
             validate_nargoutchk(&args, nout)?;
             Ok(Value::Num(0.0))
         }

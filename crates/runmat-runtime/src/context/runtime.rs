@@ -1,4 +1,7 @@
-use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServicePorts};
+use super::{
+    ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeInvocationArity,
+    RuntimeServicePorts,
+};
 use crate::execution::RuntimeExecutionServices;
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
 use std::cell::{Cell, RefCell};
@@ -107,6 +110,7 @@ pub struct RuntimeContext {
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
     invocation_language_policy: Option<Rc<Cell<RuntimeLanguagePolicy>>>,
+    invocation_arity: Option<RuntimeInvocationArity>,
     // Invocation-scoped, unlike shared session language state. Scoped guards
     // affect this invocation's clones, never an earlier/later generation.
     cancellation: Rc<RefCell<CancellationToken>>,
@@ -147,6 +151,7 @@ impl RuntimeContext {
             services: RuntimeServicePorts::default(),
             state,
             invocation_language_policy: None,
+            invocation_arity: None,
             cancellation: Rc::new(RefCell::new(cancellation)),
         };
         {
@@ -273,6 +278,17 @@ impl RuntimeContext {
 
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
+    }
+
+    /// Project the selected call's arity without changing sibling futures or
+    /// the parent invocation. The VM/native caller owns the actual counts.
+    pub fn with_invocation_arity(mut self, arity: RuntimeInvocationArity) -> Self {
+        self.invocation_arity = Some(arity);
+        self
+    }
+
+    pub fn invocation_arity(&self) -> Option<RuntimeInvocationArity> {
+        self.invocation_arity
     }
 
     /// Create work accounting for this invocation generation. The adapter
@@ -647,6 +663,7 @@ impl RuntimeContext {
         };
         *child.state.source.borrow_mut() = self.state.source.borrow().fork_snapshot();
         let mut child = child;
+        child.invocation_arity = self.invocation_arity;
         if let Some(sources) = &self.program_sources {
             child.program_sources = Some(Rc::new(sources.fork_snapshot()));
         }

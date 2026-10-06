@@ -13,7 +13,7 @@ pub(super) async fn dispatch(
 ) -> Result<bool, RuntimeError> {
     let runtime = context.runtime;
     let bytecode = context.bytecode;
-    let call_counts = context.call_counts;
+    let invocation_arity = context.invocation_arity;
     match instr {
         crate::bytecode::Instr::BeginSubscriptEndReceiver { prefix } => {
             let operand_count = prefix
@@ -110,7 +110,7 @@ pub(super) async fn dispatch(
                     selection: *selection,
                     indexing: *context,
                     access: frame_access(bytecode)?,
-                    call_counts,
+                    invocation_arity,
                 },
                 sequence_register,
             )
@@ -135,7 +135,7 @@ pub(super) async fn dispatch(
                     selection: runmat_types::SequenceUse::ExpandAll,
                     indexing: *context,
                     access: frame_access(bytecode)?,
-                    call_counts,
+                    invocation_arity,
                 },
                 sequence_register,
             )

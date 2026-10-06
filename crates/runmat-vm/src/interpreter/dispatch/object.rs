@@ -58,7 +58,7 @@ pub struct ObjectDispatchContext<'a> {
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub current_function_name: &'a str,
     pub bytecode: &'a crate::bytecode::Bytecode,
-    pub call_counts: &'a [(usize, usize)],
+    pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
 }
 
 pub async fn dispatch_object(
@@ -123,7 +123,7 @@ struct SubscriptPathReadContext<'a> {
     selection: runmat_types::SequenceUse,
     indexing: runmat_types::ObjectIndexingContext,
     access: runmat_runtime::object::protocol::ObjectAccessContext,
-    call_counts: &'a [(usize, usize)],
+    invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
 }
 
 async fn execute_subscript_path(
@@ -203,7 +203,9 @@ async fn execute_subscript_path(
     let sequence_context = match read.selection {
         runmat_types::SequenceUse::SelectCurrentFunctionOutputs => {
             runmat_runtime::sequence::SequenceResolutionContext::current_function_outputs(
-                read.call_counts.last().map_or(1, |entry| entry.1),
+                read.invocation_arity
+                    .function_counts()
+                    .map_or(1, |(_, outputs)| outputs),
             )
         }
         runmat_types::SequenceUse::SelectDestinationCardinality => {
