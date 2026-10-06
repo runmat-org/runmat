@@ -33,7 +33,13 @@ pub(in crate::session) fn finalize_current_definitions(
                 format!("published function {function:?} is absent from the canonical executable")
             })?;
             validate_same_definition(function, published, exact, publication, executable)?;
-            Ok(exact.clone())
+            let mut replacement = exact.clone();
+            // `runtime_bytecode` binds the portable source map into a fresh
+            // invocation owner. Session publication must retain the durable
+            // source authority prepared by the session source pool instead of
+            // capturing that invocation-local lease.
+            replacement.source_id = published.source_id;
+            Ok(replacement)
         })
         .collect::<Result<Vec<_>, String>>()?;
 
@@ -65,14 +71,39 @@ fn validate_same_definition(
     }
     if published.portable_function != exact.portable_function
         || published.display_name != exact.display_name
-        || published.source_id != exact.source_id
-        || published.source_file != exact.source_file
-        || published.source_role != exact.source_role
-        || published.private_owner_scope != exact.private_owner_scope
-        || !Arc::ptr_eq(&published.definition_owner, &exact.definition_owner)
     {
         return Err(format!(
-            "published function {function:?} disagrees with its executable owner facts"
+            "published function {function:?} disagrees with its executable identity facts"
+        ));
+    }
+    if published.source_file != exact.source_file
+        || published.source_role != exact.source_role
+        || published.private_owner_scope != exact.private_owner_scope
+    {
+        return Err(format!(
+            "published function {function:?} disagrees with its executable source facts"
+        ));
+    }
+    let published_source = published
+        .source_id
+        .and_then(runmat_vm::BytecodeSourceRef::runtime)
+        .ok_or_else(|| {
+            format!("published function {function:?} has an invalid source authority domain")
+        })?;
+    let exact_source = exact
+        .source_id
+        .and_then(runmat_vm::BytecodeSourceRef::runtime)
+        .ok_or_else(|| {
+            format!("published function {function:?} has an invalid source authority domain")
+        })?;
+    if published_source.semantic_content_revision() != exact_source.semantic_content_revision() {
+        return Err(format!(
+            "published function {function:?} disagrees with its executable source content"
+        ));
+    }
+    if !Arc::ptr_eq(&published.definition_owner, &exact.definition_owner) {
+        return Err(format!(
+            "published function {function:?} disagrees with its executable definition owner"
         ));
     }
 

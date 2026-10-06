@@ -31,6 +31,24 @@ fn runtime_ref(source: usize) -> BytecodeSourceRef {
     })
 }
 
+fn separately_owned_runtime_ref(
+    name: &str,
+    text: &str,
+) -> (
+    runmat_runtime::context::RuntimeContext,
+    runmat_runtime::source_context::RuntimeSourceLease,
+    BytecodeSourceRef,
+) {
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let lease =
+        runmat_runtime::source_context::lease_source_context_in_context(&runtime, name, None, text)
+            .expect("separate test source owner");
+    let source = BytecodeSourceRef::Runtime(lease.source_ref());
+    (runtime, lease, source)
+}
+
 fn definition(id: usize, name: &str, callee: usize) -> FunctionBytecode {
     FunctionBytecode {
         function: FunctionId(id),
@@ -88,11 +106,16 @@ fn finalized_publication_uses_exact_decorated_body_and_registry_owners() {
     let mut prepared = definition(function.0, "published", function.0);
     prepared.portable_function = runmat_types::ProgramFunctionId(3);
     prepared.binding_origin = Some(binding_origin("published-v1", prepared.portable_function));
+    prepared.source_file = Some("/durable/published.m".into());
     let owner = std::sync::Arc::clone(&prepared.definition_owner);
+    let durable_source = prepared.source_id.expect("durable source");
     let mut publication = FunctionRegistry::new(HashMap::from([(function, prepared.clone())]));
     publication.names.insert("published_alias".into(), function);
 
     let mut decorated = prepared;
+    let (_invocation_runtime, _invocation_lease, invocation_source) =
+        separately_owned_runtime_ref("source-5.m", "source 5");
+    decorated.source_id = Some(invocation_source);
     let point = runmat_types::ProgramPointId {
         function: decorated.portable_function,
         block: 0,
@@ -114,10 +137,14 @@ fn finalized_publication_uses_exact_decorated_body_and_registry_owners() {
 
     let finalized = publication.get(function).expect("published body");
     assert_eq!(finalized.regions, decorated.regions);
+    assert_eq!(finalized.source_id, Some(durable_source));
+    assert_ne!(finalized.source_id, decorated.source_id);
     assert!(std::sync::Arc::ptr_eq(&finalized.definition_owner, &owner));
     assert_eq!(publication.resolve_name("published_alias"), Some(function));
-    let source = finalized.source_id.expect("source");
-    assert_eq!(publication.source_functions[&source], vec![function]);
+    assert_eq!(
+        publication.source_functions[&durable_source],
+        vec![function]
+    );
 }
 
 #[test]
@@ -128,40 +155,47 @@ fn finalized_publication_validates_every_owner_before_mutation() {
     first_body.binding_origin = Some(binding_origin("first-v1", first_body.portable_function));
     let mut second_body = definition(second.0, "second-published", second.0);
     second_body.binding_origin = Some(binding_origin("second-v1", second_body.portable_function));
-    let first_owner = std::sync::Arc::clone(&first_body.definition_owner);
-    let before_source = first_body.source_id.expect("source");
-    let mut publication = FunctionRegistry::new(HashMap::from([
-        (first, first_body.clone()),
-        (second, second_body.clone()),
-    ]));
+    for (conflict, expected) in [(0, "source content"), (1, "binding origin")] {
+        let first_owner = std::sync::Arc::clone(&first_body.definition_owner);
+        let before_source = first_body.source_id.expect("source");
+        let mut publication = FunctionRegistry::new(HashMap::from([
+            (first, first_body.clone()),
+            (second, second_body.clone()),
+        ]));
+        let mut first_decorated = first_body.clone();
+        first_decorated.instructions.push(Instr::LoadConst(17.0));
+        let mut second_conflict = second_body.clone();
+        match conflict {
+            0 => second_conflict.source_id = Some(runtime_ref(6)),
+            1 => {
+                second_conflict.binding_origin = Some(binding_origin(
+                    "second-conflict",
+                    second_conflict.portable_function,
+                ));
+            }
+            _ => unreachable!(),
+        }
+        let executable = FunctionRegistry::new(HashMap::from([
+            (first, first_decorated),
+            (second, second_conflict),
+        ]));
 
-    let mut first_decorated = first_body;
-    first_decorated.instructions.push(Instr::LoadConst(17.0));
-    let mut second_conflict = second_body;
-    second_conflict.binding_origin = Some(binding_origin(
-        "second-conflict",
-        second_conflict.portable_function,
-    ));
-    let executable = FunctionRegistry::new(HashMap::from([
-        (first, first_decorated),
-        (second, second_conflict),
-    ]));
-
-    let error = super::finalize_current_definitions(
-        &mut publication,
-        &HashSet::from([first, second]),
-        &executable,
-    )
-    .expect_err("conflicting origin must fail before replacement");
-    assert!(error.contains("binding origin"));
-    assert_eq!(publication.get(first).unwrap().instructions.len(), 1);
-    assert!(std::sync::Arc::ptr_eq(
-        &publication.get(first).unwrap().definition_owner,
-        &first_owner,
-    ));
-    let mut source_members = publication.source_functions[&before_source].clone();
-    source_members.sort_by_key(|function| function.0);
-    assert_eq!(source_members, vec![first, second]);
+        let error = super::finalize_current_definitions(
+            &mut publication,
+            &HashSet::from([first, second]),
+            &executable,
+        )
+        .expect_err("conflicting owner facts must fail before replacement");
+        assert!(error.contains(expected), "{error}");
+        assert_eq!(publication.get(first).unwrap().instructions.len(), 1);
+        assert!(std::sync::Arc::ptr_eq(
+            &publication.get(first).unwrap().definition_owner,
+            &first_owner,
+        ));
+        let mut source_members = publication.source_functions[&before_source].clone();
+        source_members.sort_by_key(|function| function.0);
+        assert_eq!(source_members, vec![first, second]);
+    }
 }
 
 #[test]
