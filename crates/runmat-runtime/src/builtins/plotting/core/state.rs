@@ -33,7 +33,10 @@ mod shared_figure;
 use shared_figure::SharedFigure;
 #[path = "state/persistence_snapshot.rs"]
 pub(crate) mod persistence_snapshot;
-pub(crate) use persistence_snapshot::capture_figure_persistence_snapshot;
+pub use persistence_snapshot::{
+    capture_figure_persistence_snapshot, FigurePersistenceSnapshot, FigurePersistenceSnapshotError,
+    FigureSnapshotEntry, FigureSnapshotScope,
+};
 
 #[path = "state/colorbar.rs"]
 mod colorbar;

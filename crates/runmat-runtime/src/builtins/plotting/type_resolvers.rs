@@ -8,10 +8,6 @@ pub fn handle_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
-pub fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
 pub fn handle_logical_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Logical {

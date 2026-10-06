@@ -11,6 +11,7 @@ pub(super) struct GraphicsFlushEffectSource {
 }
 
 impl GraphicsFlushEffectSource {
+    #[cfg(test)]
     pub(super) fn disposition(&self) -> GraphicsFlushDisposition {
         self.disposition
     }
