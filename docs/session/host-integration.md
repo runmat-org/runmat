@@ -40,6 +40,10 @@ Editor integrations should use session results for runtime state, not for static
 
 ## Lifecycle Responsibilities
 
+Native library hosts own a session's local background-task driver. `execute_request` and `invoke_executable` automatically participate in that driver while foreground work is active. Between requests, a host that admits background work must keep `session.local_task_driver().drive_until(next_input_or_event)` polled so callbacks can progress while the session is idle. A completed foreground request does not itself keep polling the driver. Only the exact session's active driver can admit a nested foreground call; hosts must still serialize ordinary requests for one session.
+
+The CLI REPL drives local work while waiting for the next input event. Finite CLI and standalone AOT hosts drive it through foreground execution, then shut it down. Embedders should call `shutdown_local_tasks()` before disposal; dropping `RunMatSession` also cancels remaining local jobs. Browser sessions use the JavaScript event loop instead of a native driver, and `dispose` shuts down their local jobs. These are host-lifetime obligations for the shared task service, not a claim that every timer lifecycle form has already migrated to background execution.
+
 Hosts should:
 
 - Serialize requests per session.
