@@ -42,6 +42,22 @@ fn real_numeric_candidate(value: &ValueFact) -> bool {
     ) && value.storage != StorageFact::Sparse
 }
 
+fn scalar_numeric_candidate(value: &ValueFact) -> bool {
+    real_numeric_candidate(value) && value.shape.element_count().is_none_or(|count| count == 1)
+}
+
+fn positioned_form_possible(args: &[ValueFact], target: bool, three_dimensional: bool) -> bool {
+    let offset = usize::from(target);
+    let coordinate_count = if three_dimensional { 3 } else { 2 };
+    let label_index = offset + coordinate_count;
+    args.len() > label_index
+        && (!target || scalar_numeric_candidate(&args[0]))
+        && args[offset..label_index]
+            .iter()
+            .all(scalar_numeric_candidate)
+        && text_candidate(&args[label_index], false)
+}
+
 pub(super) fn infer(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
@@ -83,38 +99,31 @@ pub(super) fn infer(
         | AnnotationForm::AxesNumericText
         | AnnotationForm::FigureLabel => {
             if let Some(value) = first {
-                let target = args.len() >= 2
-                    && real_numeric_candidate(value)
-                    && value.shape.element_count().is_none_or(|n| n == 1);
-                let text_index = usize::from(target);
-                if let Some(text) = args.get(text_index) {
-                    if !text_candidate(text, !matches!(form, AnnotationForm::AxesText)) {
-                        diagnostics.push(argument_error(
-                            "RM-CATALOG-ANNOTATION-TEXT",
-                            "annotation text must be a supported text or scalar numeric value",
-                            text_index,
-                        ));
-                    }
+                let numeric_allowed = !matches!(form, AnnotationForm::AxesText);
+                let ordinary = text_candidate(value, numeric_allowed);
+                let targeted = args.len() >= 2
+                    && scalar_numeric_candidate(value)
+                    && text_candidate(&args[1], numeric_allowed);
+                if !ordinary && !targeted {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-ANNOTATION-TEXT",
+                        "annotation text must be a supported text or scalar numeric value",
+                        0,
+                    ));
                 }
             }
         }
         AnnotationForm::PositionedText => {
-            for (index, value) in args.iter().take(2).enumerate() {
-                if !real_numeric_candidate(value)
-                    || value.shape.element_count().is_some_and(|n| n != 1)
-                {
-                    diagnostics.push(argument_error(
-                        "RM-CATALOG-TEXT-POSITION",
-                        "text coordinates must be real numeric scalars",
-                        index,
-                    ));
-                }
-            }
-            if args.len() == 3 && !text_candidate(&args[2], false) {
+            let possible = [false, true].into_iter().any(|target| {
+                [false, true].into_iter().any(|three_dimensional| {
+                    positioned_form_possible(args, target, three_dimensional)
+                })
+            });
+            if args.len() >= 3 && !possible {
                 diagnostics.push(argument_error(
-                    "RM-CATALOG-TEXT-LABEL",
-                    "text requires a label after two coordinates",
-                    2,
+                    "RM-CATALOG-TEXT-FORM",
+                    "text requires real scalar coordinates and a text label",
+                    0,
                 ));
             }
         }

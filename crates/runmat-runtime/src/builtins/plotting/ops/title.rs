@@ -86,6 +86,28 @@ mod tests {
     }
 
     #[test]
+    fn numeric_text_with_property_pair_is_not_interpreted_as_axes_target() {
+        let _guard = setup_plot_tests();
+        let handle = title_builtin(vec![
+            Value::Num(42.0),
+            Value::String("FontSize".into()),
+            Value::Num(12.0),
+        ])
+        .expect("numeric text with a complete property pair");
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).and_then(|meta| meta.title.as_deref()),
+            Some("42")
+        );
+        let value = crate::builtins::plotting::get::get_builtin(vec![
+            Value::Num(handle),
+            Value::String("FontSize".into()),
+        ])
+        .unwrap();
+        assert_eq!(value, Value::Num(12.0));
+    }
+
+    #[test]
     fn title_accepts_axes_target_and_char_array_with_properties() {
         let _guard = setup_plot_tests();
         let mut figure = Figure::new();

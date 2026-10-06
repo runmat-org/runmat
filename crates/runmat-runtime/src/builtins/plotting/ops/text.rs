@@ -87,12 +87,9 @@ pub async fn text_builtin(
         Some(Value::Tensor(tensor)) if tensor.integer_storage().is_some()
     );
     let (target, rest) = if typed_tensor_coordinate {
-        (
-            super::op_common::text::current_axes_target(),
-            args.as_slice(),
-        )
+        (None, args.as_slice())
     } else {
-        super::op_common::text::split_axes_target(BUILTIN_NAME, &args)
+        super::op_common::text::split_axes_target_deferred(BUILTIN_NAME, &args)
             .map_err(map_text_invalid_argument)?
     };
     if rest.len() != args.len()
@@ -125,6 +122,7 @@ pub async fn text_builtin(
                 .await
                 .map_err(map_execution_error)?;
         }
+        let target = target.unwrap_or_else(super::op_common::text::current_axes_target);
         return add_text_annotation_for_axes_with_source(
             target.0,
             target.1,
@@ -160,6 +158,7 @@ pub async fn text_builtin(
             .await
             .map_err(map_execution_error)?;
     }
+    let target = target.unwrap_or_else(super::op_common::text::current_axes_target);
     add_text_annotation_for_axes_with_source(
         target.0,
         target.1,
@@ -228,18 +227,39 @@ async fn position_source(
 
 fn validate_coordinate(value: &Value, role: &str) -> crate::BuiltinResult<()> {
     if let Value::GpuTensor(handle) = value {
-        if handle
+        let numeric_real = handle.physical().storage()
+            == runmat_accelerate_api::GpuTensorStorage::Real
+            && !runmat_accelerate_api::handle_is_logical(handle);
+        let scalar = handle
             .shape()
             .iter()
             .try_fold(1usize, |count, dim| count.checked_mul(*dim))
-            == Some(1)
-        {
-            return Ok(());
+            == Some(1);
+        if !numeric_real || !scalar {
+            return Err(text_error_with_detail(
+                &TEXT_ERROR_INVALID_ARGUMENT,
+                format!("{role} must be a real numeric scalar"),
+            ));
         }
-        return Err(text_error_with_detail(
-            &TEXT_ERROR_INVALID_ARGUMENT,
-            format!("{role} must be a real numeric scalar"),
-        ));
+        handle
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                crate::runtime_error::with_provider_execution_source(
+                    text_error_with_detail(
+                        &TEXT_ERROR_INTERNAL,
+                        format!("{role} allocation is unavailable"),
+                    ),
+                    runmat_accelerate_api::ProviderExecutionError::from_source(source),
+                )
+            })?;
+        if runmat_accelerate_api::provider_for_handle(handle).is_none() {
+            return Err(text_error_with_detail(
+                &TEXT_ERROR_INTERNAL,
+                format!("{role} has no exact acceleration provider"),
+            ));
+        }
+        return Ok(());
     }
     let tensor =
         crate::builtins::common::tensor::value_into_tensor_for(BUILTIN_NAME, value.clone())
@@ -377,6 +397,35 @@ mod tests {
     }
 
     #[test]
+    fn text_preserves_explicit_axes_two_and_three_dimensional_forms() {
+        let _guard = setup();
+        let mut figure = runmat_plot::plots::Figure::new();
+        figure.set_subplot_grid(1, 2);
+        let figure = crate::builtins::plotting::state::import_figure(figure);
+        let axes = crate::builtins::plotting::state::encode_axes_handle(figure, 1);
+        text_builtin(vec![
+            Value::Num(axes),
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::String("two".into()),
+        ])
+        .unwrap();
+        text_builtin(vec![
+            Value::Num(axes),
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::Num(5.0),
+            Value::String("three".into()),
+        ])
+        .unwrap();
+        let figure = crate::builtins::plotting::clone_figure(figure).unwrap();
+        let annotations = figure.axes_text_annotations(1);
+        assert_eq!(annotations.len(), 2);
+        assert_eq!(annotations[0].text, "two");
+        assert_eq!(annotations[1].position, glam::Vec3::new(3.0, 4.0, 5.0));
+    }
+
+    #[test]
     fn text_position_get_and_set_preserve_wide_integer_storage() {
         let _guard = setup();
         let wide = 9_007_199_254_740_993_u64;
@@ -466,8 +515,8 @@ mod tests {
 
     #[test]
     fn text_explicit_gpu_scalar_coordinates_materialize_without_releasing_inputs() {
-        let _guard = setup();
         test_support::with_test_provider(|provider| {
+            let _guard = setup();
             let x = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![2.0], 1, 1).unwrap())
                 .unwrap();
             let y = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![3.0], 1, 1).unwrap())
@@ -499,8 +548,8 @@ mod tests {
 
     #[test]
     fn malformed_host_label_rejects_before_resident_coordinate_download() {
-        let _guard = setup();
         test_support::with_test_provider(|provider| {
+            let _guard = setup();
             let x = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![2.0], 1, 1).unwrap())
                 .unwrap();
             let before = crate::builtins::plotting::clone_figure(current_figure_handle())
@@ -523,8 +572,8 @@ mod tests {
 
     #[test]
     fn cancelled_context_does_not_materialize_or_publish_resident_annotation() {
-        let _guard = setup();
         test_support::with_test_provider(|provider| {
+            let _guard = setup();
             let x = gpu_helpers::upload_tensor(provider, &Tensor::new_2d(vec![2.0], 1, 1).unwrap())
                 .unwrap();
             let source = runmat_execution::cancellation::CancellationSource::new();

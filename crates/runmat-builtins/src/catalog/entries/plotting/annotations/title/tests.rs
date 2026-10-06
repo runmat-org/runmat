@@ -75,3 +75,26 @@ fn known_resident_control_rejects_before_graphics_execution() {
         assert!(!result.diagnostics.is_empty());
     }
 }
+
+#[test]
+fn scalar_numeric_title_with_property_pair_is_not_misread_as_axes_target() {
+    let result = inference::infer(
+        &request(
+            vec![real(), ValueFact::scalar(ValueKindFact::String), real()],
+            1,
+        ),
+        &TITLE_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let unknown = inference::infer(
+        &request(
+            vec![
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+                ValueFact::scalar(ValueKindFact::Logical),
+            ],
+            1,
+        ),
+        &TITLE_CATALOG_ENTRY,
+    );
+    assert!(unknown.diagnostics.is_empty(), "{:?}", unknown.diagnostics);
+}

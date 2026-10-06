@@ -253,10 +253,21 @@ pub(crate) fn split_axes_target<'a>(
     builtin: &'static str,
     args: &'a [Value],
 ) -> BuiltinResult<((FigureHandle, usize), &'a [Value])> {
+    let (target, rest) = split_axes_target_deferred(builtin, args)?;
+    Ok((target.unwrap_or_else(current_axes_target), rest))
+}
+
+/// Resolve an explicit axes handle without creating the implicit current axes.
+/// Callers with potentially pending preparation can publish the implicit scene
+/// only after their input and cancellation checks have completed.
+pub(crate) fn split_axes_target_deferred<'a>(
+    builtin: &'static str,
+    args: &'a [Value],
+) -> BuiltinResult<(Option<(FigureHandle, usize)>, &'a [Value])> {
     if let Some(first) = args.first() {
         if let Some(target) = try_parse_axes_target(first) {
             if axes_handle_exists(target.0, target.1) {
-                return Ok((target, &args[1..]));
+                return Ok((Some(target), &args[1..]));
             }
             return Err(plotting_error(
                 builtin,
@@ -264,7 +275,7 @@ pub(crate) fn split_axes_target<'a>(
             ));
         }
     }
-    Ok((current_axes_target(), args))
+    Ok((None, args))
 }
 
 fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {

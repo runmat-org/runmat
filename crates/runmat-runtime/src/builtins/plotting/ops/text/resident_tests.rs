@@ -1,7 +1,8 @@
 use super::*;
 use crate::builtins::common::test_support;
+use crate::builtins::plotting::state::{axes_handle_exists, reset_plot_state, FigureHandle};
 use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
+use crate::builtins::plotting::{clone_figure, current_figure_handle};
 use futures::task::noop_waker;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
@@ -67,7 +68,7 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
     let _global = test_support::accel_test_lock();
     let _plots = lock_plot_registry();
     ensure_plot_test_env();
-    let _ = clear_figure(None);
+    reset_plot_state();
     let provider: &'static PendingDownloadProvider = Box::leak(Box::new(PendingDownloadProvider {
         inner: InProcessProvider::new(),
         mode: Mutex::new(DownloadMode::Pending),
@@ -81,9 +82,9 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
             shape: &[1, 1],
         })
         .unwrap();
-    let figure = current_figure_handle();
-    let count = || clone_figure(figure).unwrap().axes_text_annotations(0).len();
-    let original = count();
+    let figure = FigureHandle::default();
+    let absent = || !axes_handle_exists(figure, 0);
+    assert!(absent());
     let args = || {
         vec![
             Value::GpuTensor(input.clone()),
@@ -92,6 +93,55 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
         ]
     };
 
+    let invalid = futures::executor::block_on(text_builtin(
+        None,
+        vec![
+            Value::GpuTensor(input.clone()),
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ],
+    ))
+    .expect_err("missing label must reject before download or scene creation");
+    assert_eq!(invalid.identifier(), TEXT_ERROR_INVALID_ARGUMENT.identifier);
+    assert!(absent());
+    assert_eq!(provider.attempts.load(Ordering::SeqCst), 0);
+
+    let nonscalar = provider
+        .upload(&HostTensorView {
+            data: &[2.0, 3.0],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    let invalid = futures::executor::block_on(text_builtin(
+        None,
+        vec![
+            Value::GpuTensor(nonscalar),
+            Value::Num(3.0),
+            Value::String("invalid shape".into()),
+        ],
+    ))
+    .expect_err("nonscalar resident coordinate must reject before download");
+    assert_eq!(invalid.identifier(), TEXT_ERROR_INVALID_ARGUMENT.identifier);
+    assert!(absent());
+    assert_eq!(provider.attempts.load(Ordering::SeqCst), 0);
+
+    let pre_cancel = CancellationSource::new();
+    pre_cancel.cancel(CancellationReason::User);
+    let runtime = crate::context::RuntimeContext::with_cancellation(
+        std::rc::Rc::new(crate::execution::RuntimeExecutionService::default()),
+        pre_cancel.token(),
+    );
+    let error = futures::executor::block_on(text_builtin(Some(runtime), args()))
+        .expect_err("pre-cancelled call must not poll provider or create scene");
+    assert!(matches!(
+        error
+            .source()
+            .and_then(|source| source.downcast_ref::<crate::execution::ExecutionServiceError>()),
+        Some(crate::execution::ExecutionServiceError::Cancelled)
+    ));
+    assert!(absent());
+    assert_eq!(provider.attempts.load(Ordering::SeqCst), 0);
+
     let mut dropped = Box::pin(text_builtin(None, args()));
     assert!(matches!(
         dropped
@@ -99,9 +149,9 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
             .poll(&mut Context::from_waker(&noop_waker())),
         Poll::Pending
     ));
-    assert_eq!(count(), original);
+    assert!(absent());
     drop(dropped);
-    assert_eq!(count(), original);
+    assert!(absent());
     assert_eq!(provider.attempts.load(Ordering::SeqCst), 1);
     assert_eq!(provider.finished_futures.load(Ordering::SeqCst), 1);
 
@@ -132,12 +182,16 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
         Some(crate::execution::ExecutionServiceError::Cancelled)
     ));
     drop(cancelled);
-    assert_eq!(count(), original);
+    assert!(absent());
     assert_eq!(provider.attempts.load(Ordering::SeqCst), 2);
     assert_eq!(provider.finished_futures.load(Ordering::SeqCst), 2);
 
     *provider.mode.lock().unwrap() = DownloadMode::Ready;
     futures::executor::block_on(text_builtin(None, args())).unwrap();
-    assert_eq!(count(), original + 1);
+    assert_eq!(current_figure_handle(), figure);
+    assert_eq!(
+        clone_figure(figure).unwrap().axes_text_annotations(0).len(),
+        1
+    );
     assert!(futures::executor::block_on(provider.inner.download(&input)).is_ok());
 }

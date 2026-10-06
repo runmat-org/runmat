@@ -78,3 +78,29 @@ fn known_invalid_input_rejects_but_unknown_stays_conservative() {
     );
     assert!(!unknown.diagnostics.is_empty()); // Fewer than three coordinates/labels.
 }
+
+#[test]
+fn positioned_text_inference_distinguishes_two_three_dimensional_and_axes_forms() {
+    let string = ValueFact::scalar(ValueKindFact::String);
+    for arguments in [
+        vec![real(), real(), string.clone()],
+        vec![real(), real(), real(), string.clone()],
+        vec![real(), real(), real(), string.clone()],
+        vec![real(), real(), real(), real(), string.clone()],
+    ] {
+        let result = inference::infer(&request(arguments, 1), &TEXT_CATALOG_ENTRY);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+    for arguments in [
+        vec![real(), real(), real()],
+        vec![
+            real(),
+            real(),
+            real(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+    ] {
+        let result = inference::infer(&request(arguments, 1), &TEXT_CATALOG_ENTRY);
+        assert!(!result.diagnostics.is_empty());
+    }
+}
