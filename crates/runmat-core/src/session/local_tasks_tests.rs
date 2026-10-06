@@ -12,6 +12,7 @@ fn public_execution_drives_local_callback_without_a_tokio_host() {
     let owner = session.runtime_context.local_identity();
     let observed = Rc::new(Cell::new(false));
     let callback_observed = observed.clone();
+    let callback_driver = Rc::downgrade(&session.local_task_driver());
     let lease = session
         .runtime_context
         .service_ports()
@@ -21,6 +22,11 @@ fn public_execution_drives_local_callback_without_a_tokio_host() {
             owner,
             Box::pin(async move {
                 tokio::task::yield_now().await;
+                let driver = callback_driver.upgrade().expect("Core owns local driver");
+                driver
+                    .participate_foreground(async {})
+                    .await
+                    .expect("callback is polled inside its Core driver");
                 callback_observed.set(true);
             }),
         )

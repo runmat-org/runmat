@@ -501,14 +501,27 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let local_tasks = self.local_tasks.clone();
-            let source = request.source.clone();
+            // The driver rejects admission before polling its child. Keep the
+            // request outside that child until admission so an error can
+            // report its source without copying source text on the hot path.
+            let mut request = Some(request);
             return match local_tasks
-                .participate_foreground(self.execute_request_inner(request))
+                .participate_foreground(async {
+                    self.execute_request_inner(
+                        request.take().expect("execution request polled only once"),
+                    )
+                    .await
+                })
                 .await
             {
                 Ok(response) => response,
                 Err(error) => crate::abi::ExecutionResponse {
-                    source_context: unresolved_source_context(&source),
+                    source_context: unresolved_source_context(
+                        &request
+                            .as_ref()
+                            .expect("rejected foreground request was not polled")
+                            .source,
+                    ),
                     result: Err(RunError::Runtime(error)),
                 },
             };
