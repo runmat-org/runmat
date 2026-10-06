@@ -59,7 +59,7 @@ impl RuntimeLocalTaskService for BrowserPort {
             future.await;
             completion.0.finish(RuntimeLocalTaskOutcome::Completed);
         });
-        let slot = Rc::new(TaskSlot::new(child));
+        let slot = Rc::new(TaskSlot::new(child, state.clone()));
         owner.tasks.borrow_mut().insert(id, slot.clone());
         let weak = Rc::downgrade(&owner);
         let abort: Rc<dyn Fn()> = Rc::new(move || {
@@ -154,6 +154,25 @@ mod tests {
             .expect("spawn");
         assert_eq!(lease.join().await, RuntimeLocalTaskOutcome::Completed);
         assert_eq!(count.get(), 1);
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn browser_shutdown_from_current_callback_reports_cancelled() {
+        let supervisor = Rc::new(BrowserLocalTaskSupervisor::new());
+        let weak = Rc::downgrade(&supervisor);
+        let owner = owner();
+        let lease = supervisor
+            .submission_port(owner)
+            .spawn_local(
+                owner,
+                Box::pin(async move {
+                    weak.upgrade().expect("host owns supervisor").shutdown();
+                    // The child reaches Ready in the same poll that requested shutdown.
+                }),
+            )
+            .expect("spawn");
+        assert_eq!(lease.join().await, RuntimeLocalTaskOutcome::Cancelled);
+        assert_eq!(lease.outcome(), Some(RuntimeLocalTaskOutcome::Cancelled));
     }
 
     struct PendingDrop(Rc<Cell<usize>>, PhantomPinned);

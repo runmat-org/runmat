@@ -1,7 +1,8 @@
 //! A cancellable child future owned by the host, independent of executor polling.
 
-use super::RuntimeLocalTaskFuture;
+use super::{RuntimeLocalTaskFuture, RuntimeLocalTaskOutcome, TaskState};
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
 struct TaskSlotState {
@@ -11,7 +12,10 @@ struct TaskSlotState {
     wake: Option<Waker>,
 }
 
-pub(super) struct TaskSlot(RefCell<TaskSlotState>);
+pub(super) struct TaskSlot {
+    inner: RefCell<TaskSlotState>,
+    outcome: Rc<TaskState>,
+}
 
 struct TaskPollReset<'a> {
     slot: &'a TaskSlot,
@@ -21,7 +25,7 @@ struct TaskPollReset<'a> {
 impl Drop for TaskPollReset<'_> {
     fn drop(&mut self) {
         if self.armed {
-            let mut slot = self.slot.0.borrow_mut();
+            let mut slot = self.slot.inner.borrow_mut();
             slot.polling = false;
             slot.cancelled = true;
             slot.wake = None;
@@ -30,18 +34,21 @@ impl Drop for TaskPollReset<'_> {
 }
 
 impl TaskSlot {
-    pub(super) fn new(future: RuntimeLocalTaskFuture) -> Self {
-        Self(RefCell::new(TaskSlotState {
-            future: Some(future),
-            polling: false,
-            cancelled: false,
-            wake: None,
-        }))
+    pub(super) fn new(future: RuntimeLocalTaskFuture, outcome: Rc<TaskState>) -> Self {
+        Self {
+            inner: RefCell::new(TaskSlotState {
+                future: Some(future),
+                polling: false,
+                cancelled: false,
+                wake: None,
+            }),
+            outcome,
+        }
     }
 
     pub(super) fn cancel(&self) {
         let (future, wake) = {
-            let mut slot = self.0.borrow_mut();
+            let mut slot = self.inner.borrow_mut();
             slot.cancelled = true;
             let future = if slot.polling {
                 None
@@ -50,6 +57,7 @@ impl TaskSlot {
             };
             (future, slot.wake.take())
         };
+        self.outcome.finish(RuntimeLocalTaskOutcome::Cancelled);
         drop(future);
         if let Some(wake) = wake {
             wake.wake();
@@ -58,7 +66,7 @@ impl TaskSlot {
 
     pub(super) fn poll(&self, context: &mut Context<'_>) -> Poll<()> {
         let mut future = {
-            let mut slot = self.0.borrow_mut();
+            let mut slot = self.inner.borrow_mut();
             if slot.cancelled {
                 return Poll::Ready(());
             }
@@ -74,7 +82,7 @@ impl TaskSlot {
         };
         let result = future.as_mut().poll(context);
         {
-            let mut slot = self.0.borrow_mut();
+            let mut slot = self.inner.borrow_mut();
             slot.polling = false;
             slot.wake = None;
             if result.is_pending() && !slot.cancelled {

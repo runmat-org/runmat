@@ -304,7 +304,7 @@ fn shutdown_from_a_polled_callback_does_not_borrow_or_drop_reentrantly() {
     let owner = owner();
     let weak = Rc::downgrade(&supervisor);
     let (sender, receiver) = futures::channel::oneshot::channel();
-    supervisor
+    let lease = supervisor
         .submission_port(owner)
         .spawn_local(
             owner,
@@ -319,6 +319,11 @@ fn shutdown_from_a_polled_callback_does_not_borrow_or_drop_reentrantly() {
             receiver.await.expect("callback signalled after shutdown");
         }))
         .expect("same drive exits cleanly");
+    assert_eq!(
+        lease.outcome(),
+        Some(RuntimeLocalTaskOutcome::Cancelled),
+        "shutdown during the child's poll wins over its later Ready"
+    );
     assert!(supervisor
         .submission_port(owner)
         .spawn_local(owner, Box::pin(async {}))

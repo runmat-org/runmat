@@ -74,7 +74,7 @@ impl RuntimeLocalTaskService for SubmissionPort {
             future.await;
             completion.state.finish(RuntimeLocalTaskOutcome::Completed);
         });
-        let slot = Rc::new(TaskSlot::new(child));
+        let slot = Rc::new(TaskSlot::new(child, state.clone()));
         let task_slot = slot.clone();
         let _task = local.spawn_local(async move {
             std::future::poll_fn(|context| task_slot.poll(context)).await;
