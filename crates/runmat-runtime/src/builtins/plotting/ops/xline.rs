@@ -8,12 +8,12 @@ use runmat_value::NumericScalar;
 use runmat_value::{Tensor, Value};
 
 use super::op_common::annotation_error;
+use super::plotting_error;
 use super::state::{append_active_plot, register_reference_line_handle, PlotRenderOptions};
 use super::style::{
     color_from_token, looks_like_option_name, parse_line_style_args, value_as_f64, value_as_string,
     LineAppearance, LineStyleParseOptions,
 };
-use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::BuiltinResult;
 
@@ -312,8 +312,7 @@ fn coordinates_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
         }
         _ => {}
     }
-    let tensor = Tensor::try_from(value)
-        .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
+    let tensor = Tensor::try_from(value).map_err(|err| reference_line_error(builtin, err))?;
     if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(reference_line_error(
             builtin,
