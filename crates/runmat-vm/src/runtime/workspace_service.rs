@@ -402,12 +402,11 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let runtime = runtime.with_service_ports(
-            runtime
-                .service_ports()
-                .clone()
-                .with_workspace(delegate.clone()),
-        );
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_workspace(delegate.clone());
+        let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime);
 
         futures::executor::block_on(runtime.scope(async {
@@ -438,8 +437,8 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let runtime = runtime
-            .with_service_ports(runtime.service_ports().clone().with_workspace(base_service));
+        let ports = runtime.service_ports().clone().with_workspace(base_service);
+        let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime);
 
         futures::executor::block_on(runtime.scope(async {
@@ -490,12 +489,11 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let runtime = runtime.with_service_ports(
-            runtime
-                .service_ports()
-                .clone()
-                .with_workspace(delegate.clone()),
-        );
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_workspace(delegate.clone());
+        let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime);
 
         futures::executor::block_on(runtime.scope(async {
@@ -533,12 +531,11 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let runtime = runtime.with_service_ports(
-            runtime
-                .service_ports()
-                .clone()
-                .with_workspace(delegate.clone()),
-        );
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_workspace(delegate.clone());
+        let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime);
 
         futures::executor::block_on(runtime.scope(async {
@@ -594,12 +591,11 @@ mod tests {
             let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             ));
-            let runtime = runtime.with_service_ports(
-                runtime
-                    .service_ports()
-                    .clone()
-                    .with_workspace(canonical.clone()),
-            );
+            let ports = runtime
+                .service_ports()
+                .clone()
+                .with_workspace(canonical.clone());
+            let runtime = runtime.with_service_ports(ports);
             let (runtime, service) = VmWorkspaceService::prepare(runtime);
             drop(canonical);
             drop(projection);
