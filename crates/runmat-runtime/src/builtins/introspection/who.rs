@@ -218,7 +218,9 @@ async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let request = parse_request(&gathered).await?;
 
     let mut entries = match &request.source {
-        WhoSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
+        WhoSource::Workspace => crate::workspace::try_snapshot()
+            .map_err(who_flow)?
+            .unwrap_or_default(),
         WhoSource::File(path) => read_mat_file_for_builtin(path, "who").await?,
     };
 
@@ -228,7 +230,10 @@ async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let global_names: std::collections::HashSet<String> =
         if matches!(request.source, WhoSource::Workspace) {
-            crate::workspace::global_names().into_iter().collect()
+            crate::workspace::try_global_names()
+                .map_err(who_flow)?
+                .into_iter()
+                .collect()
         } else {
             std::collections::HashSet::new()
         };

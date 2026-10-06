@@ -102,8 +102,8 @@ pub const CLEARVARS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
-        cleanup_workspace_values(workspace::snapshot()).await?;
-        workspace::clear().map_err(clearvars_error)?;
+        cleanup_workspace_values(workspace::try_snapshot().map_err(clearvars_flow)?).await?;
+        workspace::try_clear().map_err(clearvars_flow)?;
         return Ok(empty_return_value());
     }
 
@@ -148,11 +148,11 @@ async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         clear_except(&targets, &exclusions).await?;
     } else {
         for name in targets {
-            if let Some(value) = workspace::lookup(&name) {
+            if let Some(value) = workspace::try_lookup(&name).map_err(clearvars_flow)? {
                 crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(&value)
                     .await?;
             }
-            workspace::remove(&name).map_err(clearvars_error)?;
+            workspace::try_remove(&name).map_err(clearvars_flow)?;
         }
     }
 
@@ -162,25 +162,26 @@ async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 async fn clear_except(targets: &[String], exclusions: &[String]) -> BuiltinResult<()> {
     let keep: HashSet<&str> = exclusions.iter().map(String::as_str).collect();
     if targets.is_empty() {
-        let snapshot = workspace::snapshot()
+        let snapshot = workspace::try_snapshot()
+            .map_err(clearvars_flow)?
             .ok_or_else(|| clearvars_error("clearvars: workspace state unavailable"))?;
         for (name, value) in snapshot {
             if !keep.contains(name.as_str()) {
                 crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(&value)
                     .await?;
-                workspace::remove(&name).map_err(clearvars_error)?;
+                workspace::try_remove(&name).map_err(clearvars_flow)?;
             }
         }
     } else {
         for name in targets {
             if !keep.contains(name.as_str()) {
-                if let Some(value) = workspace::lookup(name) {
+                if let Some(value) = workspace::try_lookup(name).map_err(clearvars_flow)? {
                     crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(
                         &value,
                     )
                     .await?;
                 }
-                workspace::remove(name).map_err(clearvars_error)?;
+                workspace::try_remove(name).map_err(clearvars_flow)?;
             }
         }
     }
@@ -203,6 +204,11 @@ fn clearvars_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("clearvars")
         .build()
+}
+
+fn clearvars_flow(mut error: crate::RuntimeError) -> crate::RuntimeError {
+    error.context = error.context.with_builtin("clearvars");
+    error
 }
 
 fn collect_clearvars_words(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<()> {

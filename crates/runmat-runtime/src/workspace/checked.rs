@@ -155,9 +155,9 @@ fn workspace_capability_error() -> crate::RuntimeError {
 }
 
 fn operation_unavailable(message: &'static str) -> crate::RuntimeError {
-    crate::runtime_error::semantic_error("Workspace:OperationUnavailable", message)
+    crate::runtime_error::semantic_error("RunMat:Workspace:OperationUnavailable", message)
 }
 
 fn legacy_workspace_error(message: String) -> crate::RuntimeError {
-    crate::runtime_error::semantic_error("Workspace:OperationFailed", message)
+    crate::runtime_error::semantic_error("RunMat:Workspace:OperationFailed", message)
 }

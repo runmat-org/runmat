@@ -393,7 +393,7 @@ fn conflict_message(option: &str, conflicts: &[&str]) -> String {
 
 async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<String>> {
     if options.var_only {
-        return Ok(variable_match(name).into_iter().collect());
+        return Ok(variable_match(name)?.into_iter().collect());
     }
     if options.builtin_only {
         return Ok(builtin_matches(name));
@@ -405,7 +405,7 @@ async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec
     let mut seen = HashSet::new();
     let mut results = Vec::new();
 
-    if let Some(var_msg) = variable_match(name) {
+    if let Some(var_msg) = variable_match(name)? {
         push_unique(&mut results, &mut seen, var_msg.clone());
         if !options.all {
             return Ok(results);
@@ -471,8 +471,10 @@ async fn search_file_like_matches(name: &str, gather_all: bool) -> BuiltinResult
     Ok(results)
 }
 
-fn variable_match(name: &str) -> Option<String> {
-    crate::workspace::lookup(name).map(|_| format!("'{name}' is a variable."))
+fn variable_match(name: &str) -> BuiltinResult<Option<String>> {
+    crate::workspace::try_lookup(name)
+        .map(|value| value.map(|_| format!("'{name}' is a variable.")))
+        .map_err(which_flow)
 }
 
 fn builtin_matches(name: &str) -> Vec<String> {

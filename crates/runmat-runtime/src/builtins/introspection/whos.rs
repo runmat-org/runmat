@@ -213,7 +213,9 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let request = parse_request(&gathered).await?;
 
     let mut entries = match &request.source {
-        WhosSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
+        WhosSource::Workspace => crate::workspace::try_snapshot()
+            .map_err(whos_flow)?
+            .unwrap_or_default(),
         WhosSource::File(path) => read_mat_file_for_builtin(path, "whos").await?,
     };
 
@@ -222,7 +224,10 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     let global_names: HashSet<String> = if matches!(request.source, WhosSource::Workspace) {
-        crate::workspace::global_names().into_iter().collect()
+        crate::workspace::try_global_names()
+            .map_err(whos_flow)?
+            .into_iter()
+            .collect()
     } else {
         HashSet::new()
     };

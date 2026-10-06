@@ -287,6 +287,23 @@ fn checked_facade_does_not_fall_back_when_canonical_owner_is_closed() {
 }
 
 #[test]
+fn checked_facade_preserves_canonical_borrow_conflicts() {
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::execution::RuntimeExecutionService;
+    use std::rc::Rc;
+
+    let owner = BaseWorkspaceOwner::new();
+    let service = Rc::new(BaseWorkspaceService::new(owner.clone()));
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_workspace(service));
+    let _scope = crate::context::RuntimeContextGuard::enter(runtime);
+    let _exclusive = owner.state.borrow_mut();
+
+    let error = crate::workspace::try_snapshot().unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:Workspace:Busy"));
+}
+
+#[test]
 fn caller_workspace_service_does_not_gain_base_workspace_authority() {
     use crate::context::{RuntimeContext, RuntimeServicePorts};
     use crate::execution::RuntimeExecutionService;

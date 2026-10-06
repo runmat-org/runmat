@@ -75,8 +75,8 @@ pub const CLEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
-        cleanup_workspace_values(workspace::snapshot()).await?;
-        workspace::clear().map_err(clear_error)?;
+        cleanup_workspace_values(workspace::try_snapshot().map_err(clear_flow)?).await?;
+        workspace::try_clear().map_err(clear_flow)?;
         return Ok(empty_return_value());
     }
 
@@ -89,22 +89,22 @@ async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         if name.is_empty() {
             continue;
         }
-        if let Some(value) = workspace::lookup(&name) {
+        if let Some(value) = workspace::try_lookup(&name).map_err(clear_flow)? {
             crate::builtins::introspection::on_cleanup::run_cleanup_for_workspace_value(&value)
                 .await?;
-            workspace::remove(&name).map_err(clear_error)?;
+            workspace::try_remove(&name).map_err(clear_flow)?;
             continue;
         }
         match name.to_ascii_lowercase().as_str() {
             "all" => {
-                cleanup_workspace_values(workspace::snapshot()).await?;
-                workspace::clear().map_err(clear_error)?;
+                cleanup_workspace_values(workspace::try_snapshot().map_err(clear_flow)?).await?;
+                workspace::try_clear().map_err(clear_flow)?;
                 clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)
                     .await?;
             }
             "variables" => {
-                cleanup_workspace_values(workspace::snapshot()).await?;
-                workspace::clear().map_err(clear_error)?;
+                cleanup_workspace_values(workspace::try_snapshot().map_err(clear_flow)?).await?;
+                workspace::try_clear().map_err(clear_flow)?;
             }
             "functions" => {
                 clear_dynamic_functions(crate::user_functions::DynamicFunctionClearRequest::All)
@@ -151,6 +151,11 @@ async fn cleanup_workspace_values(snapshot: Option<Vec<(String, Value)>>) -> Bui
 
 fn clear_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("clear").build()
+}
+
+fn clear_flow(mut error: crate::RuntimeError) -> crate::RuntimeError {
+    error.context = error.context.with_builtin("clear");
+    error
 }
 
 fn collect_clear_targets(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<()> {
