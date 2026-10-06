@@ -14413,15 +14413,46 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .vm_layout()
         .functions
         .contains_key(&published_function));
+    let published_portable_function = first_unit
+        .functions()
+        .get(published_function)
+        .expect("published function body")
+        .portable_function;
+    assert_eq!(published_portable_function, published_program_function);
+    let envelope = first_unit
+        .portable_envelope_for(Some("nativeCacheCaller"))
+        .expect("portable product");
     assert_eq!(
-        first_unit
-            .portable_envelope_for(Some("nativeCacheCaller"))
-            .expect("portable product")
-            .manifest
-            .identity
-            .entrypoint_function,
-        published_program_function
+        envelope.manifest.identity.entrypoint_function,
+        published_portable_function
     );
+    assert_eq!(
+        runmat_vm::admit_executable_unit(
+            &envelope
+                .canonical_bytes()
+                .expect("canonical portable bytes")
+        )
+        .expect("admit portable product")
+        .entrypoint_origin()
+        .expect("admitted exact entrypoint"),
+        runmat_execution::FunctionBindingOrigin::from_revision(
+            &envelope.manifest.identity.program,
+            published_portable_function,
+        )
+        .expect("entrypoint origin")
+    );
+    let mut mismatched_entrypoint = envelope.clone();
+    mismatched_entrypoint.manifest.identity.entrypoint_function =
+        runmat_types::ProgramFunctionId(published_portable_function.0.saturating_add(10_000));
+    let mismatch = runmat_vm::admit_executable_unit(
+        &mismatched_entrypoint
+            .canonical_bytes()
+            .expect("canonical mismatched portable bytes"),
+    )
+    .expect_err("manifest entrypoint must match the admitted body");
+    assert!(mismatch
+        .to_string()
+        .contains("executable entrypoint identity disagrees"));
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCacheCaller".into()),
         arguments: vec![runmat_value::Value::Num(2.0)],
@@ -14532,6 +14563,20 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
     assert_eq!(
         first.canonical_bytes().unwrap(),
         second.canonical_bytes().unwrap()
+    );
+    let admitted_script = runmat_vm::admit_executable_unit(
+        &first
+            .canonical_bytes()
+            .expect("canonical script executable"),
+    )
+    .expect("admit script executable with its synthetic body identity");
+    assert_eq!(
+        admitted_script.entrypoint_origin().unwrap(),
+        runmat_execution::FunctionBindingOrigin::from_revision(
+            &first.manifest.identity.program,
+            first.manifest.identity.entrypoint_function,
+        )
+        .unwrap()
     );
 
     let mut invalid = first.manifest.interop;

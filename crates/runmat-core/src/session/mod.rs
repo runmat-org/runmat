@@ -234,22 +234,37 @@ struct WorkspaceMaterializeTicket {
 
 #[derive(Clone)]
 struct DynamicFunctionCacheEntry {
-    source_text: String,
-    project_revision: Option<runmat_package::ProjectRevision>,
-    path_origin: runmat_runtime::builtins::common::path_search::FileCandidateOrigin,
-    registry: Arc<runmat_vm::FunctionRegistry>,
-    source_map: Arc<crate::ExecutableSourceMap>,
+    selection: DynamicFunctionCacheSelection,
+    unit_bytes: Arc<[u8]>,
+    admitted: Arc<runmat_vm::AdmittedExecutableUnit>,
+    entrypoint_origin: runmat_execution::FunctionBindingOrigin,
+    binding: runmat_value::BoundFunctionBinding,
+    dependencies: Arc<[DynamicFunctionDependency]>,
 }
 
-impl DynamicFunctionCacheEntry {
+#[derive(Clone)]
+struct DynamicFunctionDependency {
+    access_path: PathBuf,
+    content_revision: Option<runmat_execution::Digest>,
+    uses_pcode_reader: bool,
+}
+
+#[derive(Clone)]
+struct DynamicFunctionCacheSelection {
+    primary_revision: runmat_execution::Digest,
+    inventory_revision: runmat_execution::Digest,
+    path_origin: runmat_runtime::builtins::common::path_search::FileCandidateOrigin,
+}
+
+impl DynamicFunctionCacheSelection {
     fn matches_selection(
         &self,
-        source_text: &str,
-        project_revision: Option<&runmat_package::ProjectRevision>,
+        primary_revision: &runmat_execution::Digest,
+        inventory_revision: &runmat_execution::Digest,
         origin: &runmat_runtime::builtins::common::path_search::FileCandidateOrigin,
     ) -> bool {
-        self.source_text == source_text
-            && self.project_revision.as_ref() == project_revision
+        &self.primary_revision == primary_revision
+            && &self.inventory_revision == inventory_revision
             && &self.path_origin == origin
     }
 }
@@ -266,29 +281,36 @@ mod dynamic_source_cache_tests {
             access_root: PathBuf::from("/workspace"),
             relative: PathBuf::from("same.m"),
         };
-        let entry = DynamicFunctionCacheEntry {
-            source_text: "function y = same(); y = 1; end".into(),
-            project_revision: None,
+        let entry = DynamicFunctionCacheSelection {
+            primary_revision: runmat_execution::Digest::sha256("function y = same(); y = 1; end"),
+            inventory_revision: runmat_execution::Digest::sha256("inventory"),
             path_origin: selected.clone(),
-            registry: Arc::new(runmat_vm::FunctionRegistry::default()),
-            source_map: Arc::new(crate::ExecutableSourceMap::default()),
         };
-        assert!(entry.matches_selection(&entry.source_text, None, &selected));
+        assert!(entry.matches_selection(
+            &entry.primary_revision,
+            &entry.inventory_revision,
+            &selected
+        ));
         assert!(!entry.matches_selection(
-            &entry.source_text,
-            None,
+            &entry.primary_revision,
+            &entry.inventory_revision,
             &FileCandidateOrigin::SearchRoot {
                 ordinal: 1,
                 access_root: PathBuf::from("/workspace"),
                 relative: PathBuf::from("same.m"),
-            }
+            },
         ));
         assert!(!entry.matches_selection(
-            &entry.source_text,
-            None,
+            &entry.primary_revision,
+            &entry.inventory_revision,
             &FileCandidateOrigin::Direct {
                 spelling: PathBuf::from("/workspace/same.m"),
-            }
+            },
+        ));
+        assert!(!entry.matches_selection(
+            &entry.primary_revision,
+            &runmat_execution::Digest::sha256("changed inventory"),
+            &selected,
         ));
     }
 }

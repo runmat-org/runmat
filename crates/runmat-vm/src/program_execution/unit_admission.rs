@@ -5,7 +5,7 @@ use crate::{Bytecode, FunctionRegistry, VmAssemblyLayout};
 /// Fully decoded executable unit whose component identities and revisions have
 /// been validated, but whose portable source ordinals have not yet issued
 /// runtime-local source leases.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AdmittedExecutableUnit {
     envelope: ExecutableUnitEnvelope,
     bytecode: Bytecode,
@@ -30,6 +30,51 @@ impl AdmittedExecutableUnit {
 
     pub fn registry(&self) -> &FunctionRegistry {
         &self.registry
+    }
+
+    /// Resolve the manifest entrypoint to the exact immutable definition
+    /// origin admitted with this unit. A display name or a matching numeric
+    /// ordinal alone is not executable authority.
+    pub fn entrypoint_origin(
+        &self,
+    ) -> Result<runmat_execution::FunctionBindingOrigin, ExecutableUnitAdmissionError> {
+        let identity = &self.envelope.manifest.identity;
+        let function = match identity.entrypoint_kind {
+            runmat_execution::ExecutableEntrypointKind::Function => self
+                .registry
+                .resolve_name(&identity.entrypoint)
+                .and_then(|function| self.registry.get(function)),
+            runmat_execution::ExecutableEntrypointKind::Script => self
+                .registry
+                .functions
+                .values()
+                .find(|function| function.portable_function == identity.entrypoint_function),
+        }
+        .ok_or_else(|| {
+            ExecutableUnitAdmissionError::SourceBinding(
+                "executable entrypoint is absent from its admitted function registry".into(),
+            )
+        })?;
+        if function.portable_function != identity.entrypoint_function {
+            return Err(ExecutableUnitAdmissionError::SourceBinding(
+                "executable entrypoint identity disagrees with its admitted function body".into(),
+            ));
+        }
+        let expected = runmat_execution::FunctionBindingOrigin::from_revision(
+            &identity.program,
+            function.portable_function,
+        )
+        .map_err(|error| {
+            ExecutableUnitAdmissionError::SourceBinding(format!(
+                "executable entrypoint has an invalid immutable origin: {error}"
+            ))
+        })?;
+        if function.binding_origin != Some(expected) {
+            return Err(ExecutableUnitAdmissionError::SourceBinding(
+                "executable entrypoint lies outside its admitted revision".into(),
+            ));
+        }
+        Ok(expected)
     }
 
     pub fn bind_runtime_sources(
@@ -239,10 +284,12 @@ pub fn admit_executable_unit(
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("VM layout"))?;
     let layout = serde_json::from_slice(&layout_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidLayout)?;
-    Ok(AdmittedExecutableUnit {
+    let admitted = AdmittedExecutableUnit {
         envelope,
         bytecode,
         registry,
         layout,
-    })
+    };
+    admitted.entrypoint_origin()?;
+    Ok(admitted)
 }

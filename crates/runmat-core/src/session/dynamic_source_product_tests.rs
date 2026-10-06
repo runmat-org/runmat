@@ -68,15 +68,19 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
             .any(|frame| frame.contains("private/secret.m")),
         "private source must own the failure: {first:?}"
     );
-    let (registry, source_map) = {
+    let (admitted, unit_bytes, entrypoint_origin) = {
         let cache = session.dynamic_function_cache.lock().expect("cache lock");
         assert_eq!(cache.len(), 1, "the entry was dynamically resolved");
         let entry = cache.values().next().expect("resolved helper");
-        assert!(entry.source_map.entries().iter().any(|record| {
-            record.relative_path.ends_with("private/secret.m")
-                && record.text.contains("private source witness")
-        }));
-        (Arc::clone(&entry.registry), Arc::clone(&entry.source_map))
+        assert_eq!(
+            entry.admitted.envelope().manifest.identity.entrypoint,
+            "helper"
+        );
+        (
+            Arc::clone(&entry.admitted),
+            Arc::clone(&entry.unit_bytes),
+            entry.entrypoint_origin,
+        )
     };
 
     let second = execute_helper(&mut session);
@@ -87,11 +91,215 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
     assert_eq!(cache.len(), 1);
     let entry = cache.values().next().expect("same dynamic entry");
     assert!(
-        Arc::ptr_eq(&entry.registry, &registry),
-        "registry cache hit"
+        Arc::ptr_eq(&entry.admitted, &admitted),
+        "admitted product cache hit"
     );
     assert!(
-        Arc::ptr_eq(&entry.source_map, &source_map),
-        "source-map cache hit"
+        Arc::ptr_eq(&entry.unit_bytes, &unit_bytes),
+        "canonical envelope cache hit"
+    );
+    drop(cache);
+
+    std::fs::write(
+        temporary.path().join("private/secret.m"),
+        "function y = secret()\n y = 0;\n error('changed private source witness');\nend\n",
+    )
+    .expect("changed private companion source");
+    let changed = execute_helper(&mut session);
+    assert!(
+        changed.message.contains("changed private source witness"),
+        "a companion content revision must invalidate the product: {changed:?}"
+    );
+    assert!(
+        changed
+            .callstack
+            .iter()
+            .any(|frame| frame.contains("private/secret.m")),
+        "the rebuilt companion retains its exact source: {changed:?}"
+    );
+    let cache = session.dynamic_function_cache.lock().expect("cache lock");
+    let changed_entry = cache.values().next().expect("rebuilt helper");
+    assert!(!Arc::ptr_eq(&changed_entry.admitted, &admitted));
+    assert!(!Arc::ptr_eq(&changed_entry.unit_bytes, &unit_bytes));
+    assert_ne!(changed_entry.entrypoint_origin, entrypoint_origin);
+}
+
+#[test]
+fn committed_dynamic_binding_reuses_incoming_session_and_exact_private_source() {
+    let _serial = runmat_filesystem::provider_override_lock();
+    let temporary = tempfile::TempDir::new().expect("isolated source root");
+    std::fs::create_dir(temporary.path().join("private")).expect("private source directory");
+    std::fs::write(
+        temporary.path().join("stable_helper.m"),
+        concat!(
+            "function y = stable_helper(fail)\n",
+            " y = stable_secret(fail);\n",
+            "end\n"
+        ),
+    )
+    .expect("dynamic entry source");
+    std::fs::write(
+        temporary.path().join("private/stable_secret.m"),
+        concat!(
+            "function y = stable_secret(fail)\n",
+            " y = 17;\n",
+            " if fail\n",
+            "  error('committed private source witness');\n",
+            " end\n",
+            "end\n"
+        ),
+    )
+    .expect("private companion source");
+    let mut session = RunMatSession::with_options(false, false).expect("interpreter session");
+    let root = temporary.path().to_string_lossy().replace('\'', "''");
+    let first = crate::execute_text_request_for_testing(
+        &mut session,
+        &format!("addpath('{root}'); first = stable_helper(false);"),
+    )
+    .expect("successful dynamic invocation");
+    assert!(first.error.is_none(), "first invocation commits: {first:?}");
+    assert_eq!(
+        session.get_variables().unwrap().get("first"),
+        Some(&Value::Num(17.0))
+    );
+    let binding = session
+        .dynamic_function_cache
+        .lock()
+        .expect("cache lock")
+        .values()
+        .next()
+        .expect("committed dynamic product")
+        .binding
+        .clone();
+
+    let second = crate::execute_text_request_for_testing(&mut session, "stable_helper(true);")
+        .expect("failing dynamic invocation returns an outcome");
+    let error = second.error.expect("private callback reports its failure");
+    assert!(error.message.contains("committed private source witness"));
+    assert!(
+        error
+            .context
+            .call_stack
+            .iter()
+            .any(|frame| frame.contains("private/stable_secret.m")),
+        "warm binding must resolve its retained private source in the incoming session: {error:?}"
+    );
+    assert_eq!(
+        session
+            .dynamic_function_cache
+            .lock()
+            .expect("cache lock")
+            .values()
+            .next()
+            .expect("same cached product")
+            .binding,
+        binding,
+        "a committed warm hit must not rebind the admitted product"
+    );
+}
+
+#[test]
+fn escaped_dynamic_private_callback_exports_after_source_session_closes() {
+    let _serial = runmat_filesystem::provider_override_lock();
+    let temporary = tempfile::TempDir::new().expect("isolated source root");
+    std::fs::create_dir(temporary.path().join("private")).expect("private source directory");
+    std::fs::write(
+        temporary.path().join("callback_factory.m"),
+        "function callback = callback_factory()\n callback = @retained_secret;\nend\n",
+    )
+    .expect("dynamic callback factory");
+    std::fs::write(
+        temporary.path().join("private/retained_secret.m"),
+        concat!(
+            "function value = retained_secret(input)\n",
+            " value = input;\n",
+            " error('dynamic retained private witness');\n",
+            "end\n"
+        ),
+    )
+    .expect("private retained callback");
+
+    let mut source = RunMatSession::with_options(false, false).expect("source session");
+    let root = temporary.path().to_string_lossy().replace('\'', "''");
+    let setup = crate::execute_text_request_for_testing(
+        &mut source,
+        &format!(
+            "addpath('{root}'); escaped_dynamic = callback_factory(); error('after dynamic publication');"
+        ),
+    )
+    .expect("later error is returned in the execution outcome");
+    assert!(
+        setup.error.is_some(),
+        "the foreground request must fail later"
+    );
+    let escaped = source
+        .get_variables()
+        .expect("source workspace")
+        .get("escaped_dynamic")
+        .cloned()
+        .expect("dynamic callback publication survives the later error");
+    let source_runtime = source.runtime_context.clone();
+    let service = std::rc::Rc::clone(
+        source_runtime
+            .service_ports()
+            .require_callable_artifacts("export a dynamic callback")
+            .expect("source callable artifact service"),
+    );
+    let bundle = futures::executor::block_on(service.export(
+        source_runtime,
+        vec![escaped],
+        runmat_runtime::context::RuntimeCallableArtifactLimits::default(),
+    ))
+    .expect("export dynamic callback and its private definition");
+    drop(source);
+    drop(temporary);
+
+    let destination = RunMatSession::with_options(false, false).expect("destination session");
+    let destination_runtime = destination.runtime_context.clone();
+    let service = std::rc::Rc::clone(
+        destination_runtime
+            .service_ports()
+            .require_callable_artifacts("import a dynamic callback")
+            .expect("destination callable artifact service"),
+    );
+    let prepared = futures::executor::block_on(service.prepare_admit(
+        destination_runtime.clone(),
+        bundle,
+        runmat_runtime::context::RuntimeCallableArtifactLimits::default(),
+    ))
+    .expect("prepare dynamic callback import");
+    let committed = prepared.commit().expect("commit dynamic callback import");
+    let Value::BoundFunctionHandle {
+        function,
+        authority,
+        ..
+    } = committed.values()[0].clone()
+    else {
+        panic!("dynamic callback must retain exact bound authority");
+    };
+    let mut error = futures::executor::block_on(
+        runmat_runtime::user_functions::try_call_bound_function_in_context(
+            &destination_runtime,
+            runmat_value::BoundFunctionBinding {
+                function,
+                authority,
+            },
+            &[Value::Num(3.0)],
+            1,
+        ),
+    )
+    .expect("selected destination invoker")
+    .expect_err("private callback reports its retained failure");
+    runmat_runtime::execution::preserve_source_call_stack_in_context(
+        &mut error,
+        &destination_runtime,
+    );
+    assert!(
+        error
+            .context
+            .call_stack
+            .iter()
+            .any(|frame| frame.contains("private/retained_secret.m")),
+        "imported callback must retain its original private source: {error:?}"
     );
 }

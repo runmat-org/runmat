@@ -256,6 +256,13 @@ pub(super) struct CompanionSourceDiscovery {
     pub private_function_names: HashSet<String>,
     pub private_function_owners: HashMap<String, String>,
     pub private_function_aliases: HashMap<String, HashMap<String, String>>,
+    pub observed_sources: Vec<ObservedSourceRevision>,
+}
+
+pub(super) struct ObservedSourceRevision {
+    pub access_path: PathBuf,
+    pub content_revision: Option<runmat_execution::Digest>,
+    pub uses_pcode_reader: bool,
 }
 
 pub(super) struct DiscoveredSourceStatement {
@@ -270,6 +277,45 @@ pub(super) struct ProjectCompilationContext {
     frozen: Option<runmat_package::FrozenProject>,
     loose_index: Option<runmat_config::project::ProjectSourceIndex>,
     pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
+}
+
+impl ProjectCompilationContext {
+    /// Revision of the selected source inventory before companion contents are
+    /// read. It invalidates dynamic products when path precedence, package or
+    /// class ownership, or the visible private-file set changes.
+    pub(super) fn dynamic_inventory_revision(&self) -> runmat_execution::Digest {
+        if let Some(revision) = self
+            .source_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.project_revision())
+        {
+            return runmat_execution::Digest::sha256(revision.cache_namespace());
+        }
+        let mut files = self
+            .loose_index
+            .as_ref()
+            .map(|index| {
+                index
+                    .files
+                    .iter()
+                    .map(|file| {
+                        (
+                            file.relative_path.to_string_lossy().replace('\\', "/"),
+                            file.qualified_name.clone(),
+                            file.package_path.clone(),
+                            file.class_name.clone(),
+                            file.class_qualified_name.clone(),
+                            file.is_private,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        files.sort();
+        runmat_execution::Digest::sha256(
+            serde_json::to_vec(&files).expect("source inventory rows are serializable"),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -578,6 +624,11 @@ async fn compose_frozen_project_async(
                         file_path.display()
                     )
                 })?;
+        out.observed_sources.push(ObservedSourceRevision {
+            access_path: file_path.clone(),
+            content_revision: Some(runmat_execution::Digest::sha256(contents.as_bytes())),
+            uses_pcode_reader: true,
+        });
         if !contents.contains("classdef") && !contents.contains("function") {
             continue;
         }
@@ -678,7 +729,16 @@ async fn compose_loose_project_async(
         if source_paths_equivalent(&path, &context.primary_source_path) {
             continue;
         }
-        let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
+        let contents = runmat_filesystem::read_to_string_async(&path).await;
+        out.observed_sources.push(ObservedSourceRevision {
+            access_path: path.clone(),
+            content_revision: contents
+                .as_ref()
+                .ok()
+                .map(|text| runmat_execution::Digest::sha256(text.as_bytes())),
+            uses_pcode_reader: false,
+        });
+        let Ok(contents) = contents else {
             continue;
         };
         if !contents.contains("classdef") && !contents.contains("function") {

@@ -18,7 +18,10 @@ use generation::{
 #[path = "source_evaluation/callable_artifacts.rs"]
 mod callable_artifacts;
 
-pub(super) use callable_artifacts::{install_bound_invoker, service as callable_artifact_service};
+pub(super) use callable_artifacts::{
+    admit_dynamic_callable, install_bound_invoker, service as callable_artifact_service,
+    DynamicCallableAdmission,
+};
 
 pub(super) struct SessionSourceEvaluator {
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
@@ -143,6 +146,17 @@ impl SessionSourceEvaluator {
             .build());
         }
         Ok(())
+    }
+
+    pub(in crate::session) fn retains_binding(
+        &self,
+        binding: &runmat_value::BoundFunctionBinding,
+    ) -> Result<bool, RuntimeError> {
+        let generation = self.current_generation();
+        let registry = generation.registry()?;
+        Ok(registry
+            .owned_view(runmat_hir::FunctionId(binding.function), &binding.authority)
+            .is_some())
     }
 
     fn prepare_import(

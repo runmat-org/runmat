@@ -103,6 +103,14 @@ impl RootedValueSequence {
     pub fn value(&self) -> &ValueSequence {
         &self.value
     }
+
+    /// Transfer the completed values to an immediate synchronous consumer.
+    /// No effectful work may occur between this handoff and adoption by that
+    /// consumer; the explicit roots retire only as the owned sequence moves
+    /// out of this completion record.
+    pub fn into_sequence(self) -> ValueSequence {
+        self.value
+    }
 }
 
 /// Managed handles reachable from owned Values while an asynchronous owner

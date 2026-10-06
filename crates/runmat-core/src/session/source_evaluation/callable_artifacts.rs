@@ -21,6 +21,9 @@ use errors::*;
 #[path = "callable_artifacts/source_facts.rs"]
 mod source_facts;
 use source_facts::{ensure_all_origins, exact_origin_resolver};
+#[path = "callable_artifacts/dynamic.rs"]
+mod dynamic;
+pub(super) use dynamic::{admit_dynamic_callable, DynamicCallableAdmission};
 
 pub(super) struct SessionCallableArtifactService {
     evaluator: Weak<SessionSourceEvaluator>,

@@ -87,9 +87,11 @@ impl ExecutableUnit {
         } else {
             return Err("executable has no callable function or script entrypoint".to_string());
         };
-        let entrypoint_function = u32::try_from(entrypoint_function.0)
-            .map(runmat_types::ProgramFunctionId)
-            .map_err(|_| "entrypoint identity exceeds the portable schema".to_string())?;
+        let entrypoint_function = self
+            .functions()
+            .get(entrypoint_function)
+            .map(|function| function.portable_function)
+            .ok_or_else(|| "executable entrypoint has no compiled function body".to_string())?;
         let mut capabilities = runmat_types::CapabilitySet(
             self.analysis()
                 .functions
