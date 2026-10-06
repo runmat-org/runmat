@@ -8,6 +8,7 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
         crate::execution::RuntimeExecutionService::new(),
     ));
     runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
+    runtime.set_runmat_extensions_enabled(true);
     let _conflicting_compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
     let _conflicting_ambient = crate::output_count::push_output_count(Some(2));
 
@@ -76,6 +77,7 @@ fn selected_sink_binding_rejects_status_in_matlab_mode_before_file_effects() {
         crate::execution::RuntimeExecutionService::new(),
     ));
     runtime.set_language_mode(crate::context::RuntimeLanguageMode::Matlab);
+    runtime.set_runmat_extensions_enabled(false);
     let _conflicting_compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
 
     for name in [SAVEAS, SAVEFIG, HGSAVE] {
