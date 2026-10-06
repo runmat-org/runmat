@@ -8,6 +8,39 @@ pub(super) struct PreparedTimerPair {
     pub(super) value: Value,
 }
 
+/// Setter bindings already carry the catalog-owned property identity. Keep it
+/// typed through resident admission and assignment instead of rebuilding a
+/// name/value pair and parsing the spelling a second time.
+pub(super) async fn prepare_timer_setter_value(
+    property: TimerProperty,
+    value: Value,
+) -> BuiltinResult<PreparedTimerPair> {
+    if property.is_readonly() {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            format!("timer: property '{}' is read-only", property.name()),
+        ));
+    }
+    if property.is_numeric() {
+        if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION,
+                "timer",
+            )?;
+        }
+        if !crate::dispatcher::value_contains_gpu(&value) {
+            normalize_property_value(property, value.clone())?;
+        }
+        Ok(PreparedTimerPair {
+            property,
+            value: gather_value_async(&value).await?,
+        })
+    } else {
+        normalize_property_value(property, value.clone())?;
+        Ok(PreparedTimerPair { property, value })
+    }
+}
+
 pub(super) async fn prepare_timer_property_pairs(
     args: &[Value],
     finding: bool,
