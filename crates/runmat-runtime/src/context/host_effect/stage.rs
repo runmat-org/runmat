@@ -43,12 +43,26 @@ impl std::fmt::Display for HostEffectAllocationError {
 impl std::error::Error for HostEffectAllocationError {}
 
 /// The exact claim owner is held through the buffer's actual lifetime.
-pub trait HostEffectLiveAllocationReservation: std::fmt::Debug + Send + Sync {}
+pub trait HostEffectLiveAllocationReservation:
+    std::fmt::Debug + Send + Sync + runmat_async::DiagnosticAllocationLease
+{
+}
 
 #[derive(Debug)]
 pub enum HostEffectLiveAllocationClaim {
     Shared(Arc<dyn HostEffectLiveAllocationReservation>),
     Owned(Box<dyn HostEffectLiveAllocationReservation>),
+}
+
+impl HostEffectLiveAllocationClaim {
+    /// Retain this exact physical claim in an error without adding a source
+    /// wrapper or allocating a second claim owner.
+    pub fn into_diagnostic_retention(self) -> runmat_async::RetainedDiagnosticAllocation {
+        match self {
+            Self::Shared(claim) => runmat_async::RetainedDiagnosticAllocation::Shared(claim),
+            Self::Owned(claim) => runmat_async::RetainedDiagnosticAllocation::Owned(claim),
+        }
+    }
 }
 
 /// Owns output capacity selected for one whole call. An exact returned-value

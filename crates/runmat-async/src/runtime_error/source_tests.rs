@@ -1,5 +1,68 @@
 use super::*;
 
+#[test]
+fn retained_allocation_survives_original_error_in_a_nested_source_chain() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[derive(Debug)]
+    struct Lease(Arc<AtomicUsize>);
+    impl Drop for Lease {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let drops = Arc::new(AtomicUsize::new(0));
+    let original = runtime_error("full original message")
+        .with_identifier("RunMat:Original")
+        .with_source(std::io::Error::other("typed original cause"))
+        .with_retained_diagnostic_allocation(RetainedDiagnosticAllocation::Owned(Box::new(Lease(
+            drops.clone(),
+        ))))
+        .build();
+    let nested = runtime_error("outer").with_source(original).build();
+    let inner = StdError::source(&nested)
+        .unwrap()
+        .downcast_ref::<RuntimeError>()
+        .expect("original runtime error remains downcastable");
+    assert_eq!(inner.identifier(), Some("RunMat:Original"));
+    assert_eq!(inner.message(), "full original message");
+    assert!(StdError::source(inner).unwrap().is::<std::io::Error>());
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(nested);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn shared_retention_does_not_change_source_or_release_before_last_error() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[derive(Debug)]
+    struct Lease(Arc<AtomicUsize>);
+    impl Drop for Lease {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let drops = Arc::new(AtomicUsize::new(0));
+    let lease: Arc<dyn DiagnosticAllocationLease> = Arc::new(Lease(drops.clone()));
+    let error = runtime_error("kept")
+        .with_retained_diagnostic_allocation(RetainedDiagnosticAllocation::Shared(lease.clone()))
+        .build();
+    assert!(StdError::source(&error).is_none());
+    drop(error);
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(lease);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn native_sources_remain_send_sync_and_owned_through_formatting_and_nested_errors() {

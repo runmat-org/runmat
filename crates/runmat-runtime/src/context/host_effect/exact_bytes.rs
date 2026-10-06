@@ -5,6 +5,7 @@
 use super::HostEffectLiveAllocationReservation;
 use super::{HostEffectAllocationError, HostEffectLiveAllocationClaim};
 use std::alloc::{alloc, dealloc, Layout};
+use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 #[cfg(test)]
 use std::sync::Arc;
@@ -119,6 +120,31 @@ impl ExactHostEffectBytes {
         // exposed. NonNull::dangling is valid for an empty slice.
         unsafe { std::slice::from_raw_parts(self.pointer.as_ptr(), self.length) }
     }
+
+    /// Transfer an exact-capacity UTF-8 allocation to `String` without a
+    /// second payload allocation. The caller must retain the returned claim
+    /// for at least as long as the string, and release it after the string's
+    /// physical allocation. This transfer does not certify the other owners
+    /// of a complete diagnostic or invocation.
+    pub fn into_utf8_string(
+        self,
+    ) -> Result<(String, HostEffectLiveAllocationClaim), std::str::Utf8Error> {
+        std::str::from_utf8(self.as_bytes())?;
+        let owner = ManuallyDrop::new(self);
+        // SAFETY: suppressing this owner's Drop transfers the original,
+        // global-allocator pointer and exact layout to String. The initialized
+        // prefix has been validated as UTF-8 above. A zero-capacity buffer is
+        // represented without constructing String from a dangling pointer.
+        let string = if owner.capacity == 0 {
+            String::new()
+        } else {
+            unsafe { String::from_raw_parts(owner.pointer.as_ptr(), owner.length, owner.capacity) }
+        };
+        // SAFETY: ManuallyDrop suppresses field destruction. Read the sole
+        // claim owner exactly once and return it alongside the physical string.
+        let claim = unsafe { std::ptr::read(&owner._claim) };
+        Ok((string, claim))
+    }
 }
 
 impl Drop for ExactHostEffectBytes {
@@ -212,5 +238,58 @@ mod tests {
         ));
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    }
+
+    #[test]
+    fn exact_utf8_transfer_retains_claim_until_after_physical_string_drop() {
+        let ledger = ManagedHostEffectLedger::new(6);
+        let stage = ledger.reserve_stage(6).expect("stage");
+        let claim = stage
+            .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 6)
+            .expect("claim");
+        let mut buffer = ExactHostEffectBytes::new(6, HostEffectLiveAllocationClaim::Shared(claim))
+            .expect("exact bytes");
+        buffer.append("héllo".as_bytes()).expect("six UTF-8 bytes");
+        let (string, claim) = buffer.into_utf8_string().expect("valid UTF-8");
+        assert_eq!(string, "héllo");
+        assert_eq!(string.capacity(), 6);
+        let error = runmat_async::runtime_error(string)
+            .with_retained_diagnostic_allocation(claim.into_diagnostic_retention())
+            .build();
+        assert_eq!(error.message(), "héllo");
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 6);
+        drop(stage);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 6);
+        drop(error);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[test]
+    fn invalid_utf8_transfer_drops_payload_and_refunds_claim() {
+        let ledger = ManagedHostEffectLedger::new(1);
+        let stage = ledger.reserve_stage(1).expect("stage");
+        let claim = stage
+            .reserve_live_exact(HostEffectLiveAllocationKind::CodecWorkspace, 1)
+            .expect("claim");
+        let mut buffer = ExactHostEffectBytes::new(1, HostEffectLiveAllocationClaim::Shared(claim))
+            .expect("exact bytes");
+        buffer.append(&[0xff]).expect("one invalid byte");
+        assert!(buffer.into_utf8_string().is_err());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[test]
+    fn zero_capacity_utf8_transfer_uses_empty_string_without_allocator_pointer() {
+        #[derive(Debug)]
+        struct Claim;
+        impl HostEffectLiveAllocationReservation for Claim {}
+        let buffer =
+            ExactHostEffectBytes::new(0, HostEffectLiveAllocationClaim::Shared(Arc::new(Claim)))
+                .expect("zero-capacity owner");
+        let (string, claim) = buffer.into_utf8_string().expect("empty UTF-8");
+        assert!(string.is_empty());
+        assert_eq!(string.capacity(), 0);
+        drop(string);
+        drop(claim);
     }
 }

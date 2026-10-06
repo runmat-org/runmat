@@ -16,6 +16,21 @@ pub type RuntimeErrorSource = dyn StdError + Send + Sync + 'static;
 #[cfg(target_arch = "wasm32")]
 pub type RuntimeErrorSource = dyn StdError + 'static;
 
+/// An allocation owner that survives with a diagnostic. This is ownership,
+/// not a certificate for the publicly mutable message, context, or later
+/// executor presentation allocations.
+pub trait DiagnosticAllocationLease: std::fmt::Debug + Send + Sync {}
+
+impl<T: std::fmt::Debug + Send + Sync + ?Sized> DiagnosticAllocationLease for T {}
+
+/// Move an already-allocated, domain-charged lease into an error without
+/// allocating a wrapper or changing its typed `source()` chain.
+#[derive(Debug)]
+pub enum RetainedDiagnosticAllocation {
+    Shared(Arc<dyn DiagnosticAllocationLease>),
+    Owned(Box<dyn DiagnosticAllocationLease>),
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorContext {
     pub builtin: Option<String>,
@@ -72,6 +87,9 @@ pub struct RuntimeError {
     pub span: Option<SourceSpan>,
     #[source]
     pub source: Option<Box<RuntimeErrorSource>>,
+    /// An owning charge for original diagnostic allocations only. Mutating
+    /// public text/context fields requires a separate allocation authority.
+    pub retained_diagnostic_allocation: Option<RetainedDiagnosticAllocation>,
     pub identifier: Option<String>,
     pub context: ErrorContext,
     pub gpu_gather_retry: GpuGatherRetry,
@@ -155,6 +173,7 @@ impl RuntimeError {
             message: message.into(),
             span: None,
             source: None,
+            retained_diagnostic_allocation: None,
             identifier: None,
             context: ErrorContext::default(),
             gpu_gather_retry: GpuGatherRetry::Legacy,
@@ -271,6 +290,14 @@ pub struct RuntimeErrorBuilder {
 }
 
 impl RuntimeErrorBuilder {
+    pub fn with_retained_diagnostic_allocation(
+        mut self,
+        allocation: RetainedDiagnosticAllocation,
+    ) -> Self {
+        self.error.retained_diagnostic_allocation = Some(allocation);
+        self
+    }
+
     pub fn with_failure_origin(mut self, origin: RuntimeFailureOrigin) -> Self {
         self.error.failure_origin = origin;
         self
