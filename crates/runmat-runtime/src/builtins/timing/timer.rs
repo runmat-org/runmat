@@ -13,6 +13,7 @@ mod error;
 mod lifecycle;
 mod normalization;
 pub(crate) mod property;
+mod setter;
 mod setter_bindings;
 mod startat;
 

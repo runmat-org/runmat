@@ -4,9 +4,9 @@ use super::*;
 
 macro_rules! timer_setter_builtin {
     ($fn_name:ident, $builtin_name:literal, $property:expr) => {
-        #[runtime_builtin(name = $builtin_name, binding_variant = "default", builtin_path = "crate::builtins::timing::timer")]
-        pub async fn $fn_name(obj: Value, value: Value) -> BuiltinResult<Value> {
-            set_timer_property_object(obj, $property, value).await
+        #[runtime_builtin(name = $builtin_name, binding_variant = "default", context = true, builtin_path = "crate::builtins::timing::timer")]
+        pub async fn $fn_name(runtime: Option<RuntimeContext>, obj: Value, value: Value) -> BuiltinResult<Value> {
+            super::setter::set_timer_property(runtime, obj, $property, value).await
         }
     };
 }
@@ -74,6 +74,12 @@ pub(super) async fn set_timer_property_object(
     property: TimerProperty,
     value: Value,
 ) -> BuiltinResult<Value> {
+    let _roots =
+        crate::execution::RootedValueHandles::for_values([&obj, &value]).map_err(|error| {
+            crate::build_runtime_error("cannot retain timer setter arguments")
+                .with_source(error)
+                .build()
+        })?;
     let Value::Object(mut object) = obj else {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_HANDLE,

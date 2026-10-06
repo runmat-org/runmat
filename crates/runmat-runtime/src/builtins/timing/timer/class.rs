@@ -59,6 +59,21 @@ pub(super) fn ensure_timer_class_registered() {
     let mut properties = HashMap::new();
     for property in TimerProperty::ALL {
         let name = property.name();
+        if !property.is_readonly() {
+            let setter = crate::object_property_setter_name(name);
+            methods.insert(
+                setter.as_str().into(),
+                crate::class_registry::RuntimeMethod {
+                    name: setter.as_str().into(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: MemberAccess::Public,
+                    function_name: setter,
+                    implicit_class_argument: None,
+                },
+            );
+        }
         properties.insert(
             name.into(),
             crate::class_registry::RuntimeProperty {
