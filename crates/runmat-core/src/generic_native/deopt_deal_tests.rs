@@ -60,7 +60,9 @@ fn deal_outputs_keep_wide_aliases_and_pre_safepoint_effects_on_vm_resume() {
         let expected = IntegerStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_993]);
         let argument =
             Value::Tensor(Tensor::new_integer(expected.clone(), vec![1, 2]).expect("wide tensor"));
-        let runtime = session.runtime_context().clone();
+        let runtime = unit
+            .bind_runtime_sources(session.runtime_context().clone())
+            .expect("bind exact native product sources for this invocation");
         let mut invocation = compiled
             .executor
             .begin_request(runmat_native_executor::NativeInvocationRequest {
