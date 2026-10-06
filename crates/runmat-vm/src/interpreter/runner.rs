@@ -1780,6 +1780,45 @@ mod tests {
                 crate::runtime::workspace::workspace_lookup("outer"),
                 Some(Value::Num(1.0))
             );
+            assert_eq!(crate::runtime::workspace::workspace_lookup("local"), None);
+        })));
+        let _ = crate::runtime::workspace::take_workspace_completion(outer_frame);
+    }
+
+    #[test]
+    fn zero_variable_nested_function_still_owns_an_exact_transient_workspace_frame() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let (runtime, activation) =
+            crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
+        let outer_frame = activation.frame();
+        let child = Bytecode::with_instructions(vec![Instr::Return], 0);
+
+        block_on(activation.scope(runtime.scope(async {
+            let mut outer = vec![Value::Num(7.0)];
+            let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
+                std::collections::HashMap::from([("outer".to_string(), 0)]),
+                std::collections::HashSet::from(["outer".to_string()]),
+                &mut outer,
+                runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
+            );
+            let result = interpret_function_with_counts_in_context(
+                &child,
+                Vec::new(),
+                "zero_variable_workspace_test",
+                0,
+                0,
+                std::collections::HashSet::new(),
+                runtime.clone(),
+            )
+            .await
+            .expect("zero-variable nested interpreter should own an exact child frame");
+            assert!(result.is_empty());
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("outer"),
+                Some(Value::Num(7.0))
+            );
         })));
         let _ = crate::runtime::workspace::take_workspace_completion(outer_frame);
     }

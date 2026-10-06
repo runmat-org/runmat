@@ -79,6 +79,26 @@ pub(crate) fn release_pending_workspace_service_frame(
     release_pending_workspace_service_frame_for_owner(WorkspaceOwner::Runtime(runtime), id);
 }
 
+pub(super) fn has_exact_pending_service_frame(owner: WorkspaceOwner) -> bool {
+    let WorkspaceOwner::Runtime(_) = owner else {
+        return false;
+    };
+    let Some(active) = active_frame(owner) else {
+        return false;
+    };
+    let exact = PENDING_SERVICE_FRAMES.with(|frames| {
+        frames
+            .borrow()
+            .get(&owner)
+            .is_some_and(|pending| pending.iter().any(|frame| frame.id == active))
+    });
+    assert!(
+        exact,
+        "VM workspace entered without its exact reserved service frame"
+    );
+    true
+}
+
 pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
     let active = active_frame(owner);
     PENDING_SERVICE_FRAMES

@@ -3,8 +3,8 @@ use crate::bytecode::program::Bytecode;
 use crate::interpreter::timing::InterpreterTiming;
 use crate::runtime::gc::InterpretContext;
 use crate::runtime::workspace::{
-    refresh_workspace_state, set_transient_workspace_state, take_pending_workspace_state,
-    WorkspaceStateGuard,
+    has_exact_pending_workspace_service_frame, refresh_workspace_state,
+    set_transient_workspace_state, take_pending_workspace_state, WorkspaceStateGuard,
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -39,7 +39,13 @@ pub fn prepare_workspace_guard(
         return guard;
     }
     if var_names.is_empty() {
-        return None;
+        if !has_exact_pending_workspace_service_frame() {
+            return None;
+        }
+        let guard =
+            set_transient_workspace_state(HashMap::new(), HashSet::new(), vars, global_aliases);
+        refresh_workspace_state(vars);
+        return Some(guard);
     }
     let mut names = HashMap::new();
     let mut assigned = HashSet::new();

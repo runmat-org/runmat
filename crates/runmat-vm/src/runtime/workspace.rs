@@ -15,6 +15,7 @@ pub use admission::{
     workspace_admission, workspace_admission_with_global_bindings, PendingWorkspaceAdmission,
     WorkspaceExecutionCompletion,
 };
+use frame::{has_exact_pending_service_frame, take_service_frame, PendingServiceFrame};
 pub(crate) use frame::{
     reconcile_workspace_frame, release_pending_workspace_service_frame,
     reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
@@ -22,7 +23,6 @@ pub(crate) use frame::{
     workspace_frame_lookup, workspace_frame_name_is_global, workspace_frame_publishes,
     workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId, WorkspaceFrameLifecycle,
 };
-use frame::{take_service_frame, PendingServiceFrame};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum WorkspaceOwner {
@@ -354,6 +354,10 @@ impl Drop for WorkspaceStateGuard {
 
 pub(crate) fn take_pending_workspace_state() -> Option<PendingWorkspace> {
     frame::take_service_frame_admission(current_owner())
+}
+
+pub(crate) fn has_exact_pending_workspace_service_frame() -> bool {
+    has_exact_pending_service_frame(current_owner())
 }
 
 pub fn take_updated_workspace_state() -> Option<WorkspaceValueSnapshot> {
