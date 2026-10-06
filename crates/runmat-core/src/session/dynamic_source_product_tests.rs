@@ -32,7 +32,7 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
     .expect("dynamic entry source");
     std::fs::write(
         temporary.path().join("private/secret.m"),
-        "function y = secret()\n error('private source witness');\nend\n",
+        "function y = secret()\n y = 0;\n error('private source witness');\nend\n",
     )
     .expect("private companion source");
     let mut session = RunMatSession::with_options(false, false).expect("interpreter session");
