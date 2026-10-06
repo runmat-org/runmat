@@ -19,6 +19,7 @@ mod r#box;
 mod set;
 mod shading;
 mod view;
+mod palette_generators;
 
 pub use self::animatedline::*;
 pub use self::axes::*;
@@ -34,6 +35,7 @@ pub use self::grid::*;
 pub use self::hidden::*;
 pub use self::hold::*;
 pub use self::linkaxes::*;
+pub use self::palette_generators::*;
 pub use self::r#box::*;
 pub use self::set::*;
 pub use self::shading::*;
@@ -58,4 +60,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(set::ENTRIES.iter().copied());
     values.extend(shading::ENTRIES.iter().copied());
     values.extend(view::ENTRIES.iter().copied());
+    values.extend(palette_generators::ENTRIES.iter().copied());
 }
