@@ -120,7 +120,7 @@ pub(super) async fn run_timer_callbacks(
     Ok(())
 }
 
-fn still_running(runtime: &RuntimeContext, handle: &HandleRef, generation: u64) -> bool {
+pub(super) fn still_running(runtime: &RuntimeContext, handle: &HandleRef, generation: u64) -> bool {
     runtime
         .timer_session()
         .borrow()

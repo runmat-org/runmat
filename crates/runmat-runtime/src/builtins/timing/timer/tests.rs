@@ -506,6 +506,86 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
 }
 
 #[test]
+fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests();
+    let runtime = test_runtime();
+    let ticks = Rc::new(std::cell::Cell::new(0usize));
+    let errors = Rc::new(std::cell::Cell::new(0usize));
+    let stops = Rc::new(std::cell::Cell::new(0usize));
+    let callback_ticks = ticks.clone();
+    let callback_errors = errors.clone();
+    let callback_stops = stops.clone();
+    let callback_runtime = runtime.clone();
+    let invoker: Rc<crate::user_functions::FunctionInvoker> =
+        Rc::new(move |function, args, _requested_outputs| {
+            let handle = args[0].clone();
+            let runtime = callback_runtime.clone();
+            let ticks = callback_ticks.clone();
+            let errors = callback_errors.clone();
+            let stops = callback_stops.clone();
+            Box::pin(async move {
+                match function {
+                    1 => {
+                        let count = ticks.get() + 1;
+                        ticks.set(count);
+                        if count == 1 {
+                            super::timer_stop_builtin(Some(runtime.clone()), handle.clone())
+                                .await?;
+                            super::timer_start_builtin(Some(runtime), handle).await?;
+                            return Err(crate::build_runtime_error("old generation failed")
+                                .with_identifier("RunMat:TimerTest:OldGeneration")
+                                .build());
+                        }
+                    }
+                    2 => errors.set(errors.get() + 1),
+                    3 => stops.set(stops.get() + 1),
+                    _ => panic!("unexpected timer callback"),
+                }
+                Ok(crate::sequence::ValueSequence::empty())
+            })
+        });
+    let scope = runtime.enter();
+    let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker);
+    drop(scope);
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "tick".into(),
+            function: 1,
+        },
+        Value::String("ErrorFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "failed".into(),
+            function: 2,
+        },
+        Value::String("StopFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "done".into(),
+            function: 3,
+        },
+    ]))
+    .expect("timer");
+    block_on(timer_start_builtin(timer.clone())).expect("first start");
+    let error = block_on(timer_wait_builtin(timer.clone())).expect_err("old failure receipt");
+    assert_eq!(error.identifier(), Some("RunMat:TimerTest:OldGeneration"));
+    assert_eq!(
+        errors.get(),
+        0,
+        "stale ErrorFcn must not address restarted timer"
+    );
+    let Value::HandleObject(handle) = timer.clone() else {
+        panic!("timer handle");
+    };
+    assert_eq!(string_property(&handle, "Running").unwrap(), "on");
+    block_on(timer_wait_builtin(timer)).expect("new generation");
+    assert_eq!(ticks.get(), 2);
+    assert_eq!(errors.get(), 0);
+    assert_eq!(stops.get(), 2, "one StopFcn per generation");
+    assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+}
+
+#[test]
 fn deleting_a_pending_timer_cancels_its_child_without_late_callback() {
     let _lock = TIMER_TEST_LOCK.lock().unwrap();
     reset_timer_state_for_tests();

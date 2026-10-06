@@ -9,7 +9,24 @@ use crate::builtins::timing::timer::property::{
 };
 use crate::RuntimeError;
 use runmat_value::HandleRef;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
+
+/// A generation's failure survives replacement of the timer's current record
+/// while a waiter still holds this receipt; otherwise it drops with the run.
+#[derive(Clone, Default)]
+pub(crate) struct TimerFailureReceipt(Rc<RefCell<Option<Arc<RuntimeError>>>>);
+
+impl TimerFailureReceipt {
+    pub(crate) fn record(&self, error: Arc<RuntimeError>) {
+        *self.0.borrow_mut() = Some(error);
+    }
+
+    pub(crate) fn take(&self) -> Option<Arc<RuntimeError>> {
+        self.0.borrow_mut().take()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TimerPhase {
@@ -34,7 +51,7 @@ pub(crate) struct TimerRecord {
     pub(crate) visibility: TimerVisibility,
     pub(crate) lease: Option<RuntimeLocalTaskLease>,
     pub(crate) stop_claimed: bool,
-    pub(crate) terminal_error: Option<Arc<RuntimeError>>,
+    pub(crate) failure: TimerFailureReceipt,
 }
 
 #[derive(Default)]
@@ -69,7 +86,7 @@ impl TimerSessionState {
             visibility,
             lease: None,
             stop_claimed: false,
-            terminal_error: None,
+            failure: TimerFailureReceipt::default(),
         });
     }
 
@@ -96,7 +113,7 @@ impl TimerSessionState {
         busy_mode: TimerBusyMode,
         execution_mode: TimerExecutionMode,
         visibility: TimerVisibility,
-    ) -> Result<u64, TimerAdmissionError> {
+    ) -> Result<(u64, TimerFailureReceipt), TimerAdmissionError> {
         let index = self
             .records
             .iter()
@@ -118,8 +135,8 @@ impl TimerSessionState {
         entry.visibility = visibility;
         entry.lease = None;
         entry.stop_claimed = false;
-        entry.terminal_error = None;
-        Ok(generation)
+        entry.failure = TimerFailureReceipt::default();
+        Ok((generation, entry.failure.clone()))
     }
 
     pub(crate) fn attach_lease(
@@ -138,12 +155,7 @@ impl TimerSessionState {
         Ok(())
     }
 
-    pub(crate) fn finish(
-        &mut self,
-        handle: &HandleRef,
-        generation: u64,
-        error: Option<Arc<RuntimeError>>,
-    ) -> Option<bool> {
+    pub(crate) fn finish(&mut self, handle: &HandleRef, generation: u64) -> Option<bool> {
         let Some(entry) = self.record_mut(handle) else {
             return None;
         };
@@ -151,7 +163,6 @@ impl TimerSessionState {
             return None;
         }
         entry.phase = TimerPhase::Stopped;
-        entry.terminal_error = error;
         entry.lease = None;
         if entry.stop_claimed {
             Some(false)
@@ -174,10 +185,6 @@ impl TimerSessionState {
         let call_stop = !entry.stop_claimed;
         entry.stop_claimed = true;
         Some((lease, call_stop))
-    }
-
-    pub(crate) fn take_terminal_error(&mut self, handle: &HandleRef) -> Option<Arc<RuntimeError>> {
-        self.record_mut(handle)?.terminal_error.take()
     }
 
     pub(crate) fn delete(&mut self, handle: &HandleRef) -> Option<RuntimeLocalTaskLease> {

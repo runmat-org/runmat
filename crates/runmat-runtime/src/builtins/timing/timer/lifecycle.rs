@@ -2,12 +2,12 @@
 
 use super::*;
 use crate::context::RuntimeLocalTaskOutcome;
-use crate::context::{TimerAdmissionError, TimerPhase};
+use crate::context::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
 use std::sync::Arc;
 use std::time::Duration;
 
 mod schedule;
-use schedule::run_timer_callbacks;
+use schedule::{run_timer_callbacks, still_running};
 
 #[derive(Clone, Copy)]
 struct TimerRunConfig {
@@ -129,7 +129,7 @@ pub(super) async fn start_one_timer(
     }
     let config = TimerRunConfig::admit(runtime, &handle, override_delay)?;
     let tasks = runtime.service_ports().require_local_tasks("timer")?;
-    let generation = runtime
+    let (generation, failure) = runtime
         .timer_session()
         .borrow_mut()
         .admit_start(
@@ -154,7 +154,7 @@ pub(super) async fn start_one_timer(
     let scoped_runtime = runtime.clone();
     let task_handle = handle.clone();
     let future = scoped_runtime.scope(async move {
-        run_timer_task(task_runtime, task_handle, generation, config).await;
+        run_timer_task(task_runtime, task_handle, generation, config, failure).await;
     });
     let lease = match tasks.spawn_local(runtime.local_identity(), Box::pin(future)) {
         Ok(lease) => lease,
@@ -183,17 +183,21 @@ async fn run_timer_task(
     handle: HandleRef,
     generation: u64,
     config: TimerRunConfig,
+    failure: TimerFailureReceipt,
 ) {
     let outcome = run_timer_callbacks(&runtime, &handle, generation, config).await;
     let terminal_error = outcome.err().map(Arc::new);
     if let Some(error) = &terminal_error {
-        let _ = run_error_callback(&runtime, &handle, error.clone()).await;
+        failure.record(error.clone());
+        if still_running(&runtime, &handle, generation) {
+            let _ = run_error_callback(&runtime, &handle, error.clone()).await;
+        }
         tracing::warn!(target: "runmat_timer", "timer callback failed: {}", error);
     }
     let finish = runtime
         .timer_session()
         .borrow_mut()
-        .finish(&handle, generation, terminal_error);
+        .finish(&handle, generation);
     if let Some(call_stop) = finish {
         let _ = set_property(&handle, "Running", Value::String("off".into()));
         if call_stop {
@@ -229,17 +233,26 @@ pub(super) async fn wait_one_timer(
 ) -> BuiltinResult<()> {
     ensure_valid_timer(handle)?;
     loop {
-        let (generation, lease) = runtime
+        let (generation, lease, failure) = runtime
             .timer_session()
             .borrow()
             .record(handle)
-            .map(|record| (record.generation, record.lease.clone()))
+            .map(|record| {
+                (
+                    record.generation,
+                    record.lease.clone(),
+                    record.failure.clone(),
+                )
+            })
             .ok_or_else(|| admission_error(TimerAdmissionError::ForeignOrDeleted))?;
         let outcome = if let Some(lease) = lease {
             Some(lease.join().await)
         } else {
             None
         };
+        if let Some(error) = failure.take() {
+            return Err(RuntimeError::from_shared_original(error));
+        }
         let current_generation = runtime
             .timer_session()
             .borrow()
@@ -263,13 +276,6 @@ pub(super) async fn wait_one_timer(
                 &TIMER_ERROR_CALLBACK,
                 "timer: callback task was cancelled before completion",
             ));
-        }
-        if let Some(error) = runtime
-            .timer_session()
-            .borrow_mut()
-            .take_terminal_error(handle)
-        {
-            return Err(RuntimeError::from_shared_original(error));
         }
         return Ok(());
     }

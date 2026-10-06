@@ -87,7 +87,7 @@ pub use tcp::{
     RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpIssuer, RuntimeTcpReadMode,
     RuntimeTcpReadPublication, RuntimeTcpReadResult, RuntimeTcpServer, RuntimeTcpService,
 };
-pub(crate) use timer::{TimerAdmissionError, TimerPhase};
+pub(crate) use timer::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
 pub use timing::RuntimeTimingService;
 pub(crate) use timing::StopwatchToken;
 pub use user_path::{
