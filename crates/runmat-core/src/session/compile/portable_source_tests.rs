@@ -55,6 +55,64 @@ fn changed_reachable_source_text_changes_portable_identity() {
     assert_ne!(compile(&mut session, 1), compile(&mut session, 2));
 }
 
+#[test]
+fn retained_definition_content_not_session_allocation_order_decides_portable_identity() {
+    fn product(
+        helper_value: usize,
+        unrelated_first: bool,
+    ) -> (Vec<u8>, crate::ExecutableSourceMap) {
+        let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+        if unrelated_first {
+            session
+                .compile_input_for_source_name("unrelated.m", "unrelated = 17;")
+                .expect("unrelated source identity");
+        }
+        let definition = crate::abi::ExecutionRequest::for_source(
+            crate::abi::SourceInput::Text {
+                name: "helper.m".into(),
+                text: format!("function y = retainedHelper(); y = {helper_value}; end"),
+            },
+            session.compat_mode(),
+            crate::abi::HostExecutionPolicy::default(),
+            session.workspace_handle(),
+        );
+        let outcome = futures::executor::block_on(session.execute_request(definition))
+            .result
+            .expect("retained definition publication");
+        assert!(outcome.diagnostics.is_empty(), "{outcome:?}");
+        let unit = futures::executor::block_on(session.compile_executable_unit(
+            crate::ExecutableSource::new(
+                "fixture",
+                "main.m",
+                "function y = main(); y = retainedHelper(); end",
+            ),
+            None,
+        ))
+        .expect("unit with retained semantic dependency");
+        let bytes = unit
+            .portable_envelope()
+            .expect("envelope")
+            .canonical_bytes()
+            .expect("canonical bytes");
+        (bytes, unit.source_map().clone())
+    }
+
+    let (first_bytes, first_sources) = product(7, false);
+    let (shifted_bytes, shifted_sources) = product(7, true);
+    assert_eq!(first_sources, shifted_sources);
+    assert_eq!(first_bytes, shifted_bytes);
+    let (changed_bytes, changed_sources) = product(8, true);
+    assert_ne!(first_sources, changed_sources);
+    assert_ne!(first_bytes, changed_bytes);
+    assert!(
+        first_sources
+            .entries()
+            .iter()
+            .any(|entry| entry.relative_path == "helper.m" && entry.text.contains("y = 7")),
+        "retained dependency belongs to the source map, not only the function registry"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn pending_source_lease_coexists_with_interpreted_and_native_unit_invocations() {
