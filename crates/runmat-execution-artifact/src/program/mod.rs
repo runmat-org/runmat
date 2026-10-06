@@ -3,6 +3,7 @@ mod host;
 mod identity;
 mod native_object;
 mod recipe;
+mod region_sources;
 mod request;
 mod target;
 
@@ -10,6 +11,7 @@ pub use artifact::{ExecutableForm, ProgramArtifact, PROGRAM_ARTIFACT_SCHEMA_VERS
 pub use identity::{ProgramArtifactId, ProgramRecipeId};
 pub use native_object::{NativeObjectPayload, NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION};
 pub use recipe::{ProgramBuildRecipe, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION};
+pub use region_sources::InterpreterRegionSourcesV1;
 pub use request::{
     admit_program_execution_request_bytes, ProgramExecutionDescriptor, ProgramExecutionInputs,
     ProgramExecutionRequest, ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_ARGUMENTS,

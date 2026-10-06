@@ -2,7 +2,10 @@ use minicbor::Encoder;
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-use super::{ProgramArtifactId, ProgramBuildRecipe, ProgramRecipeId, ProgramTarget};
+use super::{
+    InterpreterRegionSourcesV1, ProgramArtifactId, ProgramBuildRecipe, ProgramRecipeId,
+    ProgramTarget,
+};
 use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_ARTIFACT_SCHEMA_VERSION: u16 = 2;
@@ -64,6 +67,41 @@ impl ProgramArtifact {
             .map_err(|error| ArtifactError::Invalid(error.to_string()))
     }
 
+    /// Exact validated portable source map, if this artifact carries one.
+    /// Source-less forms have no authority to carry portable source ordinals.
+    pub fn executable_source_map_v2(
+        &self,
+        recipe: &ProgramBuildRecipe,
+    ) -> ArtifactResult<Option<runmat_execution::ExecutableSourceMapV2>> {
+        match self.form {
+            ExecutableForm::ExecutableUnitV3 => {
+                let unit = self.executable_unit()?.expect("unit form has an envelope");
+                match unit.manifest.revisions.source_map_schema {
+                    1 => return Ok(None), // Legacy source-less admission remains explicit.
+                    2 => {}
+                    version => {
+                        return Err(ArtifactError::Invalid(format!(
+                            "unsupported executable source-map schema {version}"
+                        )))
+                    }
+                }
+                let component = unit
+                    .component(runmat_execution::ExecutableComponentKind::SourceMap)
+                    .ok_or_else(|| {
+                        ArtifactError::Invalid("executable source map is missing".into())
+                    })?;
+                runmat_execution::ExecutableSourceMapV2::decode(&component.bytes)
+                    .map(Some)
+                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
+            }
+            ExecutableForm::InterpreterRegionSourcesV1 => {
+                InterpreterRegionSourcesV1::decode(&self.executable_bytes, &recipe.program_revision)
+                    .map(|payload| Some(payload.source_map().clone()))
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub fn materialize(
         recipe: &ProgramBuildRecipe,
         form: ExecutableForm,
@@ -109,6 +147,9 @@ impl ProgramArtifact {
             ));
         }
         self.target.validate_form(self.form)?;
+        if self.form == ExecutableForm::InterpreterRegionSourcesV1 {
+            InterpreterRegionSourcesV1::decode(&self.executable_bytes, &recipe.program_revision)?;
+        }
         if let Some(admission) = self.executable_unit_admission()? {
             if admission.identity.program != recipe.program_revision
                 || admission.identity.entrypoint != recipe.entrypoint

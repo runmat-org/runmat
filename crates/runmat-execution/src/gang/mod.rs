@@ -21,6 +21,22 @@ impl SpmdOutputValue {
         }
     }
 
+    pub fn validate_for_program_sources(
+        &self,
+        source_map: Option<&crate::ExecutableSourceMapV2>,
+    ) -> Result<(), crate::ContractError> {
+        self.validate()?;
+        match self {
+            Self::Value(value) => {
+                value.validate_for_program_sources(crate::value::ValueLimits::default(), source_map)
+            }
+            Self::Distributed(snapshot) => snapshot
+                .owned
+                .value
+                .validate_for_program_sources(crate::value::ValueLimits::default(), source_map),
+        }
+    }
+
     pub fn validate_for_transport(
         &self,
         context: crate::value::ValueTransportContext<'_>,

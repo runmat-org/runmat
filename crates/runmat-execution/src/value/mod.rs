@@ -50,6 +50,17 @@ impl ValuePayload {
         validation::validate(self, limits)
     }
 
+    /// Validate portable exception source ordinals against the exact selected
+    /// artifact map, including nested cells, structures, and callable captures.
+    /// A source-less artifact admits no source-bearing exception frame.
+    pub fn validate_for_program_sources(
+        &self,
+        limits: ValueLimits,
+        source_map: Option<&crate::ExecutableSourceMapV2>,
+    ) -> Result<(), ContractError> {
+        validation::validate_for_program_sources(self, limits, source_map)
+    }
+
     /// Durable-storage payloads may contain aggregate tags that
     /// the V2 execution transport deliberately rejects.
     pub fn validate_for_durable_storage(&self, limits: ValueLimits) -> Result<(), ContractError> {

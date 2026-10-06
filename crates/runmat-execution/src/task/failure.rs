@@ -78,6 +78,27 @@ impl ProgramRuntimeFailure {
         }
         Ok(())
     }
+
+    pub fn validate_for_program_sources(
+        &self,
+        source_map: Option<&crate::ExecutableSourceMapV2>,
+    ) -> Result<(), ContractError> {
+        self.validate()?;
+        let count = source_map.map_or(0, |map| map.entries.len());
+        if self.call_frames.iter().any(|frame| {
+            frame.program_source_id.is_some_and(|source| {
+                usize::try_from(source.0)
+                    .ok()
+                    .is_none_or(|ordinal| ordinal >= count)
+            })
+        }) {
+            return Err(ContractError::invalid(
+                "portable runtime failure source",
+                "source ordinal is absent from the selected artifact map",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
