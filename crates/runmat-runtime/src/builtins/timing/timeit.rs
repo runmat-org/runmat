@@ -294,6 +294,14 @@ fn prepare_callable(
                     ) {
                         closure.binding =
                             Some(crate::user_functions::bound_function_binding_for(function));
+                        closure.source_file = crate::user_functions::source_file_for(function);
+                        if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
+                            closure.source_role =
+                                crate::user_functions::source_function_for(function)
+                                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| {
+                                        info.role
+                                    });
+                        }
                     }
                 }
                 Value::Closure(closure)
