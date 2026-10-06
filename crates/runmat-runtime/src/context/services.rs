@@ -959,7 +959,7 @@ impl Default for RuntimeServicePorts {
             spmd: None,
             distributed: None,
             collective: None,
-            timing: Rc::new(super::timing::PlatformTimingService::new()),
+            timing: super::timing::platform_service(),
         }
     }
 }

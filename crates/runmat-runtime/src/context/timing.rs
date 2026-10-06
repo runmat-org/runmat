@@ -2,12 +2,14 @@
 
 mod platform;
 
-pub(super) use platform::PlatformTimingService;
-
 use super::RuntimeServiceFuture;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+pub(super) fn platform_service() -> std::rc::Rc<dyn RuntimeTimingService> {
+    std::rc::Rc::new(platform::PlatformTimingService::new())
+}
 
 static NEXT_STOPWATCH_TOKEN: AtomicU64 = AtomicU64::new(1);
 
