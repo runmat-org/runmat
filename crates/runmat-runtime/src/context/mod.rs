@@ -6,6 +6,7 @@
 
 mod capability;
 mod catch;
+mod local_tasks;
 mod preferences;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;
@@ -35,6 +36,13 @@ pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
+#[cfg(target_arch = "wasm32")]
+pub use local_tasks::BrowserLocalTaskSupervisor;
+#[cfg(not(target_arch = "wasm32"))]
+pub use local_tasks::RuntimeLocalTaskSupervisor;
+pub use local_tasks::{
+    RuntimeLocalTaskFuture, RuntimeLocalTaskLease, RuntimeLocalTaskOutcome, RuntimeLocalTaskService,
+};
 #[cfg(target_arch = "wasm32")]
 pub use preferences::BrowserPreferenceService;
 #[cfg(not(target_arch = "wasm32"))]

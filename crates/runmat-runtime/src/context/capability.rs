@@ -26,6 +26,7 @@ pub enum RuntimeCapability {
     Spmd,
     Distributed,
     Collective,
+    LocalTasks,
 }
 
 impl RuntimeCapability {
@@ -51,6 +52,7 @@ impl RuntimeCapability {
             Self::Spmd => "spmd",
             Self::Distributed => "distributed",
             Self::Collective => "collective",
+            Self::LocalTasks => "local_tasks",
         }
     }
 }

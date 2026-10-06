@@ -933,6 +933,7 @@ pub struct RuntimeServicePorts {
     distributed: Option<Rc<dyn RuntimeDistributedService>>,
     collective: Option<Rc<dyn RuntimeCollectiveService>>,
     timing: Rc<dyn RuntimeTimingService>,
+    local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
 }
 
 impl Default for RuntimeServicePorts {
@@ -960,6 +961,7 @@ impl Default for RuntimeServicePorts {
             distributed: None,
             collective: None,
             timing: super::timing::platform_service(),
+            local_tasks: None,
         }
     }
 }
@@ -991,6 +993,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("distributed", &self.distributed.is_some())
             .field("collective", &self.collective.is_some());
         debug.field("timing", &"installed");
+        debug.field("local_tasks", &self.local_tasks.is_some());
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
         debug.finish()
@@ -1020,6 +1023,24 @@ macro_rules! port_accessors {
 }
 
 impl RuntimeServicePorts {
+    pub fn with_local_tasks(mut self, service: Rc<dyn super::RuntimeLocalTaskService>) -> Self {
+        self.local_tasks = Some(service);
+        self
+    }
+
+    pub fn local_tasks(&self) -> Option<&Rc<dyn super::RuntimeLocalTaskService>> {
+        self.local_tasks.as_ref()
+    }
+
+    pub fn require_local_tasks(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn super::RuntimeLocalTaskService>, RuntimeCapabilityError> {
+        self.local_tasks
+            .as_ref()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::LocalTasks, operation))
+    }
+
     pub fn with_timing(mut self, service: Rc<dyn RuntimeTimingService>) -> Self {
         self.timing = service;
         self
@@ -1286,6 +1307,7 @@ mod tests {
             missing(ports.require_parallel("parfor")),
             missing(ports.require_distributed("distributed array")),
             missing(ports.require_collective("SPMD barrier")),
+            missing(ports.require_local_tasks("schedule callback")),
         ];
         assert_eq!(
             failures
@@ -1309,6 +1331,7 @@ mod tests {
                 RuntimeCapability::Parallel,
                 RuntimeCapability::Distributed,
                 RuntimeCapability::Collective,
+                RuntimeCapability::LocalTasks,
             ]
         );
         assert!(failures.iter().all(|failure| {
