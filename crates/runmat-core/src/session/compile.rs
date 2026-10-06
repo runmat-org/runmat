@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 #[path = "compile/program_sources.rs"]
 mod program_sources;
+use program_sources::identity::{executable_primary_access_path, executable_source_identity};
 
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
@@ -1478,114 +1479,6 @@ impl RunMatSession {
     }
 }
 
-fn executable_source_identity(
-    root: &crate::ExecutableSource,
-    handoff: Option<&runmat_package::FrozenProjectHandoff>,
-    root_full_path: Option<&str>,
-    display_name: &str,
-    full_path: Option<&str>,
-) -> Result<(String, String), String> {
-    let candidates = handoff
-        .map(|handoff| {
-            handoff
-                .project
-                .all_sources()
-                .map(|(descriptor, access)| {
-                    (
-                        descriptor.id.package_instance.to_string(),
-                        descriptor.id.relative_path.to_string(),
-                        access.to_string_lossy().replace('\\', "/"),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    executable_source_identity_from_candidates(
-        root,
-        root_full_path,
-        display_name,
-        full_path,
-        &candidates,
-    )
-}
-
-fn executable_source_identity_from_candidates(
-    root: &crate::ExecutableSource,
-    root_full_path: Option<&str>,
-    display_name: &str,
-    full_path: Option<&str>,
-    candidates: &[(String, String, String)],
-) -> Result<(String, String), String> {
-    let display = display_name.replace('\\', "/");
-    let root_relative = root.relative_path.replace('\\', "/");
-    let full = full_path.map(|path| path.replace('\\', "/"));
-    let root_full = root_full_path.map(|path| path.replace('\\', "/"));
-    if !candidates.is_empty() {
-        if let Some(full) = &full {
-            let mut exact = candidates.iter().filter(|(_, _, access)| access == full);
-            if let Some(identity) = exact.next() {
-                if exact.next().is_some() {
-                    return Err("source access path has more than one project owner".into());
-                }
-                return Ok((identity.0.clone(), identity.1.clone()));
-            }
-            if candidates
-                .iter()
-                .any(|(_, relative, _)| relative.replace('\\', "/") == display)
-            {
-                return Err("source path does not match captured project access authority".into());
-            }
-        }
-        if full.is_none() {
-            let mut relative = candidates
-                .iter()
-                .filter(|(_, relative, _)| relative.replace('\\', "/") == display);
-            if let Some(identity) = relative.next() {
-                if relative.next().is_some() {
-                    return Err("relative source path has more than one project owner".into());
-                }
-                return Ok((identity.0.clone(), identity.1.clone()));
-            }
-        }
-    }
-    if display == root_relative
-        && match (&full, &root_full) {
-            (None, _) => true,
-            (Some(full), Some(root_full)) => full == root_full,
-            (Some(full), None) => full == &root_relative,
-        }
-    {
-        return Ok((root.owner_identity.clone(), root.relative_path.clone()));
-    }
-    if display == root_relative {
-        return Err(
-            "source shares the primary relative path without matching access authority".into(),
-        );
-    }
-    Ok((root.owner_identity.clone(), display))
-}
-
-fn executable_primary_access_path(
-    root: &crate::ExecutableSource,
-    handoff: Option<&runmat_package::FrozenProjectHandoff>,
-) -> Result<Option<String>, String> {
-    let Some(handoff) = handoff else {
-        return Ok(None);
-    };
-    let mut matches = handoff.project.all_sources().filter(|(descriptor, _)| {
-        descriptor.id.package_instance.to_string() == root.owner_identity
-            && descriptor.id.relative_path.to_string().replace('\\', "/")
-                == root.relative_path.replace('\\', "/")
-    });
-    let first = matches
-        .next()
-        .ok_or_else(|| "primary source does not belong to the captured project".to_string())?;
-    if matches.next().is_some() {
-        return Err("primary source has ambiguous captured access authority".into());
-    }
-    Ok(Some(first.1.to_string_lossy().replace('\\', "/")))
-}
-
 fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
     let registry = bytecode.function_registry.clone();
     bind_semantic_callback_literals(bytecode, &registry);
@@ -1721,62 +1614,6 @@ fn callback_literal(
 mod source_discovery_tests {
     use super::*;
     use std::fs;
-
-    #[test]
-    fn source_identity_uses_exact_access_not_primary_filename_suffix() {
-        let root = crate::ExecutableSource::new("root", "foo.m", "x = 1;");
-        let candidates = vec![
-            ("root".into(), "foo.m".into(), "/root/foo.m".into()),
-            ("dependency".into(), "foo.m".into(), "/deps/foo.m".into()),
-        ];
-        assert_eq!(
-            executable_source_identity_from_candidates(
-                &root,
-                Some("/root/foo.m"),
-                "foo.m",
-                Some("/deps/foo.m"),
-                &candidates,
-            )
-            .unwrap(),
-            ("dependency".into(), "foo.m".into())
-        );
-        assert!(executable_source_identity_from_candidates(
-            &root,
-            Some("/root/foo.m"),
-            "foo.m",
-            Some("/unowned/foo.m"),
-            &candidates,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn source_identity_requires_unambiguous_package_owner_without_access_path() {
-        let root = crate::ExecutableSource::new("root", "main.m", "x = 1;");
-        let candidates = vec![
-            ("package-a".into(), "foo.m".into(), "/a/foo.m".into()),
-            ("package-b".into(), "foo.m".into(), "/b/foo.m".into()),
-        ];
-        assert!(executable_source_identity_from_candidates(
-            &root,
-            Some("/root/main.m"),
-            "foo.m",
-            None,
-            &candidates,
-        )
-        .is_err());
-        assert_eq!(
-            executable_source_identity_from_candidates(
-                &root,
-                Some("/root/main.m"),
-                "foo.m",
-                Some("/b/foo.m"),
-                &candidates,
-            )
-            .unwrap(),
-            ("package-b".into(), "foo.m".into())
-        );
-    }
 
     fn discovered_function_names(discovery: &CompanionSourceDiscovery) -> HashSet<String> {
         discovery

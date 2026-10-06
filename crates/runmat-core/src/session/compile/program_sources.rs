@@ -1,11 +1,14 @@
 use super::{
-    executable_source_identity, source_context_function_names_in_statements,
-    CompanionSourceDiscovery, SourceContextData,
+    source_context_function_names_in_statements, CompanionSourceDiscovery, SourceContextData,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use runmat_types::ProgramSourceId;
+
+#[path = "program_sources/identity.rs"]
+pub(super) mod identity;
+use identity::executable_source_identity;
 
 /// A retained definition may refer to an older generation at the same source
 /// location. The content revision is explicit; the original text remains in
