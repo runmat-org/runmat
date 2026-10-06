@@ -213,6 +213,14 @@ pub(crate) fn reconcile_workspace_frame(
             remove_workspace_name(frame, &name);
         }
         for (name, value) in values {
+            if frame
+                .state
+                .names
+                .get(&name)
+                .is_some_and(|slot| frame.global_aliases.binding_for_slot(*slot).is_some())
+            {
+                continue;
+            }
             set_workspace_variable_in_frame(frame, &name, value)?;
         }
         Ok(())

@@ -1289,18 +1289,21 @@ impl RunMatSession {
             .has_pending_changes()
             .map_err(RunError::Runtime)?
         {
-            let commit = workspace_projection.publish().map_err(RunError::Runtime)?;
-            for change in commit.changes().changes() {
-                match change.kind() {
-                    runmat_runtime::workspace::WorkspaceChangeKind::Assign => {
-                        if let (Some(name), Some(value)) = (change.name(), change.value()) {
-                            workspace_updates.push(workspace_entry(name, value));
-                        }
+            workspace_projection.publish().map_err(RunError::Runtime)?;
+        }
+        let published_changes = workspace_projection
+            .take_published_changes()
+            .map_err(RunError::Runtime)?;
+        for change in published_changes.changes() {
+            match change.kind() {
+                runmat_runtime::workspace::WorkspaceChangeKind::Assign => {
+                    if let (Some(name), Some(value)) = (change.name(), change.value()) {
+                        workspace_updates.push(workspace_entry(name, value));
                     }
-                    runmat_runtime::workspace::WorkspaceChangeKind::Remove
-                    | runmat_runtime::workspace::WorkspaceChangeKind::Clear => {
-                        workspace_snapshot_force_full = true;
-                    }
+                }
+                runmat_runtime::workspace::WorkspaceChangeKind::Remove
+                | runmat_runtime::workspace::WorkspaceChangeKind::Clear => {
+                    workspace_snapshot_force_full = true;
                 }
             }
         }
@@ -1388,8 +1391,11 @@ impl RunMatSession {
                 workspace_projection
                     .assign("ans", value.clone())
                     .map_err(RunError::Runtime)?;
-                let commit = workspace_projection.publish().map_err(RunError::Runtime)?;
-                for change in commit.changes().changes() {
+                workspace_projection.publish().map_err(RunError::Runtime)?;
+                let published_changes = workspace_projection
+                    .take_published_changes()
+                    .map_err(RunError::Runtime)?;
+                for change in published_changes.changes() {
                     if let (Some(name), Some(value)) = (change.name(), change.value()) {
                         workspace_updates.push(workspace_entry(name, value));
                     }

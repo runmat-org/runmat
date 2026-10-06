@@ -9493,6 +9493,23 @@ fn global_statement_uses_semantic_vm() {
 }
 
 #[test]
+fn global_alias_survives_base_workspace_reconciliation_at_reentry() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(&mut session, "g = 1;").expect("seed same-named base binding");
+
+    let outcome = execute_text_request(
+        &mut session,
+        "global g; g = 9; unrelated = 2; who; observed = g;",
+    )
+    .expect("global alias should remain authoritative across workspace reentry");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "observed",
+        &runmat_value::Value::Num(9.0)
+    ));
+}
+
+#[test]
 fn range_slice_uses_semantic_vm() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = "A = [1, 2, 3, 4]; B = A(2:3); y = B(2);";
@@ -11847,6 +11864,29 @@ fn top_level_error_preserves_prior_base_workspace_assignment() {
             .get("published_before_error"),
         Some(&runmat_value::Value::Num(73.0))
     );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "published_before_error",
+        &runmat_value::Value::Num(73.0)
+    ));
+}
+
+#[test]
+fn workspace_delta_includes_assignments_published_at_intermediate_effect_safepoints() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(&mut session, "before_effect = 1; who; after_effect = 2;")
+        .expect("workspace reads should not hide earlier assignments from the result delta");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "before_effect",
+        &runmat_value::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after_effect",
+        &runmat_value::Value::Num(2.0)
+    ));
 }
 
 #[test]

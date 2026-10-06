@@ -1,7 +1,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
-    rc::Rc,
+    rc::{Rc, Weak},
 };
 
 use runmat_hir::{EnvironmentEffect, WorkspaceEffect};
@@ -56,15 +56,19 @@ pub struct NativeWorkspaceSnapshot {
     pub values: BTreeMap<String, Value>,
 }
 
+struct NativeWorkspaceFrame {
+    values: RefCell<BTreeMap<String, RootedWorkspaceValue>>,
+    externally_mutated: Cell<bool>,
+    canonical_revision: Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>,
+    active: Cell<bool>,
+}
+
 pub(super) struct NativeWorkspaceState {
-    values: Rc<RefCell<BTreeMap<String, RootedWorkspaceValue>>>,
-    externally_mutated: Rc<Cell<bool>>,
+    frame: Rc<NativeWorkspaceFrame>,
     local_names: BTreeMap<usize, String>,
     publish: bool,
     global_aliases: FrameGlobalBindings,
     canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
-    canonical_revision: Rc<Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>>,
-    active: Rc<Cell<bool>>,
 }
 
 impl NativeWorkspaceState {
@@ -125,14 +129,16 @@ impl NativeWorkspaceState {
             .collect::<Result<_, _>>()
             .map_err(NativeExecutorError::Runtime)?;
         Ok(Self {
-            values: Rc::new(RefCell::new(values)),
-            externally_mutated: Rc::new(Cell::new(false)),
+            frame: Rc::new(NativeWorkspaceFrame {
+                values: RefCell::new(values),
+                externally_mutated: Cell::new(false),
+                canonical_revision: Cell::new(None),
+                active: Cell::new(true),
+            }),
             local_names,
             publish: true,
             global_aliases,
             canonical,
-            canonical_revision: Rc::new(Cell::new(None)),
-            active: Rc::new(Cell::new(true)),
         })
     }
 
@@ -148,41 +154,41 @@ impl NativeWorkspaceState {
             .filter_map(|local| local.name.clone().map(|name| (local.id.0 as usize, name)))
             .collect();
         Self {
-            values: Rc::new(RefCell::new(BTreeMap::new())),
-            externally_mutated: Rc::new(Cell::new(false)),
+            frame: Rc::new(NativeWorkspaceFrame {
+                values: RefCell::new(BTreeMap::new()),
+                externally_mutated: Cell::new(false),
+                canonical_revision: Cell::new(None),
+                active: Cell::new(true),
+            }),
             local_names,
             publish: false,
             global_aliases,
             canonical,
-            canonical_revision: Rc::new(Cell::new(None)),
-            active: Rc::new(Cell::new(true)),
         }
     }
 
     pub(super) fn service(&self) -> Rc<dyn RuntimeWorkspaceService> {
         Rc::new(NativeWorkspaceService {
-            values: Rc::clone(&self.values),
-            externally_mutated: Rc::clone(&self.externally_mutated),
+            frame: Rc::downgrade(&self.frame),
             global_aliases: self.global_aliases.clone(),
             local_names: self.local_names.clone(),
             canonical: self.canonical.clone(),
-            canonical_revision: Rc::clone(&self.canonical_revision),
-            active: Rc::clone(&self.active),
             publish: self.publish,
         })
     }
 
     pub(super) fn needs_reconciliation(&self) -> bool {
-        self.externally_mutated.get()
+        self.frame.externally_mutated.get()
     }
 
     pub(super) fn mark_reconciled(&self) {
-        self.externally_mutated.set(false);
+        self.frame.externally_mutated.set(false);
     }
 
     pub(super) fn initial_value(&self, slot: usize) -> Option<Value> {
         self.local_names.get(&slot).and_then(|name| {
-            self.values
+            self.frame
+                .values
                 .borrow()
                 .get(name)
                 .map(|entry| entry.value.clone())
@@ -195,6 +201,7 @@ impl NativeWorkspaceState {
         };
         let rooted = RootedWorkspaceValue::new(value).map_err(NativeExecutorError::Runtime)?;
         let mut values = self
+            .frame
             .values
             .try_borrow_mut()
             .map_err(workspace_borrow_error)?;
@@ -208,7 +215,8 @@ impl NativeWorkspaceState {
         if let Some(name) = self.local_names.get(&slot) {
             let rooted =
                 RootedWorkspaceValue::new(value.clone()).map_err(NativeExecutorError::Runtime)?;
-            self.values
+            self.frame
+                .values
                 .try_borrow_mut()
                 .map(drop)
                 .map_err(workspace_borrow_error)?;
@@ -219,11 +227,12 @@ impl NativeWorkspaceState {
                         .map_err(NativeExecutorError::Runtime)?;
                 } else {
                     canonical
-                        .ensure_effect_authority()
+                        .ensure_mutation_authority()
                         .map_err(NativeExecutorError::Runtime)?;
                 }
             }
             let mut values = self
+                .frame
                 .values
                 .try_borrow_mut()
                 .map_err(workspace_borrow_error)?;
@@ -235,7 +244,7 @@ impl NativeWorkspaceState {
     }
 
     pub(super) fn local_values(&self) -> Vec<(usize, Option<Value>)> {
-        let values = self.values.borrow();
+        let values = self.frame.values.borrow();
         self.local_names
             .iter()
             .map(|(slot, name)| (*slot, values.get(name).map(|entry| entry.value.clone())))
@@ -245,6 +254,7 @@ impl NativeWorkspaceState {
     pub(super) fn snapshot(&self) -> Option<NativeWorkspaceSnapshot> {
         self.publish.then(|| NativeWorkspaceSnapshot {
             values: self
+                .frame
                 .values
                 .borrow()
                 .iter()
@@ -256,7 +266,7 @@ impl NativeWorkspaceState {
 
 impl Drop for NativeWorkspaceState {
     fn drop(&mut self) {
-        self.active.set(false);
+        self.frame.active.set(false);
     }
 }
 
@@ -282,54 +292,68 @@ fn workspace_read_borrow_error(error: std::cell::BorrowError) -> runmat_runtime:
 }
 
 struct NativeWorkspaceService {
-    values: Rc<RefCell<BTreeMap<String, RootedWorkspaceValue>>>,
-    externally_mutated: Rc<Cell<bool>>,
+    frame: Weak<NativeWorkspaceFrame>,
     global_aliases: FrameGlobalBindings,
     local_names: BTreeMap<usize, String>,
     canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
-    canonical_revision: Rc<Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>>,
-    active: Rc<Cell<bool>>,
     publish: bool,
 }
 
 impl NativeWorkspaceService {
-    fn ensure_active(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        self.active
-            .get()
-            .then_some(())
-            .ok_or_else(native_workspace_closed)
+    fn frame(&self) -> Result<Rc<NativeWorkspaceFrame>, runmat_runtime::RuntimeError> {
+        let frame = self.frame.upgrade().ok_or_else(native_workspace_closed)?;
+        if !frame.active.get() {
+            return Err(native_workspace_closed());
+        }
+        Ok(frame)
     }
 }
 
 impl RuntimeWorkspaceService for NativeWorkspaceService {
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
-        self.active.get().then_some(())?;
-        for entry in self.values.try_borrow().ok()?.values() {
+        let frame = self.frame.upgrade()?;
+        frame.active.get().then_some(())?;
+        for entry in frame.values.try_borrow().ok()?.values() {
             visitor(&entry.value)?;
         }
         Some(())
     }
+
     fn lookup(&self, name: &str) -> Option<Value> {
-        self.active.get().then_some(())?;
-        self.values
-            .borrow()
+        let frame = self.frame.upgrade()?;
+        frame.active.get().then_some(())?;
+        frame
+            .values
+            .try_borrow()
+            .ok()?
             .get(name)
             .map(|entry| entry.value.clone())
     }
 
     fn snapshot(&self) -> Vec<(String, Value)> {
-        if !self.active.get() {
+        let Some(frame) = self.frame.upgrade() else {
+            return Vec::new();
+        };
+        if !frame.active.get() {
             return Vec::new();
         }
-        self.values
-            .borrow()
-            .iter()
-            .map(|(name, entry)| (name.clone(), entry.value.clone()))
-            .collect()
+        frame
+            .values
+            .try_borrow()
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|(name, entry)| (name.clone(), entry.value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn global_names(&self) -> Vec<String> {
-        if !self.active.get() {
+        let Some(frame) = self.frame.upgrade() else {
+            return Vec::new();
+        };
+        if !frame.active.get() {
             return Vec::new();
         }
         runmat_runtime::workspace::session::global_names()
@@ -337,7 +361,8 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
 
     fn try_lookup(&self, name: &str) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
-        let values = self
+        let frame = self.frame()?;
+        let values = frame
             .values
             .try_borrow()
             .map_err(workspace_read_borrow_error)?;
@@ -346,7 +371,8 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
 
     fn try_snapshot(&self) -> Result<Vec<(String, Value)>, runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
-        let values = self
+        let frame = self.frame()?;
+        let values = frame
             .values
             .try_borrow()
             .map_err(workspace_read_borrow_error)?;
@@ -362,22 +388,22 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn ensure_effect_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        self.ensure_active()?;
+        let frame = self.frame()?;
         if let Some(canonical) = self.canonical.as_ref() {
             canonical.ensure_effect_authority()?;
             if !self.publish {
                 return Ok(());
             }
             let revision = canonical.workspace_revision()?;
-            if revision.is_some() && revision == self.canonical_revision.get() {
+            if revision.is_some() && revision == frame.canonical_revision.get() {
                 return Ok(());
             }
             let canonical_values = canonical.try_snapshot()?;
             let global_values = {
-                let values = self
+                let values = frame
                     .values
                     .try_borrow()
-                    .map_err(|error| workspace_read_borrow_error(error))?;
+                    .map_err(workspace_read_borrow_error)?;
                 self.local_names
                     .iter()
                     .filter(|(slot, name)| self.global_aliases.is_bound(**slot, name))
@@ -397,15 +423,23 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
                         .map_err(|error| *error)
                 })
                 .collect::<Result<BTreeMap<_, _>, _>>()?;
-            let mut values = self
+            let mut values = frame
                 .values
                 .try_borrow_mut()
                 .map_err(workspace_borrow_error)?;
             let previous = std::mem::replace(&mut *values, refreshed);
             drop(values);
-            self.externally_mutated.set(true);
-            self.canonical_revision.set(revision);
+            frame.externally_mutated.set(true);
+            frame.canonical_revision.set(revision);
             drop(previous);
+        }
+        Ok(())
+    }
+
+    fn ensure_mutation_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
+        self.frame()?;
+        if let Some(canonical) = self.canonical.as_ref() {
+            canonical.ensure_mutation_authority()?;
         }
         Ok(())
     }
@@ -415,7 +449,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, runmat_runtime::RuntimeError>
     {
         self.ensure_effect_authority()?;
-        Ok(self.canonical_revision.get())
+        Ok(self.frame()?.canonical_revision.get())
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), runmat_runtime::RuntimeError> {
@@ -426,7 +460,9 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .any(|(slot, local)| local == name && self.global_aliases.is_bound(*slot, name));
         let global_value = publish_global.then(|| value.clone());
         let rooted = RootedWorkspaceValue::new(value).map_err(|error| *error)?;
-        self.values
+        let frame = self.frame()?;
+        frame
+            .values
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
@@ -435,7 +471,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
                 canonical.assign(name, rooted.value.clone())?;
             }
         }
-        let mut values = self
+        let mut values = frame
             .values
             .try_borrow_mut()
             .map_err(workspace_borrow_error)?;
@@ -444,14 +480,16 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         if let Some(value) = global_value {
             runmat_runtime::workspace::session::store_global_named(name, value);
         }
-        self.externally_mutated.set(true);
+        frame.externally_mutated.set(true);
         drop(previous);
         Ok(())
     }
 
     fn clear(&self) -> Result<(), runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
-        self.values
+        let frame = self.frame()?;
+        frame
+            .values
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
@@ -460,13 +498,13 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
                 canonical.clear()?;
             }
         }
-        let mut values = self
+        let mut values = frame
             .values
             .try_borrow_mut()
             .map_err(workspace_borrow_error)?;
         let previous = std::mem::take(&mut *values);
         drop(values);
-        self.externally_mutated.set(true);
+        frame.externally_mutated.set(true);
         self.global_aliases.unbind_all();
         drop(previous);
         Ok(())
@@ -474,7 +512,9 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
 
     fn remove(&self, name: &str) -> Result<(), runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
-        self.values
+        let frame = self.frame()?;
+        frame
+            .values
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
@@ -483,13 +523,13 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
                 canonical.remove(name)?;
             }
         }
-        let mut values = self
+        let mut values = frame
             .values
             .try_borrow_mut()
             .map_err(workspace_borrow_error)?;
         let previous = values.remove(name);
         drop(values);
-        self.externally_mutated.set(true);
+        frame.externally_mutated.set(true);
         self.global_aliases.unbind_name(name);
         drop(previous);
         Ok(())

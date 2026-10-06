@@ -46,7 +46,7 @@ fn handle_value(handle: runmat_gc::GcHandle) -> Value {
 }
 
 #[test]
-fn assigned_unmapped_value_survives_suspension_and_service_outlives_state() {
+fn assigned_unmapped_value_survives_suspension_and_state_drop_releases_roots() {
     runmat_gc::gc_test_context(|| {
         let state = workspace(BTreeMap::new());
         let service = state.service();
@@ -82,15 +82,12 @@ fn assigned_unmapped_value_survives_suspension_and_service_outlives_state() {
         drop(state);
         runmat_gc::gc_collect_major().unwrap();
         assert!(
-            runmat_gc::gc_clone_value(&handle).is_ok(),
-            "service retains storage and roots"
-        );
-        drop(service);
-        runmat_gc::gc_collect_major().unwrap();
-        assert!(
             runmat_gc::gc_clone_value(&handle).is_err(),
-            "last service drop releases roots"
+            "executor owner drop releases frame roots even while a stale service remains"
         );
+        let error = service.try_lookup("unmapped").unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:Workspace:FrameClosed"));
+        drop(service);
     });
 }
 
@@ -140,7 +137,7 @@ fn reentrant_mutation_is_structured_and_gc_never_borrows_workspace_storage() {
         let state = workspace(BTreeMap::from([("retained".into(), handle_value(handle))]));
         let service = state.service();
         allocation.unroot().unwrap();
-        let borrow = state.values.borrow_mut();
+        let borrow = state.frame.values.borrow_mut();
         runmat_gc::gc_collect_major().unwrap();
         assert!(
             runmat_gc::gc_clone_value(&handle).is_ok(),

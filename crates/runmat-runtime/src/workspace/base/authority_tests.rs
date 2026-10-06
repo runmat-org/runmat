@@ -8,7 +8,8 @@ use crate::context::{
 use crate::execution::RuntimeExecutionService;
 
 use super::{
-    BaseWorkspaceOwner, BaseWorkspaceProjectionService, BaseWorkspaceService, WorkspaceRevision,
+    BaseWorkspaceOwner, BaseWorkspaceProjectionService, BaseWorkspaceService, WorkspaceChangeKind,
+    WorkspaceRevision,
 };
 
 #[derive(Debug, Default)]
@@ -134,6 +135,36 @@ fn projection_service_stages_ordered_changes_until_a_safepoint() {
     assert_eq!(receipt.change_count(), 2);
     assert_eq!(owner.lookup("discarded").unwrap(), None);
     assert_eq!(owner.lookup("kept").unwrap(), Some(Value::Num(2.0)));
+}
+
+#[test]
+fn projection_service_coalesces_effects_across_publication_safepoints() {
+    let owner = BaseWorkspaceOwner::new();
+    let service = BaseWorkspaceProjectionService::new(owner.begin_projection().unwrap());
+
+    service.assign("x", Value::Num(1.0)).unwrap();
+    service.ensure_effect_authority().unwrap();
+    service.assign("y", Value::Num(2.0)).unwrap();
+    service.publish().unwrap();
+
+    let effect = service.take_published_changes().unwrap();
+    assert_eq!(effect.len(), 2);
+    assert_eq!(effect.changes()[0].name(), Some("x"));
+    assert_eq!(effect.changes()[0].value(), Some(&Value::Num(1.0)));
+    assert_eq!(effect.changes()[1].name(), Some("y"));
+    assert_eq!(effect.changes()[1].value(), Some(&Value::Num(2.0)));
+    assert!(service.take_published_changes().unwrap().is_empty());
+
+    service.assign("discarded", Value::Num(3.0)).unwrap();
+    service.publish().unwrap();
+    service.clear().unwrap();
+    service.assign("kept", Value::Num(4.0)).unwrap();
+    service.publish().unwrap();
+    let effect = service.take_published_changes().unwrap();
+    assert_eq!(effect.len(), 2);
+    assert_eq!(effect.changes()[0].kind(), WorkspaceChangeKind::Clear);
+    assert_eq!(effect.changes()[1].name(), Some("kept"));
+    assert_eq!(effect.changes()[1].value(), Some(&Value::Num(4.0)));
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use runmat_value::Value;
@@ -8,7 +9,8 @@ use crate::RuntimeError;
 
 use super::{
     base_workspace_error_to_runtime, BaseWorkspaceCommit, BaseWorkspaceError,
-    BaseWorkspaceProjection, BaseWorkspaceReconciliation, WorkspaceRevision,
+    BaseWorkspaceProjection, BaseWorkspaceReconciliation, WorkspaceChange, WorkspaceDelta,
+    WorkspaceRevision,
 };
 
 /// Exact current-workspace authority for one admitted executor invocation.
@@ -20,12 +22,48 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceProjectionService {
     projection: Rc<RefCell<BaseWorkspaceProjection>>,
+    published_effect: Rc<RefCell<PublishedWorkspaceEffect>>,
+}
+
+#[derive(Debug, Default)]
+struct PublishedWorkspaceEffect {
+    cleared: bool,
+    changes: BTreeMap<String, WorkspaceChange>,
+}
+
+impl PublishedWorkspaceEffect {
+    fn observe(&mut self, delta: &WorkspaceDelta) {
+        for change in delta.changes() {
+            match change.kind() {
+                super::WorkspaceChangeKind::Clear => {
+                    self.cleared = true;
+                    self.changes.clear();
+                }
+                super::WorkspaceChangeKind::Assign | super::WorkspaceChangeKind::Remove => {
+                    if let Some(name) = change.name() {
+                        self.changes.insert(name.to_string(), change.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    fn take(&mut self) -> WorkspaceDelta {
+        let mut changes = Vec::with_capacity(self.changes.len() + usize::from(self.cleared));
+        if self.cleared {
+            changes.push(WorkspaceChange::clear());
+        }
+        changes.extend(std::mem::take(&mut self.changes).into_values());
+        self.cleared = false;
+        WorkspaceDelta::from_changes(changes)
+    }
 }
 
 impl BaseWorkspaceProjectionService {
     pub fn new(projection: BaseWorkspaceProjection) -> Self {
         Self {
             projection: Rc::new(RefCell::new(projection)),
+            published_effect: Rc::new(RefCell::new(PublishedWorkspaceEffect::default())),
         }
     }
 
@@ -64,9 +102,26 @@ impl BaseWorkspaceProjectionService {
 
     /// Publish all ordered mutations admitted since the preceding safepoint.
     pub fn publish(&self) -> Result<BaseWorkspaceCommit, RuntimeError> {
-        self.borrow_mut()?
+        let mut published_effect = self
+            .published_effect
+            .try_borrow_mut()
+            .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
+        let commit = self
+            .borrow_mut()?
             .publish()
-            .map_err(base_workspace_error_to_runtime)
+            .map_err(base_workspace_error_to_runtime)?;
+        published_effect.observe(commit.changes());
+        Ok(commit)
+    }
+
+    /// Drain the canonical effects published by this invocation, including
+    /// commits made at intermediate effect safepoints.
+    pub fn take_published_changes(&self) -> Result<WorkspaceDelta, RuntimeError> {
+        let mut published_effect = self
+            .published_effect
+            .try_borrow_mut()
+            .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
+        Ok(published_effect.take())
     }
 
     /// Refresh a clean invocation projection from canonical session state.
@@ -180,6 +235,12 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
         BaseWorkspaceProjectionService::ensure_effect_authority(self)
+    }
+
+    fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
+        self.borrow()?
+            .ensure_effect_authority()
+            .map_err(base_workspace_error_to_runtime)
     }
 
     fn workspace_revision(&self) -> Result<Option<WorkspaceRevision>, RuntimeError> {
