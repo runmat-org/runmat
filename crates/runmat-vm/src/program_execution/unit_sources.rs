@@ -65,27 +65,37 @@ fn validate_function_components(
     revision: &runmat_execution::ProgramRevision,
     registry: &FunctionRegistry,
 ) -> Result<(), String> {
-    for function in registry.functions.values() {
-        let expected_origin = runmat_execution::FunctionBindingOrigin::from_revision(
-            revision,
-            function.portable_function,
-        )
-        .map_err(|error| format!("worker rejected invalid function origin: {error}"))?;
-        if function.binding_origin != Some(expected_origin) {
-            return Err(
-                "worker rejected function binding origin outside its executable revision".into(),
-            );
+    for (key, function) in &registry.functions {
+        if *key != function.function {
+            return Err("worker rejected function registry key/body identity mismatch".into());
         }
-        let expected_file = function
-            .source_id
-            .and_then(BytecodeSourceRef::program)
-            .and_then(|ordinal| source_map.entries.get(usize::try_from(ordinal.0).ok()?))
-            .map(|source| source.relative_path.as_str());
-        if function.source_file.as_deref() != expected_file {
-            return Err(
-                "worker rejected function source path outside its validated source map".into(),
-            );
-        }
+        validate_function_component(source_map, revision, function)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_function_component(
+    source_map: &ExecutableSourceMapV2,
+    revision: &runmat_execution::ProgramRevision,
+    function: &crate::FunctionBytecode,
+) -> Result<(), String> {
+    let expected_origin = runmat_execution::FunctionBindingOrigin::from_revision(
+        revision,
+        function.portable_function,
+    )
+    .map_err(|error| format!("worker rejected invalid function origin: {error}"))?;
+    if function.binding_origin != Some(expected_origin) {
+        return Err(
+            "worker rejected function binding origin outside its executable revision".into(),
+        );
+    }
+    let expected_file = function
+        .source_id
+        .and_then(BytecodeSourceRef::program)
+        .and_then(|ordinal| source_map.entries.get(usize::try_from(ordinal.0).ok()?))
+        .map(|source| source.relative_path.as_str());
+    if function.source_file.as_deref() != expected_file {
+        return Err("worker rejected function source path outside its validated source map".into());
     }
     Ok(())
 }
@@ -157,5 +167,13 @@ mod tests {
         assert!(validate_function_components(&map, &revision, &wrong_origin)
             .unwrap_err()
             .contains("binding origin"));
+
+        let mut wrong_key = wrong_origin;
+        let mut body = wrong_key.functions.remove(&FunctionId(2)).unwrap();
+        body.binding_origin = Some(origin);
+        wrong_key.functions.insert(FunctionId(3), body);
+        assert!(validate_function_components(&map, &revision, &wrong_key)
+            .unwrap_err()
+            .contains("key/body"));
     }
 }
