@@ -88,7 +88,7 @@ pub struct RuntimeContext {
     execution: Rc<dyn RuntimeExecutionServices>,
     program_revision: Option<runmat_execution::ProgramRevision>,
     program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
-    source_current: Option<Rc<RefCell<Option<crate::source_context::SourceInfo>>>>,
+    source_current: Option<Rc<RefCell<crate::source_context::SourceCurrentProjection>>>,
     source_catalog_view: Option<Rc<RefCell<crate::source_context::SourceCatalogProjection>>>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
@@ -258,7 +258,9 @@ impl RuntimeContext {
     ) -> Result<Self, crate::source_context::ProgramSourceBindingError> {
         let binding = crate::source_context::bind_program_sources(&self, records)?;
         self.program_sources = Some(Rc::new(binding));
-        self.source_current = Some(Rc::new(RefCell::new(None)));
+        self.source_current = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCurrentProjection::new(None),
+        )));
         self.source_catalog_view = Some(Rc::new(RefCell::new(
             crate::source_context::SourceCatalogProjection::new(
                 self.state.source.borrow().catalog.clone(),
@@ -273,37 +275,56 @@ impl RuntimeContext {
         self.source_catalog_view.as_ref()
     }
 
+    pub(crate) fn same_source_projection_owner(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.state, &other.state)
+            && match (&self.program_sources, &other.program_sources) {
+                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+
     pub(super) fn with_poll_source_catalog(mut self) -> Self {
-        if self.source_current.is_none() {
-            let current = super::scope::active_runtime_context()
-                .filter(|active| Rc::ptr_eq(active.state(), &self.state))
-                .and_then(|active| {
-                    active
-                        .source_current()
-                        .map(|current| current.borrow().clone())
-                })
-                .unwrap_or_else(|| self.state.source.borrow().current.clone());
-            self.source_current = Some(Rc::new(RefCell::new(current)));
-        }
-        if self.source_catalog_view.is_none() {
-            let snapshot = super::scope::active_runtime_context()
-                .filter(|active| Rc::ptr_eq(active.state(), &self.state))
-                .and_then(|active| {
-                    active
-                        .source_catalog_view()
-                        .map(|view| view.borrow().snapshot_catalog())
-                })
-                .unwrap_or_else(|| self.state.source.borrow().catalog.clone());
-            self.source_catalog_view = Some(Rc::new(RefCell::new(
-                crate::source_context::SourceCatalogProjection::new(snapshot),
-            )));
-        }
+        let active = super::scope::active_runtime_context()
+            .filter(|active| active.same_source_projection_owner(&self));
+        let current = active
+            .as_ref()
+            .and_then(|active| {
+                active
+                    .source_current()
+                    .map(|current| current.borrow().snapshot())
+            })
+            .or_else(|| {
+                self.source_current
+                    .as_ref()
+                    .map(|current| current.borrow().snapshot())
+            })
+            .unwrap_or_else(|| self.state.source.borrow().current.clone());
+        self.source_current = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCurrentProjection::new(current),
+        )));
+        let snapshot = active
+            .as_ref()
+            .and_then(|active| {
+                active
+                    .source_catalog_view()
+                    .map(|view| view.borrow().snapshot_catalog())
+            })
+            .or_else(|| {
+                self.source_catalog_view
+                    .as_ref()
+                    .map(|view| view.borrow().snapshot_catalog())
+            })
+            .unwrap_or_else(|| self.state.source.borrow().catalog.clone());
+        self.source_catalog_view = Some(Rc::new(RefCell::new(
+            crate::source_context::SourceCatalogProjection::new(snapshot),
+        )));
         self
     }
 
     pub(crate) fn source_current(
         &self,
-    ) -> Option<&Rc<RefCell<Option<crate::source_context::SourceInfo>>>> {
+    ) -> Option<&Rc<RefCell<crate::source_context::SourceCurrentProjection>>> {
         self.source_current.as_ref()
     }
 
@@ -494,7 +515,9 @@ impl RuntimeContext {
             child.program_sources = Some(Rc::new(sources.fork_snapshot()));
         }
         if let Some(current) = &self.source_current {
-            child.source_current = Some(Rc::new(RefCell::new(current.borrow().clone())));
+            child.source_current = Some(Rc::new(RefCell::new(
+                crate::source_context::SourceCurrentProjection::new(current.borrow().snapshot()),
+            )));
         }
         if let Some(view) = &self.source_catalog_view {
             child.source_catalog_view = Some(Rc::new(RefCell::new(

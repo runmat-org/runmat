@@ -1,7 +1,7 @@
 use runmat_execution::identity::{Digest, DigestStream};
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::SourceId;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -12,6 +12,42 @@ pub struct SourceInfo {
     pub name: Arc<str>,
     pub fullpath_name: Option<Arc<str>>,
     pub text: Arc<str>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SourceCurrentProjection {
+    base: Option<SourceInfo>,
+    overlays: Vec<(Rc<Cell<bool>>, Option<SourceInfo>)>,
+}
+
+impl SourceCurrentProjection {
+    pub(crate) fn new(base: Option<SourceInfo>) -> Self {
+        Self {
+            base,
+            overlays: Vec::new(),
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> Option<SourceInfo> {
+        self.overlays
+            .iter()
+            .rev()
+            .find(|(live, _)| live.get())
+            .map_or_else(|| self.base.clone(), |(_, source)| source.clone())
+    }
+
+    fn push(&mut self, source: Option<SourceInfo>) -> Rc<Cell<bool>> {
+        let live = Rc::new(Cell::new(true));
+        self.overlays.push((Rc::clone(&live), source));
+        live
+    }
+
+    fn retire(&mut self, live: &Rc<Cell<bool>>) {
+        live.set(false);
+        while self.overlays.last().is_some_and(|(live, _)| !live.get()) {
+            self.overlays.pop();
+        }
+    }
 }
 
 /// Each async invocation owns this foreground view. A guard removes only its
@@ -327,15 +363,15 @@ runmat_thread_local! {
 
 pub struct SourceContextGuard {
     prev: Option<SourceInfo>,
-    invocation_current: Option<Rc<RefCell<Option<SourceInfo>>>>,
+    invocation_current: Option<(Rc<RefCell<SourceCurrentProjection>>, Rc<Cell<bool>>)>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for SourceContextGuard {
     fn drop(&mut self) {
         let prev = self.prev.take();
-        if let Some(current) = &self.invocation_current {
-            *current.borrow_mut() = prev;
+        if let Some((current, live)) = &self.invocation_current {
+            current.borrow_mut().retire(live);
         } else if let Some(state) = &self.state {
             state.source.borrow_mut().current = prev;
         } else {
@@ -442,10 +478,10 @@ pub fn replace_current_source_context(
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
             let current = Rc::clone(current);
-            let prev = std::mem::replace(&mut *current.borrow_mut(), next);
+            let live = current.borrow_mut().push(next);
             return SourceContextGuard {
-                prev,
-                invocation_current: Some(current),
+                prev: None,
+                invocation_current: Some((current, live)),
                 state: None,
             };
         }
@@ -498,12 +534,18 @@ pub fn replace_current_source_id_in_context(
     source_id: Option<SourceId>,
 ) -> SourceContextGuard {
     let next = source_id.and_then(|source_id| source_info_in_context(runtime, source_id));
-    if let Some(current) = runtime.source_current() {
+    let active = crate::context::legacy::active()
+        .filter(|active| active.same_source_projection_owner(runtime));
+    let current = active
+        .as_ref()
+        .and_then(crate::context::RuntimeContext::source_current)
+        .or_else(|| runtime.source_current());
+    if let Some(current) = current {
         let current = Rc::clone(current);
-        let prev = std::mem::replace(&mut *current.borrow_mut(), next);
+        let live = current.borrow_mut().push(next);
         SourceContextGuard {
-            prev,
-            invocation_current: Some(current),
+            prev: None,
+            invocation_current: Some((current, live)),
             state: None,
         }
     } else {
@@ -653,10 +695,7 @@ pub fn source_catalog_entries_with_fullpaths() -> Vec<(SourceId, String, Option<
 pub fn current_source() -> Option<Arc<str>> {
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
-            return current
-                .borrow()
-                .as_ref()
-                .map(|source| Arc::clone(&source.text));
+            return current.borrow().snapshot().map(|source| source.text);
         }
     }
     if let Some(state) = active_state() {
@@ -677,7 +716,7 @@ pub fn current_source() -> Option<Arc<str>> {
 pub fn current_source_info() -> Option<SourceInfo> {
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
-            return current.borrow().clone();
+            return current.borrow().snapshot();
         }
     }
     if let Some(state) = active_state() {
@@ -704,13 +743,12 @@ pub fn source_info_in_context(
     runtime: &crate::context::RuntimeContext,
     source_id: SourceId,
 ) -> Option<SourceInfo> {
-    let active = crate::context::legacy::active();
-    let catalog = runtime.source_catalog_view().or_else(|| {
-        active
-            .as_ref()
-            .filter(|active| Rc::ptr_eq(active.state(), runtime.state()))
-            .and_then(crate::context::RuntimeContext::source_catalog_view)
-    });
+    let active = crate::context::legacy::active()
+        .filter(|active| active.same_source_projection_owner(runtime));
+    let catalog = active
+        .as_ref()
+        .and_then(crate::context::RuntimeContext::source_catalog_view)
+        .or_else(|| runtime.source_catalog_view());
     let source = runtime.state().source.borrow();
     if let Some(catalog) = catalog {
         resolved_source_info(&source, catalog.borrow().current(), source_id)
@@ -918,6 +956,108 @@ mod lease_tests {
         drop(first_future);
         assert!(second_future.as_mut().poll(&mut cx).is_pending());
         drop(second_future);
+        assert!(current_source().is_none());
+    }
+
+    #[test]
+    fn sibling_futures_from_one_bound_program_keep_separate_source_views() {
+        let selected = runtime()
+            .with_program_sources([
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(0),
+                    name: Arc::from("primary.m"),
+                    fullpath_name: None,
+                    text: Arc::from("primary"),
+                },
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(1),
+                    name: Arc::from("helper.m"),
+                    fullpath_name: None,
+                    text: Arc::from("helper"),
+                },
+            ])
+            .unwrap();
+        let pending =
+            |ordinal: runmat_types::ProgramSourceId, imported: SourceId, expected: &'static str| {
+                let scoped = selected.clone();
+                selected.scope(async move {
+                    let source_id = scoped.program_source_id(ordinal).unwrap();
+                    let _source = replace_current_source_id_in_context(&scoped, Some(source_id));
+                    let _catalog =
+                        replace_source_catalog(vec![(imported, expected.into(), expected.into())])
+                            .expect("sibling catalog admission");
+                    std::future::poll_fn(|_| {
+                        assert_eq!(current_source().as_deref(), Some(expected));
+                        assert_eq!(source_info(imported).unwrap().text.as_ref(), expected);
+                        assert_eq!(
+                            source_info_in_context(&scoped, imported)
+                                .unwrap()
+                                .text
+                                .as_ref(),
+                            expected
+                        );
+                        Poll::<()>::Pending
+                    })
+                    .await;
+                })
+            };
+        let mut first = Box::pin(pending(
+            runmat_types::ProgramSourceId(0),
+            SourceId(31),
+            "first",
+        ));
+        let mut second = Box::pin(pending(
+            runmat_types::ProgramSourceId(1),
+            SourceId(32),
+            "second",
+        ));
+        let waker = std::task::Waker::from(Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        assert!(first.as_mut().poll(&mut cx).is_pending());
+        assert!(second.as_mut().poll(&mut cx).is_pending());
+        assert!(first.as_mut().poll(&mut cx).is_pending());
+        drop(first);
+        assert!(second.as_mut().poll(&mut cx).is_pending());
+        drop(second);
+        assert!(selected
+            .source_current()
+            .unwrap()
+            .borrow()
+            .snapshot()
+            .is_none());
+    }
+
+    #[test]
+    fn current_source_guard_out_of_order_drop_preserves_newer_source() {
+        let selected = runtime()
+            .with_program_sources([
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(0),
+                    name: Arc::from("first.m"),
+                    fullpath_name: None,
+                    text: Arc::from("first"),
+                },
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(1),
+                    name: Arc::from("second.m"),
+                    fullpath_name: None,
+                    text: Arc::from("second"),
+                },
+            ])
+            .unwrap();
+        let first_id = selected
+            .program_source_id(runmat_types::ProgramSourceId(0))
+            .unwrap();
+        let second_id = selected
+            .program_source_id(runmat_types::ProgramSourceId(1))
+            .unwrap();
+        let _scope = selected.enter();
+        let first = replace_current_source_id_in_context(&selected, Some(first_id));
+        let second = replace_current_source_id_in_context(&selected, Some(second_id));
+        assert_eq!(current_source().as_deref(), Some("second"));
+        drop(first);
+        assert_eq!(current_source().as_deref(), Some("second"));
+        drop(second);
         assert!(current_source().is_none());
     }
 
@@ -1168,6 +1308,7 @@ mod lease_tests {
                 .source_current()
                 .unwrap()
                 .borrow()
+                .snapshot()
                 .as_ref()
                 .unwrap()
                 .text
