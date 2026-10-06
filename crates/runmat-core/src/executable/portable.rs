@@ -238,6 +238,8 @@ impl ExecutableUnit {
         bytecode.bound_functions.clear();
         bytecode.function_registry = runmat_vm::FunctionRegistry::default();
         bytecode.layout = None;
+        bytecode.validate_portable_source_origins()?;
+        self.functions().validate_portable_source_origins()?;
         [
             (Kind::Mir, canonical_json(self.mir())?),
             (Kind::Analysis, canonical_json(self.analysis())?),

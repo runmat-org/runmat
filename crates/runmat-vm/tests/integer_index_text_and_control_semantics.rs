@@ -7,14 +7,12 @@ fn execute_source_with_catalog(
     source: &str,
 ) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).map_err(Box::new)?;
-    let source_id = bytecode.source_id.unwrap_or(runmat_hir::SourceId(0));
-    let _catalog = runmat_runtime::source_context::replace_source_catalog(vec![(
-        source_id,
-        "/tmp/integer_index_text_and_control_semantics.m".to_string(),
-        source.to_string(),
-    )])
-    .expect("source catalog admission");
-    test_helpers::interpret(&bytecode).map_err(Box::new)
+    test_helpers::interpret_with_program_source(
+        &bytecode,
+        "/tmp/integer_index_text_and_control_semantics.m",
+        source,
+    )
+    .map_err(Box::new)
 }
 
 #[test]

@@ -353,6 +353,7 @@ pub(crate) async fn invoke(
         .filter_map(|function| {
             function
                 .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::runtime)
                 .map(|source_id| user_functions::SourceFunctionInfo {
                     source_id,
                     name: function.display_name.clone(),

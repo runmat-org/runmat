@@ -1004,7 +1004,11 @@ impl RunMatSession {
                     .function_registry
                     .functions
                     .values()
-                    .filter_map(|function| function.source_id)
+                    .filter_map(|function| {
+                        function
+                            .source_id
+                            .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                    })
                     .collect::<HashSet<_>>();
                 for runtime_id in retained_ids {
                     let source = self.source_pool.get(runtime_id).ok_or_else(|| {
@@ -1054,7 +1058,7 @@ impl RunMatSession {
                 source_table
                     .function_sources
                     .iter()
-                    .map(|(name, id)| (name.clone(), SourceId(id.0 as usize))),
+                    .map(|(name, id)| (name.clone(), runmat_vm::BytecodeSourceRef::Program(*id))),
             );
             if !companion.statements.is_empty() {
                 ast.body.extend(
@@ -1139,7 +1143,8 @@ impl RunMatSession {
                 },
             )?);
         }
-        let compiled_source_id = SourceId(0);
+        let compiled_source_id =
+            runmat_vm::BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0));
         bytecode.source_id = Some(compiled_source_id);
         for function in bytecode.function_registry.functions.values_mut() {
             function.source_id = companion_function_source_ids
@@ -1247,13 +1252,12 @@ impl RunMatSession {
         if let Some(projection) = source_projection {
             execution_registry
                 .project_current_source_ids(|runtime| {
-                    projection.program_ordinal_in_registry(runtime)
+                    projection.program_ref_for_runtime_ref(runtime)
                 })
                 .map_err(|missing| {
                     RunError::Runtime(
                         build_runtime_error(format!(
-                            "retained source {} is absent from executable provenance",
-                            missing.0
+                            "retained source {missing:?} is absent from executable provenance"
                         ))
                         .with_identifier("RunMat:ExecutableSourceIdentity")
                         .build(),
@@ -1320,10 +1324,11 @@ impl RunMatSession {
                 continue;
             }
             if let Some(existing_id) = session_registry.resolve_name(&function.display_name) {
-                if let Some(source_id) = session_registry
-                    .get(existing_id)
-                    .and_then(|existing| existing.source_id)
-                {
+                if let Some(source_id) = session_registry.get(existing_id).and_then(|existing| {
+                    existing
+                        .source_id
+                        .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                }) {
                     if !replaced_sources.contains(&source_id) {
                         replaced_sources.push(source_id);
                     }
@@ -1353,7 +1358,7 @@ impl RunMatSession {
             if persist_function {
                 if let Some(projection) = source_projection {
                     if let Some(program) = function.source_id {
-                        let runtime = projection.runtime_from_registry_ordinal(program).ok_or_else(|| {
+                        let runtime = projection.runtime_ref_for_program_ref(program).ok_or_else(|| {
                             RunError::Runtime(
                                 build_runtime_error("published function source is absent from executable provenance")
                                     .with_identifier("RunMat:ExecutableSourceIdentity")

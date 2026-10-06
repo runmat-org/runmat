@@ -69,6 +69,45 @@ fn current_script_and_program_envelopes_round_trip() {
 }
 
 #[test]
+fn portable_artifacts_reject_session_source_references_on_encode_and_import() {
+    use crate::BytecodeSourceRef;
+    use runmat_types::SourceId;
+
+    let mut bytecode = Bytecode::with_instructions(vec![Instr::Return], 0);
+    bytecode.source_id = Some(BytecodeSourceRef::Runtime(SourceId(usize::MAX - 1)));
+    assert!(encode_interpreter_script_v2(&bytecode).is_err());
+    let forged = super::envelope::encode_payload(
+        InterpreterPayloadForm::ScriptV2,
+        SCRIPT_V2_PREAMBLE,
+        &[("bytecode", BYTECODE_SCHEMA_VERSION)],
+        &bytecode,
+    )
+    .expect("canonical forged transport");
+    assert!(decode_interpreter_script_v2(&forged).is_err());
+
+    let registry = FunctionRegistry::new(HashMap::from([(
+        FunctionId(1),
+        FunctionBytecode {
+            function: FunctionId(1),
+            source_id: bytecode.source_id,
+            ..Default::default()
+        },
+    )]));
+    assert!(encode_interpreter_program_v2(&registry).is_err());
+    let forged = super::envelope::encode_payload(
+        InterpreterPayloadForm::ProgramV2,
+        b"runmat-interpreter-program-v2\n",
+        &[
+            ("bytecode", BYTECODE_SCHEMA_VERSION),
+            ("function_registry", FUNCTION_REGISTRY_SCHEMA_VERSION),
+        ],
+        &registry,
+    )
+    .expect("canonical forged registry transport");
+    assert!(decode_interpreter_program_v2(&forged).is_err());
+}
+
+#[test]
 fn frozen_stale_and_legacy_payloads_are_rejected() {
     let script = include_bytes!("../../../tests/fixtures/interpreter-script-bytecode-6.artifact");
     assert!(matches!(

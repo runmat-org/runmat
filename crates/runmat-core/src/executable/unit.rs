@@ -55,12 +55,12 @@ impl ExecutableUnit {
 
     fn runtime_source_id(
         runtime: &runmat_runtime::context::RuntimeContext,
-        source: runmat_types::SourceId,
-    ) -> Option<runmat_types::SourceId> {
-        let ordinal = u32::try_from(source.0)
-            .ok()
-            .map(runmat_types::ProgramSourceId)?;
-        runtime.program_source_id(ordinal)
+        source: runmat_vm::BytecodeSourceRef,
+    ) -> Option<runmat_vm::BytecodeSourceRef> {
+        let ordinal = source.program()?;
+        runtime
+            .program_source_id(ordinal)
+            .map(runmat_vm::BytecodeSourceRef::Runtime)
     }
 
     pub(crate) fn runtime_bytecode(
@@ -72,23 +72,31 @@ impl ExecutableUnit {
             .source_id
             .map(|source| {
                 Self::runtime_source_id(runtime, source)
-                    .ok_or_else(|| format!("entrypoint source ordinal {} is absent", source.0))
+                    .ok_or_else(|| format!("entrypoint source {source:?} is absent"))
             })
             .transpose()?;
-        bytecode
-            .function_registry
-            .project_current_source_ids(|source| Self::runtime_source_id(runtime, source))
-            .map_err(|source| format!("function source ordinal {} is absent", source.0))?;
+        bytecode.function_registry = self.runtime_functions(runtime)?;
         for body in bytecode.bound_functions.values_mut() {
             body.source_id = body
                 .source_id
                 .map(|source| {
                     Self::runtime_source_id(runtime, source)
-                        .ok_or_else(|| format!("bound source ordinal {} is absent", source.0))
+                        .ok_or_else(|| format!("bound source {source:?} is absent"))
                 })
                 .transpose()?;
         }
         Ok(bytecode)
+    }
+
+    pub(crate) fn runtime_functions(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_vm::FunctionRegistry, String> {
+        let mut functions = self.functions().clone();
+        functions
+            .project_current_source_ids(|source| Self::runtime_source_id(runtime, source))
+            .map_err(|source| format!("function source {source:?} is absent"))?;
+        Ok(functions)
     }
 
     pub(crate) fn new(
@@ -101,17 +109,22 @@ impl ExecutableUnit {
     ) -> Result<Self, String> {
         source_map.validate_content_revisions()?;
         let source_count = source_map.entries().len();
-        if bytecode
-            .source_id
-            .is_some_and(|source| source.0 >= source_count)
-            || bytecode.function_registry.functions.values().any(|body| {
-                body.source_id
-                    .is_some_and(|source| source.0 >= source_count)
-            })
-            || bytecode.bound_functions.values().any(|body| {
-                body.source_id
-                    .is_some_and(|source| source.0 >= source_count)
-            })
+        let outside = |source: runmat_vm::BytecodeSourceRef| {
+            source
+                .program()
+                .and_then(|ordinal| usize::try_from(ordinal.0).ok())
+                .is_none_or(|ordinal| ordinal >= source_count)
+        };
+        if bytecode.source_id.is_some_and(outside)
+            || bytecode
+                .function_registry
+                .functions
+                .values()
+                .any(|body| body.source_id.is_some_and(outside))
+            || bytecode
+                .bound_functions
+                .values()
+                .any(|body| body.source_id.is_some_and(outside))
             || mir
                 .functions
                 .values()

@@ -19,6 +19,7 @@ use std::sync::OnceLock;
 use super::{
     parallel::{BytecodeParforRegion, BytecodeSpmdRegion},
     region::BytecodeRegion,
+    source_ref::BytecodeSourceRef,
 };
 
 #[path = "program/definition_dependencies.rs"]
@@ -72,7 +73,7 @@ pub struct FunctionBytecode {
     #[serde(default)]
     pub private_owner_scope: String,
     #[serde(default)]
-    pub source_id: Option<runmat_hir::SourceId>,
+    pub source_id: Option<BytecodeSourceRef>,
     /// Original display file attached by the publishing source-map owner.
     /// Retired callable values never reconstruct it from a reused SourceId.
     #[serde(default)]
@@ -280,8 +281,8 @@ pub struct FunctionRegistryData {
     pub functions: HashMap<FunctionId, FunctionBytecode>,
     #[serde(default)]
     pub names: HashMap<String, FunctionId>,
-    #[serde(default)]
-    pub source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>>,
+    #[serde(skip)]
+    pub source_functions: HashMap<BytecodeSourceRef, Vec<FunctionId>>,
     /// Session-only old bodies that have live callable leases. They are never
     /// name-resolvable or serialized into a portable executable artifact.
     #[serde(skip)]
@@ -315,22 +316,49 @@ impl Serialize for FunctionRegistry {
 
 impl<'de> Deserialize<'de> for FunctionRegistry {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        FunctionRegistryData::deserialize(deserializer).map(|data| Self {
-            data: std::sync::Arc::new(data),
-            static_overlay: None,
+        FunctionRegistryData::deserialize(deserializer).map(|mut data| {
+            data.source_functions = source_index(&data.functions);
+            Self {
+                data: std::sync::Arc::new(data),
+                static_overlay: None,
+            }
         })
     }
 }
 
+fn source_index(
+    functions: &HashMap<FunctionId, FunctionBytecode>,
+) -> HashMap<BytecodeSourceRef, Vec<FunctionId>> {
+    let mut index: HashMap<BytecodeSourceRef, Vec<FunctionId>> = HashMap::new();
+    let mut ids = functions.keys().copied().collect::<Vec<_>>();
+    ids.sort_by_key(|id| id.0);
+    for id in ids {
+        if let Some(source) = functions[&id].source_id {
+            index.entry(source).or_default().push(id);
+        }
+    }
+    index
+}
+
 impl FunctionRegistry {
+    pub fn validate_portable_source_origins(&self) -> Result<(), &'static str> {
+        if self.functions.values().any(|body| {
+            body.source_id
+                .is_some_and(|source| !matches!(source, BytecodeSourceRef::Program(_)))
+        }) {
+            return Err("portable function registry contains a session source identity");
+        }
+        Ok(())
+    }
+
     /// Project current definitions into a different source-ID domain without
     /// changing names, definition owners, or retained old bodies. Validation
     /// completes before any mutation, so a missing mapping leaves the registry
     /// and its source index untouched.
     pub fn project_current_source_ids(
         &mut self,
-        mut project: impl FnMut(runmat_hir::SourceId) -> Option<runmat_hir::SourceId>,
-    ) -> Result<(), runmat_hir::SourceId> {
+        mut project: impl FnMut(BytecodeSourceRef) -> Option<BytecodeSourceRef>,
+    ) -> Result<(), BytecodeSourceRef> {
         let projected = self
             .functions
             .iter()
@@ -372,7 +400,7 @@ impl FunctionRegistry {
 
     pub fn new(functions: HashMap<FunctionId, FunctionBytecode>) -> Self {
         let mut names = HashMap::new();
-        let mut source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>> = HashMap::new();
+        let mut source_functions: HashMap<BytecodeSourceRef, Vec<FunctionId>> = HashMap::new();
         let mut ids: Vec<_> = functions.keys().copied().collect();
         ids.sort_by_key(|id| id.0);
         for id in ids {
@@ -535,6 +563,7 @@ impl FunctionRegistry {
     /// Enumerate only definitions selected by the current execution owner.
     /// A retained overlay never falls back to later published source members.
     pub fn execution_source_group(&self, source: runmat_hir::SourceId) -> Vec<&FunctionBytecode> {
+        let source = BytecodeSourceRef::Runtime(source);
         let mut bodies = Vec::new();
         if let Some(overlay) = &self.static_overlay {
             if let runmat_value::BoundFunctionAuthority::Local {
@@ -552,7 +581,12 @@ impl FunctionRegistry {
                 }
             }
         } else {
-            for id in self.functions_for_source(source) {
+            for id in self
+                .source_functions
+                .get(&source)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+            {
                 if let Some(body) = self.get_current(*id) {
                     bodies.push(body);
                 }
@@ -649,6 +683,7 @@ impl FunctionRegistry {
     }
 
     pub fn remove_source(&mut self, source: runmat_hir::SourceId) -> Vec<FunctionBytecode> {
+        let source = BytecodeSourceRef::Runtime(source);
         self.execution_stacks.take();
         let ids = self.source_functions.remove(&source).unwrap_or_default();
         let mut removed = Vec::new();
@@ -661,6 +696,10 @@ impl FunctionRegistry {
     }
 
     pub fn functions_for_source(&self, source: runmat_hir::SourceId) -> &[FunctionId] {
+        self.functions_for_source_ref(BytecodeSourceRef::Runtime(source))
+    }
+
+    pub fn functions_for_source_ref(&self, source: BytecodeSourceRef) -> &[FunctionId] {
         self.source_functions
             .get(&source)
             .map(Vec::as_slice)
@@ -1091,7 +1130,7 @@ pub struct Bytecode {
     #[serde(default)]
     pub coverage_sites: Vec<Vec<u64>>,
     #[serde(default)]
-    pub source_id: Option<runmat_hir::SourceId>,
+    pub source_id: Option<BytecodeSourceRef>,
     pub var_count: usize,
     #[serde(default)]
     pub bound_functions: HashMap<FunctionId, FunctionBytecode>,
@@ -1231,6 +1270,20 @@ impl RuntimeAccelGraphSource {
 }
 
 impl Bytecode {
+    pub fn validate_portable_source_origins(&self) -> Result<(), &'static str> {
+        if self
+            .source_id
+            .is_some_and(|source| !matches!(source, BytecodeSourceRef::Program(_)))
+            || self.bound_functions.values().any(|body| {
+                body.source_id
+                    .is_some_and(|source| !matches!(source, BytecodeSourceRef::Program(_)))
+            })
+        {
+            return Err("portable bytecode contains a session source identity");
+        }
+        self.function_registry.validate_portable_source_origins()
+    }
+
     pub(crate) fn validate_catch_scope_metadata(&self) -> Result<(), String> {
         validate_catch_scope_metadata(&self.instructions, &self.catch_scopes)
     }

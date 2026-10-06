@@ -58,7 +58,7 @@ fn source_fact(
     definition_owners: Option<runmat_runtime::user_functions::DefinitionOwnerGraph>,
 ) -> Option<runmat_runtime::user_functions::SourceFunctionInfo> {
     Some(runmat_runtime::user_functions::SourceFunctionInfo {
-        source_id: body.source_id?,
+        source_id: body.source_id?.runtime()?,
         name: body.display_name.clone(),
         function: body.function.0,
         role: body.source_role,

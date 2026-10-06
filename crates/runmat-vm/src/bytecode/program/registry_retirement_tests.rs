@@ -1,4 +1,4 @@
-use super::{FunctionBytecode, FunctionRegistry};
+use super::{BytecodeSourceRef, FunctionBytecode, FunctionRegistry};
 use runmat_hir::{FunctionId, SourceId};
 use std::collections::HashMap;
 
@@ -6,7 +6,7 @@ fn function(id: usize, name: &str, source: usize) -> FunctionBytecode {
     FunctionBytecode {
         function: FunctionId(id),
         display_name: name.into(),
-        source_id: Some(SourceId(source)),
+        source_id: Some(BytecodeSourceRef::Runtime(SourceId(source))),
         ..Default::default()
     }
 }
@@ -26,21 +26,26 @@ fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomicall
     let unchanged = registry.clone();
     assert_eq!(
         registry.project_current_source_ids(|source| {
-            (source == SourceId(5)).then_some(SourceId(1))
+            (source == BytecodeSourceRef::Runtime(SourceId(5)))
+                .then_some(BytecodeSourceRef::Runtime(SourceId(1)))
         }),
-        Err(SourceId(6))
+        Err(BytecodeSourceRef::Runtime(SourceId(6)))
     );
     assert_eq!(registry.source_functions, unchanged.source_functions);
     assert_eq!(registry.names, unchanged.names);
     assert_eq!(
         registry.get(FunctionId(3)).unwrap().source_id,
-        Some(SourceId(6))
+        Some(BytecodeSourceRef::Runtime(SourceId(6)))
     );
 
     registry
         .project_current_source_ids(|source| match source {
-            SourceId(5) => Some(SourceId(1)),
-            SourceId(6) => Some(SourceId(2)),
+            BytecodeSourceRef::Runtime(SourceId(5)) => {
+                Some(BytecodeSourceRef::Runtime(SourceId(1)))
+            }
+            BytecodeSourceRef::Runtime(SourceId(6)) => {
+                Some(BytecodeSourceRef::Runtime(SourceId(2)))
+            }
             _ => None,
         })
         .unwrap();
@@ -51,6 +56,39 @@ fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomicall
     );
     assert_eq!(registry.functions_for_source(SourceId(2)), &[FunctionId(3)]);
     assert!(registry.functions_for_source(SourceId(5)).is_empty());
+}
+
+#[test]
+fn mixed_retained_runtime_and_program_sources_project_without_losing_old_owner() {
+    let mut program = function(1, "program", 0);
+    program.source_id = Some(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)));
+    let retained = function(2, "retained", 7);
+    let mut registry = FunctionRegistry::new(HashMap::from([
+        (FunctionId(1), program),
+        (FunctionId(2), retained),
+    ]));
+    let before = registry.source_functions.clone();
+    assert_eq!(
+        registry.project_current_source_ids(|source| match source {
+            BytecodeSourceRef::Program(_) => None,
+            runtime => Some(runtime),
+        }),
+        Err(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)))
+    );
+    assert_eq!(registry.source_functions, before);
+    registry
+        .project_current_source_ids(|source| match source {
+            BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)) => {
+                Some(BytecodeSourceRef::Runtime(SourceId(11)))
+            }
+            runtime => Some(runtime),
+        })
+        .expect("selected program binding");
+    assert_eq!(
+        registry.functions_for_source(SourceId(11)),
+        &[FunctionId(1)]
+    );
+    assert_eq!(registry.functions_for_source(SourceId(7)), &[FunctionId(2)]);
 }
 
 #[test]
@@ -229,8 +267,14 @@ fn reused_numeric_id_keeps_old_lease_on_old_body() {
         &new_body.definition_owner,
         &old_body.definition_owner
     ));
-    assert_eq!(old_body.source_id, Some(SourceId(5)));
-    assert_eq!(new_body.source_id, Some(SourceId(7)));
+    assert_eq!(
+        old_body.source_id,
+        Some(BytecodeSourceRef::Runtime(SourceId(5)))
+    );
+    assert_eq!(
+        new_body.source_id,
+        Some(BytecodeSourceRef::Runtime(SourceId(7)))
+    );
 }
 
 #[test]
@@ -349,11 +393,11 @@ fn reused_id_static_edge_and_dynamic_name_have_distinct_owners() {
     assert_eq!(view.resolve_name("second"), Some(FunctionId(2)));
     assert_eq!(
         view.get(FunctionId(2)).unwrap().source_id,
-        Some(SourceId(5))
+        Some(BytecodeSourceRef::Runtime(SourceId(5)))
     );
     assert_eq!(
         view.current_view().get(FunctionId(2)).unwrap().source_id,
-        Some(SourceId(7))
+        Some(BytecodeSourceRef::Runtime(SourceId(7)))
     );
     assert_eq!(
         view.get(FunctionId(1)).unwrap().private_owner_scope,

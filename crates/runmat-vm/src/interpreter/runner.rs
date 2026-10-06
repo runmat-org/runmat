@@ -495,9 +495,12 @@ async fn interpret_resume_inner(
         state.pc, resume.side_effect_epoch
     );
     let current_name = current_function_name.unwrap_or("<main>");
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&state.context.runtime));
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_name,
-        bytecode.source_id,
+        source_id,
         bytecode_frame_span(bytecode),
     );
     let mut output_vars = vars;
@@ -507,7 +510,7 @@ async fn interpret_resume_inner(
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
-            Err(attach_call_frames(bytecode, current_name, err))
+            Err(attach_call_frames(current_name, source_id, err))
         }
     }
 }
@@ -520,9 +523,12 @@ async fn interpret_with_vars_inner(
 ) -> VmResult<InterpreterOutcome> {
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
         .map_err(RuntimeError::new)?;
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&runtime));
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_function_name.unwrap_or("<main>"),
-        bytecode.source_id,
+        source_id,
         bytecode_frame_span(bytecode),
     );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
@@ -540,7 +546,7 @@ async fn interpret_with_vars_inner(
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
             let current_name = current_function_name.unwrap_or("<main>");
-            Err(attach_call_frames(bytecode, current_name, err))
+            Err(attach_call_frames(current_name, source_id, err))
         }
     }
 }
@@ -605,8 +611,11 @@ async fn run_interpreter_inner(
         fusion_accel_graph,
         bytecode,
     } = state;
-    let _source_context_guard =
-        runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
+    let _source_context_guard = runmat_runtime::source_context::replace_current_source_id(
+        bytecode
+            .source_id
+            .and_then(|source| source.resolve_in(&context.runtime)),
+    );
     let _arity_call_counts_guard =
         runmat_runtime::builtins::introspection::arity_check::replace_call_counts(
             call_counts.clone(),
@@ -757,17 +766,20 @@ async fn run_interpreter_inner(
         .functions
         .values()
         .filter_map(|function| {
-            function.source_id.map(
-                |source_id| runmat_runtime::user_functions::SourceFunctionInfo {
-                    source_id,
-                    name: function.display_name.clone(),
-                    function: function.function.0,
-                    role: function.source_role,
-                    binding_origin: function.binding_origin,
-                    source_file: function.source_file.clone(),
-                    definition_owners: None,
-                },
-            )
+            function
+                .source_id
+                .and_then(|source| source.resolve_in(&context.runtime))
+                .map(
+                    |source_id| runmat_runtime::user_functions::SourceFunctionInfo {
+                        source_id,
+                        name: function.display_name.clone(),
+                        function: function.function.0,
+                        role: function.source_role,
+                        binding_origin: function.binding_origin,
+                        source_file: function.source_file.clone(),
+                        definition_owners: None,
+                    },
+                )
         })
         .collect::<Vec<_>>();
     source_function_catalog.sort_by_key(|info| info.function);
@@ -994,7 +1006,9 @@ async fn run_interpreter_inner(
                     bytecode: &bytecode,
                     var_names: &bytecode.var_names,
                     function_registry: &function_registry,
-                    source_id: bytecode.source_id,
+                    source_id: bytecode
+                        .source_id
+                        .and_then(|source| source.resolve_in(&context.runtime)),
                     call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
                     call_counts: &call_counts_snapshot,
                     current_function_name: &current_function_name,
@@ -1603,7 +1617,9 @@ async fn interpret_function_with_counts_in_context_inner(
     state.missing_input_slots = missing_input_slots;
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         name,
-        bytecode.source_id,
+        bytecode
+            .source_id
+            .and_then(|source| source.resolve_in(&state.context.runtime)),
         bytecode_frame_span(bytecode),
     );
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;

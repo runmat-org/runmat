@@ -839,7 +839,7 @@ fn compile_dynamic_workspace_eval(
             )
         })?;
     if source_id.is_some() {
-        bytecode.source_id = source_id;
+        bytecode.source_id = source_id.map(crate::BytecodeSourceRef::Runtime);
     }
     merge_eval_function_registry(&mut bytecode, function_registry);
     remap_dynamic_workspace_slots(&mut bytecode, workspace_bindings);

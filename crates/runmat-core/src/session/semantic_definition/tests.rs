@@ -1,13 +1,13 @@
 use super::*;
 use runmat_hir::{FunctionId, SourceId};
-use runmat_vm::{Bytecode, FunctionBytecode, FunctionRegistry, Instr};
+use runmat_vm::{Bytecode, BytecodeSourceRef, FunctionBytecode, FunctionRegistry, Instr};
 use std::collections::{HashMap, HashSet};
 
 fn definition(id: usize, name: &str, callee: usize) -> FunctionBytecode {
     FunctionBytecode {
         function: FunctionId(id),
         display_name: name.into(),
-        source_id: Some(SourceId(5)),
+        source_id: Some(BytecodeSourceRef::Runtime(SourceId(5))),
         instructions: vec![Instr::CreateBoundFunctionHandle(
             FunctionId(callee),
             "callee".into(),
@@ -42,7 +42,7 @@ fn changed_body_source_scope_capture_layout_and_alias_do_not_reuse() {
         let function = incoming.functions.get_mut(&FunctionId(1)).unwrap();
         match mutation {
             0 => function.instructions.push(Instr::LoadConst(9.0)),
-            1 => function.source_id = Some(SourceId(6)),
+            1 => function.source_id = Some(BytecodeSourceRef::Runtime(SourceId(6))),
             2 => function.private_owner_scope = "other_scope".into(),
             3 => function.capture_slots.push(1),
             4 => {
@@ -138,7 +138,7 @@ fn unrelated_published_source_does_not_prevent_reuse() {
     let incoming = group(1);
     let mut functions = group(100).into_functions();
     let mut unrelated = definition(200, "unrelated", 200);
-    unrelated.source_id = Some(SourceId(6));
+    unrelated.source_id = Some(BytecodeSourceRef::Runtime(SourceId(6)));
     functions.insert(FunctionId(200), unrelated);
     let mut published = FunctionRegistry::new(functions);
     published
@@ -201,7 +201,10 @@ fn publishing_function_captures_original_fullpath_before_source_retirement() {
         .expect("published body");
     assert_eq!(published.source_file.as_deref(), Some("/old/old_file.m"));
     let lease = runmat_value::FunctionDefinitionOwner::issue(&published.definition_owner, id.0);
-    let source_id = published.source_id.expect("source");
+    let source_id = published
+        .source_id
+        .and_then(BytecodeSourceRef::runtime)
+        .expect("published runtime source");
     let mut current = prepared.function_registry_after_success;
     current.remove_source(source_id);
     let retained = current

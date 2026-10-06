@@ -836,7 +836,9 @@ impl RunMatSession {
             })?;
         let _source_id_guard = runmat_runtime::source_context::replace_current_source_id_in_context(
             &execution_runtime,
-            bytecode.source_id,
+            bytecode
+                .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::runtime),
         );
         if self.verbose {
             debug!("AST: {ast:?}");

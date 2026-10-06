@@ -297,3 +297,98 @@ fn retained_function_handle_error_keeps_original_source_after_later_public_calls
         "retained body must not be attributed to handle construction: {error:?}"
     );
 }
+
+#[test]
+fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
+    use runmat_execution::{OutputContract, ProgramCallable, ProgramInvocationContext};
+    use runmat_execution_artifact::{
+        ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
+        ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    };
+    use std::rc::Rc;
+
+    let mut session = crate::RunMatSession::with_options(false, false).expect("compiler session");
+    let unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new("fixture", "worker_script.m", "ans = mfilename();"),
+        None,
+    ))
+    .expect("portable unit");
+    let envelope = unit.portable_envelope().expect("portable envelope");
+    let recipe = ProgramBuildRecipe {
+        schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision: envelope.manifest.identity.program.clone(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
+        outputs: OutputContract {
+            requested_outputs: 1,
+        },
+        execution_mode: "interpreter".into(),
+        target: ProgramTarget::portable("source-projection-worker"),
+        interop: envelope.manifest.interop.clone(),
+        accelerators: Vec::new(),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::ExecutableUnitV3,
+        envelope.canonical_bytes().expect("canonical unit"),
+    )
+    .expect("artifact");
+    let request = ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        recipe,
+        artifact,
+        callable: ProgramCallable::semantic(envelope.manifest.identity.entrypoint_function, None),
+        context: ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    for _ in 0..2 {
+        let response = futures::executor::block_on(
+            runmat_vm::execute_program_request_with_context(request.clone(), runtime.clone()),
+        );
+        let ProgramExecutionResponse::Success { outputs } = response else {
+            panic!("imported worker unit must use its validated source map: {response:?}");
+        };
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(
+            runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
+                .expect("inline worker value"),
+            runmat_value::Value::String("worker_script".into())
+        );
+    }
+    let mut future_schema = envelope.clone();
+    future_schema.manifest.revisions.source_map_schema = 3;
+    let descriptor = future_schema
+        .manifest
+        .components
+        .iter_mut()
+        .find(|component| component.kind == runmat_execution::ExecutableComponentKind::SourceMap)
+        .expect("source-map descriptor");
+    descriptor.schema_version = 3;
+    let mut stale = request;
+    stale.artifact = ProgramArtifact::materialize(
+        &stale.recipe,
+        ExecutableForm::ExecutableUnitV3,
+        future_schema
+            .canonical_bytes()
+            .expect("forward schema envelope"),
+    )
+    .expect("forward schema artifact");
+    let response = futures::executor::block_on(runmat_vm::execute_program_request_with_context(
+        stale, runtime,
+    ));
+    assert!(matches!(
+        response,
+        ProgramExecutionResponse::Failure { message }
+            if message.contains("source map actual 3 expected 2")
+    ));
+}

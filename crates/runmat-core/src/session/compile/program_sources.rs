@@ -51,20 +51,26 @@ pub(super) struct SourceCompileProjection {
 }
 
 impl SourceCompileProjection {
-    pub fn program_ordinal_in_registry(
+    pub fn program_ref_for_runtime_ref(
         &self,
-        runtime: runmat_hir::SourceId,
-    ) -> Option<runmat_hir::SourceId> {
-        let ordinal = self.runtime_to_program.get(&runtime)?.0;
-        usize::try_from(ordinal).ok().map(runmat_hir::SourceId)
+        source: runmat_vm::BytecodeSourceRef,
+    ) -> Option<runmat_vm::BytecodeSourceRef> {
+        let runtime = source.runtime()?;
+        self.runtime_to_program
+            .get(&runtime)
+            .copied()
+            .map(runmat_vm::BytecodeSourceRef::Program)
     }
 
-    pub fn runtime_from_registry_ordinal(
+    pub fn runtime_ref_for_program_ref(
         &self,
-        ordinal: runmat_hir::SourceId,
-    ) -> Option<runmat_hir::SourceId> {
-        let ordinal = ProgramSourceId(u32::try_from(ordinal.0).ok()?);
-        self.program_to_runtime.get(&ordinal).copied()
+        source: runmat_vm::BytecodeSourceRef,
+    ) -> Option<runmat_vm::BytecodeSourceRef> {
+        let ordinal = source.program()?;
+        self.program_to_runtime
+            .get(&ordinal)
+            .copied()
+            .map(runmat_vm::BytecodeSourceRef::Runtime)
     }
 }
 
