@@ -1,4 +1,5 @@
 use super::*;
+use crate::execute::workspace::NativeWorkspaceState;
 use crate::memory::ScopedValueRoots;
 use runmat_runtime::call::function_abi::{prepare_function_inputs, FunctionInputSpec};
 
@@ -109,7 +110,7 @@ impl HostState {
             .unwrap_or_default();
         let canonical_workspace = runtime.service_ports().workspace().cloned();
         let workspace = if let Some(input) = workspace {
-            super::workspace::NativeWorkspaceState::new(
+            NativeWorkspaceState::new(
                 &function,
                 input,
                 global_bindings.clone(),
@@ -117,7 +118,7 @@ impl HostState {
                 Some(runtime.session_variable_authority()),
             )?
         } else {
-            super::workspace::NativeWorkspaceState::function_frame(
+            NativeWorkspaceState::function_frame(
                 &function,
                 global_bindings.clone(),
                 canonical_workspace,
