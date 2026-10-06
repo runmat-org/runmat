@@ -3,19 +3,20 @@
 use super::*;
 use async_trait::async_trait;
 use futures::channel::oneshot;
-use futures::task::noop_waker;
+use futures::future::{select, Either};
 use runmat_filesystem::{
     self as fs, DirEntry, FileHandle, FsMetadata, FsProvider, FsPublicationFailure,
     FsResourceContract, FsResourceLease, FsResourceRevision, FsStagedOutput, OpenFlags,
 };
 use std::future::Future;
 use std::io;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 
 struct PausedProvider {
     gate: Mutex<Option<oneshot::Receiver<()>>>,
+    started: Mutex<Option<oneshot::Sender<()>>>,
     published: Arc<Mutex<Option<Vec<u8>>>>,
     drops: Arc<AtomicUsize>,
     lease: Arc<RevocableLease>,
@@ -99,6 +100,13 @@ impl FsProvider for PausedProvider {
             .unwrap()
             .take()
             .expect("one public print stage");
+        self.started
+            .lock()
+            .unwrap()
+            .take()
+            .expect("stage start sender")
+            .send(())
+            .expect("public test awaits stage start");
         Ok(Some(Box::new(PausedStage {
             gate: Some(gate),
             bytes: Vec::new(),
@@ -150,6 +158,14 @@ impl FsProvider for PausedProvider {
     }
 }
 
+fn await_stage_start<F: Future>(started: oneshot::Receiver<()>, call: Pin<&mut F>) {
+    match futures::executor::block_on(select(started, call)) {
+        Either::Left((Ok(()), _pending_call)) => {}
+        Either::Left((Err(_), _pending_call)) => panic!("selected stage start was abandoned"),
+        Either::Right((_finished, _start)) => panic!("public print finished before staging"),
+    }
+}
+
 #[test]
 fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
     let _plot = crate::builtins::plotting::tests::lock_plot_registry();
@@ -166,10 +182,12 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
     let expected =
         futures::executor::block_on(render_png(original, 800, 600)).expect("reference render");
     let (sender, receiver) = oneshot::channel();
+    let (start_sender, start_receiver) = oneshot::channel();
     let published = Arc::new(Mutex::new(None));
     let drops = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(PausedProvider {
         gate: Mutex::new(Some(receiver)),
+        started: Mutex::new(Some(start_sender)),
         published: published.clone(),
         drops: drops.clone(),
         lease: RevocableLease::live(),
@@ -177,11 +195,7 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
     let _selected = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
     let mut call = Box::pin(print_builtin(None, vec![Value::from("/selected.png")]));
-    let waker = noop_waker();
-    assert!(matches!(
-        call.as_mut().poll(&mut Context::from_waker(&waker)),
-        Poll::Pending
-    ));
+    await_stage_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),
         "public call reached selected stage"
@@ -209,10 +223,12 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
     ]))
     .expect("plot selected scene");
     let (sender, receiver) = oneshot::channel();
+    let (start_sender, start_receiver) = oneshot::channel();
     let published = Arc::new(Mutex::new(None));
     let drops = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(PausedProvider {
         gate: Mutex::new(Some(receiver)),
+        started: Mutex::new(Some(start_sender)),
         published: published.clone(),
         drops: drops.clone(),
         lease: RevocableLease::live(),
@@ -228,11 +244,7 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
         Some(runtime),
         vec![Value::from("/cancelled.png")],
     ));
-    let waker = noop_waker();
-    assert!(matches!(
-        call.as_mut().poll(&mut Context::from_waker(&waker)),
-        Poll::Pending
-    ));
+    await_stage_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),
         "public call reached selected stage"
@@ -263,11 +275,13 @@ fn revoked_selected_print_lease_after_pending_write_prevents_publication() {
     ]))
     .expect("plot selected scene");
     let (sender, receiver) = oneshot::channel();
+    let (start_sender, start_receiver) = oneshot::channel();
     let published = Arc::new(Mutex::new(None));
     let drops = Arc::new(AtomicUsize::new(0));
     let lease = RevocableLease::live();
     let provider = Arc::new(PausedProvider {
         gate: Mutex::new(Some(receiver)),
+        started: Mutex::new(Some(start_sender)),
         published: published.clone(),
         drops: drops.clone(),
         lease: lease.clone(),
@@ -275,11 +289,7 @@ fn revoked_selected_print_lease_after_pending_write_prevents_publication() {
     let _selected = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
     let mut call = Box::pin(print_builtin(None, vec![Value::from("/revoked.png")]));
-    let waker = noop_waker();
-    assert!(matches!(
-        call.as_mut().poll(&mut Context::from_waker(&waker)),
-        Poll::Pending
-    ));
+    await_stage_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),
         "selected stage owns pending write"
