@@ -44,7 +44,7 @@ impl FunctionRegistry {
 
 fn owners_arc(
     owners: Vec<(FunctionId, Arc<runmat_value::FunctionDefinitionOwner>)>,
-) -> Arc<Vec<(usize, Arc<runmat_value::FunctionDefinitionOwner>)>> {
+) -> runmat_runtime::user_functions::DefinitionOwnerGraph {
     Arc::new(
         owners
             .into_iter()
@@ -55,7 +55,7 @@ fn owners_arc(
 
 fn source_fact(
     body: &FunctionBytecode,
-    definition_owners: Option<Arc<Vec<(usize, Arc<runmat_value::FunctionDefinitionOwner>)>>>,
+    definition_owners: Option<runmat_runtime::user_functions::DefinitionOwnerGraph>,
 ) -> Option<runmat_runtime::user_functions::SourceFunctionInfo> {
     Some(runmat_runtime::user_functions::SourceFunctionInfo {
         source_id: body.source_id?,

@@ -449,9 +449,7 @@ impl FunctionRegistry {
             let id = FunctionId(lease.function());
             self.get_owned(id, lease)?;
         }
-        if authority.local_lease(function.0).is_none() {
-            return None;
-        }
+        authority.local_lease(function.0)?;
         Some(Self {
             data: std::sync::Arc::clone(&self.data),
             static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {

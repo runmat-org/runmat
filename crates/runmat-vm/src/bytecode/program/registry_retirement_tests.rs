@@ -178,7 +178,7 @@ fn leased_old_body_survives_name_republication_without_becoming_name_visible() {
     assert!(registry.get_owned(FunctionId(1), &wrong).is_none());
     drop(lease);
     registry.insert_replacing_name(function(5, "second", 8));
-    assert!(registry.retired.get(&FunctionId(1)).is_none());
+    assert!(!registry.retired.contains_key(&FunctionId(1)));
 }
 
 #[test]
