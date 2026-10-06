@@ -135,7 +135,7 @@ impl GeometryFeatureProvider for OcctExactFeatureProvider {
                 representation: geometry.representation.clone(),
             })
             .collect();
-        let cancel_token = ffi::OcctCancelTokenRegistration::new(self.context.cancellation_flag());
+        let cancel_token = ffi::OcctCancelTokenRegistration::new(self.context.cancellation_token());
         let payload = ffi::bridge::execute_exact_feature(
             encoded.kind,
             &encoded.scalars,

@@ -188,7 +188,17 @@ impl NativeInvocation {
                     }
                     return Err(NativeExecutorError::from(self.state.annotate_error(error)));
                 }
-                NativeExitKind::CANCELLED => return Err(NativeExecutorError::Cancelled),
+                NativeExitKind::CANCELLED => {
+                    return Err(
+                        if exit.cancellation.reason
+                            == runmat_runtime::native::NativeCancellationReason::DEADLINE
+                        {
+                            NativeExecutorError::Deadline
+                        } else {
+                            NativeExecutorError::Cancelled
+                        },
+                    );
+                }
                 NativeExitKind::SUSPENDED => {
                     self.resume_pending = true;
                     return Ok(NativeInvocationStep::Suspended {

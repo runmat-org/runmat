@@ -200,7 +200,7 @@ pub(crate) fn evaluate_observation_partition_with_provider(
     let mut handles = ProviderHandles::new(execution.provider);
     handles.track(&input);
     let cancellation =
-        ProviderCancellationToken::from_shared(progress::cancellation_token().shared_flag());
+        ProviderCancellationToken::from_token(progress::cancellation_token().shared_token());
     let request = DenseReductionRequest {
         input: &input,
         operation: governed.operation,

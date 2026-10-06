@@ -12,6 +12,8 @@ pub enum NativeExecutorError {
     Host(String),
     #[error("native execution was cancelled")]
     Cancelled,
+    #[error("native execution deadline elapsed")]
+    Deadline,
     #[error("native execution returned unsupported exit kind {0}")]
     UnsupportedExit(u32),
     #[error("native IR site is not executable by the generic host: {0}")]

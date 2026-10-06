@@ -61,11 +61,14 @@ pub fn debug_stack_enabled() -> bool {
 }
 
 pub fn check_cancelled() -> Result<(), RuntimeError> {
-    if runmat_runtime::interrupt::is_cancelled() {
-        return Err(crate::interpreter::errors::mex(
-            "ExecutionCancelled",
-            "Execution cancelled by user",
-        ));
+    if let Some(reason) = runmat_runtime::interrupt::stop_reason() {
+        let (identifier, message) = match reason {
+            runmat_execution::CancellationReason::Deadline => {
+                ("ExecutionDeadline", "Execution deadline elapsed")
+            }
+            _ => ("ExecutionCancelled", "Execution cancelled"),
+        };
+        return Err(crate::interpreter::errors::mex(identifier, message));
     }
     Ok(())
 }

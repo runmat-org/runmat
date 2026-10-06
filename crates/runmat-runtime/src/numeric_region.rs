@@ -1,10 +1,7 @@
 //! Executor-neutral fused evaluation for a deliberately small, exact numeric
 //! region subset. Executors build plans; Runtime owns MATLAB value semantics.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use runmat_execution::{CancellationReason, CancellationToken};
 
 use runmat_value::{Tensor, Value};
 
@@ -51,7 +48,7 @@ pub struct NumericRegionProgram {
 pub enum NumericRegionExecution {
     Completed(Vec<Value>),
     Ineligible,
-    Cancelled,
+    Cancelled(CancellationReason),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,9 +111,12 @@ impl NumericRegionProgram {
 pub fn execute(
     program: &NumericRegionProgram,
     inputs: &[&Value],
-    cancellation: &Arc<AtomicBool>,
+    cancellation: &CancellationToken,
 ) -> Result<NumericRegionExecution, &'static str> {
     program.validate(inputs.len())?;
+    if let Some(reason) = cancellation.stop_reason() {
+        return Ok(NumericRegionExecution::Cancelled(reason));
+    }
     let Some((input_views, output_shape)) = analyze_inputs(inputs) else {
         return Ok(NumericRegionExecution::Ineligible);
     };
@@ -131,8 +131,10 @@ pub fn execute(
     let mut output_values = vec![Vec::with_capacity(element_count); program.outputs.len()];
     let mut values = vec![0.0; program.nodes.len()];
     for element in 0..element_count {
-        if element % 1_024 == 0 && cancellation.load(Ordering::Relaxed) {
-            return Ok(NumericRegionExecution::Cancelled);
+        if element % 1_024 == 0 {
+            if let Some(reason) = cancellation.stop_reason() {
+                return Ok(NumericRegionExecution::Cancelled(reason));
+            }
         }
         for (index, node) in program.nodes.iter().enumerate() {
             values[index] = match *node {
@@ -175,6 +177,9 @@ pub fn execute(
             .map(|values| Value::Num(values[0]))
             .collect()
     };
+    if let Some(reason) = cancellation.stop_reason() {
+        return Ok(NumericRegionExecution::Cancelled(reason));
+    }
     Ok(NumericRegionExecution::Completed(outputs))
 }
 
@@ -230,7 +235,7 @@ mod tests {
     fn execute_values(
         program: &NumericRegionProgram,
         inputs: &[Value],
-        cancellation: &Arc<AtomicBool>,
+        cancellation: &CancellationToken,
     ) -> Result<NumericRegionExecution, &'static str> {
         let inputs = inputs.iter().collect::<Vec<_>>();
         execute(program, &inputs, cancellation)
@@ -260,7 +265,7 @@ mod tests {
         let result = execute_values(
             &program,
             &[Value::Tensor(tensor), Value::Num(1.0)],
-            &Arc::new(AtomicBool::new(false)),
+            &CancellationToken::default(),
         )
         .unwrap();
         let NumericRegionExecution::Completed(outputs) = result else {
@@ -292,11 +297,27 @@ mod tests {
             execute_values(
                 &program,
                 &[Value::Tensor(left), Value::Tensor(right)],
-                &Arc::new(AtomicBool::new(false)),
+                &CancellationToken::default(),
             )
             .unwrap(),
             NumericRegionExecution::Ineligible
         );
+    }
+
+    #[test]
+    fn inherited_deadline_discards_numeric_region_without_mutating_primary() {
+        let token = CancellationToken::default().with_deadline(Some(0));
+        let program = NumericRegionProgram {
+            nodes: vec![NumericRegionNode::Input(0)],
+            outputs: vec![0],
+        };
+        assert!(matches!(
+            execute_values(&program, &[Value::Num(42.0)], &token).unwrap(),
+            NumericRegionExecution::Cancelled(CancellationReason::Deadline)
+        ));
+        assert!(!token
+            .primary_flag()
+            .load(std::sync::atomic::Ordering::Acquire));
     }
 
     #[test]
@@ -314,10 +335,11 @@ mod tests {
             outputs: vec![2],
         };
         let input = Tensor::new(vec![0.0; 2_048], vec![1, 2_048]).unwrap();
-        let cancellation = Arc::new(AtomicBool::new(true));
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
         assert_eq!(
             execute_values(&program, &[Value::Tensor(input)], &cancellation).unwrap(),
-            NumericRegionExecution::Cancelled
+            NumericRegionExecution::Cancelled(CancellationReason::User)
         );
     }
 
@@ -339,7 +361,7 @@ mod tests {
         let result = execute_values(
             &program,
             &[Value::Tensor(input)],
-            &Arc::new(AtomicBool::new(false)),
+            &CancellationToken::default(),
         )
         .unwrap();
         let NumericRegionExecution::Completed(outputs) = result else {

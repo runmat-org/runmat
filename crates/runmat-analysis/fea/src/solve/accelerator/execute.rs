@@ -65,7 +65,7 @@ pub fn solve_prepared_accelerator_system(
         }
     };
     let cancellation = progress::cancellation_token();
-    let provider_cancellation = ProviderCancellationToken::from_shared(cancellation.shared_flag());
+    let provider_cancellation = ProviderCancellationToken::from_token(cancellation.shared_token());
     let attempt_id = provider_attempt_id(prepared.operator_identity);
     let result = (|| {
         let request = SparseKrylovRequest {

@@ -72,7 +72,16 @@ impl RuntimeContext {
     }
 
     pub fn cancellation(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.state.cancellation.borrow())
+        self.state.cancellation.borrow().primary_flag()
+    }
+
+    pub fn cancellation_token(&self) -> runmat_execution::CancellationToken {
+        self.state.cancellation.borrow().clone()
+    }
+
+    pub fn with_cancellation_token(self, token: runmat_execution::CancellationToken) -> Self {
+        self.state.cancellation.replace(token);
+        self
     }
 
     pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {

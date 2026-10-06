@@ -95,10 +95,9 @@ fn clear_residency(value: &Value) {
 fn active_or_standalone_runtime_context() -> runmat_runtime::context::RuntimeContext {
     runmat_runtime::context::legacy::active().unwrap_or_else(|| {
         let execution = std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new());
-        let runtime = match runmat_runtime::interrupt::current_interrupt() {
-            Some(cancellation) => {
-                runmat_runtime::context::RuntimeContext::with_cancellation(execution, cancellation)
-            }
+        let runtime = match runmat_runtime::interrupt::current_cancellation() {
+            Some(cancellation) => runmat_runtime::context::RuntimeContext::new(execution)
+                .with_cancellation_token(cancellation),
             None => runmat_runtime::context::RuntimeContext::new(execution),
         };
         runmat_runtime::compatibility::inherit_legacy_extension_policy(&runtime);

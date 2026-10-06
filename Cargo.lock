@@ -6583,6 +6583,7 @@ version = "0.6.2"
 dependencies = [
  "ed25519-dalek",
  "minicbor",
+ "runmat-time",
  "runmat-types",
  "serde",
  "serde_json",
@@ -6806,6 +6807,7 @@ dependencies = [
  "cxx-build",
  "js-sys",
  "occt-sys",
+ "runmat-execution",
  "runmat-geometry-core",
  "runmat-geometry-ops",
  "serde",

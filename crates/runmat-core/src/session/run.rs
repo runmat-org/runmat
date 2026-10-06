@@ -287,15 +287,25 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let parent_control = runmat_runtime::interrupt::current_cancellation();
         self.configure_runtime_context();
         let runtime = self.runtime_context.clone();
-        runtime.scope(self.run_in_context(input)).await
+        runtime
+            .scope(self.run_in_context(input, parent_control))
+            .await
     }
 
     async fn run_in_context(
         &mut self,
         input: &str,
+        parent_control: Option<runmat_execution::CancellationToken>,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let _parent_control = runmat_runtime::interrupt::scope_invocation_with_parent(
+            self.interrupt_flag.clone(),
+            None,
+            None,
+            parent_control,
+        );
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
@@ -468,7 +478,7 @@ impl RunMatSession {
         reset_provider_telemetry();
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
+            runmat_runtime::interrupt::scope_invocation(self.interrupt_flag.clone(), None, None);
         let start_time = Instant::now();
         self.stats.total_executions += 1;
         let debug_trace = std::env::var("RUNMAT_DEBUG_REPL").is_ok();

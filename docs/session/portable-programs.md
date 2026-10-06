@@ -45,6 +45,38 @@ The portable interpreter uses the VM's existing assignment inventory. Native scr
 tiering currently has a zero-output contract; forcing native execution while
 requesting an `ans` output is rejected explicitly.
 
+## Live invocation controls
+
+`InvocationControl` composes the session's cancellation flag, the caller's original
+shared flag, inherited parent controls, and the earliest absolute deadline. Entering
+a different session captures those parent controls before activating the child
+runtime context. Nested invocation cannot extend or clear a parent's deadline;
+returning or unwinding restores the previous control inventory.
+
+The shared execution `CancellationToken` owns this composition. Its clones share
+one immutable inventory of original flag authorities. Cancelling a token mutates
+its original primary flag; observing a deadline does not mutate that flag or turn
+it into a user cancellation. Raw shared-flag constructors remain available where
+the host supplies only a flag; adapters that receive a complete token preserve it.
+
+The portable interpreter polls the token during execution and reports user
+cancellation as `RunMat:ExecutionCancelled` and deadline expiry as
+`RunMat:ExecutionDeadline`. FEA, provider and CAD adapters retain the same live
+sources and deadline at their existing cooperative checkpoints. The native CAD
+registry uses opaque handles and preserves the original inventory after lock
+poisoning; polling clones the token before releasing the registry lock.
+
+Native host safepoints, semantic sites, placement snapshots and fused numeric
+regions consume the same complete token. Native deadline exits retain their reason
+through Core. Numeric regions poll before allocation, at their existing element
+checkpoints and before publishing transactional outputs.
+
+These controls are cooperative. Original running-loop witnesses exercise both the
+portable interpreter and forced generic native code; native tests warm the exact
+compiled function before entering its loop. They do not prove interruption of a
+blocked await or preemption inside a kernel without checkpoints. Live flags are
+process-local controls, not serialized restart authority or measured resource usage.
+
 ## Nested interpreter dispatch
 
 Indexing, arithmetic and instruction families choose typed handlers before

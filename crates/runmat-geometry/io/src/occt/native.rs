@@ -37,7 +37,7 @@ pub(crate) fn import_cad_topology(
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let materialized = materialize_iges_input(bytes, format, context)?;
-    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
+    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_token());
     let payload = ffi::bridge::import_cad_bytes(
         path,
         bytes,
@@ -62,7 +62,7 @@ pub(crate) fn import_exact_cad_shape(
     context.check_cancelled()?;
     let meters_per_source_unit = meters_per_unit(options.source_units)?;
     let materialized = materialize_iges_input(bytes, format, context)?;
-    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
+    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_token());
     let payload = ffi::bridge::import_exact_cad_bytes(
         path,
         bytes,
@@ -333,7 +333,7 @@ pub(crate) fn start_cad_preview_session(
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
     let materialized = materialize_iges_input(bytes, format, context)?;
-    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
+    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_token());
     let payload = ffi::bridge::start_cad_preview_session(
         path,
         bytes,
@@ -358,7 +358,7 @@ pub(crate) fn read_cad_preview_session_chunk(
 ) -> Result<OcctCadPreviewSessionChunk, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
-    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_flag());
+    let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_token());
     let payload = ffi::bridge::read_cad_preview_session_chunk(
         session_id,
         ffi::bridge::OcctPreviewSessionChunkOptions {

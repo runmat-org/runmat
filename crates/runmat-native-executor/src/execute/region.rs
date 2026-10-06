@@ -1,6 +1,4 @@
-use runmat_runtime::native::{
-    NativeCancellation, NativeCancellationReason, NativeExit, NativeSiteOutcome,
-};
+use runmat_runtime::native::{NativeExit, NativeSiteOutcome};
 
 use crate::NativeExecutorResult;
 
@@ -29,7 +27,7 @@ pub(super) fn checkpoint(
     match runmat_runtime::numeric_region::execute(
         &plan.program,
         &inputs,
-        &state.runtime.cancellation(),
+        &state.runtime.cancellation_token(),
     )
     .map_err(|error| crate::NativeExecutorError::Host(error.into()))?
     {
@@ -46,16 +44,12 @@ pub(super) fn checkpoint(
             state.disable_optimized_region(plan.region);
             Ok(None)
         }
-        runmat_runtime::numeric_region::NumericRegionExecution::Cancelled => {
+        runmat_runtime::numeric_region::NumericRegionExecution::Cancelled(reason) => {
             placement.observe(
                 runmat_time::duration_ns_saturating(started.elapsed()),
                 false,
             );
-            *exit = NativeExit::cancelled(NativeCancellation {
-                reason: NativeCancellationReason::REQUESTED,
-                reserved: 0,
-                generation: 1,
-            });
+            *exit = super::control::exit(reason);
             Ok(Some(NativeSiteOutcome::exit()))
         }
     }

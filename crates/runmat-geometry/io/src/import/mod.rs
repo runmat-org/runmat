@@ -4,10 +4,7 @@ mod obj;
 mod ply;
 mod stl;
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use runmat_geometry_core::{
     GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region, RegionEntityMapping,
@@ -67,7 +64,7 @@ impl Default for GeometryImportOptions {
 
 #[derive(Clone, Default)]
 pub struct GeometryImportContext {
-    cancellation: Option<Arc<AtomicBool>>,
+    cancellation: Option<runmat_execution::CancellationToken>,
 }
 
 impl std::fmt::Debug for GeometryImportContext {
@@ -85,6 +82,14 @@ impl GeometryImportContext {
 
     pub fn with_cancellation(cancellation: Arc<AtomicBool>) -> Self {
         Self {
+            cancellation: Some(runmat_execution::CancellationToken::from_shared(
+                cancellation,
+            )),
+        }
+    }
+
+    pub fn with_cancellation_token(cancellation: runmat_execution::CancellationToken) -> Self {
+        Self {
             cancellation: Some(cancellation),
         }
     }
@@ -92,7 +97,7 @@ impl GeometryImportContext {
     pub fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
-            .map(|flag| flag.load(Ordering::Relaxed))
+            .map(runmat_execution::CancellationToken::is_cancelled)
             .unwrap_or(false)
     }
 
@@ -105,7 +110,7 @@ impl GeometryImportContext {
     }
 
     #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
-    pub(crate) fn cancellation_flag(&self) -> Option<Arc<AtomicBool>> {
+    pub(crate) fn cancellation_token(&self) -> Option<runmat_execution::CancellationToken> {
         self.cancellation.clone()
     }
 }
@@ -375,4 +380,27 @@ pub(crate) fn parse_f64(value: &str) -> Result<f64, GeometryImportError> {
 
 pub(crate) fn is_degenerate_triangle(vertices: &[[f64; 3]; 3]) -> bool {
     vertices[0] == vertices[1] || vertices[1] == vertices[2] || vertices[0] == vertices[2]
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+    #[test]
+    fn import_control_keeps_live_parent_and_deadline() {
+        let caller = Arc::new(AtomicBool::new(false));
+        let token = runmat_execution::CancellationToken::default().with_source(caller.clone());
+        let context = GeometryImportContext::with_cancellation_token(token.clone());
+        assert!(!context.is_cancelled());
+        caller.store(true, std::sync::atomic::Ordering::Release);
+        assert!(matches!(
+            context.check_cancelled(),
+            Err(GeometryImportError::Cancelled)
+        ));
+        caller.store(false, std::sync::atomic::Ordering::Release);
+        let deadline = GeometryImportContext::with_cancellation_token(token.with_deadline(Some(0)));
+        assert!(matches!(
+            deadline.check_cancelled(),
+            Err(GeometryImportError::Cancelled)
+        ));
+    }
 }

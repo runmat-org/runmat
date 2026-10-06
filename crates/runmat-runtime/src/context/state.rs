@@ -1,9 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use runmat_types::SourceId;
 use runmat_value::Value;
@@ -39,7 +36,7 @@ pub struct RuntimeContextState {
     pub(crate) dynamic_eval_enabled: Cell<bool>,
     pub(crate) callstack_limit: Cell<usize>,
     pub(crate) error_namespace: RefCell<String>,
-    pub(crate) cancellation: RefCell<Arc<AtomicBool>>,
+    pub(crate) cancellation: RefCell<runmat_execution::CancellationToken>,
 }
 
 impl RuntimeContextState {
@@ -67,12 +64,10 @@ impl RuntimeContextState {
             dynamic_eval_enabled: Cell::new(true),
             callstack_limit: Cell::new(super::DEFAULT_CALLSTACK_LIMIT),
             error_namespace: RefCell::new(super::DEFAULT_ERROR_NAMESPACE.to_string()),
-            cancellation: RefCell::new(cancellation),
+            cancellation: RefCell::new(runmat_execution::CancellationToken::from_shared(
+                cancellation,
+            )),
         }
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancellation.borrow().load(Ordering::Relaxed)
     }
 }
 

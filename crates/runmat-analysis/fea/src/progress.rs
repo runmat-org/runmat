@@ -1,9 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use runmat_execution::identity::AttemptId;
 use serde::{Deserialize, Serialize};
@@ -52,7 +49,7 @@ pub type FeaProgressHandler = Arc<dyn Fn(FeaProgressEvent) + Send + Sync + 'stat
 
 #[derive(Clone, Debug, Default)]
 pub struct FeaCancellationToken {
-    cancelled: Arc<AtomicBool>,
+    cancelled: runmat_execution::CancellationToken,
 }
 
 impl FeaCancellationToken {
@@ -61,19 +58,25 @@ impl FeaCancellationToken {
     }
 
     pub fn from_shared(cancelled: Arc<AtomicBool>) -> Self {
+        Self {
+            cancelled: runmat_execution::CancellationToken::from_shared(cancelled),
+        }
+    }
+
+    pub fn from_token(cancelled: runmat_execution::CancellationToken) -> Self {
         Self { cancelled }
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
+        self.cancelled.cancel();
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
+        self.cancelled.is_cancelled()
     }
 
-    pub(crate) fn shared_flag(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.cancelled)
+    pub(crate) fn shared_token(&self) -> runmat_execution::CancellationToken {
+        self.cancelled.clone()
     }
 }
 
@@ -189,4 +192,24 @@ pub fn check_cancelled(operation: impl Into<String>) -> Result<(), crate::contra
         return Err(crate::contracts::FeaRunError::Cancelled);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+    #[test]
+    fn adapter_keeps_live_parent_and_deadline_without_mutating_primary_flag() {
+        let owner = Arc::new(AtomicBool::new(false));
+        let caller = Arc::new(AtomicBool::new(false));
+        let shared = runmat_execution::CancellationToken::from_shared(owner.clone())
+            .with_source(caller.clone());
+        let adapter = FeaCancellationToken::from_token(shared.clone());
+        assert!(!adapter.is_cancelled());
+        caller.store(true, std::sync::atomic::Ordering::Release);
+        assert!(adapter.is_cancelled());
+        assert!(!owner.load(std::sync::atomic::Ordering::Acquire));
+        caller.store(false, std::sync::atomic::Ordering::Release);
+        assert!(FeaCancellationToken::from_token(shared.with_deadline(Some(0))).is_cancelled());
+        assert!(!owner.load(std::sync::atomic::Ordering::Acquire));
+    }
 }

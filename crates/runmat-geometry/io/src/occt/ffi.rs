@@ -1,8 +1,8 @@
 use sha2::Digest as _;
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc, Mutex, OnceLock,
+    atomic::{AtomicU64, Ordering},
+    Mutex, OnceLock,
 };
 
 #[cxx::bridge(namespace = "runmat_geometry_io::occt_backend")]
@@ -595,24 +595,21 @@ pub(crate) mod bridge {
 }
 
 static NEXT_CANCEL_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
-static CANCEL_TOKENS: OnceLock<Mutex<BTreeMap<u64, Arc<AtomicBool>>>> = OnceLock::new();
+type CancelTokenMap = BTreeMap<u64, runmat_execution::CancellationToken>;
+static CANCEL_TOKENS: OnceLock<Mutex<CancelTokenMap>> = OnceLock::new();
 
 pub(crate) struct OcctCancelTokenRegistration {
     id: u64,
 }
 
 impl OcctCancelTokenRegistration {
-    pub(crate) fn new(flag: Option<Arc<AtomicBool>>) -> Self {
+    pub(crate) fn new(flag: Option<runmat_execution::CancellationToken>) -> Self {
         let Some(flag) = flag else {
             return Self { id: 0 };
         };
         let id = NEXT_CANCEL_TOKEN_ID.fetch_add(1, Ordering::Relaxed);
-        if let Ok(mut tokens) = cancel_tokens().lock() {
-            tokens.insert(id, flag);
-            Self { id }
-        } else {
-            Self { id: 0 }
-        }
+        lock_cancel_tokens(cancel_tokens()).insert(id, flag);
+        Self { id }
     }
 
     pub(crate) fn id(&self) -> u64 {
@@ -625,9 +622,7 @@ impl Drop for OcctCancelTokenRegistration {
         if self.id == 0 {
             return;
         }
-        if let Ok(mut tokens) = cancel_tokens().lock() {
-            tokens.remove(&self.id);
-        }
+        lock_cancel_tokens(cancel_tokens()).remove(&self.id);
     }
 }
 
@@ -635,12 +630,10 @@ fn occt_import_cancelled(cancel_token_id: u64) -> bool {
     if cancel_token_id == 0 {
         return false;
     }
-    cancel_tokens()
-        .lock()
-        .ok()
-        .and_then(|tokens| tokens.get(&cancel_token_id).cloned())
-        .map(|flag| flag.load(Ordering::Relaxed))
-        .unwrap_or(false)
+    let token = lock_cancel_tokens(cancel_tokens())
+        .get(&cancel_token_id)
+        .cloned();
+    token.map(|token| token.is_cancelled()).unwrap_or(false)
 }
 
 fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
@@ -654,6 +647,20 @@ fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8> {
     sha2::Sha256::digest(bytes).to_vec()
 }
 
-fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, Arc<AtomicBool>>> {
+fn cancel_tokens() -> &'static Mutex<CancelTokenMap> {
     CANCEL_TOKENS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
+
+fn lock_cancel_tokens(
+    registry: &Mutex<CancelTokenMap>,
+) -> std::sync::MutexGuard<'_, CancelTokenMap> {
+    registry.lock().unwrap_or_else(|poisoned| {
+        // Integer-keyed map mutations preserve Rust's map invariants on unwind.
+        // Keep the original token inventory; poisoning cannot disable cancellation.
+        registry.clear_poison();
+        poisoned.into_inner()
+    })
+}
+
+#[cfg(test)]
+mod control_tests;

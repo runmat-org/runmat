@@ -1,5 +1,7 @@
 //! Portable execution contracts shared by native, browser, test, and remote hosts.
 
+mod cancellation;
+pub use cancellation::CancellationToken;
 mod error;
 pub mod executable;
 pub mod handle;

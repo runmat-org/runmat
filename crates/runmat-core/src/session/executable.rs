@@ -422,13 +422,14 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<Value, RunError> {
+        let parent_control = runmat_runtime::interrupt::current_cancellation();
         self.configure_runtime_context();
         let runtime = self
             .runtime_context
             .clone()
             .with_program_revision(Some(unit.revision().program_revision.clone()));
         runtime
-            .scope(self.invoke_executable_in_context(unit, invocation, control))
+            .scope(self.invoke_executable_in_context(unit, invocation, control, parent_control))
             .await
     }
 
@@ -437,7 +438,9 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
+        parent_control: Option<runmat_execution::CancellationToken>,
     ) -> std::result::Result<Value, RunError> {
+        let _interrupt_guard = control.runtime_scope(self.interrupt_flag.clone(), parent_control);
         let _program_guard = self.program_service.enter(unit);
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
@@ -453,8 +456,6 @@ impl RunMatSession {
         ensure_invocation_allowed(control)?;
         self.stats.total_executions += 1;
         self.configure_executable_runtime();
-        let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
         let _source_guard = runmat_runtime::source_context::replace_current_source_context(
             Some(&unit.source().relative_path),
             Some(&unit.source().text),
@@ -624,13 +625,23 @@ impl RunMatSession {
 fn ensure_invocation_allowed(
     control: &crate::InvocationControl,
 ) -> std::result::Result<(), RunError> {
-    if control.is_cancelled() {
+    if control.is_cancelled()
+        || matches!(
+            runmat_runtime::interrupt::stop_reason(),
+            Some(runmat_execution::CancellationReason::User)
+        )
+    {
         return Err(runtime_error(
             "RunMat:ExecutionCancelled",
             "executable invocation was cancelled",
         ));
     }
-    if control.deadline_elapsed() {
+    if control.deadline_elapsed()
+        || matches!(
+            runmat_runtime::interrupt::stop_reason(),
+            Some(runmat_execution::CancellationReason::Deadline)
+        )
+    {
         return Err(runtime_error(
             "RunMat:ExecutionDeadline",
             "executable invocation deadline elapsed",

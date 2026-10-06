@@ -76,6 +76,19 @@ impl InvocationControl {
         self.backend
     }
 
+    pub(crate) fn runtime_scope(
+        &self,
+        session: Arc<AtomicBool>,
+        parent: Option<runmat_execution::CancellationToken>,
+    ) -> runmat_runtime::interrupt::InterruptGuard {
+        runmat_runtime::interrupt::scope_invocation_with_parent(
+            session,
+            self.cancellation.clone(),
+            self.deadline_unix_ms,
+            parent,
+        )
+    }
+
     pub(crate) fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
@@ -87,3 +100,6 @@ impl InvocationControl {
             .is_some_and(|deadline| runmat_time::unix_timestamp_ms() >= deadline as u128)
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
