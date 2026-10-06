@@ -49,9 +49,9 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                 .expect("local g upsert")
                 .key
                 .clone();
-            assert!(!matches!(
-                local_key,
-                crate::abi::WorkspaceBindingKey::Global { .. }
+            assert!(matches!(
+                &local_key,
+                crate::abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "g"
             ));
             let binding =
                 execute_text_request_for_testing(&mut session, "global g; g = 9; observed = g;")
@@ -116,6 +116,13 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
         let local = execute_text_request_for_testing(&mut session, "clear g; g = 3;").unwrap();
         assert!(local.error.is_none(), "{:?}", local.error);
         assert!(local.workspace_delta.removals.contains(&global_key));
+        assert!(local.workspace_delta.upserts.iter().any(|entry| {
+            matches!(
+                &entry.key,
+                crate::abi::WorkspaceBindingKey::Interactive { name, .. }
+                    if name.0 == "g" && entry.value == runmat_value::Value::Num(3.0)
+            )
+        }));
         assert_eq!(
             session.get_variables().unwrap().get("g"),
             Some(&runmat_value::Value::Num(3.0))
@@ -137,7 +144,7 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
 fn workspace_key_name(key: &crate::abi::WorkspaceBindingKey) -> &str {
     match key {
         crate::abi::WorkspaceBindingKey::SourceBinding { binding, .. } => &binding.0,
-        crate::abi::WorkspaceBindingKey::SessionSlot { name, .. }
+        crate::abi::WorkspaceBindingKey::Interactive { name, .. }
         | crate::abi::WorkspaceBindingKey::Global { name, .. }
         | crate::abi::WorkspaceBindingKey::Persistent { name, .. } => &name.0,
     }
