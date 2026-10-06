@@ -57,7 +57,6 @@ pub(super) fn active_frame(owner: WorkspaceOwner) -> Option<WorkspaceFrameId> {
     })
 }
 
-#[cfg(test)]
 pub(super) fn reset_for_tests() {
     ACTIVE_WORKSPACE_FRAMES.with(|frames| frames.borrow_mut().clear());
 }
