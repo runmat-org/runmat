@@ -9,6 +9,15 @@ pub(super) fn contract_error(source: runmat_execution::ContractError) -> Runtime
         .build()
 }
 
+pub(super) fn artifact_index_error(
+    source: super::super::generation::CallableArtifactIndexError,
+) -> RuntimeError {
+    build_runtime_error(source.to_string())
+        .with_identifier("RunMat:CallableArtifact:Invalid")
+        .with_source(source)
+        .build()
+}
+
 pub(super) fn codec_error(
     source: runmat_runtime::execution::value_codec::ValueCodecError,
 ) -> RuntimeError {

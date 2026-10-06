@@ -3,8 +3,12 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use runmat_execution::{ContractError, Digest, FunctionBindingOrigin};
+use runmat_execution::{Digest, FunctionBindingOrigin};
 use runmat_runtime::{build_runtime_error, RuntimeError};
+
+#[path = "generation/index_error.rs"]
+mod index_error;
+pub(super) use index_error::CallableArtifactIndexError;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct CallableArtifactIndex {
@@ -24,21 +28,19 @@ pub(super) enum CallableArtifactSelectionError {
 }
 
 impl CallableArtifactIndex {
-    pub(super) fn insert_canonical_unit(&mut self, bytes: Vec<u8>) -> Result<(), ContractError> {
+    pub(super) fn insert_canonical_unit(
+        &mut self,
+        bytes: Vec<u8>,
+    ) -> Result<(), CallableArtifactIndexError> {
         let admitted = runmat_vm::admit_executable_unit(&bytes)
-            .map_err(|error| ContractError::invalid("callable artifact unit", error.to_string()))?;
+            .map_err(CallableArtifactIndexError::InvalidUnit)?;
         let fingerprints = runmat_vm::retained_callable_origin_fingerprints(admitted.registry())
-            .map_err(|error| {
-                ContractError::invalid("callable artifact definitions", error.to_string())
-            })?;
+            .map_err(CallableArtifactIndexError::InvalidDefinitions)?;
         let bytes = Arc::<[u8]>::from(bytes);
         for (origin, fingerprint) in fingerprints {
             match self.units.get(&origin) {
                 Some(existing) if existing.fingerprint != fingerprint => {
-                    return Err(ContractError::invalid(
-                        "callable artifact index",
-                        "one immutable function origin has conflicting executable bodies",
-                    ));
+                    return Err(CallableArtifactIndexError::ConflictingOrigin);
                 }
                 Some(_) => {}
                 None => {
@@ -219,7 +221,7 @@ impl FunctionRegistryGeneration {
                 .iter()
                 .filter(|owner| owner.has_live_definition_owners())
                 .cloned()
-                .collect(),
+                .collect::<Vec<_>>(),
         );
         let retired = self.source_owners.replace(retained.clone());
         self.rotate_epoch();

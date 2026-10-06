@@ -8,7 +8,7 @@ use runmat_runtime::context::{
     RuntimeServiceFuture,
 };
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_value::{BoundFunctionBinding, Value, ValueSequence};
+use runmat_value::{BoundFunctionBinding, Value};
 
 use super::{
     CallableArtifactIndex, CallableArtifactSelectionError, FunctionRegistryGeneration,
@@ -220,7 +220,7 @@ impl RuntimeCallableArtifactService for SessionCallableArtifactService {
             for bytes in unit_bytes {
                 artifacts
                     .insert_canonical_unit(bytes)
-                    .map_err(contract_error)?;
+                    .map_err(artifact_index_error)?;
             }
             let mut source_owners = existing_owners.iter().cloned().collect::<Vec<_>>();
             source_owners.extend(imported_owners.into_iter().map(Rc::new));
@@ -237,7 +237,7 @@ impl RuntimeCallableArtifactService for SessionCallableArtifactService {
     }
 }
 
-pub(super) fn service(
+pub(in crate::session) fn service(
     evaluator: &Rc<SessionSourceEvaluator>,
 ) -> Rc<dyn RuntimeCallableArtifactService> {
     Rc::new(SessionCallableArtifactService {
@@ -245,7 +245,7 @@ pub(super) fn service(
     })
 }
 
-pub(super) fn install_bound_invoker(
+pub(in crate::session) fn install_bound_invoker(
     runtime: &RuntimeContext,
     evaluator: &Rc<SessionSourceEvaluator>,
 ) {
