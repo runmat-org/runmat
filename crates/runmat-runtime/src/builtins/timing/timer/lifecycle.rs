@@ -128,7 +128,10 @@ pub(super) async fn start_one_timer(
         return Err(admission_error(TimerAdmissionError::ForeignOrDeleted));
     }
     let config = TimerRunConfig::admit(runtime, &handle, override_delay)?;
-    let tasks = runtime.service_ports().require_local_tasks("timer")?;
+    let tasks = runtime
+        .service_ports()
+        .require_local_tasks("timer")
+        .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
     // The session record owns discovery, while this independent root keeps a
     // currently polled callback's receiver alive if it deletes its timer.
     let task_root = runmat_gc::gc_root(handle.target)
