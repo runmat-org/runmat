@@ -7,9 +7,10 @@ pub mod bindings;
 
 pub use base::base_workspace_error_to_runtime;
 pub use base::{
-    BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
-    BaseWorkspaceProjectionService, BaseWorkspaceReconciliation, BaseWorkspaceService,
-    BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceChangeKind, WorkspaceDelta, WorkspaceRevision,
+    assign_logical_base_value, lookup_logical_base_value, BaseWorkspaceCommit, BaseWorkspaceError,
+    BaseWorkspaceOwner, BaseWorkspaceProjection, BaseWorkspaceProjectionService,
+    BaseWorkspaceReconciliation, BaseWorkspaceService, BaseWorkspaceSnapshot, WorkspaceChange,
+    WorkspaceChangeKind, WorkspaceDelta, WorkspaceRevision,
 };
 pub use checked::{
     base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear, try_global_names,

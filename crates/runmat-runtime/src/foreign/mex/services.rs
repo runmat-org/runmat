@@ -89,16 +89,25 @@ impl MexHostServices for RuntimeMexHostServices {
                 .map_err(capability_diagnostic)?
                 .try_lookup(name)
                 .map_err(runtime_diagnostic),
-            MexWorkspace::Base => self
+            MexWorkspace::Base => {
+                let owner = self
+                    .runtime
+                    .service_ports()
+                    .require_base_workspace("read the MEX base workspace")
+                    .map_err(capability_diagnostic)?
+                    .owner();
+                crate::workspace::lookup_logical_base_value(
+                    &owner,
+                    &self.runtime.session_variable_authority(),
+                    name,
+                )
+                .map_err(runtime_diagnostic)
+            }
+            MexWorkspace::Global => self
                 .runtime
-                .service_ports()
-                .require_base_workspace("read the MEX base workspace")
-                .map_err(capability_diagnostic)?
-                .owner()
-                .lookup(name)
-                .map_err(crate::workspace::base_workspace_error_to_runtime)
+                .session_variable_authority()
+                .global_value(name)
                 .map_err(runtime_diagnostic),
-            MexWorkspace::Global => Ok(crate::workspace::session::global_value(name)),
         }
     }
 
@@ -114,24 +123,26 @@ impl MexHostServices for RuntimeMexHostServices {
                 .assign(name, value)
                 .map_err(runtime_diagnostic),
             MexWorkspace::Base => {
-                let mut delta = crate::workspace::WorkspaceDelta::new();
-                delta
-                    .assign(name, value)
-                    .map_err(crate::workspace::base_workspace_error_to_runtime)
-                    .map_err(runtime_diagnostic)?;
-                self.runtime
+                let owner = self
+                    .runtime
                     .service_ports()
                     .require_base_workspace("write the MEX base workspace")
                     .map_err(capability_diagnostic)?
-                    .owner()
-                    .apply(delta)
-                    .map(|_| ())
-                    .map_err(crate::workspace::base_workspace_error_to_runtime)
-                    .map_err(runtime_diagnostic)
+                    .owner();
+                crate::workspace::assign_logical_base_value(
+                    &owner,
+                    &self.runtime.session_variable_authority(),
+                    name,
+                    value,
+                )
+                .map_err(runtime_diagnostic)
             }
             MexWorkspace::Global => {
-                crate::workspace::session::store_global_named(name, value);
-                Ok(())
+                crate::execution::validate_storable_value(&value).map_err(runtime_diagnostic)?;
+                self.runtime
+                    .session_variable_authority()
+                    .store_global(name, value)
+                    .map_err(runtime_diagnostic)
             }
         }
     }
@@ -402,6 +413,42 @@ mod tests {
         );
         assert_eq!(caller.lookup("answer"), Some(Value::Num(42.0)));
         assert_eq!(base_owner.lookup("answer").unwrap(), Some(Value::Num(7.0)));
+    }
+
+    #[test]
+    fn base_callbacks_resolve_bound_globals_through_the_session_value_owner() {
+        let base_owner = crate::workspace::BaseWorkspaceOwner::new();
+        let mut binding = crate::workspace::WorkspaceDelta::new();
+        binding.bind_global("answer");
+        base_owner.apply(binding).unwrap();
+        let base = Rc::new(crate::workspace::BaseWorkspaceService::new(
+            base_owner.clone(),
+        ));
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(RuntimeServicePorts::default().with_base_workspace(base));
+        let services = RuntimeMexHostServices::new(runtime);
+
+        services
+            .put_variable("global", "answer", Value::Num(3.0))
+            .expect("initialize session-global value");
+        assert_eq!(
+            services
+                .get_variable("base", "answer")
+                .expect("base binding resolves through session-global storage"),
+            Some(Value::Num(3.0))
+        );
+
+        services
+            .put_variable("base", "answer", Value::Num(11.0))
+            .expect("base write updates its bound global");
+        assert_eq!(
+            services
+                .get_variable("global", "answer")
+                .expect("read updated session-global value"),
+            Some(Value::Num(11.0))
+        );
+        assert!(base_owner.is_global("answer").unwrap());
+        assert_eq!(base_owner.lookup("answer").unwrap(), None);
     }
 
     #[test]
