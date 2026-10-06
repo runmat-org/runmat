@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn unmanaged_values_need_no_shared_root_owner() {
-        let values = [Value::Num(7.0), Value::Nothing];
+        let values = [Value::Num(7.0), Value::Bool(false)];
         let roots = RootedValueHandles::for_values(values.iter()).expect("no managed handles");
         assert!(roots._roots.is_none());
         assert!(roots.clone()._roots.is_none());

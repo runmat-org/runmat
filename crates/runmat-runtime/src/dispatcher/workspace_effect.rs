@@ -97,7 +97,7 @@ mod tests {
         let fence = PostCallWorkspaceEffectFence::capture(Some(&runtime));
         owner.close().unwrap();
 
-        let error = fence.finish(Ok(Value::Nothing)).unwrap_err();
+        let error = fence.finish(Ok(Value::Bool(false))).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
     }
 

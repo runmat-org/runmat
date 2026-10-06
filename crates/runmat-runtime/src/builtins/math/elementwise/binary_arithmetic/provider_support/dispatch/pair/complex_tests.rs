@@ -1,6 +1,6 @@
 use super::*;
 use futures::FutureExt;
-use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorStorage, NumericElementType};
 use runmat_builtins::PLUS_CATALOG_ENTRY;
 use std::sync::atomic::Ordering;
 

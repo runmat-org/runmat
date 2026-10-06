@@ -87,7 +87,7 @@ impl RevocableLease {
     pub(super) fn live() -> Arc<Self> {
         Arc::new(Self(AtomicBool::new(true)))
     }
-    fn revoke(&self) {
+    pub(super) fn revoke(&self) {
         self.0.store(false, Ordering::SeqCst);
     }
 }

@@ -159,7 +159,7 @@ pub(super) async fn finish_stage(
 
 #[cfg(test)]
 mod tests {
-    use super::publication::PublicationInterruption;
+    use crate::execution::staged_file::PublicationInterruption;
     use super::*;
     use crate::builtins::io::tabular::path::TabularFsOwner;
     use crate::execution::RuntimeExecutionService;
