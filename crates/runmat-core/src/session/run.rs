@@ -221,7 +221,6 @@ async fn load_dynamic_function(
                             .with_identifier("RunMat:ExecutableSourceIdentity")
                             .build()
                     })?;
-                let source_map = Arc::new(source_table.source_map);
                 if !companion.statements.is_empty() {
                     ast.body
                         .extend(companion.statements.drain(..).map(|entry| entry.statement));
@@ -277,7 +276,7 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionCompileError")
                     .build());
                 }
-                let mut bytecode = frontend.bytecode.ok_or_else(|| {
+                let bytecode = frontend.bytecode.ok_or_else(|| {
                     build_runtime_error(format!(
                         "Canonical frontend produced no bytecode for '{}'",
                         path.display()
@@ -292,6 +291,7 @@ async fn load_dynamic_function(
                             .with_identifier("RunMat:ExecutableSourceIdentity")
                             .build()
                     })?;
+                let source_map = Arc::new(source_table.source_map);
                 let mut compiled_registry = bytecode.function_registry();
                 let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
                 if compiled_registry.resolve_name(&name).is_none() {
@@ -1205,7 +1205,11 @@ impl RunMatSession {
             }
 
             match self
-                .interpret_with_context(&execution_bytecode, &mut variable_array, execution_runtime)
+                .interpret_with_context(
+                    &execution_bytecode,
+                    &mut variable_array,
+                    execution_runtime.clone(),
+                )
                 .await
             {
                 Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {
