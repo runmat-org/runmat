@@ -93,7 +93,6 @@ pub(crate) mod errorbar;
 pub(crate) mod fcontour;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
-#[path = "ops/figure_persistence.rs"]
 pub(crate) mod figure_persistence;
 #[path = "ops/fill.rs"]
 pub(crate) mod fill;

@@ -2,12 +2,14 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod animatedline;
+mod annotations;
 mod axes;
 mod axis;
 mod cla;
 mod colorbar;
 mod colormap;
 mod daspect;
+mod figure_persistence;
 mod findobj;
 mod gcf;
 mod get;
@@ -15,13 +17,12 @@ mod grid;
 mod hidden;
 mod hold;
 mod linkaxes;
+mod palette_generators;
+mod print;
 mod r#box;
 mod set;
 mod shading;
 mod view;
-mod palette_generators;
-mod annotations;
-mod print;
 
 pub use self::animatedline::*;
 pub use self::annotations::*;
@@ -31,6 +32,7 @@ pub use self::cla::*;
 pub use self::colorbar::*;
 pub use self::colormap::*;
 pub use self::daspect::*;
+pub use self::figure_persistence::*;
 pub use self::findobj::*;
 pub use self::gcf::*;
 pub use self::get::*;
@@ -56,6 +58,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(findobj::ENTRIES.iter().copied());
     values.extend(gcf::ENTRIES.iter().copied());
     values.extend(get::ENTRIES.iter().copied());
+    values.extend(figure_persistence::ENTRIES.iter().copied());
     values.extend(grid::ENTRIES.iter().copied());
     values.extend(hidden::ENTRIES.iter().copied());
     values.extend(hold::ENTRIES.iter().copied());
