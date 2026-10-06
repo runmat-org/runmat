@@ -131,11 +131,8 @@ pub async fn print_builtin(
     }
     if let Some(first) = args.first() {
         if crate::builtins::common::validation::value_has_native_integer_class(first)
-            && !export::await_effect(
-                runtime.as_ref(),
-                crate::builtins::common::validation::native_integer_value_is_exact_f64_async(first),
-            )
-            .await??
+            && !matches!(first, Value::GpuTensor(_))
+            && !crate::builtins::common::validation::native_integer_value_is_exact_f64(first)
         {
             return Err(build_runtime_error(
                 "print: integer figure handle values must be exactly representable as double",
@@ -157,6 +154,24 @@ pub async fn print_builtin(
     #[cfg(feature = "plot-core")]
     let early_scene = early_handle.and_then(clone_figure);
     let owner = export::PrintFsOwner::capture(known_filename.as_deref()).map_err(export::map_io)?;
+    // A resident integer handle needs provider data to establish binary64
+    // exactness; the selected scene and filesystem owner are already captured.
+    if let Some(first @ Value::GpuTensor(_)) = args.first() {
+        if crate::builtins::common::validation::value_has_native_integer_class(first)
+            && !export::await_effect(
+                runtime.as_ref(),
+                crate::builtins::common::validation::native_integer_value_is_exact_f64_async(first),
+            )
+            .await??
+        {
+            return Err(build_runtime_error(
+                "print: integer figure handle values must be exactly representable as double",
+            )
+            .with_builtin(BUILTIN_NAME)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
+    }
     // Host-known invalid controls are rejected before any resident download or
     // filesystem service capture. Dynamic controls receive the same parser
     // after materialization.
