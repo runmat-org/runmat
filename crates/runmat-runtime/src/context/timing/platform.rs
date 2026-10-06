@@ -1,17 +1,21 @@
+mod calendar;
+
 use super::RuntimeTimingService;
 use crate::context::RuntimeServiceFuture;
-use chrono::TimeZone;
+use calendar::CapturedCalendar;
 use runmat_time::Instant;
 use std::time::Duration;
 
 pub(super) struct PlatformTimingService {
     origin: Instant,
+    calendar: Option<CapturedCalendar>,
 }
 
 impl PlatformTimingService {
     pub(super) fn new() -> Self {
         Self {
             origin: Instant::now(),
+            calendar: CapturedCalendar::try_system().ok(),
         }
     }
 }
@@ -28,20 +32,11 @@ impl RuntimeTimingService for PlatformTimingService {
     }
 
     fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
-        let timestamp = chrono::Local.from_local_datetime(&local).single()?;
-        Some(Duration::new(
-            u64::try_from(timestamp.timestamp()).ok()?,
-            timestamp.timestamp_subsec_nanos(),
-        ))
+        self.calendar.as_ref()?.local_to_epoch(local)
     }
 
     fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
-        Some(
-            chrono::Local
-                .timestamp_opt(i64::try_from(epoch.as_secs()).ok()?, epoch.subsec_nanos())
-                .single()?
-                .naive_local(),
-        )
+        self.calendar.as_ref()?.local_at_epoch(epoch)
     }
 
     fn process_cpu_seconds(&self) -> Option<f64> {
@@ -198,4 +193,25 @@ async fn browser_sleep_chunk(millis: i32) -> Result<(), crate::RuntimeError> {
         .map_err(|_| crate::RuntimeError::new("pause: timer callback was dropped"))?;
     drop(scheduled);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn unavailable_calendar_does_not_fall_back_to_utc() {
+        let timing = PlatformTimingService {
+            origin: Instant::now(),
+            calendar: None,
+        };
+        let local = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .expect("test date")
+            .and_hms_opt(0, 0, 0)
+            .expect("test time");
+
+        assert_eq!(timing.local_datetime_to_epoch(local), None);
+        assert_eq!(timing.local_datetime_at_epoch(Duration::ZERO), None);
+    }
 }
