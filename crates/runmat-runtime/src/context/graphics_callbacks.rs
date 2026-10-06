@@ -15,6 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::Arc;
 
@@ -25,6 +26,8 @@ use claim::CallbackClaim;
 mod host_request;
 pub use host_request::GraphicsCallbackHostTicket;
 use host_request::HostReply;
+#[path = "graphics_callbacks/retirement.rs"]
+mod retirement;
 pub use runmat_value::{GraphicsCallbackDisposition, GraphicsCallbackHostFailure};
 
 /// Host metadata only. The session-side adapter constructs callable arguments
@@ -53,6 +56,7 @@ pub struct GraphicsCallbackIngress {
     figure: u32,
     kind: GraphicsCallbackKind,
     live: Arc<CallbackClaim>,
+    closed: Arc<AtomicBool>,
     sender: SyncSender<Envelope>,
 }
 
@@ -76,7 +80,7 @@ impl GraphicsCallbackIngress {
     }
 
     pub fn is_live(&self) -> bool {
-        self.live.is_live()
+        !self.closed.load(Ordering::Acquire) && self.live.is_live()
     }
 
     /// Never block a GUI/DOM event lane. Full is a typed backpressure result;
@@ -113,7 +117,16 @@ impl GraphicsCallbackIngress {
                     event: envelope.event,
                     failure: GraphicsCallbackIngressFailure::Closed,
                 },
-            })
+            })?;
+        // A concurrent host admission can race session close between the
+        // first liveness check and try_send. Closed queues never execute it.
+        if !self.is_live() {
+            return Err(GraphicsCallbackIngressError {
+                event,
+                failure: GraphicsCallbackIngressFailure::Retired,
+            });
+        }
+        Ok(())
     }
 
     /// Submit a result-bearing host gesture without blocking the UI lane.
@@ -154,6 +167,9 @@ impl GraphicsCallbackIngress {
                     failure: GraphicsCallbackIngressFailure::Closed,
                 },
             })?;
+        if !self.is_live() {
+            reply.reject_queued(GraphicsCallbackHostFailure::Retired);
+        }
         Ok(ticket)
     }
 }
@@ -209,6 +225,7 @@ struct Inner {
     owner: Option<RuntimeContextLocalId>,
     receiver: RefCell<Receiver<Envelope>>,
     sender: SyncSender<Envelope>,
+    closed: Arc<AtomicBool>,
     registrations: RefCell<HashMap<u64, Registration>>,
     /// The session queue, not a process-global scene or a RuntimeContext
     /// service port, owns the selected callable's registration lifetime.
@@ -287,6 +304,7 @@ impl RuntimeGraphicsCallbackQueue {
             owner,
             receiver: RefCell::new(receiver),
             sender,
+            closed: Arc::new(AtomicBool::new(false)),
             registrations: RefCell::new(HashMap::new()),
             property_registrations: RefCell::new(Vec::new()),
             maximum_registrations,
@@ -342,6 +360,11 @@ impl RuntimeGraphicsCallbackQueue {
         selected: &RuntimeContext,
         receiver: &GraphicsReceiverRef,
     ) -> Result<u32, RuntimeError> {
+        if self.is_closed() {
+            return Err(build_runtime_error("graphics callback session has retired")
+                .with_identifier("RunMat:graphics:CallbackSessionRetired")
+                .build());
+        }
         let GraphicsReceiverKind::Figure { figure } = receiver.kind() else {
             return Err(
                 build_runtime_error("graphics callback source must be a Figure")
@@ -418,6 +441,7 @@ impl RuntimeGraphicsCallbackQueue {
                 figure,
                 kind,
                 live: new_live,
+                closed: Arc::clone(&self.0.closed),
                 sender: self.0.sender.clone(),
             });
         }
@@ -480,6 +504,11 @@ impl RuntimeGraphicsCallbackQueue {
         receiver: Option<GraphicsReceiverRef>,
         callback: Rc<GraphicsCallbackResponder>,
     ) -> Result<(GraphicsCallbackRegistration, GraphicsCallbackIngress), RuntimeError> {
+        if self.is_closed() {
+            return Err(build_runtime_error("graphics callback session has retired")
+                .with_identifier("RunMat:graphics:CallbackSessionRetired")
+                .build());
+        }
         if self.0.registrations.borrow().len() >= self.0.maximum_registrations.get() {
             return Err(
                 build_runtime_error("graphics callback registration capacity exhausted")
@@ -517,6 +546,7 @@ impl RuntimeGraphicsCallbackQueue {
                 figure,
                 kind,
                 live,
+                closed: Arc::clone(&self.0.closed),
                 sender: self.0.sender.clone(),
             },
         ))
@@ -529,6 +559,11 @@ impl RuntimeGraphicsCallbackQueue {
     pub fn defer(&self) {}
 
     pub async fn process(&self) -> Result<(), RuntimeError> {
+        if self.is_closed() {
+            return Err(build_runtime_error("graphics callback session has retired")
+                .with_identifier("RunMat:graphics:CallbackSessionRetired")
+                .build());
+        }
         if self.0.draining.replace(true) {
             return Err(
                 build_runtime_error("graphics callback queue is already draining")
@@ -549,6 +584,11 @@ impl RuntimeGraphicsCallbackQueue {
         let _guard = DrainGuard(&self.0);
         self.prune_retired_graphics_properties();
         loop {
+            if self.is_closed() {
+                return Err(build_runtime_error("graphics callback session has retired")
+                    .with_identifier("RunMat:graphics:CallbackSessionRetired")
+                    .build());
+            }
             let current = self.0.in_flight.borrow().clone();
             let envelope = match current {
                 Some(InFlight::Indeterminate(envelope)) => {
@@ -631,7 +671,7 @@ impl RuntimeGraphicsCallbackQueue {
             };
             if let Some(reply) = envelope.reply.as_ref() {
                 if !reply.begin() {
-                    invocation.terminal();
+                    invocation.abort_before_invocation();
                     *self.0.in_flight.borrow_mut() = None;
                     continue;
                 }

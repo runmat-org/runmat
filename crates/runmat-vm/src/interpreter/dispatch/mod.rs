@@ -715,6 +715,7 @@ fn dispatch_immediate(
         vars,
         sequence_register,
         context,
+        try_stack,
         imports,
         global_aliases,
         persistent_aliases,

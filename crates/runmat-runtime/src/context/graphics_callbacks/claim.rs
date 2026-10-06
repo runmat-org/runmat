@@ -50,6 +50,13 @@ pub(super) struct ActiveCallbackClaim {
 }
 
 impl ActiveCallbackClaim {
+    /// A host ticket retired after claim acquisition but before dispatch.
+    /// No callback ran, so neither publication nor an indeterminate effect
+    /// may be recorded by this guard's Drop.
+    pub(super) fn abort_before_invocation(&mut self) {
+        self.terminal = true;
+    }
+
     pub(super) fn terminal(&mut self) {
         self.claim.0.fetch_or(PUBLISHED, Ordering::AcqRel);
         self.terminal = true;
@@ -94,5 +101,14 @@ mod tests {
             exhausted.begin().is_none(),
             "capacity must not set a state bit"
         );
+    }
+
+    #[test]
+    fn host_ticket_retirement_before_invocation_does_not_publish_claim() {
+        let claim = Arc::new(CallbackClaim::default());
+        let mut active = claim.begin().expect("claim acquired");
+        active.abort_before_invocation();
+        drop(active);
+        assert_eq!(claim.retire(), GraphicsCallbackDisposition::NotPublished);
     }
 }

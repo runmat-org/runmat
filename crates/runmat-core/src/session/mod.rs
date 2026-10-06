@@ -363,6 +363,9 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
+        if let Some(callbacks) = self.graphics_callbacks.take() {
+            callbacks.close();
+        }
         if let Err(error) = self.base_workspace.close() {
             tracing::warn!(%error, "could not revoke base workspace during session shutdown");
         }

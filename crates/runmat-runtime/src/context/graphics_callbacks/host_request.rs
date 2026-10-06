@@ -14,6 +14,7 @@ const QUEUED: u8 = 0;
 const RETIRED: u8 = 1;
 const DISPATCHED: u8 = 2;
 const COMMITTED: u8 = 3;
+const INDETERMINATE: u8 = 4;
 
 pub(super) struct HostReply {
     state: AtomicU8,
@@ -48,7 +49,7 @@ impl HostReply {
     pub(super) fn disposition(&self) -> GraphicsCallbackDisposition {
         match self.state.load(Ordering::Acquire) {
             QUEUED | RETIRED => GraphicsCallbackDisposition::NotPublished,
-            DISPATCHED => GraphicsCallbackDisposition::Indeterminate,
+            DISPATCHED | INDETERMINATE => GraphicsCallbackDisposition::Indeterminate,
             COMMITTED => GraphicsCallbackDisposition::Published,
             _ => unreachable!("closed callback request state"),
         }
@@ -58,10 +59,15 @@ impl HostReply {
         &self,
         result: Result<GraphicsCallbackResult, GraphicsCallbackHostFailure>,
     ) {
-        let previous =
-            self.state
-                .compare_exchange(DISPATCHED, COMMITTED, Ordering::AcqRel, Ordering::Acquire);
-        debug_assert_eq!(previous, Ok(DISPATCHED));
+        if self
+            .state
+            .compare_exchange(DISPATCHED, COMMITTED, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            // Session close may already have resolved this started request
+            // conservatively. Its effect must not be reported twice.
+            return;
+        }
         if let Some(sender) = self.sender.lock().expect("callback reply lock").take() {
             let _ = sender.send(result);
         }
@@ -78,6 +84,25 @@ impl HostReply {
         {
             if let Some(sender) = self.sender.lock().expect("callback reply lock").take() {
                 let _ = sender.send(Err(failure));
+            }
+        }
+    }
+
+    /// Close a request that may already be executing. This is not a claim
+    /// that the callback had no effect and must never permit host replay.
+    pub(super) fn close_started(&self) {
+        if self
+            .state
+            .compare_exchange(
+                DISPATCHED,
+                INDETERMINATE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            if let Some(sender) = self.sender.lock().expect("callback reply lock").take() {
+                let _ = sender.send(Err(GraphicsCallbackHostFailure::Indeterminate));
             }
         }
     }
@@ -111,7 +136,13 @@ impl Future for GraphicsCallbackHostTicket {
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.receiver).poll(context) {
             Poll::Ready(Ok(result)) => Poll::Ready(result),
-            Poll::Ready(Err(_)) => Poll::Ready(Err(GraphicsCallbackHostFailure::Retired)),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(match self.reply.disposition() {
+                GraphicsCallbackDisposition::NotPublished => GraphicsCallbackHostFailure::Retired,
+                GraphicsCallbackDisposition::Indeterminate
+                | GraphicsCallbackDisposition::Published => {
+                    GraphicsCallbackHostFailure::Indeterminate
+                }
+            })),
             Poll::Pending => Poll::Pending,
         }
     }

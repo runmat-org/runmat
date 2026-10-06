@@ -30,6 +30,9 @@ pub enum GraphicsCallbackHostFailure {
     CallbackFailed,
     InvalidResult,
     Retired,
+    /// The selected callback may already have produced effects when its
+    /// session retired. The host must not replay the gesture.
+    Indeterminate,
 }
 
 /// Whether a host gesture may have started its callback. The native event

@@ -53,7 +53,10 @@ impl RunMatSession {
             .clone()
             .with_graphics_callback_queue(queue.downgrade());
         self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
-        self.graphics_callbacks = Some(queue.clone());
+        let previous = self.graphics_callbacks.replace(queue.clone());
+        if let Some(previous) = previous {
+            previous.close();
+        }
         queue
     }
 
@@ -137,6 +140,22 @@ mod tests {
             same_service(before.call(), after.call());
             same_service(before.placement(), after.placement());
             same_service(before.distributed(), after.distributed());
+        });
+    }
+
+    #[test]
+    fn replacing_or_dropping_session_retires_external_callback_queue_clones() {
+        runmat_gc::gc_test_context(|| {
+            let mut session = RunMatSession::with_options(false, false).unwrap();
+            let capacity = std::num::NonZeroUsize::new(2).unwrap();
+            let first = session.install_graphics_callback_queue(capacity, capacity);
+            let external = first.clone();
+            let second = session.install_graphics_callback_queue(capacity, capacity);
+            assert!(first.is_closed());
+            assert!(external.is_closed());
+            assert!(!second.is_closed());
+            drop(session);
+            assert!(second.is_closed());
         });
     }
 

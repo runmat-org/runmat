@@ -1051,6 +1051,56 @@ fn replacement_during_pending_cooperation_excludes_callback_start() {
 }
 
 #[test]
+fn session_close_during_pending_cooperation_retires_ready_head_without_callback() {
+    let (release, gate) = oneshot::channel();
+    let reached = Rc::new(Cell::new(0));
+    let dropped = Rc::new(Cell::new(0));
+    let service = Rc::new(PendingFirstTurn {
+        receiver: RefCell::new(Some(gate)),
+        reached: reached.clone(),
+        dropped: dropped.clone(),
+    });
+    let selected = RuntimeContext::new(service);
+    let owner = queue(2);
+    let external = owner.clone();
+    let calls = Rc::new(Cell::new(0));
+    let callback: Rc<GraphicsCallbackResponder> = {
+        let calls = calls.clone();
+        Rc::new(move |_| {
+            calls.set(calls.get() + 1);
+            Box::pin(async { Ok(GraphicsCallbackResult::Completed) })
+        })
+    };
+    let (_registration, ingress) = owner
+        .register_response(selected, 7, GraphicsCallbackKind::PanActionPre, callback)
+        .unwrap();
+    let ticket = ingress
+        .request(event(GraphicsCallbackKind::PanActionPre))
+        .unwrap();
+    let mut processing = Box::pin(owner.process());
+    futures::executor::block_on(futures::future::poll_fn(|context| {
+        assert!(processing.as_mut().poll(context).is_pending());
+        std::task::Poll::Ready(())
+    }));
+    assert_eq!(reached.get(), 1);
+    assert_eq!(calls.get(), 0);
+    owner.close();
+    assert!(external.is_closed());
+    assert_eq!(
+        ticket.disposition(),
+        GraphicsCallbackDisposition::NotPublished
+    );
+    assert_eq!(
+        futures::executor::block_on(ticket),
+        Err(GraphicsCallbackHostFailure::Retired)
+    );
+    drop(processing);
+    assert_eq!(dropped.get(), 1);
+    assert_eq!(calls.get(), 0);
+    assert!(release.send(()).is_err(), "abandoned turn has no receiver");
+}
+
+#[test]
 fn replacement_after_callback_start_is_indeterminate_and_never_replays() {
     let queue = queue(2);
     let calls = Rc::new(Cell::new(0));

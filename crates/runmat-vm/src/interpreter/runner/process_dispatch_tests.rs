@@ -1,7 +1,8 @@
 use super::{interpret_with_vars_in_context, InterpreterOutcome};
-use crate::bytecode::program::Bytecode;
+use crate::bytecode::program::{Bytecode, FunctionBytecode, FunctionRegistry};
 use crate::bytecode::Instr;
 use futures::executor::block_on;
+use runmat_hir::FunctionId;
 use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
 use runmat_value::{Value, ValueSequence};
 use std::rc::Rc;
@@ -13,6 +14,7 @@ struct ProcessDispatchControl {
 }
 
 static PROCESS_DISPATCH_CONTROL: Mutex<Option<ProcessDispatchControl>> = Mutex::new(None);
+static PROCESS_DISPATCH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn pending_process_builtin(
     _invocation: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>,
@@ -47,8 +49,72 @@ impl RuntimeBuiltinService for ProcessBuiltinService {
     }
 }
 
-#[test]
-fn process_stack_builtin_can_suspend_on_a_bounded_native_thread_stack() {
+fn process_leaf_instructions() -> Vec<Instr> {
+    vec![
+        Instr::LoadString("java.lang.String".into()),
+        Instr::CallBuiltinMulti("javaObject".into(), 1, 1),
+        Instr::StoreVar(0),
+        Instr::Return,
+    ]
+}
+
+fn nested_process_bytecode(depth: usize) -> Bytecode {
+    if depth == 0 {
+        return Bytecode::with_instructions(
+            vec![
+                Instr::LoadString("java.lang.String".into()),
+                Instr::CallBuiltinMulti("javaObject".into(), 1, 1),
+                Instr::ReturnValue,
+            ],
+            0,
+        );
+    }
+
+    let functions = (1..=depth)
+        .map(|index| {
+            let instructions = if index == depth {
+                process_leaf_instructions()
+            } else {
+                vec![
+                    Instr::CallSemanticFunctionMulti(FunctionId(index + 1), 0, 1),
+                    Instr::StoreVar(0),
+                    Instr::Return,
+                ]
+            };
+            (
+                FunctionId(index),
+                FunctionBytecode {
+                    function: FunctionId(index),
+                    display_name: format!("process_chain_{index}"),
+                    instructions,
+                    var_count: 1,
+                    output_slots: vec![0],
+                    ..FunctionBytecode::default()
+                },
+            )
+        })
+        .collect();
+    let registry = FunctionRegistry::new(functions);
+    assert_eq!(
+        registry.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Process,
+        "the selected static chain must stay on the native process stack"
+    );
+    let mut bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::CallSemanticFunctionMulti(FunctionId(1), 0, 1),
+            Instr::ReturnValue,
+        ],
+        0,
+    );
+    bytecode.function_registry = registry;
+    bytecode
+}
+
+fn run_process_fixture_on_bounded_stack(depth: usize) {
+    let _test_guard = PROCESS_DISPATCH_TEST_LOCK
+        .lock()
+        .expect("serialize process dispatch fixtures");
     let (reached_tx, reached_rx) = mpsc::channel();
     let (release_tx, release_rx) = futures::channel::oneshot::channel();
     *PROCESS_DISPATCH_CONTROL
@@ -61,21 +127,14 @@ fn process_stack_builtin_can_suspend_on_a_bounded_native_thread_stack() {
     let execution = std::thread::Builder::new()
         .name("vm-process-dispatch".into())
         .stack_size(2 * 1024 * 1024)
-        .spawn(|| {
+        .spawn(move || {
             let runtime = RuntimeContext::new(Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             ))
             .with_service_ports(
                 RuntimeServicePorts::default().with_builtin(Rc::new(ProcessBuiltinService)),
             );
-            let bytecode = Bytecode::with_instructions(
-                vec![
-                    Instr::LoadString("java.lang.String".into()),
-                    Instr::CallBuiltinMulti("javaObject".into(), 1, 1),
-                    Instr::ReturnValue,
-                ],
-                0,
-            );
+            let bytecode = nested_process_bytecode(depth);
             let mut vars = Vec::new();
             let outcome = block_on(interpret_with_vars_in_context(
                 &bytecode,
@@ -96,4 +155,14 @@ fn process_stack_builtin_can_suspend_on_a_bounded_native_thread_stack() {
     execution
         .join()
         .expect("bounded-stack VM thread must not overflow");
+}
+
+#[test]
+fn process_stack_builtin_can_suspend_on_a_bounded_native_thread_stack() {
+    run_process_fixture_on_bounded_stack(0);
+}
+
+#[test]
+fn nested_process_stack_calls_reach_a_pending_leaf_on_a_bounded_native_thread_stack() {
+    run_process_fixture_on_bounded_stack(12);
 }
