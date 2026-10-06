@@ -76,8 +76,19 @@ impl RuntimeTimingService for TestClock {
     }
 }
 
+struct TimerTestSession {
+    runtime: RuntimeContext,
+    supervisor: Rc<RuntimeLocalTaskSupervisor>,
+    bindings: Vec<BoundFunctionBinding>,
+}
+
+struct TimerInvokerGuards {
+    _semantic: crate::user_functions::FunctionInvokerGuard,
+    _bound: crate::user_functions::BoundFunctionInvokerGuard,
+}
+
 thread_local! {
-    static TEST_SESSION: RefCell<Option<(RuntimeContext, Rc<RuntimeLocalTaskSupervisor>, Vec<BoundFunctionBinding>)>> = const { RefCell::new(None) };
+    static TEST_SESSION: RefCell<Option<TimerTestSession>> = const { RefCell::new(None) };
 }
 
 fn set_test_session(runtime: RuntimeContext, supervisor: Rc<RuntimeLocalTaskSupervisor>) {
@@ -86,7 +97,13 @@ fn set_test_session(runtime: RuntimeContext, supervisor: Rc<RuntimeLocalTaskSupe
             crate::user_functions::test_support::exact_local_binding(&runtime, function)
         })
         .collect();
-    TEST_SESSION.with(|session| *session.borrow_mut() = Some((runtime, supervisor, bindings)));
+    TEST_SESSION.with(|session| {
+        *session.borrow_mut() = Some(TimerTestSession {
+            runtime,
+            supervisor,
+            bindings,
+        });
+    });
 }
 
 fn timer_callback_value(name: &str, function: usize) -> Value {
@@ -95,7 +112,7 @@ fn timer_callback_value(name: &str, function: usize) -> Value {
         let binding = session
             .as_ref()
             .expect("test session")
-            .2
+            .bindings
             .get(function.checked_sub(1).expect("fixture function number"))
             .expect("registered fixture binding")
             .clone();
@@ -121,28 +138,48 @@ fn reset_timer_state_for_tests_with_clock(clock: Option<Arc<Mutex<Duration>>>) {
 }
 
 fn test_runtime() -> RuntimeContext {
-    TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").0.clone())
+    TEST_SESSION.with(|session| {
+        session
+            .borrow()
+            .as_ref()
+            .expect("test session")
+            .runtime
+            .clone()
+    })
 }
 
 fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
-    TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").1.clone())
+    TEST_SESSION.with(|session| {
+        session
+            .borrow()
+            .as_ref()
+            .expect("test session")
+            .supervisor
+            .clone()
+    })
 }
 
 fn install_timer_invoker(
     invoker: Option<Arc<crate::user_functions::FunctionInvoker>>,
-) -> (
-    crate::user_functions::FunctionInvokerGuard,
-    crate::user_functions::BoundFunctionInvokerGuard,
-) {
+) -> TimerInvokerGuards {
     let _scope = test_runtime().enter();
     let semantic = crate::user_functions::install_semantic_function_invoker(invoker);
     let bound = install_timer_bound_forwarders();
-    (semantic, bound)
+    TimerInvokerGuards {
+        _semantic: semantic,
+        _bound: bound,
+    }
 }
 
 fn install_timer_bound_forwarders() -> crate::user_functions::BoundFunctionInvokerGuard {
-    let bindings =
-        TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").2.clone());
+    let bindings = TEST_SESSION.with(|session| {
+        session
+            .borrow()
+            .as_ref()
+            .expect("test session")
+            .bindings
+            .clone()
+    });
     crate::user_functions::test_support::install_bound_forwarders(bindings)
 }
 
