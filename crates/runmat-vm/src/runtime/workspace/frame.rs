@@ -11,9 +11,9 @@ pub(crate) enum WorkspaceFrameLifecycle {
 }
 
 pub(crate) struct PendingServiceFrame {
-    pub(super) id: WorkspaceFrameId,
-    pub(super) lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
-    pub(super) delegate:
+    pub(in crate::runtime) id: WorkspaceFrameId,
+    pub(in crate::runtime) lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
+    pub(in crate::runtime) delegate:
         Rc<RefCell<Option<Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
 }
 
