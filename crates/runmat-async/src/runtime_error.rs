@@ -87,13 +87,14 @@ pub struct RuntimeError {
     pub span: Option<SourceSpan>,
     #[source]
     pub source: Option<Box<RuntimeErrorSource>>,
-    /// An owning charge for original diagnostic allocations only. Mutating
-    /// public text/context fields requires a separate allocation authority.
-    pub retained_diagnostic_allocation: Option<RetainedDiagnosticAllocation>,
     pub identifier: Option<String>,
     pub context: ErrorContext,
     pub gpu_gather_retry: GpuGatherRetry,
     pub failure_origin: RuntimeFailureOrigin,
+    /// An owning charge for original diagnostic allocations only. Its final
+    /// drop follows message, source, identifier and context physical drops.
+    /// Mutating public text/context fields requires a separate authority.
+    pub retained_diagnostic_allocation: Option<RetainedDiagnosticAllocation>,
 }
 
 /// An owning reference to the exact error caught by an exception value.
@@ -173,11 +174,11 @@ impl RuntimeError {
             message: message.into(),
             span: None,
             source: None,
-            retained_diagnostic_allocation: None,
             identifier: None,
             context: ErrorContext::default(),
             gpu_gather_retry: GpuGatherRetry::Legacy,
             failure_origin: RuntimeFailureOrigin::Unclassified,
+            retained_diagnostic_allocation: None,
         }
     }
 
