@@ -283,6 +283,7 @@ async fn invoke_semantic_function_with_captures_inner(
     let result_vars = {
         #[cfg(not(target_arch = "wasm32"))]
         let execution_runtime = runtime.clone();
+        #[cfg(target_arch = "wasm32")]
         let future = interpret_function_with_counts_in_context(
             &bytecode,
             vars,
@@ -305,13 +306,27 @@ async fn invoke_semantic_function_with_captures_inner(
             // the native OS stack, which those runtimes may register or inspect.
             const SEMANTIC_CALL_STACK_BYTES: usize = 16 * 1024 * 1024;
             let execution_stack = function_registry.execution_stack(function_id);
+            // Construct the large interpreter future on the temporary stack,
+            // then return only its pinned heap owner to the caller. Constructing
+            // it before boxing would still consume the caller's native stack.
+            // No interpreter polling or foreign execution occurs here.
+            let mut future = stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
+                Box::pin(interpret_function_with_counts_in_context(
+                    &bytecode,
+                    vars,
+                    &func.display_name,
+                    requested_outputs,
+                    prepared.nargin,
+                    missing_input_slots,
+                    runtime.clone(),
+                ))
+            });
             if execution_stack == runmat_types::ExecutionStackRequirement::Process {
                 // The async interpreter state is substantially larger than a
                 // call frame. Heap-allocate it so nested dispatch does not
                 // consume the native stack needed by the foreign runtime.
-                Box::pin(future).await?
+                future.await?
             } else {
-                let mut future = Box::pin(future);
                 futures::future::poll_fn(move |context| {
                     stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
                         let _stack = execution_runtime.enter_execution_stack(
