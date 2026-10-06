@@ -222,13 +222,9 @@ impl NativeWorkspaceState {
                 .map_err(workspace_borrow_error)?;
             if let Some(canonical) = self.canonical.as_ref() {
                 if self.publish && !self.global_aliases.is_bound(slot, name) {
-                    canonical
-                        .assign(name, value.clone())
-                        .map_err(NativeExecutorError::Runtime)?;
+                    canonical.assign(name, value.clone())?;
                 } else {
-                    canonical
-                        .ensure_mutation_authority()
-                        .map_err(NativeExecutorError::Runtime)?;
+                    canonical.ensure_mutation_authority()?;
                 }
             }
             let mut values = self
@@ -322,12 +318,8 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     fn lookup(&self, name: &str) -> Option<Value> {
         let frame = self.frame.upgrade()?;
         frame.active.get().then_some(())?;
-        frame
-            .values
-            .try_borrow()
-            .ok()?
-            .get(name)
-            .map(|entry| entry.value.clone())
+        let values = frame.values.try_borrow().ok()?;
+        values.get(name).map(|entry| entry.value.clone())
     }
 
     fn snapshot(&self) -> Vec<(String, Value)> {
