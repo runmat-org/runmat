@@ -98,3 +98,6 @@ async fn restored_product_freezes_original_analysis_source_and_function_without_
             .clone()
     );
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+mod deferred;

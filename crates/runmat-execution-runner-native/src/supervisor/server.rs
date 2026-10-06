@@ -42,6 +42,9 @@ pub async fn run_local_supervisor(config: LocalSupervisorConfig) -> NativeExecut
                     was_failing = false;
                 }
             }
+            // An overdue interval can remain ready across every cycle. Reconciliation
+            // must yield even then so IPC and cancellation can share this executor.
+            tokio::task::yield_now().await;
         }
     };
     tokio::select! {

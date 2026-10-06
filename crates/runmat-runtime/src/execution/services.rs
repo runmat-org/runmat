@@ -19,10 +19,9 @@ pub struct DeferredCall {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
-    /// Exact, runtime-opaque program description supplied by the VM.
-    ///
-    /// The serial service does not inspect this payload. Execution adapters may
-    /// require it to reproduce the callable in an isolated worker.
+    /// Canonical complete V3 compiler product frozen by the active session owner.
+    /// The serial service does not inspect it; isolated consumers reject partial
+    /// registries and inconsistent original revision/function identity.
     pub program: Option<Vec<u8>>,
 }
 

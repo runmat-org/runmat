@@ -5,12 +5,8 @@ use runmat_execution_runner::TaskCancellationCause;
 use runmat_runtime::execution::ExecutionServiceError;
 
 pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExecutionConfig) {
-    let mut original = call(1);
-    let mut registry: FunctionRegistry =
-        serde_json::from_slice(original.program.as_ref().unwrap()).unwrap();
-    assert_eq!(registry.functions.len(), 1);
-    registry.functions.values_mut().next().unwrap().instructions = vec![Instr::Jump(0)];
-    original.program = Some(serde_json::to_vec(&registry).unwrap());
+    let original = call_source(1,
+        "function [first, second] = original_output_values(); while true; first = 13; end; second = 29; end").await;
     let job = service
         .submit_job(
             original,

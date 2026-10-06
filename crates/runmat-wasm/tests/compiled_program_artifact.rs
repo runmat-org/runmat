@@ -45,7 +45,7 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
         envelope.canonical_bytes().unwrap(),
     )
     .unwrap();
-    let request = ProgramExecutionRequest {
+    let request: ProgramExecutionRequest = ProgramExecutionRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe,
         artifact,

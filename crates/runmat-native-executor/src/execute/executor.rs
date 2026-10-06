@@ -13,7 +13,6 @@ use super::state::{HostState, HostStateInput};
 pub struct NativeExecutor {
     functions: Arc<Vec<runmat_native_codegen::NativeFunction>>,
     compiled: NativeExecutable,
-    program_capture: Option<Vec<u8>>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub(super) regions: Vec<runmat_types::RegionContract>,
@@ -24,7 +23,6 @@ pub struct NativeExecutor {
 
 #[derive(Default)]
 pub struct NativeExecutorOptions {
-    pub program_capture: Option<Vec<u8>>,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub entry_profile: Option<crate::RepresentationProfile>,
@@ -84,7 +82,6 @@ impl NativeExecutor {
         Ok(Self {
             functions: Arc::new(assembly.functions),
             compiled: executable,
-            program_capture: options.program_capture,
             interpreter_resume_points: options.interpreter_resume_points,
             coverage_sites: options.coverage_sites,
             regions,
@@ -344,7 +341,6 @@ impl NativeExecutor {
             arguments,
             requested_outputs: requested_outputs as usize,
             runtime,
-            program_capture: self.program_capture.clone(),
             functions: Arc::clone(&self.functions),
             captures,
             deoptimization,

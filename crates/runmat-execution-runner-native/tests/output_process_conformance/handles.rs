@@ -31,7 +31,7 @@ pub(super) fn reject_altered_task(service: &NativeExecutionService, original: &T
 }
 
 pub(super) async fn verify_caller(service: &NativeExecutionService) {
-    let future = service.create_future(call(2)).unwrap();
+    let future = service.create_future(call(2).await).unwrap();
     let mut unknown = future.clone();
     unknown.id = runmat_execution::FutureId::derive(&[b"unknown-completion"]);
     assert_eq!(
@@ -54,16 +54,20 @@ pub(super) async fn verify_caller(service: &NativeExecutionService) {
         panic!("original caller did not enter execution");
     };
     assert!(service.begin_await(Value::Future(future.clone())).is_err());
-    let registry: FunctionRegistry =
-        serde_json::from_slice(call.program.as_ref().unwrap()).unwrap();
-    let result = runmat_vm::invoke_semantic_function_value(
-        call.function,
-        &call.arguments,
-        call.requested_outputs,
-        &registry,
+    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
+        call.program.as_ref().unwrap(),
     )
-    .await
     .unwrap();
+    let mut caller = RunMatSession::with_options(false, false).unwrap();
+    let result = caller
+        .invoke_portable_unit(
+            &envelope,
+            call.arguments.clone(),
+            call.requested_outputs,
+            &runmat_core::InvocationControl::default(),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         service.complete_future(&handle, Ok(Value::Num(0.0))),
         Err(ExecutionServiceError::InvalidOutputContract)
@@ -82,7 +86,7 @@ pub(super) async fn verify_caller(service: &NativeExecutionService) {
         panic!("original caller completion lost");
     };
     assert_eq!(retained, result);
-    let cancelled = service.create_future(super::call(0)).unwrap();
+    let cancelled = service.create_future(super::call(0).await).unwrap();
     service
         .cancel(&Value::Future(cancelled.clone()), CancellationReason::User)
         .unwrap();

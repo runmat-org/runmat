@@ -1,4 +1,5 @@
 mod artifact;
+mod executable_unit;
 mod identity;
 mod native_object;
 mod recipe;

@@ -172,22 +172,17 @@ fn create_async_future_value(
     function: runmat_hir::FunctionId,
     requested_outputs: usize,
     arguments: Vec<Value>,
-    function_registry: &crate::bytecode::FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(arguments.clone()))?;
-    let program = context
-        .runtime
-        .execution()
-        .requires_program_capture()
-        .then(|| {
-            serde_json::to_vec(function_registry).map_err(|error| {
-                crate::interpreter::errors::mex(
-                    "ExecutionProgram",
-                    &format!("failed to capture the exact async program: {error}"),
-                )
-            })
-        })
-        .transpose()?;
+    let function_identity =
+        runmat_types::ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
+            crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                "function identity exceeds portable contract",
+            )
+        })?);
+    let program =
+        runmat_runtime::execution::capture_deferred_program(&context.runtime, function_identity)?;
     context
         .runtime
         .execution()

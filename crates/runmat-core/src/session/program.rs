@@ -21,6 +21,18 @@ impl SessionProgramService {
 }
 
 impl RuntimeProgramService for SessionProgramService {
+    fn freeze_executable(
+        &self,
+        function: ProgramFunctionId,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, runmat_runtime::RuntimeError> {
+        let active = self.active.borrow();
+        active
+            .last()
+            .ok_or_else(|| program_error("no executable is active"))?
+            .portable_envelope_for_function(function)
+            .map_err(program_error)
+    }
+
     fn freeze_bound_callable(
         &self,
         function: ProgramFunctionId,

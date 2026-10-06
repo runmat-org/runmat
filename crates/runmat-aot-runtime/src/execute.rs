@@ -77,7 +77,6 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
             assembly.clone(),
             executable,
             runmat_native_executor::NativeExecutorOptions {
-                program_capture: Some(input.program.clone()),
                 interpreter_resume_points: resume_points,
                 ..runmat_native_executor::NativeExecutorOptions::default()
             },

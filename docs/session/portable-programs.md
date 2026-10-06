@@ -89,6 +89,32 @@ anonymous captures that call helpers, zero/one/two output ordinals, and assigned
 versus absent script `ans`. These run under the existing stack limit; they do not
 establish arbitrary recursion depth or whole-task resource qualification.
 
+## Deferred calls
+
+When an execution service requests a portable capture, interpreter and native
+future creation ask the active core program service for the complete V3 product
+of the exact semantic function. They preserve the original revision, source map,
+analysis and compiler components. Missing program authority fails explicitly.
+Raw script execution also enters the original core program scope on native and
+WASM targets. Its interpreted call uses that product's revision in a scoped runtime
+context; the session's outer revision is restored after execution.
+Serial in-context services may retain a future without portable capture.
+
+Artifact construction belongs to the shared artifact owner. Deferred materialization
+requires canonical V3 bytes, the same original revision and function identity, and
+the original output contract. Partial registries and absent revisions reject; the
+consumer does not invent a replacement program revision. Native executor/JIT state
+no longer retains a second registry-only capture for this purpose. Standalone AOT
+manifests retain their existing owner and do not substitute for a V3 capture.
+
+The original native output/cancellation/pending-await/cold-attachment witness now
+uses authored complete compiler products. Core tests compare the captured product
+exactly and validate its logical source fields after cold import. Portable physical
+paths remain absent. This cutover does not establish transport of the caller's full
+project, console, host policy or parent allocation, nor measured resource usage.
+Browser service tests compile; actual browser scheduling and broader host-context
+qualification remain separate gates.
+
 ## Qualification boundary
 
 This API provides session invocation of a portable compiler product. It does not

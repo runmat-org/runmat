@@ -529,19 +529,38 @@ mod tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
+    async fn original_deferred_failure() -> DeferredCall {
+        runmat_runtime::builtins::wasm_registry::register_all();
+        let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+        let unit = session
+            .compile_executable_unit(
+                runmat_core::ExecutableSource::new(
+                    "browser-deferred-owner",
+                    "originalFailure.m",
+                    "function y = originalFailure(); error('original deferred failure'); end",
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let envelope = unit.portable_envelope_for(Some("originalFailure")).unwrap();
+        let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        DeferredCall {
+            function,
+            arguments: Vec::new(),
+            requested_outputs: 1,
+            program_revision: Some(unit.revision().program_revision.clone()),
+            program: Some(envelope.canonical_bytes().unwrap()),
+        }
+    }
+
     #[wasm_bindgen_test(async)]
     async fn serial_fallback_schedules_through_the_portable_driver() {
         let service = BrowserExecutionService::new(None).unwrap();
         assert_eq!(service.capabilities.max_workers, 1);
         assert!(!service.capabilities.has_worker_isolation());
         let future = service
-            .create_future(DeferredCall {
-                function: 0,
-                arguments: Vec::new(),
-                requested_outputs: 1,
-                program_revision: None,
-                program: Some(b"invalid registry".to_vec()),
-            })
+            .create_future(original_deferred_failure().await)
             .unwrap();
         let task = service.spawn(&future).unwrap();
         assert!(matches!(
@@ -562,7 +581,7 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn cancelling_a_scheduled_future_cancels_its_child_task() {
+    fn partial_registry_rejects_before_scheduling_child_work() {
         let service = BrowserExecutionService::new(None).unwrap();
         let future = service
             .create_future(DeferredCall {
@@ -572,6 +591,16 @@ mod tests {
                 program_revision: None,
                 program: Some(b"invalid registry".to_vec()),
             })
+            .unwrap();
+        assert!(service.spawn(&future).is_err());
+        assert!(service.state.borrow().requests.is_empty());
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn cancelling_a_scheduled_future_cancels_its_child_task() {
+        let service = BrowserExecutionService::new(None).unwrap();
+        let future = service
+            .create_future(original_deferred_failure().await)
             .unwrap();
         let task = service.spawn(&future).unwrap();
         service

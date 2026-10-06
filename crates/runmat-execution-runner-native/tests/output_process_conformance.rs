@@ -1,4 +1,5 @@
 //! Actual original portable outputs across process attempts and cold durable attachment.
+use runmat_core::{ExecutableSource, RunMatSession};
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution_runner_native::supervisor::{
     run_local_supervisor, LocalSupervisorClient, LocalSupervisorConfig, SupervisorPaths,
@@ -9,8 +10,7 @@ use runmat_runtime::execution::{
     AwaitAction, DeferredCall, DurableJobOptions, RuntimeExecutionServices,
 };
 use runmat_value::Value;
-use runmat_vm::{FunctionBytecode, FunctionRegistry, Instr};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::time::Duration;
 #[path = "output_process_conformance/cancellation.rs"]
 mod cancellation;
@@ -50,27 +50,33 @@ fn main() {
     });
 }
 
-fn call(requested_outputs: usize) -> DeferredCall {
-    let function = FunctionBytecode {
-        display_name: "original_output_values".into(),
-        instructions: vec![
-            Instr::LoadConst(13.0),
-            Instr::StoreVar(0),
-            Instr::LoadConst(29.0),
-            Instr::StoreVar(1),
-            Instr::Return,
-        ],
-        var_count: 2,
-        output_slots: vec![0, 1],
-        ..Default::default()
-    };
-    let registry = FunctionRegistry::new(HashMap::from([(function.function, function)]));
+async fn call(requested_outputs: usize) -> DeferredCall {
+    call_source(
+        requested_outputs,
+        "function [first, second] = original_output_values(); first = 13; second = 29; end",
+    )
+    .await
+}
+
+async fn call_source(requested_outputs: usize, source: &str) -> DeferredCall {
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let unit = session
+        .compile_executable_unit(
+            ExecutableSource::new("original-output-owner", "original_output_values.m", source),
+            None,
+        )
+        .await
+        .unwrap();
+    let envelope = unit
+        .portable_envelope_for(Some("original_output_values"))
+        .unwrap();
+    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
     DeferredCall {
-        function: 0,
+        function,
         arguments: vec![],
         requested_outputs,
-        program_revision: None,
-        program: Some(serde_json::to_vec(&registry).unwrap()),
+        program_revision: Some(unit.revision().program_revision.clone()),
+        program: Some(envelope.canonical_bytes().unwrap()),
     }
 }
 
@@ -93,7 +99,7 @@ async fn witness() {
     cancellation::verify(&config).await;
     portable_units::verify(&config).await;
     for requested in [0, 1, 2] {
-        let future = service.create_future(call(requested)).unwrap();
+        let future = service.create_future(call(requested).await).unwrap();
         handles::reject_altered_future(&service, &future);
         let task = service.spawn(&future).unwrap();
         handles::reject_altered_task(&service, &task);
@@ -123,7 +129,7 @@ async fn witness() {
         assert_eq!(retained, value);
         let job = service
             .submit_job(
-                call(requested),
+                call(requested).await,
                 DurableJobOptions {
                     idempotency_key: Some(format!("original-outputs-{requested}")),
                     retention_millis:
@@ -164,7 +170,7 @@ async fn witness() {
             .execution
             .expect("durable original task evidence must survive cold attachment");
         assert!(!evidence.attempts.is_empty());
-        let original = call(requested);
+        let original = call(requested).await;
         let (recipe, artifact, arguments) = runmat_vm::materialize_deferred_call(
             &original,
             job.outputs.clone(),
@@ -179,7 +185,7 @@ async fn witness() {
             schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
             recipe,
             artifact,
-            function: 0,
+            function: original.function,
             arguments,
             requested_outputs: requested as u16,
         };

@@ -9,42 +9,26 @@ use crate::JitResult;
 impl GenericCompiler {
     pub fn compile_executor_with_resume_points(
         assembly: runmat_native_codegen::NativeAssembly,
-        program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
     ) -> JitResult<NativeExecutor> {
-        Self::compile_executor_product(
-            assembly,
-            program_capture,
-            interpreter_resume_points,
-            BTreeMap::new(),
-            None,
-        )
+        Self::compile_executor_product(assembly, interpreter_resume_points, BTreeMap::new(), None)
     }
 
     pub fn compile_executor_with_metadata(
         assembly: runmat_native_codegen::NativeAssembly,
-        program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     ) -> JitResult<NativeExecutor> {
-        Self::compile_executor_product(
-            assembly,
-            program_capture,
-            interpreter_resume_points,
-            coverage_sites,
-            None,
-        )
+        Self::compile_executor_product(assembly, interpreter_resume_points, coverage_sites, None)
     }
 
     pub fn compile_specialized_executor_with_resume_points(
         assembly: runmat_native_codegen::NativeAssembly,
-        program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         profile: RepresentationProfile,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_product(
             assembly,
-            program_capture,
             interpreter_resume_points,
             BTreeMap::new(),
             Some(profile),
@@ -53,14 +37,12 @@ impl GenericCompiler {
 
     pub fn compile_specialized_executor_with_metadata(
         assembly: runmat_native_codegen::NativeAssembly,
-        program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
         profile: RepresentationProfile,
     ) -> JitResult<NativeExecutor> {
         Self::compile_executor_product(
             assembly,
-            program_capture,
             interpreter_resume_points,
             coverage_sites,
             Some(profile),
@@ -69,7 +51,6 @@ impl GenericCompiler {
 
     fn compile_executor_product(
         assembly: runmat_native_codegen::NativeAssembly,
-        program_capture: Option<Vec<u8>>,
         interpreter_resume_points: BTreeMap<ProgramPointId, u64>,
         coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
         entry_profile: Option<RepresentationProfile>,
@@ -85,7 +66,6 @@ impl GenericCompiler {
             assembly,
             executable,
             NativeExecutorOptions {
-                program_capture,
                 interpreter_resume_points,
                 coverage_sites,
                 entry_profile,

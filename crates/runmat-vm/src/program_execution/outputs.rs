@@ -1,5 +1,6 @@
 use super::*;
 use crate::{Bytecode, FunctionBytecode, FunctionRegistry, Instr};
+use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_hir::FunctionId;
 use runmat_value::Value;
 

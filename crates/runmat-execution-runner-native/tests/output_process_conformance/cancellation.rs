@@ -36,7 +36,7 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
     let mut config = original.clone();
     config.worker_arguments = vec![WORKER_MARKER.into()];
     let service = NativeExecutionService::new(config.clone()).unwrap();
-    let future = service.create_future(call(1)).unwrap();
+    let future = service.create_future(call(1).await).unwrap();
     let task = service.spawn(&future).unwrap();
     let root = config.store_root.join(task.scope_id.to_string());
     tokio::time::timeout(Duration::from_secs(30), async {

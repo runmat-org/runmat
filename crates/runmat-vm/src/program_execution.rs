@@ -1,6 +1,4 @@
-use runmat_execution::{
-    value::ValuePayload, Digest, OutputContract, ProgramEnvironment, ProgramRevision,
-};
+use runmat_execution::{value::ValuePayload, OutputContract};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
     ProgramExecutionResponse,
@@ -15,28 +13,22 @@ pub fn materialize_deferred_call(
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
     })?;
-    let revision = call
-        .program_revision
-        .clone()
-        .unwrap_or_else(|| captured_program_revision(program));
-    let recipe = ProgramBuildRecipe {
-        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        program_revision: revision,
-        entrypoint: call.function.to_string(),
-        outputs,
-        execution_mode: "interpreter".into(),
-        target,
-        features: Default::default(),
-        compile_options: Default::default(),
-        source_objects: Vec::new(),
-        expected_artifact_id: None,
-    };
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        program.to_vec(),
-    )
-    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(program)
+        .map_err(|error| {
+            ExecutionServiceError::Failed(format!("invalid complete deferred program: {error}"))
+        })?;
+    if call.program_revision.as_ref() != Some(&envelope.manifest.identity.program)
+        || usize::try_from(envelope.manifest.identity.entrypoint_function.0).ok()
+            != Some(call.function)
+        || usize::from(outputs.requested_outputs) != call.requested_outputs
+    {
+        return Err(ExecutionServiceError::Failed(
+            "deferred program revision, function or output contract mismatch".into(),
+        ));
+    }
+    let (recipe, artifact) =
+        ProgramArtifact::materialize_executable_unit(&envelope, outputs, target)
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let arguments = call
         .arguments
         .iter()
@@ -44,26 +36,6 @@ pub fn materialize_deferred_call(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     Ok((recipe, artifact, arguments))
-}
-
-fn captured_program_revision(program: &[u8]) -> ProgramRevision {
-    let digest = Digest::sha256(program);
-    ProgramRevision::new(
-        digest,
-        digest,
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(format!(
-                "runmat-runtime-abi-v1\0{}",
-                env!("CARGO_PKG_VERSION")
-            )),
-            Digest::sha256(b"runmat-local-captured-catalog-v1"),
-            "matlab",
-        )
-        .expect("captured execution compatibility constants are valid"),
-    )
-    .expect("captured program revision is valid")
 }
 
 pub async fn execute_program_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {

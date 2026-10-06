@@ -175,15 +175,14 @@ pub(super) fn evaluate_rvalue(
             runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
                 arguments.clone(),
             ))?;
-            let program = if state.runtime.execution().requires_program_capture() {
-                Some(state.program_capture.clone().ok_or_else(|| {
-                    NativeExecutorError::Host(
-                        "native async execution is missing its exact program".into(),
-                    )
-                })?)
-            } else {
-                None
-            };
+            let function_identity =
+                runmat_types::ProgramFunctionId(u32::try_from(function.0).map_err(|_| {
+                    NativeExecutorError::Host("function identity exceeds portable contract".into())
+                })?);
+            let program = runmat_runtime::execution::capture_deferred_program(
+                &state.runtime,
+                function_identity,
+            )?;
             let future = state
                 .runtime
                 .execution()

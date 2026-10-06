@@ -6,20 +6,14 @@ pub(super) async fn execute(
     hooks: DispatchHooks<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     let instr = meta.instr;
-    let DispatchMeta {
-        function_registry, ..
-    } = meta;
+    let function_registry = meta.function_registry;
     let DispatchState { stack, context, .. } = state;
     let _ = hooks;
     match instr {
         Instr::CreateSemanticFuture(function, arg_count, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             stack.push(create_async_future_value(
-                context,
-                *function,
-                *out_count,
-                args,
-                function_registry,
+                context, *function, *out_count, args,
             )?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -28,11 +22,7 @@ pub(super) async fn execute(
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             stack.push(create_async_future_value(
-                context,
-                *function,
-                *out_count,
-                args,
-                function_registry,
+                context, *function, *out_count, args,
             )?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

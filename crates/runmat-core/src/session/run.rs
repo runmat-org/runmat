@@ -700,7 +700,6 @@ impl RunMatSession {
             function_registry_after_success,
             next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
-        #[cfg(not(target_arch = "wasm32"))]
         let interactive_unit = {
             let source = crate::ExecutableSource::new(
                 format!("interactive:{}", self.abi_workspace_handle.0),
@@ -730,16 +729,8 @@ impl RunMatSession {
         };
         #[cfg(not(target_arch = "wasm32"))]
         let analysis = interactive_unit.analysis();
-        #[cfg(not(target_arch = "wasm32"))]
         let _program_guard = self.program_service.enter(&interactive_unit);
-        #[cfg(not(target_arch = "wasm32"))]
         let mut bytecode = interactive_unit.bytecode().clone();
-        #[cfg(target_arch = "wasm32")]
-        let _ = mir;
-        #[cfg(target_arch = "wasm32")]
-        let _ = analysis;
-        #[cfg(target_arch = "wasm32")]
-        let mut bytecode = bytecode;
         let source_catalog_entries = self
             .source_pool
             .entries()
@@ -1013,7 +1004,10 @@ impl RunMatSession {
                 }
             }
 
-            match self.interpret_with_context(&execution_bytecode).await {
+            match self
+                .interpret_with_context(&execution_bytecode, &interactive_unit)
+                .await
+            {
                 Ok(runmat_vm::InterpreterOutcome::Completed(results)) => {
                     self.stats.interpreter_fallback += 1;
                     if self.verbose {
@@ -1511,13 +1505,16 @@ impl RunMatSession {
     async fn interpret_with_context(
         &mut self,
         bytecode: &runmat_vm::Bytecode,
+        unit: &crate::ExecutableUnit,
     ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
         let source_name = self.current_source_name().to_string();
         runmat_vm::interpret_with_vars_in_context(
             bytecode,
             &mut self.variable_array,
             Some(source_name.as_str()),
-            self.runtime_context.clone(),
+            self.runtime_context
+                .clone()
+                .with_program_revision(Some(unit.revision().program_revision.clone())),
         )
         .await
     }
