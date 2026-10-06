@@ -7262,6 +7262,7 @@ dependencies = [
  "anyhow",
  "arrow-array",
  "arrow-schema",
+ "async-io 2.6.0",
  "async-recursion",
  "async-trait",
  "axum 0.7.9",
