@@ -212,7 +212,6 @@ function enforceTransientSequenceQuarantine() {
       "crates/runmat-runtime/src/dispatcher.rs",
       [
         "call_builtin_async_impl",
-        "try_call_builtin_async_with_outputs",
         "try_call_registered_instance_method",
         "call_builtin_async",
         "call_builtin_async_in_context",

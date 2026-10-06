@@ -465,17 +465,6 @@ async fn try_call_builtin_sequence_async_impl(
     compatibility_checked_builtin_sequence(name, args, result).map(Some)
 }
 
-pub(crate) async fn try_call_builtin_async_with_outputs(
-    name: &str,
-    args: &[Value],
-    output_count: usize,
-    context: Option<&crate::context::RuntimeContext>,
-) -> Result<Option<Value>, RuntimeError> {
-    try_call_builtin_sequence_async_with_outputs(name, args, output_count, context)
-        .await
-        .map(|sequence| sequence.map(crate::call::arguments::project_legacy_builtin_value_abi))
-}
-
 pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
     name: &str,
     args: &[Value],
