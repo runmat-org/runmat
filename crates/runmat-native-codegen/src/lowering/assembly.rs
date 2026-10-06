@@ -224,7 +224,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
         },
         selected_entrypoint: input.entrypoint.compiled(),
         selected_portable_entrypoint: input.entrypoint.portable(),
-        selected_entrypoint_body: input.entrypoint.body_digest.clone(),
+        selected_entrypoint_body: input.entrypoint.body_digest,
         entrypoints,
         functions,
     };
