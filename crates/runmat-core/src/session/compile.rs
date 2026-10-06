@@ -985,7 +985,6 @@ impl RunMatSession {
             private_companion_function_names,
             private_companion_function_owners,
             private_companion_function_aliases,
-            companion_function_source_ids,
             source_table,
             source_catalog,
             project_symbol_aliases,
@@ -1063,13 +1062,6 @@ impl RunMatSession {
                 std::mem::take(&mut companion.private_function_aliases);
             let source_catalog = companion.source_catalog.take();
             let project_symbol_aliases = std::mem::take(&mut companion.project_symbol_aliases);
-            let mut companion_function_source_ids = HashMap::new();
-            companion_function_source_ids.extend(
-                source_table
-                    .function_sources
-                    .iter()
-                    .map(|(name, id)| (name.clone(), runmat_vm::BytecodeSourceRef::Program(*id))),
-            );
             if !companion.statements.is_empty() {
                 ast.body.extend(
                     companion
@@ -1083,7 +1075,6 @@ impl RunMatSession {
                 private_companion_function_names,
                 private_companion_function_owners,
                 private_companion_function_aliases,
-                companion_function_source_ids,
                 source_table,
                 source_catalog,
                 project_symbol_aliases,
@@ -1153,15 +1144,15 @@ impl RunMatSession {
                 },
             )?);
         }
-        let compiled_source_id =
-            runmat_vm::BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0));
-        bytecode.source_id = Some(compiled_source_id);
-        for function in bytecode.function_registry.functions.values_mut() {
-            function.source_id = companion_function_source_ids
-                .get(&function.display_name)
-                .copied()
-                .or(Some(compiled_source_id));
-        }
+        source_table
+            .validate_compiled_sources(&bytecode)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let source_projection = source_table
             .intern_runtime_projection(&mut self.source_pool, &self.runtime_context)

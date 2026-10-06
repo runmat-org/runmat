@@ -88,15 +88,15 @@ async fn load_dynamic_function(
     let source_search_span = info_span!("runtime.source_search", resolution_purpose = "call");
     let path_result = {
         let _source_search_guard = source_search_span.enter();
-        runmat_runtime::builtins::common::path_search::find_file_with_extensions(
+        runmat_runtime::builtins::common::path_search::find_file_with_extensions_with_origin(
             &name,
             &[".m"],
             "function resolution",
         )
         .await
     };
-    let path = match path_result {
-        Ok(Some(path)) => path,
+    let selected = match path_result {
+        Ok(Some(selected)) => selected,
         Ok(None) => return None,
         Err(error) => {
             return Some(Err(build_runtime_error(error)
@@ -104,6 +104,8 @@ async fn load_dynamic_function(
                 .build()))
         }
     };
+    let path = selected.path;
+    let path_origin = selected.origin;
     Some(
         async move {
             let source_text =
@@ -198,25 +200,27 @@ async fn load_dynamic_function(
                         path_name.as_ref(),
                         &source_text,
                         project_handoff.as_ref(),
+                        &path_origin,
                     )
                     .map_err(|error| {
                         build_runtime_error(error)
                             .with_identifier("RunMat:ExecutableSourceIdentity")
                             .build()
                     })?;
-                let source_table = super::compile::program_sources::ProgramSourceTable::build(
-                    &primary_source,
-                    Some(path_name.as_ref()),
-                    &companion,
-                    primary_statement_count,
-                    project_handoff.as_ref(),
-                    &[],
-                )
-                .map_err(|error| {
-                    build_runtime_error(error)
-                        .with_identifier("RunMat:ExecutableSourceIdentity")
-                        .build()
-                })?;
+                let source_table =
+                    super::compile::program_sources::ProgramSourceTable::build_dynamic(
+                        &primary_source,
+                        path_name.as_ref(),
+                        &companion,
+                        primary_statement_count,
+                        project_handoff.as_ref(),
+                        &path_origin,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build()
+                    })?;
                 let source_map = Arc::new(source_table.source_map);
                 if !companion.statements.is_empty() {
                     ast.body
@@ -281,17 +285,13 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionCompileError")
                     .build()
                 })?;
-                bytecode.source_id = Some(runmat_vm::BytecodeSourceRef::Program(
-                    runmat_types::ProgramSourceId(0),
-                ));
-                for function in bytecode.function_registry.functions.values_mut() {
-                    function.source_id = source_table
-                        .function_sources
-                        .get(&function.display_name)
-                        .copied()
-                        .map(runmat_vm::BytecodeSourceRef::Program)
-                        .or(bytecode.source_id);
-                }
+                source_table
+                    .validate_compiled_sources(&bytecode)
+                    .map_err(|error| {
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build()
+                    })?;
                 let mut compiled_registry = bytecode.function_registry();
                 let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
                 if compiled_registry.resolve_name(&name).is_none() {

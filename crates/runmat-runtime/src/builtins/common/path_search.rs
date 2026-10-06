@@ -200,6 +200,37 @@ pub fn file_candidates(
     extensions: &[&str],
     error_prefix: &str,
 ) -> Result<Vec<PathBuf>, String> {
+    Ok(file_candidates_with_origin(name, extensions, error_prefix)?
+        .into_iter()
+        .map(|candidate| candidate.path)
+        .collect())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FileCandidateOrigin {
+    /// The root's position in the captured, deduplicated search path is part
+    /// of source identity; its absolute access path is not portable identity.
+    SearchRoot {
+        ordinal: u32,
+        access_root: PathBuf,
+        relative: PathBuf,
+    },
+    /// A directly spelled path has no search-root authority. Its explicit
+    /// spelling is the user's chosen identity, including absolute spelling.
+    Direct { spelling: PathBuf },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileCandidate {
+    pub path: PathBuf,
+    pub origin: FileCandidateOrigin,
+}
+
+pub fn file_candidates_with_origin(
+    name: &str,
+    extensions: &[&str],
+    error_prefix: &str,
+) -> Result<Vec<FileCandidate>, String> {
     if should_treat_as_path(name) {
         collect_direct_file_candidates(name, extensions, error_prefix)
     } else {
@@ -211,19 +242,29 @@ fn collect_direct_file_candidates(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<FileCandidate>, String> {
     let expanded = expand_user_path(name, error_prefix)?;
     let base = PathBuf::from(&expanded);
     let mut candidates = Vec::new();
     if matches_extension(&base, extensions) {
-        candidates.push(base.clone());
+        candidates.push(FileCandidate {
+            path: base.clone(),
+            origin: FileCandidateOrigin::Direct {
+                spelling: PathBuf::from(name),
+            },
+        });
     }
     if base.extension().is_none() {
         for &ext in extensions {
             if ext.is_empty() {
                 continue;
             }
-            candidates.push(append_extension(&base, ext));
+            candidates.push(FileCandidate {
+                path: append_extension(&base, ext),
+                origin: FileCandidateOrigin::Direct {
+                    spelling: append_extension(Path::new(name), ext),
+                },
+            });
         }
     }
     Ok(candidates)
@@ -233,29 +274,61 @@ fn collect_package_file_candidates(
     name: &str,
     extensions: &[&str],
     error_prefix: &str,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<FileCandidate>, String> {
     let (packages, base_name) = split_package_components(name);
     let prefix = packages_to_path(&packages);
     let mut candidates = Vec::new();
 
-    for dir in search_directories(error_prefix)? {
+    for (ordinal, dir) in search_directories(error_prefix)?.into_iter().enumerate() {
+        let ordinal = u32::try_from(ordinal)
+            .map_err(|_| format!("{error_prefix}: search path has too many roots"))?;
         let mut root = dir.clone();
         if !prefix.as_os_str().is_empty() {
             root.push(&prefix);
         }
         let base_path = root.join(&base_name);
+        let relative_base = prefix.join(&base_name);
         if matches_extension(&base_path, extensions) {
-            push_unique(&mut candidates, base_path.clone());
+            push_unique_candidate(
+                &mut candidates,
+                FileCandidate {
+                    path: base_path.clone(),
+                    origin: FileCandidateOrigin::SearchRoot {
+                        ordinal,
+                        access_root: dir.clone(),
+                        relative: relative_base.clone(),
+                    },
+                },
+            );
         }
         for &ext in extensions {
             if ext.is_empty() {
                 continue;
             }
-            push_unique(&mut candidates, append_extension(&base_path, ext));
+            push_unique_candidate(
+                &mut candidates,
+                FileCandidate {
+                    path: append_extension(&base_path, ext),
+                    origin: FileCandidateOrigin::SearchRoot {
+                        ordinal,
+                        access_root: dir.clone(),
+                        relative: append_extension(&relative_base, ext),
+                    },
+                },
+            );
         }
     }
 
     Ok(candidates)
+}
+
+fn push_unique_candidate(candidates: &mut Vec<FileCandidate>, candidate: FileCandidate) {
+    if !candidates
+        .iter()
+        .any(|existing| existing.path == candidate.path)
+    {
+        candidates.push(candidate);
+    }
 }
 
 fn matches_extension(path: &Path, extensions: &[&str]) -> bool {
@@ -285,10 +358,22 @@ pub async fn find_file_with_extensions(
     extensions: &[&str],
     error_prefix: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let candidates = file_candidates(name, extensions, error_prefix)?;
-    for path in candidates {
-        if path_is_file(&path).await {
-            return Ok(Some(path));
+    Ok(
+        find_file_with_extensions_with_origin(name, extensions, error_prefix)
+            .await?
+            .map(|candidate| candidate.path),
+    )
+}
+
+pub async fn find_file_with_extensions_with_origin(
+    name: &str,
+    extensions: &[&str],
+    error_prefix: &str,
+) -> Result<Option<FileCandidate>, String> {
+    let candidates = file_candidates_with_origin(name, extensions, error_prefix)?;
+    for candidate in candidates {
+        if path_is_file(&candidate.path).await {
+            return Ok(Some(candidate));
         }
     }
     Ok(None)
@@ -426,7 +511,10 @@ pub async fn path_is_directory(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{file_candidates, MEX_EXTENSIONS, PCODE_EXTENSIONS};
+    use super::{
+        file_candidates, file_candidates_with_origin, FileCandidateOrigin, MEX_EXTENSIONS,
+        PCODE_EXTENSIONS,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -448,5 +536,21 @@ mod tests {
             source_or_bare,
             vec![PathBuf::from("./entry"), PathBuf::from("./entry.m")]
         );
+    }
+
+    #[test]
+    fn package_candidate_keeps_selected_root_ordinal_and_relative_spelling() {
+        let candidates = file_candidates_with_origin("pkg.leaf", &[".m"], "test")
+            .expect("captured search-path candidates");
+        let first = candidates.first().expect("current directory search root");
+        assert!(matches!(
+            &first.origin,
+            FileCandidateOrigin::SearchRoot {
+                ordinal: 0,
+                relative,
+                ..
+            } if relative == &PathBuf::from("+pkg/leaf.m")
+        ));
+        assert!(first.path.ends_with("+pkg/leaf.m"));
     }
 }
