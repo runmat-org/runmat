@@ -100,8 +100,10 @@ impl Drop for JoinWaiter {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 pub(super) struct CompletionOnDrop(pub(super) Rc<TaskState>);
 
+#[cfg(target_arch = "wasm32")]
 impl Drop for CompletionOnDrop {
     fn drop(&mut self) {
         self.0.finish(RuntimeLocalTaskOutcome::Cancelled);

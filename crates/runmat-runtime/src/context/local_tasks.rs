@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
+#[cfg(target_arch = "wasm32")]
 use std::task::{Poll, Waker};
 #[cfg(not(target_arch = "wasm32"))]
 mod driver;
@@ -26,7 +27,9 @@ pub use browser::BrowserLocalTaskSupervisor;
 pub type RuntimeLocalTaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
 mod lease;
-use lease::{CompletionOnDrop, TaskState};
+#[cfg(target_arch = "wasm32")]
+use lease::CompletionOnDrop;
+use lease::TaskState;
 pub use lease::{RuntimeLocalTaskLease, RuntimeLocalTaskOutcome};
 
 #[derive(Clone, Copy)]

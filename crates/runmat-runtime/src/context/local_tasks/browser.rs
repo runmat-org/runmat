@@ -159,7 +159,7 @@ impl RuntimeLocalTaskService for BrowserPort {
                 supervisor: weak,
                 id,
             };
-            poll_fn(|context| slot.poll(context)).await;
+            std::future::poll_fn(|context| slot.poll(context)).await;
         });
         Ok(RuntimeLocalTaskLease { state, abort })
     }
