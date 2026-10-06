@@ -560,9 +560,8 @@ impl RuntimeContext {
         }
         if let Some(view) = &self.source_catalog_view {
             child.source_catalog_view = Some(Rc::new(RefCell::new(
-                crate::source_context::SourceCatalogProjection::new(
-                    view.borrow().snapshot_catalog(),
-                ),
+                view.borrow()
+                    .fork_with_inherited_sources(&child.state.source.borrow()),
             )));
         }
         *child.state.call.borrow_mut() = self.state.call.borrow().clone();
