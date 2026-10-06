@@ -16,8 +16,8 @@ use crate::context::host_effect::{
 };
 
 use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
-use crate::workspace;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use workspace_io::WorkspaceReadSet;
 
 use runmat_builtins::{
     SAVE_ERROR_FILENAME, SAVE_ERROR_INVALID_ARGUMENT, SAVE_ERROR_INVALID_OPTION, SAVE_ERROR_IO,

@@ -2,7 +2,7 @@ use super::super::{save_error_with_source, save_workspace_flow, SAVE_ERROR_WORKS
 use crate::{workspace, BuiltinResult};
 use runmat_value::Value;
 
-pub(super) struct WorkspaceReadSet {
+pub(in crate::builtins::io::mat::save) struct WorkspaceReadSet {
     target: WorkspaceReadTarget,
     _roots: Vec<crate::execution::RootedValueHandles>,
 }
@@ -13,7 +13,9 @@ enum WorkspaceReadTarget {
 }
 
 impl WorkspaceReadSet {
-    pub(super) fn capture(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<Self> {
+    pub(in crate::builtins::io::mat::save) fn capture(
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
         let target = match runtime.and_then(|runtime| runtime.service_ports().workspace()) {
             Some(service) => {
                 service
@@ -29,7 +31,7 @@ impl WorkspaceReadSet {
         })
     }
 
-    pub(super) fn liveness_service(
+    pub(in crate::builtins::io::mat::save) fn liveness_service(
         &self,
     ) -> Option<std::rc::Rc<dyn crate::context::RuntimeWorkspaceService>> {
         match &self.target {
@@ -38,7 +40,9 @@ impl WorkspaceReadSet {
         }
     }
 
-    pub(super) fn snapshot(&self) -> BuiltinResult<Option<Vec<(String, Value)>>> {
+    pub(in crate::builtins::io::mat::save) fn snapshot(
+        &self,
+    ) -> BuiltinResult<Option<Vec<(String, Value)>>> {
         match &self.target {
             WorkspaceReadTarget::Service(service) => {
                 service
@@ -54,7 +58,10 @@ impl WorkspaceReadSet {
         }
     }
 
-    pub(super) fn lookup(&self, name: &str) -> BuiltinResult<Option<Value>> {
+    pub(in crate::builtins::io::mat::save) fn lookup(
+        &self,
+        name: &str,
+    ) -> BuiltinResult<Option<Value>> {
         match &self.target {
             WorkspaceReadTarget::Service(service) => {
                 service
@@ -70,7 +77,7 @@ impl WorkspaceReadSet {
         }
     }
 
-    pub(super) fn retain_values<'a>(
+    pub(in crate::builtins::io::mat::save) fn retain_values<'a>(
         &mut self,
         values: impl Iterator<Item = &'a Value>,
     ) -> BuiltinResult<()> {
