@@ -225,6 +225,9 @@ async fn load_scalar_member_with_context(
         }
         Value::HandleObject(handle) => {
             let base = Value::HandleObject(handle.clone());
+            if super::graphics::is_graphics_receiver_handle(&handle) {
+                return super::graphics::load_graphics_member(context, base, &field).await;
+            }
             let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
                 caller_function_name,
             );

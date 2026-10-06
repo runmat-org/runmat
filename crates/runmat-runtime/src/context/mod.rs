@@ -7,6 +7,7 @@
 mod capability;
 mod callable_artifacts;
 mod graphics_presentation;
+mod graphics_callbacks;
 mod arity;
 mod catch;
 mod local_tasks;
@@ -46,6 +47,13 @@ pub use callable_artifacts::{
 };
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
+pub use graphics_callbacks::{
+    GraphicsCallbackDisposition, GraphicsCallbackHandler, GraphicsCallbackHostEvent,
+    GraphicsCallbackHostFailure, GraphicsCallbackHostTicket, GraphicsCallbackIngress,
+    GraphicsCallbackIngressError, GraphicsCallbackIngressFailure, GraphicsCallbackKind,
+    GraphicsCallbackRegistration, GraphicsCallbackResponder, GraphicsCallbackResult,
+    RuntimeGraphicsCallbackQueue, WeakRuntimeGraphicsCallbackQueue,
+};
 pub use graphics_presentation::{
     GraphicsCallbackPolicy, GraphicsCallbackReceipt, GraphicsFlushDisposition, GraphicsFlushRate,
     GraphicsFlushReceipt, GraphicsFlushRequest, GraphicsPresentation,

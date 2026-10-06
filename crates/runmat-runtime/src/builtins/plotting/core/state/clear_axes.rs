@@ -72,6 +72,10 @@ pub(super) fn configure_grid(
         .collect();
     if !reclaimed.is_empty() {
         clear_registered_axes(reg, handle, &reclaimed);
+        let state = get_state_mut(reg, handle);
+        for &index in &reclaimed {
+            state.axes_receivers.remove(&index);
+        }
         reg.plot_children.retain(|_, child| !matches!(child,
             PlotChildHandleState::ColorBar(bar) if bar.figure == handle && reclaimed.contains(&bar.axes_index)));
     }

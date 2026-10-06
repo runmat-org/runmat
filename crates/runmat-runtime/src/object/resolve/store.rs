@@ -150,6 +150,9 @@ where
         }
         Value::HandleObject(handle) => {
             let base = Value::HandleObject(handle.clone());
+            if super::graphics::is_graphics_receiver_handle(&handle) {
+                return super::graphics::store_graphics_member(context, base, &field, rhs).await;
+            }
             let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
                 caller_function_name,
             );

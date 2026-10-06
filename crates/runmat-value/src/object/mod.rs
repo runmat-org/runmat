@@ -1,6 +1,8 @@
 mod array;
 mod containers_map;
 mod dynamic_property;
+mod graphics_callback;
+mod graphics_receiver;
 mod handle;
 mod instance;
 mod listener;
@@ -12,6 +14,11 @@ pub use containers_map::{
     ContainersMapValueClass, ContainersMapValueType,
 };
 pub use dynamic_property::DynamicPropertyDef;
+pub use graphics_callback::{
+    GraphicsCallbackDisposition, GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure,
+    GraphicsCallbackKind, GraphicsCallbackResult,
+};
+pub use graphics_receiver::{GraphicsReceiverKind, GraphicsReceiverRef};
 pub use handle::HandleRef;
 pub use instance::{ObjectInstance, ObjectPersistencePayloadKind};
 pub use listener::Listener;

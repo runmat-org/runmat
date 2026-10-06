@@ -59,6 +59,33 @@ pub enum PlotHandle {
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
+    if let Value::HandleObject(handle) = value {
+        let receiver = runmat_gc::gc_with_value(&handle.target, |target| match target {
+            Value::Object(object) => object.graphics_receiver().cloned(),
+            _ => None,
+        })
+        .ok()
+        .flatten();
+        if let Some(receiver) = receiver {
+            if !crate::is_handle_valid(handle) || !super::state::graphics_receiver_valid(&receiver)
+            {
+                return Err(crate::build_runtime_error("graphics object is retired")
+                    .with_builtin(builtin)
+                    .with_identifier("RunMat:graphics:ReceiverRetired")
+                    .build());
+            }
+            // An exact lease cannot be erased to a numeric PlotHandle: another
+            // session could close and reuse that number before the property
+            // owner reacquires the registry. Until a lease-bearing operation
+            // is admitted, reject this object without touching the new owner.
+            return Err(crate::build_runtime_error(
+                "graphics object property access requires a lease-bearing operation",
+            )
+            .with_builtin(builtin)
+            .with_identifier("RunMat:graphics:ReceiverPropertyUnavailable")
+            .build());
+        }
+    }
     let scalar = handle_scalar(value, builtin)?;
     if scalar == 0.0 {
         return Ok(PlotHandle::Root);

@@ -128,6 +128,9 @@ pub struct RunMatSession {
     cancellation: cancellation::SessionCancellation,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
+    /// Strong callback owner stays with the session; its presentation service
+    /// holds only a weak reference, so retained selected contexts cannot cycle.
+    graphics_callbacks: Option<runmat_runtime::context::RuntimeGraphicsCallbackQueue>,
     /// Strong local executor owner. RuntimeContext holds only its weak port.
     local_tasks: std::rc::Rc<SessionLocalTaskSupervisor>,
     /// Typed handle retained alongside the executor-neutral runtime port so a

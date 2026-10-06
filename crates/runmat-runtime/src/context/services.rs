@@ -1050,6 +1050,7 @@ pub struct RuntimeServicePorts {
     object: Option<Rc<dyn RuntimeObjectService>>,
     host: Option<Rc<dyn RuntimeHostService>>,
     graphics_presentation: Option<Rc<dyn RuntimeGraphicsPresentationService>>,
+    graphics_callbacks: Option<super::WeakRuntimeGraphicsCallbackQueue>,
     http: Option<Rc<dyn RuntimeHttpService>>,
     preferences: Option<Rc<dyn RuntimePreferenceService>>,
     user_path: Option<Rc<dyn RuntimeUserPathService>>,
@@ -1082,6 +1083,7 @@ impl Default for RuntimeServicePorts {
             object: None,
             host: None,
             graphics_presentation: None,
+            graphics_callbacks: None,
             http: None,
             preferences: None,
             user_path: None,
@@ -1120,6 +1122,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
                 "graphics_presentation",
                 &self.graphics_presentation.is_some(),
             )
+            .field("graphics_callbacks", &self.graphics_callbacks.is_some())
             .field("http", &self.http.is_some())
             .field("preferences", &self.preferences.is_some())
             .field("user_path", &self.user_path.is_some())
@@ -1280,6 +1283,7 @@ impl RuntimeServicePorts {
     /// queue authority merely because their service ports were cloned.
     pub fn without_graphics_presentation(mut self) -> Self {
         self.graphics_presentation = None;
+        self.graphics_callbacks = None;
         self
     }
 
@@ -1288,6 +1292,20 @@ impl RuntimeServicePorts {
     pub fn without_callable_artifacts(mut self) -> Self {
         self.callable_artifacts = None;
         self
+    }
+    /// Session-local callback registration authority. The port is weak so a
+    /// selected callback context cannot keep its owning queue alive in a
+    /// context → presentation → queue cycle.
+    pub fn with_graphics_callback_queue(
+        mut self,
+        queue: super::WeakRuntimeGraphicsCallbackQueue,
+    ) -> Self {
+        self.graphics_callbacks = Some(queue);
+        self
+    }
+
+    pub fn graphics_callback_queue(&self) -> Option<&super::WeakRuntimeGraphicsCallbackQueue> {
+        self.graphics_callbacks.as_ref()
     }
     port_accessors!(
         with_object,

@@ -106,11 +106,29 @@ pub(crate) fn is_handle_valid(handle: &runmat_value::HandleRef) -> bool {
 }
 
 pub(crate) fn is_handle_target_valid(handle: &runmat_value::HandleRef) -> bool {
-    runmat_gc::gc_with_value(&handle.target, |target| match target {
-        Value::Object(obj) => object_handle_flag_valid(obj),
-        _ => false,
+    let target = runmat_gc::gc_with_value(&handle.target, |target| match target {
+        Value::Object(obj) => Some((
+            object_handle_flag_valid(obj),
+            obj.class_name == handle.class_name,
+            obj.graphics_receiver().cloned(),
+        )),
+        _ => None,
     })
-    .unwrap_or(false)
+    .ok()
+    .flatten();
+    match target {
+        Some((true, true, Some(receiver))) => {
+            let expected_class = match receiver.kind() {
+                runmat_value::GraphicsReceiverKind::Figure { .. } => runmat_types::standard::FIGURE,
+                runmat_value::GraphicsReceiverKind::Axes { .. } => runmat_types::standard::AXES,
+            };
+            handle.class_name == expected_class
+                && builtins::plotting::state::graphics_receiver_valid(&receiver)
+        }
+        Some((valid, _, None)) => valid,
+        Some((_, _, Some(_))) => false,
+        None => false,
+    }
 }
 
 pub(crate) fn set_handle_valid(handle: &runmat_value::HandleRef, valid: bool) -> bool {

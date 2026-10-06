@@ -5,7 +5,7 @@ use runmat_plot::plots::{
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::Tensor;
+use runmat_value::{GraphicsReceiverKind, GraphicsReceiverRef, Tensor};
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -50,9 +50,16 @@ pub use colormap::{
 };
 #[path = "state/clear_axes.rs"]
 mod clear_axes;
+#[path = "state/graphics_receiver.rs"]
+mod graphics_receiver;
 pub use clear_axes::clear_axes_target;
 #[cfg(test)]
 pub use clear_axes::clear_current_axes;
+use graphics_receiver::issue_graphics_receiver;
+pub use graphics_receiver::{
+    axes_graphics_receiver, figure_graphics_receiver, graphics_receiver_object,
+    graphics_receiver_valid, GraphicsReceiverIssueError,
+};
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
 pub use axes_modes::{
@@ -356,9 +363,10 @@ impl LineColorCycle {
     }
 }
 
-#[derive(Default)]
 struct FigureState {
     figure: SharedFigure,
+    figure_receiver: Option<GraphicsReceiverRef>,
+    axes_receivers: HashMap<usize, GraphicsReceiverRef>,
     active_axes: usize,
     tag: String,
     hold_per_axes: HashMap<usize, bool>,
@@ -383,6 +391,11 @@ impl FigureState {
         let figure = default_figure(&title, "X", "Y");
         Self {
             figure: figure.into(),
+            figure_receiver: issue_graphics_receiver(GraphicsReceiverKind::Figure {
+                figure: handle.as_u32(),
+            })
+            .ok(),
+            axes_receivers: HashMap::new(),
             active_axes: 0,
             tag: String::new(),
             hold_per_axes: HashMap::new(),

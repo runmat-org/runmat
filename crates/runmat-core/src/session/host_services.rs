@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use runmat_runtime::context::RuntimeHostService;
+use runmat_runtime::context::{RuntimeGraphicsPresentationService, RuntimeHostService};
 
 use super::RunMatSession;
 
@@ -19,6 +19,49 @@ impl RunMatSession {
             .with_host(service);
         self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
     }
+
+    /// Install the owning application's frame-presentation and callback-pump
+    /// service. A host must supply actual completion receipts; merely having
+    /// a plot registry or numeric figure handle does not grant this port.
+    pub fn install_graphics_presentation_service(
+        &mut self,
+        service: Rc<dyn RuntimeGraphicsPresentationService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_graphics_presentation(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
+    /// Retain the callback queue at the session owner, outside the selected
+    /// service port and any callback registration's originating context.
+    pub fn install_graphics_callback_queue(
+        &mut self,
+        maximum_pending_events: std::num::NonZeroUsize,
+        maximum_registrations: std::num::NonZeroUsize,
+    ) -> runmat_runtime::context::RuntimeGraphicsCallbackQueue {
+        let queue = runmat_runtime::context::RuntimeGraphicsCallbackQueue::new_for_selected(
+            &self.runtime_context,
+            maximum_pending_events,
+            maximum_registrations,
+        );
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_graphics_callback_queue(queue.downgrade());
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+        self.graphics_callbacks = Some(queue.clone());
+        queue
+    }
+
+    pub fn graphics_callback_queue(
+        &self,
+    ) -> Option<&runmat_runtime::context::RuntimeGraphicsCallbackQueue> {
+        self.graphics_callbacks.as_ref()
+    }
 }
 
 #[cfg(test)]
@@ -31,6 +74,17 @@ mod tests {
     };
 
     struct Host;
+    struct Graphics;
+
+    impl runmat_runtime::context::RuntimeGraphicsPresentationService for Graphics {
+        fn flush(
+            &self,
+            _: runmat_runtime::context::GraphicsFlushRequest,
+        ) -> std::pin::Pin<Box<dyn runmat_runtime::context::RuntimeGraphicsFlushOperation>>
+        {
+            panic!("installing a service must not request a frame")
+        }
+    }
     fn same_service<T: ?Sized>(before: Option<&Rc<T>>, after: Option<&Rc<T>>) {
         match (before, after) {
             (Some(before), Some(after)) => assert!(Rc::ptr_eq(before, after)),
@@ -66,6 +120,22 @@ mod tests {
             same_service(before.acceleration(), after.acceleration());
             same_service(before.placement(), after.placement());
             same_service(before.spmd(), after.spmd());
+            same_service(before.distributed(), after.distributed());
+        });
+    }
+
+    #[test]
+    fn graphics_installation_retains_selected_port_without_entering_host_effects() {
+        runmat_gc::gc_test_context(|| {
+            let mut session = RunMatSession::with_options(false, false).unwrap();
+            let before = session.runtime_context.service_ports().clone();
+            let service: Rc<dyn RuntimeGraphicsPresentationService> = Rc::new(Graphics);
+            session.install_graphics_presentation_service(service.clone());
+            let after = session.runtime_context.service_ports();
+            assert!(Rc::ptr_eq(after.graphics_presentation().unwrap(), &service));
+            same_service(before.host(), after.host());
+            same_service(before.call(), after.call());
+            same_service(before.placement(), after.placement());
             same_service(before.distributed(), after.distributed());
         });
     }

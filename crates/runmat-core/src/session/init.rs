@@ -160,6 +160,7 @@ impl RunMatSession {
             source_evaluator,
             cancellation: cancellation.clone(),
             runtime_context,
+            graphics_callbacks: None,
             local_tasks,
             placement_session: placement,
             is_executing: false,

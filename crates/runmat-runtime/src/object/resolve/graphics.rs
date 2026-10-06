@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn is_graphics_receiver_handle(handle: &runmat_value::HandleRef) -> bool {
+    runmat_gc::gc_with_value(&handle.target, |target| match target {
+        Value::Object(object) => object.graphics_receiver().is_some(),
+        _ => false,
+    })
+    .unwrap_or(false)
+}
+
 pub(super) async fn load_graphics_member(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,

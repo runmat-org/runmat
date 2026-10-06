@@ -37,7 +37,10 @@ pub use numeric::{
 };
 pub use object::{
     ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
-    ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef, HandleRef, Listener,
+    ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef,
+    GraphicsCallbackDisposition, GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure,
+    GraphicsCallbackKind, GraphicsCallbackResult, GraphicsReceiverKind, GraphicsReceiverRef,
+    HandleRef, Listener,
     MemmapElementType, MemmapFieldState, MemmapFormatPresentationState, MemmapReceiverAuthority,
     MemmapReceiverState, ObjectArray, ObjectInstance, ObjectPersistencePayloadKind,
 };

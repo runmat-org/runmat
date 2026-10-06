@@ -1,5 +1,6 @@
 use super::{
-    ContainersMapStorage, DynamicPropertyDef, MemmapReceiverAuthority, MemmapReceiverState,
+    ContainersMapStorage, DynamicPropertyDef, GraphicsReceiverRef, MemmapReceiverAuthority,
+    MemmapReceiverState,
 };
 use crate::{ForeignRef, Value};
 use runmat_gc_api::{Trace, Tracer};
@@ -24,6 +25,7 @@ enum NativeObjectPayload {
     MatFileAuthority(ForeignRef),
     MemmapReceiver(MemmapReceiverState),
     TcpAuthority(ForeignRef),
+    GraphicsReceiver(GraphicsReceiverRef),
 }
 
 /// Whether a value object carries host- or session-owned native state.
@@ -37,6 +39,7 @@ pub enum ObjectPersistencePayloadKind {
     MatFileAuthority,
     MemmapReceiver,
     TcpAuthority,
+    GraphicsReceiver,
 }
 
 impl Trace for NativeObjectPayload {
@@ -52,6 +55,7 @@ impl Trace for NativeObjectPayload {
                 }
             }
             Self::TcpAuthority(_) => {}
+            Self::GraphicsReceiver(_) => {}
         }
     }
 }
@@ -77,6 +81,9 @@ impl ObjectInstance {
             }
             Some(NativeObjectPayload::TcpAuthority(_)) => {
                 ObjectPersistencePayloadKind::TcpAuthority
+            }
+            Some(NativeObjectPayload::GraphicsReceiver(_)) => {
+                ObjectPersistencePayloadKind::GraphicsReceiver
             }
         }
     }
@@ -116,6 +123,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -133,6 +141,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -150,6 +159,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -167,6 +177,25 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
+            | None => None,
+        }
+    }
+
+    pub fn with_graphics_receiver(mut self, receiver: GraphicsReceiverRef) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::GraphicsReceiver(receiver)));
+        self
+    }
+
+    pub fn graphics_receiver(&self) -> Option<&GraphicsReceiverRef> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::GraphicsReceiver(receiver)) => Some(receiver),
+            Some(NativeObjectPayload::ContainersMap(_))
+            | Some(NativeObjectPayload::ForeignHostControl(_))
+            | Some(NativeObjectPayload::DatasetAuthority(_))
+            | Some(NativeObjectPayload::MatFileAuthority(_))
+            | Some(NativeObjectPayload::MemmapReceiver(_))
+            | Some(NativeObjectPayload::TcpAuthority(_))
             | None => None,
         }
     }
@@ -184,6 +213,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -196,6 +226,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -208,6 +239,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -220,6 +252,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::MemmapReceiver(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => None,
         }
     }
@@ -237,6 +270,7 @@ impl ObjectInstance {
             | Some(NativeObjectPayload::DatasetAuthority(_))
             | Some(NativeObjectPayload::MatFileAuthority(_))
             | Some(NativeObjectPayload::TcpAuthority(_))
+            | Some(NativeObjectPayload::GraphicsReceiver(_))
             | None => {}
             Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
                 if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
