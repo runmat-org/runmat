@@ -10489,6 +10489,7 @@ fn timer_constructs_finds_starts_and_deletes_through_vm() {
         f = timerfind('Tag', 'clientBatch');
         foundName = f.Name;
         start(t);
+        wait(t);
         tasks = t.TasksExecuted;
         running = t.Running;
         delete(t);
@@ -10560,6 +10561,7 @@ fn timer_member_method_start_works_through_vm() {
     let source = r#"
         t = timer('TimerFcn', @(src, evt) 0);
         t.start();
+        wait(t);
         tasks = t.TasksExecuted;
         running = t.Running;
     "#;
