@@ -465,7 +465,9 @@ fn decode_exception_runtime(
         .map(|frame| {
             Ok(crate::CallFrame {
                 function: frame.function.clone(),
-                source_id: frame.source_id.map(|id| local(id, path)).transpose()?,
+                // Portable exception frames contain program ordinals. Without
+                // a selected invocation binding they are not local SourceIds.
+                source_id: None,
                 span: span(frame.span, path)?,
             })
         })

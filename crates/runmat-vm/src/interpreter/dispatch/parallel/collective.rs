@@ -1,5 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
-use runmat_runtime::execution::value_codec::encode_inline_value;
+use runmat_runtime::execution::value_codec::encode_inline_value_in_context;
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -36,7 +36,12 @@ pub(super) async fn execute(
         .map_err(capability_error)?
         .clone();
     let sequence = collective.next_sequence(id)?;
-    let invocation = collective_invocation(operation, arguments, collective.context())?;
+    let invocation = collective_invocation(
+        operation,
+        arguments,
+        collective.context(),
+        &execution.runtime,
+    )?;
     let response = collective
         .execute(runmat_execution::CollectiveRequest {
             context: collective.context().clone(),
@@ -92,11 +97,13 @@ fn collective_invocation(
     operation: crate::BytecodeCollectiveOp,
     mut arguments: Vec<Value>,
     context: &runmat_execution::SpmdTaskContext,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_execution::CollectiveInvocation, RuntimeError> {
     use crate::BytecodeCollectiveOp as Op;
     use runmat_execution::{CollectiveInvocation, CollectiveMessageTag, ReceiveSelection};
 
-    let encode = |value: &Value| encode_inline_value(value).map_err(value_codec_error);
+    let encode =
+        |value: &Value| encode_inline_value_in_context(value, runtime).map_err(value_codec_error);
     Ok(match operation {
         Op::Barrier => CollectiveInvocation::Barrier,
         Op::Broadcast { has_input } => {

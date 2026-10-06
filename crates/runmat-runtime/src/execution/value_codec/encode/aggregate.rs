@@ -28,6 +28,7 @@ pub(super) fn struct_array(
                             item,
                             &format!("{}[{index}]", field_path(path, name)),
                             purpose,
+                            None,
                         )
                     })
                     .collect::<Result<_, _>>()?,
@@ -81,7 +82,7 @@ pub(super) fn plain_object(
         .map(|(name, item)| {
             Ok(StructField {
                 name: name.clone(),
-                value: encode(item, &field_path(path, name), purpose)?,
+                value: encode(item, &field_path(path, name), purpose, None)?,
             })
         })
         .collect::<Result<Vec<_>, ValueCodecError>>()?;

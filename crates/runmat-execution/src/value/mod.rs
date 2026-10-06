@@ -261,6 +261,7 @@ pub enum ExceptionFailureOrigin {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExceptionCallFrame {
     pub function: String,
+    /// Portable program-source ordinal. Never a worker-local SourceId.
     pub source_id: Option<u64>,
     pub span: Option<(u64, u64)>,
 }
