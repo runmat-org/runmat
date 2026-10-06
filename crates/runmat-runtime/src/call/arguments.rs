@@ -402,6 +402,13 @@ mod tests {
     }
 
     #[test]
+    fn legacy_builtin_projector_preserves_an_empty_comma_separated_output_list() {
+        let sequence = ValueSequence::comma_separated(Vec::new()).expect("empty output sequence");
+        let projected = super::project_legacy_builtin_value_abi(sequence);
+        assert!(matches!(projected, Value::OutputList(values) if values.is_empty()));
+    }
+
+    #[test]
     fn invalid_expansion_retains_stable_identifier() {
         let error = block_on(expand_arguments(
             &runtime(),
