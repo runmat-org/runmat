@@ -478,7 +478,10 @@ impl HostState {
             });
             error.context.call_frames.push(runmat_runtime::CallFrame {
                 function: self.function.name.clone(),
-                source_id: Some(self.function.source.0 as usize),
+                source_id: self
+                    .runtime
+                    .program_source_id(self.function.source)
+                    .map(|source| source.0),
                 span,
             });
         }

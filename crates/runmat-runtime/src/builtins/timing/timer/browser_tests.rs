@@ -28,24 +28,21 @@ async fn browser_start_returns_before_callback_and_wait_joins_it() {
             })
         },
     )));
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 1);
+    let callback = crate::user_functions::test_support::exact_local_value("tick", binding.clone());
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding);
     drop(scope);
     let timer = timer_builtin(
         Some(runtime.clone()),
-        vec![
-            Value::String("TimerFcn".into()),
-            Value::BoundFunctionHandle {
-                name: "tick".into(),
-                function: 1,
-            },
-        ],
+        vec![Value::String("TimerFcn".into()), callback],
     )
     .await
     .expect("timer");
-    timer_start_builtin(Some(runtime.clone()), timer.clone())
+    timer_start_builtin(Some(runtime.clone()), Some(0), timer.clone())
         .await
         .expect("start");
     assert_eq!(*calls.lock().unwrap(), 0);
-    timer_wait_builtin(Some(runtime.clone()), timer.clone())
+    timer_wait_builtin(Some(runtime.clone()), Some(0), timer.clone())
         .await
         .expect("wait");
     assert_eq!(*calls.lock().unwrap(), 1);

@@ -497,9 +497,12 @@ async fn interpret_resume_inner(
         state.pc, resume.side_effect_epoch
     );
     let current_name = current_function_name.unwrap_or("<main>");
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&state.context.runtime));
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_name,
-        bytecode.source_id,
+        source_id,
         bytecode_frame_span(bytecode),
     );
     let mut output_vars = vars;
@@ -509,7 +512,7 @@ async fn interpret_resume_inner(
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
-            Err(attach_call_frames(bytecode, current_name, err))
+            Err(attach_call_frames(current_name, source_id, err))
         }
     }
 }
@@ -520,11 +523,17 @@ async fn interpret_with_vars_inner(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    bytecode
+        .validate_selected_source_owners(&runtime)
+        .map_err(RuntimeError::new)?;
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
         .map_err(RuntimeError::new)?;
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&runtime));
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_function_name.unwrap_or("<main>"),
-        bytecode.source_id,
+        source_id,
         bytecode_frame_span(bytecode),
     );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
@@ -542,7 +551,7 @@ async fn interpret_with_vars_inner(
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
             let current_name = current_function_name.unwrap_or("<main>");
-            Err(attach_call_frames(bytecode, current_name, err))
+            Err(attach_call_frames(current_name, source_id, err))
         }
     }
 }
@@ -561,6 +570,10 @@ async fn run_interpreter(
     state
         .bytecode
         .validate_catch_scope_metadata()
+        .map_err(RuntimeError::new)?;
+    state
+        .bytecode
+        .validate_selected_source_owners(&state.context.runtime)
         .map_err(RuntimeError::new)?;
     let catch_runtime = state.context.runtime.clone();
     let inherited_catch = catch_runtime.active_catch_exception_shared();
@@ -607,8 +620,11 @@ async fn run_interpreter_inner(
         fusion_accel_graph,
         bytecode,
     } = state;
-    let _source_context_guard =
-        runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
+    let _source_context_guard = runmat_runtime::source_context::replace_current_source_id(
+        bytecode
+            .source_id
+            .and_then(|source| source.resolve_in(&context.runtime)),
+    );
     let _arity_call_counts_guard =
         runmat_runtime::builtins::introspection::arity_check::replace_call_counts(
             call_counts.clone(),
@@ -740,14 +756,16 @@ async fn run_interpreter_inner(
     let registry_for_execution_source = Arc::clone(&function_registry);
     let registry_for_execution_group = Arc::clone(&function_registry);
     let registry_for_execution_owners = Arc::clone(&function_registry);
+    let source_runtime = context.runtime.clone();
+    let group_runtime = context.runtime.clone();
     let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
         std::rc::Rc::new(user_functions::ExecutionSourceFacts::new(
             std::rc::Rc::new(move |function| {
                 registry_for_execution_source
-                    .execution_source_fact(runmat_hir::FunctionId(function))
+                    .execution_source_fact_in(&source_runtime, runmat_hir::FunctionId(function))
             }),
             std::rc::Rc::new(move |source| {
-                registry_for_execution_group.execution_source_group_facts(source)
+                registry_for_execution_group.execution_source_group_facts_in(&group_runtime, source)
             }),
             std::rc::Rc::new(move |function| {
                 registry_for_execution_owners
@@ -759,17 +777,20 @@ async fn run_interpreter_inner(
         .functions
         .values()
         .filter_map(|function| {
-            function.source_id.map(
-                |source_id| runmat_runtime::user_functions::SourceFunctionInfo {
-                    source_id,
-                    name: function.display_name.clone(),
-                    function: function.function.0,
-                    role: function.source_role,
-                    binding_origin: function.binding_origin,
-                    source_file: function.source_file.clone(),
-                    definition_owners: None,
-                },
-            )
+            function
+                .source_id
+                .and_then(|source| source.resolve_in(&context.runtime))
+                .map(
+                    |source_id| runmat_runtime::user_functions::SourceFunctionInfo {
+                        source_id,
+                        name: function.display_name.clone(),
+                        function: function.function.0,
+                        role: function.source_role,
+                        binding_origin: function.binding_origin,
+                        source_file: function.source_file.clone(),
+                        definition_owners: None,
+                    },
+                )
         })
         .collect::<Vec<_>>();
     source_function_catalog.sort_by_key(|info| info.function);
@@ -997,7 +1018,9 @@ async fn run_interpreter_inner(
                     bytecode: &bytecode,
                     var_names: &bytecode.var_names,
                     function_registry: &function_registry,
-                    source_id: bytecode.source_id,
+                    source_id: bytecode
+                        .source_id
+                        .and_then(|source| source.resolve_in(&context.runtime)),
                     call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
                     call_counts: &call_counts_snapshot,
                     current_function_name: &current_function_name,
@@ -1607,7 +1630,9 @@ async fn interpret_function_with_counts_in_context_inner(
     state.missing_input_slots = missing_input_slots;
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         name,
-        bytecode.source_id,
+        bytecode
+            .source_id
+            .and_then(|source| source.resolve_in(&state.context.runtime)),
         bytecode_frame_span(bytecode),
     );
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;

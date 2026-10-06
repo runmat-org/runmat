@@ -5,12 +5,13 @@ mod parallel;
 pub mod program;
 mod region;
 mod sequence_register;
+mod source_ref;
 mod subscript;
 
 /// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 13;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 14;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
-pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 9;
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 10;
 
 pub use artifact::{
     decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,
@@ -36,6 +37,7 @@ pub use program::{
 };
 pub use region::{BytecodeRegion, BytecodeRegionBoundary};
 pub use sequence_register::validate_sequence_register_flow;
+pub use source_ref::BytecodeSourceRef;
 pub use subscript::{
     BytecodeDottedInvokeArgument, BytecodeSubscriptSelector, BytecodeSubscriptStep,
 };

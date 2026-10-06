@@ -20,7 +20,7 @@ pub(super) fn owners(
     // localfunctions() can issue those handles after the file is retired,
     // even when no static call edge references a particular local.
     if let Some(source) = registry.get(function)?.source_id {
-        pending.extend(registry.functions_for_source(source).iter().copied());
+        pending.extend(registry.functions_for_source_ref(source).iter().copied());
     }
     pending.push(function);
     while let Some(function) = pending.pop() {

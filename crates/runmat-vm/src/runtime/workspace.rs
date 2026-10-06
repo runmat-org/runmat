@@ -331,6 +331,7 @@ pub fn take_updated_workspace_assigned_report() -> Option<WorkspaceAssignedRepor
     LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| reports.borrow_mut().remove(&owner))
 }
 
+#[cfg(test)]
 pub fn set_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,

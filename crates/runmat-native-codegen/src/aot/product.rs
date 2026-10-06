@@ -4,7 +4,7 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 use crate::NativeTarget;
 
 pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 6;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 4;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 5;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -57,6 +57,7 @@ pub struct AotProgramManifest {
     pub schema_version: u16,
     pub executable: ExecutableIdentity,
     pub native_ir_digest: Digest,
+    pub source_map: runmat_execution::ExecutableSourceMapV2,
     pub functions: Vec<AotProgramFunction>,
     pub runtime_binding_mode: AotRuntimeBindingMode,
     pub builtin_bindings: Vec<AotBuiltinBinding>,
@@ -80,6 +81,7 @@ impl AotProgramManifest {
     pub fn from_assembly(
         assembly: &crate::NativeAssembly,
         native_ir_digest: Digest,
+        source_map: runmat_execution::ExecutableSourceMapV2,
         runtime_binding_mode: AotRuntimeBindingMode,
         mut builtin_bindings: Vec<AotBuiltinBinding>,
     ) -> Result<Self, crate::NativeCodegenError> {
@@ -100,6 +102,7 @@ impl AotProgramManifest {
             schema_version: AOT_PROGRAM_MANIFEST_SCHEMA_VERSION,
             executable: assembly.executable_identity.clone(),
             native_ir_digest,
+            source_map,
             functions,
             runtime_binding_mode,
             builtin_bindings,
@@ -121,6 +124,9 @@ impl AotProgramManifest {
         self.executable.program.validate().map_err(|error| {
             crate::NativeCodegenError::new("native.aot.program", error.to_string())
         })?;
+        self.source_map.validate().map_err(|error| {
+            crate::NativeCodegenError::new("native.aot.program.source_map", error.to_string())
+        })?;
         if !valid_identity(&self.executable.root_package, 256)
             || !valid_identity(&self.executable.entrypoint, 512)
             || self.functions.is_empty()
@@ -137,6 +143,9 @@ impl AotProgramManifest {
                 function.name.is_empty()
                     || function.name.len() > 512
                     || function.name.chars().any(char::is_control)
+                    || usize::try_from(function.source.0)
+                        .ok()
+                        .is_none_or(|source| source >= self.source_map.entries.len())
             })
             || self
                 .builtin_bindings
@@ -239,7 +248,10 @@ mod admission_tests {
         )
         .unwrap_err();
         assert_eq!(error.code, "native.aot.program.schema");
-        assert!(error.message.contains("actual 1, expected 3"));
+        assert!(error.message.contains(&format!(
+            "actual 1, expected {}",
+            super::AOT_PROGRAM_MANIFEST_SCHEMA_VERSION
+        )));
     }
 
     #[test]

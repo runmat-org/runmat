@@ -188,7 +188,8 @@ mod tests {
             SourceId(7),
             "/tmp/caller.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("inputname source catalog admission");
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(7)),
             Some(vec![
@@ -209,7 +210,8 @@ mod tests {
             SourceId(8),
             "/tmp/caller.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("inputname source catalog admission");
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(8)),
             Some(vec![
@@ -238,7 +240,8 @@ mod tests {
             SourceId(9),
             "/tmp/caller.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("inputname source catalog admission");
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(9)),
             Some(vec![span_of(source, "alpha"), span_of(source, "beta")]),
@@ -269,7 +272,8 @@ mod tests {
                 source_id,
                 "/tmp/caller.m".to_string(),
                 source.to_string(),
-            )]);
+            )])
+            .expect("inputname source catalog admission");
             let _callsite_guard = crate::callsite::push_function_input_callsite(
                 Some(source_id),
                 Some(vec![
@@ -315,7 +319,8 @@ mod tests {
             SourceId(10),
             "/tmp/caller.m".to_string(),
             source.to_string(),
-        )]);
+        )])
+        .expect("inputname source catalog admission");
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(10)),
             Some(vec![span_of(source, "alpha")]),

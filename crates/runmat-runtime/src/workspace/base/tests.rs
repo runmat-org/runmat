@@ -1,4 +1,6 @@
-use runmat_value::{CellArray, HandleRef, Tensor, TransientValueError, Value};
+#[cfg(not(target_arch = "wasm32"))]
+use runmat_value::HandleRef;
+use runmat_value::{CellArray, Tensor, TransientValueError, Value};
 
 use super::values::RootedWorkspaceEntry;
 use super::*;

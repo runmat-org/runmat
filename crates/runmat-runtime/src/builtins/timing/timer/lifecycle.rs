@@ -26,19 +26,19 @@ impl TimerRunConfig {
         override_delay: Option<Duration>,
     ) -> BuiltinResult<Self> {
         ensure_valid_timer(handle)?;
-        if callback_is_empty(&property(handle, "TimerFcn")?) {
+        if callback_is_empty(&property(handle, TimerCallback::Timer.property().name())?) {
             return Err(timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
                 "timer: TimerFcn must be set before starting a timer",
             ));
         }
-        for callback_name in CALLBACK_PROPS {
-            let callback = property(handle, callback_name)?;
+        for slot in TimerCallback::ALL {
+            let callback = property(handle, slot.property().name())?;
             if let Some(text) = nonempty_text_callback(&callback) {
                 // Capture through the executor's source catalog, then release
                 // the preflight lease. Each actual firing captures its own
                 // source identity so callback property edits remain visible.
-                let request = text_callback_request(runtime, handle, callback_name, text)?;
+                let request = text_callback_request(runtime, handle, slot, text)?;
                 drop(request);
             }
         }
@@ -211,7 +211,7 @@ async fn run_timer_task(
     if let Some(call_stop) = finish {
         let _ = set_property(&handle, "Running", Value::String("off".into()));
         if call_stop {
-            let _ = run_callback(&runtime, &handle, "StopFcn", "StopFcn").await;
+            let _ = run_callback(&runtime, &handle, TimerCallback::Stop).await;
         }
     }
 }
@@ -232,7 +232,7 @@ pub(super) async fn stop_one_timer(
     }
     set_property(handle, "Running", Value::String("off".into()))?;
     if call_stop && claimed {
-        run_callback(runtime, handle, "StopFcn", "StopFcn").await?;
+        run_callback(runtime, handle, TimerCallback::Stop).await?;
     }
     Ok(())
 }

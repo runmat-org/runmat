@@ -10,6 +10,19 @@ use runmat_runtime::execution::{DeferredCall, DeferredInvocation, ExecutionServi
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
+#[path = "program_execution/unit_sources.rs"]
+mod unit_sources;
+#[path = "program_execution/region_sources.rs"]
+mod region_sources;
+pub use region_sources::encode_portable_region_sources_v1;
+
+pub(crate) fn capture_region_sources(
+    bytecode: &crate::Bytecode,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<Vec<u8>, String> {
+    region_sources::capture(bytecode, runtime)
+}
+
 pub fn materialize_deferred_call(
     call: &DeferredCall,
     outputs: OutputContract,
@@ -68,6 +81,15 @@ pub fn materialize_deferred_call(
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
     })?;
+    if matches!(
+        &callable,
+        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+    ) && call.program_revision.is_none()
+    {
+        return Err(ExecutionServiceError::Failed(
+            "isolated region is missing its compiler-bound program revision".into(),
+        ));
+    }
     let revision = call
         .program_revision
         .clone()
@@ -93,7 +115,7 @@ pub fn materialize_deferred_call(
         &callable,
         ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
     ) {
-        ExecutableForm::InterpreterScriptV2
+        ExecutableForm::InterpreterRegionSourcesV1
     } else {
         ExecutableForm::InterpreterBytecodeV2
     };
@@ -244,6 +266,16 @@ async fn execute_program_request_in_context(
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
         return execute_unit_request(request, runtime).await;
     }
+    if matches!(
+        &request.callable,
+        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+    ) && request.artifact.form != ExecutableForm::InterpreterRegionSourcesV1
+    {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected source-less region bytecode; rebuild the parallel program"
+                .into(),
+        };
+    }
     if request.artifact.form == ExecutableForm::InterpreterBytecodeV1 {
         return ProgramExecutionResponse::Failure {
             message: format!(
@@ -254,6 +286,7 @@ async fn execute_program_request_in_context(
     }
     if request.artifact.form != ExecutableForm::InterpreterBytecodeV2
         && request.artifact.form != ExecutableForm::InterpreterScriptV2
+        && request.artifact.form != ExecutableForm::InterpreterRegionSourcesV1
     {
         return ProgramExecutionResponse::Failure {
             message:
@@ -374,15 +407,18 @@ async fn execute_spmd_region_request(
             }
         }
     };
-    let bytecode: crate::Bytecode =
-        match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
-            Ok(bytecode) => bytecode,
-            Err(error) => {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker rejected invalid SPMD bytecode: {error}"),
-                }
+    let (bytecode, runtime) = match region_sources::bind(
+        &request.artifact.executable_bytes,
+        runtime,
+        &request.recipe.program_revision,
+    ) {
+        Ok(bound) => bound,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid SPMD sources: {error}"),
             }
-        };
+        }
+    };
     let Some(executable) = bytecode
         .spmd_regions
         .iter()
@@ -510,15 +546,18 @@ async fn execute_parallel_region_request(
             message: "parallel region tasks return one typed result envelope".into(),
         };
     }
-    let bytecode: crate::Bytecode =
-        match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
-            Ok(bytecode) => bytecode,
-            Err(error) => {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker rejected invalid parallel bytecode: {error}"),
-                }
+    let (bytecode, runtime) = match region_sources::bind(
+        &request.artifact.executable_bytes,
+        runtime,
+        &request.recipe.program_revision,
+    ) {
+        Ok(bound) => bound,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid parallel sources: {error}"),
             }
-        };
+        }
+    };
     let Some(executable) = bytecode
         .parfor_regions
         .iter()
@@ -669,14 +708,15 @@ async fn execute_unit_request(
             message: "worker rejected executable unit without a function registry".into(),
         };
     };
-    let registry: crate::FunctionRegistry = match serde_json::from_slice(&registry_payload.bytes) {
-        Ok(registry) => registry,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected invalid executable registry: {error}"),
+    let mut registry: crate::FunctionRegistry =
+        match serde_json::from_slice(&registry_payload.bytes) {
+            Ok(registry) => registry,
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker rejected invalid executable registry: {error}"),
+                }
             }
-        }
-    };
+        };
     let Some(layout_payload) =
         envelope.component(runmat_execution::ExecutableComponentKind::VmLayout)
     else {
@@ -692,8 +732,11 @@ async fn execute_unit_request(
             }
         }
     };
-    bytecode.bound_functions = registry.functions.clone();
-    bytecode.function_registry = registry.clone();
+    let runtime =
+        match unit_sources::bind_unit_sources(&envelope, &mut bytecode, &mut registry, runtime) {
+            Ok(runtime) => runtime,
+            Err(message) => return ProgramExecutionResponse::Failure { message },
+        };
     bytecode.layout = Some(layout);
 
     match envelope.manifest.identity.entrypoint_kind {
@@ -714,11 +757,12 @@ fn unsupported_executable_revisions(
         && revisions.bytecode_schema == crate::BYTECODE_SCHEMA_VERSION
         && revisions.vm_layout_schema == crate::VM_LAYOUT_SCHEMA_VERSION
         && revisions.function_registry_schema == crate::FUNCTION_REGISTRY_SCHEMA_VERSION
+        && revisions.source_map_schema == 2
         && revisions.contract_schema == runmat_types::RUNMAT_TYPES_SCHEMA.major
         && u32::from(revisions.catalog_schema) == runmat_builtins::BUILTIN_CATALOG_SCHEMA;
     (!supported).then(|| {
         format!(
-            "worker rejected stale executable component revisions: MIR actual {} expected {}; analysis actual {} expected {}; bytecode actual {} expected {}; VM layout actual {} expected {}; function registry actual {} expected {}; contract actual {} expected {}; catalog actual {} expected {}. Rebuild the program with this RunMat version",
+            "worker rejected stale executable component revisions: MIR actual {} expected {}; analysis actual {} expected {}; bytecode actual {} expected {}; VM layout actual {} expected {}; function registry actual {} expected {}; source map actual {} expected 2; contract actual {} expected {}; catalog actual {} expected {}. Rebuild the program with this RunMat version",
             revisions.mir_schema,
             runmat_mir::MIR_SCHEMA_VERSION,
             revisions.analysis_schema,
@@ -729,6 +773,7 @@ fn unsupported_executable_revisions(
             crate::VM_LAYOUT_SCHEMA_VERSION,
             revisions.function_registry_schema,
             crate::FUNCTION_REGISTRY_SCHEMA_VERSION,
+            revisions.source_map_schema,
             revisions.contract_schema,
             runmat_types::RUNMAT_TYPES_SCHEMA.major,
             revisions.catalog_schema,

@@ -84,6 +84,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
 
     for invalid in ["UnknownProperty", "Running"] {
         let error = futures::executor::block_on(prepare_timer_property_pairs(
+            None,
             &[
                 Value::String("Period".into()),
                 resident.clone(),
@@ -97,6 +98,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
         assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
     }
     let error = futures::executor::block_on(prepare_timer_property_pairs(
+        None,
         &[
             Value::String("Period".into()),
             resident.clone(),
@@ -112,18 +114,19 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     running
         .properties
         .insert("Running".into(), Value::String("on".into()));
-    let error =
-        futures::executor::block_on(super::super::setter_bindings::set_timer_property_object(
-            Value::Object(running),
-            TimerProperty::StartDelay,
-            resident.clone(),
-        ))
-        .expect_err("frozen running property");
+    let error = futures::executor::block_on(super::super::setter::set_timer_property_object(
+        None,
+        Value::Object(running),
+        TimerProperty::StartDelay,
+        resident.clone(),
+    ))
+    .expect_err("frozen running property");
     assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
 
     owner.mode.store(0, Ordering::SeqCst);
     let prepared = futures::executor::block_on(prepare_timer_property_pairs(
+        None,
         &[Value::String("Period".into()), resident.clone()],
         false,
     ))
@@ -136,6 +139,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     let direct = futures::executor::block_on(gather_value_async(&resident))
         .expect_err("direct provider failure");
     let timer = futures::executor::block_on(prepare_timer_property_pairs(
+        None,
         &[Value::String("Period".into()), resident.clone()],
         false,
     ))
@@ -151,13 +155,70 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
 
     owner.mode.store(1, Ordering::SeqCst);
     let args = [Value::String("Period".into()), resident];
-    let mut pending = Box::pin(prepare_timer_property_pairs(&args, false));
+    let mut pending = Box::pin(prepare_timer_property_pairs(None, &args, false));
     let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
     let before_pending = owner.downloads.load(Ordering::SeqCst);
     assert!(pending.as_mut().poll(&mut context).is_pending());
     assert_eq!(owner.downloads.load(Ordering::SeqCst), before_pending + 1);
     drop(pending);
     assert_eq!(owner.abandoned.load(Ordering::SeqCst), 1);
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_cancellation_token(cancellation.token());
+    let timer = futures::executor::block_on(super::super::api::timer_builtin(
+        Some(runtime.clone()),
+        Vec::new(),
+    ))
+    .expect("session timer");
+    let Value::HandleObject(timer_handle) = &timer else {
+        panic!("timer handle");
+    };
+    let previous_period =
+        super::super::access::numeric_property(timer_handle, "Period").expect("initial period");
+    let mut setter = Box::pin(super::super::setter::set_timer_property(
+        Some(runtime.clone()),
+        timer.clone(),
+        TimerProperty::Period,
+        args[1].clone(),
+    ));
+    assert!(setter.as_mut().poll(&mut context).is_pending());
+    cancellation.cancel(runmat_execution::CancellationReason::User);
+    let std::task::Poll::Ready(result) = setter.as_mut().poll(&mut context) else {
+        panic!("cancellation must finish a suspended setter");
+    };
+    let error = result.expect_err("cancelled setter cannot publish");
+    assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+    assert_eq!(owner.abandoned.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        super::super::access::numeric_property(timer_handle, "Period")
+            .expect("unchanged live period"),
+        previous_period
+    );
+    drop(setter);
+    for (property, value) in [
+        (TimerProperty::Tag, Value::String("must-not-publish".into())),
+        (TimerProperty::UserData, Value::Num(123.0)),
+    ] {
+        let before = super::super::access::property(timer_handle, property.name())
+            .expect("existing timer property");
+        // Use the same owning timer session; a foreign receiver rejection
+        // would not establish cancellation-before-publication behavior.
+        let error = futures::executor::block_on(super::super::setter::set_timer_property(
+            Some(runtime.clone()),
+            timer.clone(),
+            property,
+            value,
+        ))
+        .expect_err("pre-cancelled nonnumeric setter");
+        assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+        assert_eq!(
+            super::super::access::property(timer_handle, property.name())
+                .expect("unchanged timer property"),
+            before
+        );
+    }
     handle
         .allocation_lease()
         .validate_live()

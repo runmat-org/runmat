@@ -1,4 +1,6 @@
 use crate::*;
+#[path = "tests/timers.rs"]
+mod timers;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_workspace_reconciliation.rs"]
 mod native_workspace_reconciliation;
@@ -10498,132 +10500,6 @@ fn runtests_rejects_parallel_execution_option() {
 }
 
 #[test]
-fn timer_constructs_finds_starts_and_deletes_through_vm() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = r#"
-        t = timer('Name', 'clientTimer', 'Tag', 'clientBatch', 'TimerFcn', @(src, evt) 0);
-        f = timerfind('Tag', 'clientBatch');
-        foundName = f.Name;
-        start(t);
-        tasks = t.TasksExecuted;
-        running = t.Running;
-        delete(t);
-        validAfterDelete = isvalid(t);
-    "#;
-    let outcome = execute_text_request(&mut session, source).expect("timer workflow succeeds");
-    assert!(
-        outcome.diagnostics.is_empty(),
-        "timer workflow diagnostics: {:?}; upserts: {:?}",
-        outcome.diagnostics,
-        outcome.workspace_delta.upserts
-    );
-
-    assert_eq!(
-        outcome_named_upsert_value(&outcome, "foundName"),
-        Some(&runmat_value::Value::String("clientTimer".into()))
-    );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "tasks",
-        &runmat_value::Value::Num(1.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "running",
-        &runmat_value::Value::String("off".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "validAfterDelete",
-        &runmat_value::Value::Bool(false)
-    ));
-}
-
-#[test]
-fn timer_absolute_startat_datevec_dispatches_in_matlab_mode() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = r#"
-        t = timer('TimerFcn', @(src, evt) 0);
-        startat(t, datevec(now + 2/86400));
-        running = t.Running;
-        stop(t);
-        stopped = t.Running;
-        delete(t);
-    "#;
-    let outcome = execute_text_request(&mut session, source).expect("absolute startat request");
-    assert!(
-        outcome.diagnostics.is_empty(),
-        "absolute startat diagnostics: {:?}",
-        outcome.diagnostics
-    );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "running",
-        &runmat_value::Value::String("on".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "stopped",
-        &runmat_value::Value::String("off".into())
-    ));
-}
-
-#[test]
-fn timer_member_method_start_works_through_vm() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let source = r#"
-        t = timer('TimerFcn', @(src, evt) 0);
-        t.start();
-        tasks = t.TasksExecuted;
-        running = t.Running;
-    "#;
-    let outcome = execute_text_request(&mut session, source).expect("timer member start succeeds");
-    assert!(
-        outcome.diagnostics.is_empty(),
-        "timer member workflow diagnostics: {:?}; upserts: {:?}",
-        outcome.diagnostics,
-        outcome.workspace_delta.upserts
-    );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "tasks",
-        &runmat_value::Value::Num(1.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "running",
-        &runmat_value::Value::String("off".into())
-    ));
-}
-
-#[test]
-fn timer_rejects_invalid_post_construction_assignments_through_vm() {
-    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
-    for (source, expected) in [
-        ("t = timer; t.Period = 0;", "Period must be a finite scalar"),
-        (
-            "t = timer; t.TimerFcn = 42;",
-            "TimerFcn must be text, a function handle, or a callback cell array",
-        ),
-    ] {
-        let mut session = RunMatSession::with_options(false, false).expect("session init");
-        let outcome =
-            execute_text_request(&mut session, source).expect("assignment failure is diagnostic");
-        assert!(
-            outcome
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains(expected)),
-            "missing timer assignment diagnostic containing {expected:?}; diagnostics: {:?}",
-            outcome.diagnostics
-        );
-    }
-}
-
-#[test]
 fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let source = r#"
@@ -13227,7 +13103,7 @@ fn cellfun_session_function_uses_semantic_registry() {
         prepared
             .bytecode
             .function_registry
-            .functions_for_source(inc_source)
+            .functions_for_source_ref(inc_source)
             .contains(&inc_id),
         "session semantic callback target should be indexed by source ownership"
     );

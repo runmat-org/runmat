@@ -71,7 +71,8 @@ mod tests {
             SourceId(3),
             "/tmp/localfunctions.m".to_string(),
             "handles = localfunctions();".to_string(),
-        )]);
+        )])
+        .expect("localfunctions source catalog admission");
         let _current_guard = crate::source_context::replace_current_source_id(Some(SourceId(99)));
         let _active = crate::user_functions::push_active_semantic_function(10);
         let _catalog_guard =

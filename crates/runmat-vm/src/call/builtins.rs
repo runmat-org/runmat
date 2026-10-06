@@ -1,7 +1,7 @@
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
-use crate::interpreter::runner::interpret_with_vars;
+use crate::interpreter::runner::interpret_with_vars_in_context;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
@@ -387,6 +387,7 @@ pub fn vm_intrinsic_builtin(
 }
 
 pub async fn vm_dynamic_workspace_builtin(
+    runtime: &runmat_runtime::context::RuntimeContext,
     stack: &mut Vec<Value>,
     name: &str,
     arg_count: usize,
@@ -406,7 +407,7 @@ pub async fn vm_dynamic_workspace_builtin(
         VmDynamicWorkspaceBuiltin::Eval => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
-            let source_context = dynamic_source_context("<eval>", &source);
+            let source_lease = dynamic_source_context(runtime, "<eval>", &source)?;
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -414,8 +415,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<eval>".to_string(),
                     requested_outputs,
-                    source_id: Some(source_context.source_id),
-                    source_context: Some(source_context),
+                    source_ref: Some(source_lease.source_ref()),
+                    source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: false,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -427,7 +429,7 @@ pub async fn vm_dynamic_workspace_builtin(
         VmDynamicWorkspaceBuiltin::Evalc => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
-            let source_context = dynamic_source_context("<evalc>", &source);
+            let source_lease = dynamic_source_context(runtime, "<evalc>", &source)?;
             let eval_requested_outputs = if requested_outputs == 1 {
                 1
             } else {
@@ -441,8 +443,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<evalc>".to_string(),
                     requested_outputs: eval_requested_outputs,
-                    source_id: Some(source_context.source_id),
-                    source_context: Some(source_context),
+                    source_ref: Some(source_lease.source_ref()),
+                    source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: false,
                     capture_display_output: requested_outputs == 1,
                     empty_value_when_no_result: requested_outputs > 1,
@@ -458,7 +461,7 @@ pub async fn vm_dynamic_workspace_builtin(
             validate_intrinsic_arg_count(builtin.name(), args.len(), 2)?;
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let source = workspace_text_arg(builtin.name(), &args[1])?;
-            let source_context = dynamic_source_context("<eval>", &source);
+            let source_lease = dynamic_source_context(runtime, "<eval>", &source)?;
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -466,8 +469,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<eval>".to_string(),
                     requested_outputs,
-                    source_id: Some(source_context.source_id),
-                    source_context: Some(source_context),
+                    source_ref: Some(source_lease.source_ref()),
+                    source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: false,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -509,13 +513,13 @@ pub async fn vm_dynamic_workspace_builtin(
             }
             let source =
                 runmat_runtime::builtins::io::repl_fs::run::resolve_run_source(&args[0]).await?;
-            let dynamic_source_id = next_dynamic_source_id();
-            let source_context = DynamicSourceContext {
-                source_id: dynamic_source_id,
-                name: source.display_name.clone(),
-                fullpath_name: Some(source.path.to_string_lossy().to_string()),
-                text: source.text.clone(),
-            };
+            let source_lease = runmat_runtime::source_context::lease_source_context_in_context(
+                runtime,
+                source.display_name.as_str(),
+                Some(std::sync::Arc::from(source.path.to_string_lossy().as_ref())),
+                source.text.as_str(),
+            )
+            .map_err(dynamic_source_identity_error)?;
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -523,8 +527,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source: source.text,
                     source_label: source.display_name,
                     requested_outputs: 0,
-                    source_id: Some(source_context.source_id),
-                    source_context: Some(source_context),
+                    source_ref: Some(source_lease.source_ref()),
+                    source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: true,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -603,8 +608,9 @@ struct WorkspaceEvalRequest {
     source: String,
     source_label: String,
     requested_outputs: usize,
-    source_id: Option<runmat_hir::SourceId>,
-    source_context: Option<DynamicSourceContext>,
+    source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
+    source_lease: Option<runmat_runtime::source_context::RuntimeSourceLease>,
+    runtime: runmat_runtime::context::RuntimeContext,
     commit_workspace_on_error: bool,
     capture_display_output: bool,
     empty_value_when_no_result: bool,
@@ -620,8 +626,9 @@ async fn eval_workspace_source(
         source,
         source_label,
         requested_outputs,
-        source_id,
-        source_context,
+        source_ref,
+        source_lease: _source_lease,
+        runtime,
         commit_workspace_on_error,
         capture_display_output,
         empty_value_when_no_result,
@@ -634,13 +641,12 @@ async fn eval_workspace_source(
     }
     let frame = workspace_target_snapshot(target)
         .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
-    let _source_catalog_guard = source_context.as_ref().map(install_dynamic_source_context);
     let Some((bytecode, result_slot)) = compile_dynamic_workspace_eval(
         builtin,
         &source,
         &frame.names,
         function_registry,
-        source_id,
+        source_ref,
         requested_outputs,
     )?
     else {
@@ -654,6 +660,7 @@ async fn eval_workspace_source(
         frame.assigned,
         builtin,
         source_label,
+        runtime,
     )
     .await?;
     let vars = match outcome {
@@ -711,52 +718,35 @@ async fn eval_workspace_source(
     Ok(result)
 }
 
-#[derive(Clone)]
-struct DynamicSourceContext {
-    source_id: runmat_hir::SourceId,
-    name: String,
-    fullpath_name: Option<String>,
-    text: String,
-}
-
-fn install_dynamic_source_context(
-    context: &DynamicSourceContext,
-) -> runmat_runtime::source_context::SourceCatalogGuard {
-    let mut entries = runmat_runtime::source_context::source_catalog_entries_with_fullpaths();
-    entries.retain(|(source_id, _, _, _)| *source_id != context.source_id);
-    entries.push((
-        context.source_id,
-        context.name.clone(),
-        context.fullpath_name.clone(),
-        context.text.clone(),
-    ));
-    runmat_runtime::source_context::replace_source_catalog_with_fullpaths(entries)
-}
-
-fn dynamic_source_context(name: impl Into<String>, text: &str) -> DynamicSourceContext {
+fn dynamic_source_context(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    name: impl Into<String>,
+    text: &str,
+) -> Result<runmat_runtime::source_context::RuntimeSourceLease, RuntimeError> {
     let fallback_name = name.into();
     let current = runmat_runtime::source_context::current_source_info();
-    DynamicSourceContext {
-        source_id: next_dynamic_source_id(),
-        name: current
-            .as_ref()
-            .map(|source| source.name.to_string())
-            .filter(|name| !name.is_empty())
-            .unwrap_or(fallback_name),
-        fullpath_name: current
-            .as_ref()
-            .and_then(|source| source.fullpath_name.as_ref().map(ToString::to_string)),
-        text: text.to_string(),
-    }
+    let name = current
+        .as_ref()
+        .map(|source| source.name.clone())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| std::sync::Arc::from(fallback_name));
+    let fullpath_name = current.and_then(|source| source.fullpath_name);
+    runmat_runtime::source_context::lease_source_context_in_context(
+        runtime,
+        name,
+        fullpath_name,
+        text,
+    )
+    .map_err(dynamic_source_identity_error)
 }
 
-fn next_dynamic_source_id() -> runmat_hir::SourceId {
-    runmat_runtime::source_context::source_catalog_entries_with_fullpaths()
-        .into_iter()
-        .map(|(source_id, _, _, _)| source_id.0)
-        .max()
-        .map(|id| runmat_hir::SourceId(id + 1))
-        .unwrap_or(runmat_hir::SourceId(0))
+fn dynamic_source_identity_error(
+    error: runmat_runtime::source_context::SourceIdExhausted,
+) -> RuntimeError {
+    runmat_runtime::build_runtime_error(error.to_string())
+        .with_identifier("RunMat:DynamicSourceIdentity")
+        .with_source(error)
+        .build()
 }
 
 #[derive(Default)]
@@ -781,6 +771,7 @@ async fn interpret_dynamic_workspace_eval(
     assigned: HashSet<String>,
     _builtin: &'static str,
     source_label: String,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<
     (
         Result<InterpreterOutcome, RuntimeError>,
@@ -791,7 +782,9 @@ async fn interpret_dynamic_workspace_eval(
 > {
     let _pending_workspace =
         crate::runtime::workspace::push_transactional_pending_workspace(names, assigned);
-    let outcome = interpret_with_vars(&bytecode, &mut target_vars, Some(&source_label)).await;
+    let outcome =
+        interpret_with_vars_in_context(&bytecode, &mut target_vars, Some(&source_label), runtime)
+            .await;
     let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
     let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
     Ok((outcome, updated_workspace, DynamicThreadEffects::default()))
@@ -802,7 +795,7 @@ fn compile_dynamic_workspace_eval(
     source: &str,
     workspace_bindings: &HashMap<String, usize>,
     function_registry: &FunctionRegistry,
-    source_id: Option<runmat_hir::SourceId>,
+    source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     requested_outputs: usize,
 ) -> Result<Option<(Bytecode, Option<usize>)>, RuntimeError> {
     let options = current_dynamic_eval_options();
@@ -856,8 +849,8 @@ fn compile_dynamic_workspace_eval(
                 &format!("{builtin}: compile error: {err}"),
             )
         })?;
-    if source_id.is_some() {
-        bytecode.source_id = source_id;
+    if source_ref.is_some() {
+        bytecode.source_id = source_ref.map(crate::BytecodeSourceRef::Runtime);
     }
     merge_eval_function_registry(&mut bytecode, function_registry);
     remap_dynamic_workspace_slots(&mut bytecode, workspace_bindings);
@@ -1287,6 +1280,10 @@ mod tests {
 
     #[test]
     fn dynamic_eval_inherits_the_calling_file_identity() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let _scope = runtime.enter();
         let source_id = runmat_hir::SourceId(41);
         let _catalog =
             runmat_runtime::source_context::replace_source_catalog_with_fullpaths(vec![(
@@ -1294,16 +1291,16 @@ mod tests {
                 "analysis.m".to_string(),
                 Some("/project/analysis.m".to_string()),
                 "value = eval('mfilename()');".to_string(),
-            )]);
+            )])
+            .expect("dynamic eval source catalog admission");
         let _current = runmat_runtime::source_context::replace_current_source_id(Some(source_id));
-        let dynamic = dynamic_source_context("<eval>", "mfilename()");
-        assert_eq!(dynamic.name, "analysis.m");
-        assert_eq!(
-            dynamic.fullpath_name.as_deref(),
-            Some("/project/analysis.m")
-        );
-        assert_eq!(dynamic.text, "mfilename()");
-        assert_ne!(dynamic.source_id, source_id);
+        let dynamic = dynamic_source_context(&runtime, "<eval>", "mfilename()")
+            .expect("session-owned source lease");
+        let info = dynamic.source_info();
+        assert_eq!(info.name.as_ref(), "analysis.m");
+        assert_eq!(info.fullpath_name.as_deref(), Some("/project/analysis.m"));
+        assert_eq!(info.text.as_ref(), "mfilename()");
+        assert_ne!(dynamic.source_id(), source_id);
     }
 
     #[test]

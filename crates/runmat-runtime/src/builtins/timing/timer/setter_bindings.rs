@@ -4,9 +4,9 @@ use super::*;
 
 macro_rules! timer_setter_builtin {
     ($fn_name:ident, $builtin_name:literal, $property:expr) => {
-        #[runtime_builtin(name = $builtin_name, binding_variant = "default", builtin_path = "crate::builtins::timing::timer")]
-        pub async fn $fn_name(obj: Value, value: Value) -> BuiltinResult<Value> {
-            set_timer_property_object(obj, $property, value).await
+        #[runtime_builtin(name = $builtin_name, binding_variant = "default", context = true, builtin_path = "crate::builtins::timing::timer")]
+        pub async fn $fn_name(runtime: Option<RuntimeContext>, obj: Value, value: Value) -> BuiltinResult<Value> {
+            super::setter::set_timer_property(runtime, obj, $property, value).await
         }
     };
 }
@@ -68,41 +68,3 @@ timer_setter_builtin!(
     "set.UserData",
     TimerProperty::UserData
 );
-
-pub(super) async fn set_timer_property_object(
-    obj: Value,
-    property: TimerProperty,
-    value: Value,
-) -> BuiltinResult<Value> {
-    let Value::Object(mut object) = obj else {
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_HANDLE,
-            format!(
-                "timer: set.{} requires timer object receiver",
-                property.name()
-            ),
-        ));
-    };
-    if !object.class_name.is(TIMER_CLASS) {
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_HANDLE,
-            format!(
-                "timer: set.{} requires timer object receiver, got '{}'",
-                property.name(),
-                object.class_name
-            ),
-        ));
-    }
-    if running_is_on(&object) && property.frozen_while_running() {
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_PROPERTY,
-            format!(
-                "timer: property '{}' cannot be changed while Running is on",
-                property.name()
-            ),
-        ));
-    }
-    let prepared = arguments::prepare_timer_setter_value(property, value).await?;
-    apply_name_value_pairs(&mut object, &[prepared], false)?;
-    Ok(Value::Object(object))
-}

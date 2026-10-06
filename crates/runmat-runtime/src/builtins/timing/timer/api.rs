@@ -14,7 +14,7 @@ pub async fn timer_builtin(
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
     ensure_timer_class_registered();
-    let args = prepare_timer_property_pairs(&args, false).await?;
+    let args = prepare_timer_property_pairs(Some(&runtime), &args, false).await?;
     let name = runtime
         .timer_session()
         .borrow_mut()
@@ -63,7 +63,7 @@ pub async fn timerfind_builtin(
     let runtime = timer_runtime(runtime)?;
     find_timers(
         &runtime,
-        prepare_timer_property_pairs(&args, true).await?,
+        prepare_timer_property_pairs(Some(&runtime), &args, true).await?,
         false,
     )
 }
@@ -81,7 +81,7 @@ pub async fn timerfindall_builtin(
     let runtime = timer_runtime(runtime)?;
     find_timers(
         &runtime,
-        prepare_timer_property_pairs(&args, true).await?,
+        prepare_timer_property_pairs(Some(&runtime), &args, true).await?,
         true,
     )
 }
@@ -137,6 +137,7 @@ pub async fn timer_startat_builtin(
     let prepared = match rest.first() {
         Some(delay) => {
             prepare_timer_property_pairs(
+                Some(&runtime),
                 &[Value::String("StartDelay".to_string()), delay.clone()],
                 false,
             )

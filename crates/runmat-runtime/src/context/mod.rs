@@ -82,7 +82,7 @@ pub use source_evaluation::{
     RuntimeSourceEvaluationService, SessionSourceEvaluation, SourceEvaluationPolicy,
     SourceEvaluationProvenance,
 };
-pub(crate) use state::RuntimeContextState;
+pub(crate) use state::{RuntimeContextState, SourceState};
 pub use tcp::{
     RuntimeTcpBind, RuntimeTcpByteOrder, RuntimeTcpClient, RuntimeTcpClientStatus,
     RuntimeTcpCloseScope, RuntimeTcpConnect, RuntimeTcpIssuer, RuntimeTcpReadMode,

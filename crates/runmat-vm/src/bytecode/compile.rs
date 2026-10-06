@@ -130,7 +130,7 @@ fn compile_with_bound_analysis(
                 .find(|function| function.id == function_id)
         })
         .and_then(|function| hir.modules.get(function.module.0))
-        .map(|module| module.source_id);
+        .map(|module| crate::bytecode::BytecodeSourceRef::Program(module.source_id));
 
     Ok(Bytecode {
         active_function: entrypoint_target,
@@ -813,7 +813,7 @@ fn compile_semantic_functions(
         let source_id = hir
             .modules
             .get(function.module.0)
-            .map(|module| module.source_id);
+            .map(|module| crate::bytecode::BytecodeSourceRef::Program(module.source_id));
         let resume_points = compiler
             .layout
             .as_ref()

@@ -196,7 +196,7 @@ fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoi
         ExecutableForm::InterpreterBytecodeV1 | ExecutableForm::InterpreterBytecodeV2 => {
             callable.recipe_entrypoint() == entrypoint
         }
-        ExecutableForm::InterpreterScriptV2
+        ExecutableForm::InterpreterScriptV2 | ExecutableForm::InterpreterRegionSourcesV1
             if matches!(
                 callable,
                 ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
@@ -210,6 +210,7 @@ fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoi
                 .is_some_and(|function| function.0 == 0)
                 && entrypoint == "script"
         }
+        ExecutableForm::InterpreterRegionSourcesV1 => false,
         ExecutableForm::TestAttemptV1 => {
             callable
                 .semantic_function()
@@ -237,6 +238,7 @@ fn artifact_form_requires_argument_free_entrypoint(
             callable,
             ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
         ),
+        ExecutableForm::InterpreterRegionSourcesV1 => false,
         ExecutableForm::InterpreterBytecodeV1
         | ExecutableForm::InterpreterBytecodeV2
         | ExecutableForm::MeshingWorkload
