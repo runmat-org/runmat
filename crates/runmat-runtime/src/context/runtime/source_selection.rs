@@ -83,7 +83,7 @@ impl RuntimeContext {
         Ok(self)
     }
 
-    pub(super) fn with_poll_source_catalog(mut self) -> Self {
+    pub(in crate::context) fn with_poll_source_catalog(mut self) -> Self {
         let active = super::super::scope::active_runtime_context()
             .filter(|active| active.same_source_projection_owner(&self));
         let current = match &self.source_selection {
