@@ -84,10 +84,12 @@ pub(super) async fn read_default_staged(
         cooperation,
         path,
         &options,
-        Some(workspace()?),
-        Some(workspace()?),
-        Some(workspace()?),
-        Some(&stage),
+        bounded::ScanResources {
+            line: Some(workspace()?),
+            samples: Some(workspace()?),
+            field: Some(workspace()?),
+            diagnostic: Some(&stage),
+        },
     )
     .await?;
     let fill_line = workspace()?;
@@ -123,10 +125,12 @@ pub(super) async fn read_default_staged(
             cooperation,
             path,
             &options,
-            Some(fill_line),
-            Some(fill_field),
-            Some(output_permit.as_ref()),
-            Some(&receipt),
+            bounded::FillResources {
+                line: Some(fill_line),
+                field: Some(fill_field),
+                output: Some(output_permit.as_ref()),
+                diagnostic: Some(&receipt),
+            },
         )
         .await?;
         cooperation.completed(0).await?;
@@ -197,10 +201,7 @@ pub(super) async fn read_numeric_matrix(
                 cooperation,
                 path,
                 options,
-                None,
-                None,
-                None,
-                None,
+                bounded::ScanResources::default(),
             )
             .await?;
             bounded::fill_utf8(
@@ -209,10 +210,7 @@ pub(super) async fn read_numeric_matrix(
                 cooperation,
                 path,
                 options,
-                None,
-                None,
-                None,
-                None,
+                bounded::FillResources::default(),
             )
             .await
         }

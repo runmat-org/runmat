@@ -1,6 +1,5 @@
 use super::super::scan;
 use super::*;
-use runmat_value::ExactHostAllocationPermit;
 use std::io::{Seek, SeekFrom};
 
 mod storage;
@@ -44,10 +43,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     cooperation: &mut TabularCooperation<'_>,
     path: &impl TabularReadPath,
     options: &ReadMatrixOptions,
-    staged_line: Option<ExactHostEffectBytes>,
-    mut staged_field: Option<ExactHostEffectBytes>,
-    output_permit: Option<&dyn ExactHostAllocationPermit>,
-    diagnostic_reservation: Option<&dyn DiagnosticReservation>,
+    mut resources: FillResources<'_>,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
     let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
@@ -66,8 +62,9 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
         )
     })?;
     let integer_dtype = integer_output_dtype(&options.output_template);
-    let mut storage = FillStorage::new(rows, cols, count, integer_dtype, options, output_permit)?;
-    let mut reader = RowReader::new(source, staged_line);
+    let mut storage =
+        FillStorage::new(rows, cols, count, integer_dtype, options, resources.output)?;
+    let mut reader = RowReader::new(source, resources.line.take());
     let mut data_row = 0usize;
     let mut semantic_error = None;
     while let Some(line_number) = reader
@@ -82,14 +79,14 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
             integer_dtype,
             options,
             storage: &mut storage,
-            diagnostic_reservation,
+            diagnostic_reservation: resources.diagnostic,
         };
         let field_count = scan::for_each_field_ref(
             reader.text(),
             &geometry.delimiter,
             cooperation,
             path,
-            staged_field.as_mut(),
+            resources.field.as_mut(),
             |source_col, field| {
                 if selected
                     && semantic_error.is_none()

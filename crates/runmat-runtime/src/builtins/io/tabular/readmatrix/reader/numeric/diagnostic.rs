@@ -1,6 +1,6 @@
 //! One full-text numeric-token diagnostic for floating and integer replay.
-//! Its checked byte length is an input to a future exact retained allocation;
-//! ordinary `to_string` below does not by itself certify resource use.
+//! The staged caller uses its checked byte length for an exact retained
+//! allocation; ordinary `to_string` below does not certify resource use.
 
 use crate::context::host_effect::{
     ExactHostEffectDiagnosticStrings, HostEffectAllocationError, HostEffectLiveAllocationClaim,
@@ -116,16 +116,15 @@ impl<'a> NumericTokenDiagnostic<'a> {
             .and_then(|bytes| bytes.checked_add(BUILTIN.len()))
             .ok_or(HostEffectAllocationError::Overflow)?;
         let claim = reservation.reserve_diagnostic_claim(total)?;
-        let mut strings = ExactHostEffectDiagnosticStrings::new(total, claim);
-        let message = strings.render(message_bytes, self)?;
-        let identifier = strings.copy(identifier)?;
-        let builtin = strings.copy(BUILTIN)?;
-        let claim = strings.finish()?;
-        Ok(crate::build_runtime_error(message)
-            .with_identifier(identifier)
-            .with_builtin(builtin)
-            .with_retained_diagnostic_allocation(claim.into_diagnostic_retention())
-            .build())
+        let strings = ExactHostEffectDiagnosticStrings::render(
+            total,
+            message_bytes,
+            self,
+            identifier,
+            BUILTIN,
+            claim,
+        )?;
+        Ok(strings.into_error())
     }
 }
 

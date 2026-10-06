@@ -27,10 +27,7 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
             &mut cooperation,
             &selected,
             &options,
-            None,
-            None,
-            None,
-            None,
+            bounded::ScanResources::default(),
         ))
         .expect("whole-source validation");
         let live = Arc::new(AtomicUsize::new(0));
@@ -41,10 +38,10 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
             &mut cooperation,
             &selected,
             &options,
-            None,
-            None,
-            Some(&permit),
-            None,
+            bounded::FillResources {
+                output: Some(&permit),
+                ..Default::default()
+            },
         ))
         .expect("exact ragged output");
         assert_eq!(tensor.shape, [2, 3]);
@@ -122,10 +119,7 @@ fn exact_output_claim_releases_on_changed_source_digest() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        None,
+        bounded::ScanResources::default(),
     ))
     .expect("first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-shape mutation");
@@ -137,10 +131,10 @@ fn exact_output_claim_releases_on_changed_source_digest() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        Some(&permit),
-        None,
+        bounded::FillResources {
+            output: Some(&permit),
+            ..Default::default()
+        },
     ))
     .expect_err("changed bytes cannot publish the charged output");
     assert!(error
@@ -168,10 +162,7 @@ fn exact_output_claim_releases_on_pending_drop_and_cancellation() {
         &mut scan_cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        None,
+        bounded::ScanResources::default(),
     ))
     .expect("first pass");
     let live = Arc::new(AtomicUsize::new(0));
@@ -199,10 +190,10 @@ fn exact_output_claim_releases_on_pending_drop_and_cancellation() {
             &mut cooperation,
             &selected,
             &options,
-            None,
-            None,
-            Some(&permit),
-            None,
+            bounded::FillResources {
+                output: Some(&permit),
+                ..Default::default()
+            },
         ));
         let waker = futures::task::noop_waker();
         assert!(matches!(

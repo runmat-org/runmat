@@ -76,10 +76,16 @@ fn staged_scan_retains_full_first_numeric_error_through_remaining_utf8_validatio
         &mut cooperation,
         &selected,
         &ReadMatrixOptions::default(),
-        Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
-        Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
-        Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
-        Some(&diagnostic),
+        bounded::ScanResources {
+            line: Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
+            samples: Some(
+                crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len()),
+            ),
+            field: Some(
+                crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len()),
+            ),
+            diagnostic: Some(&diagnostic),
+        },
     ))
     .expect_err("numeric error after complete UTF-8 scan");
     assert_eq!(
@@ -149,10 +155,7 @@ fn retained_utf8_replay_writes_exact_wide_integer_output_without_mirror() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        None,
+        bounded::ScanResources::default(),
     ))
     .expect("first pass");
     let live = Arc::new(AtomicUsize::new(0));
@@ -163,10 +166,10 @@ fn retained_utf8_replay_writes_exact_wide_integer_output_without_mirror() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        Some(&permit),
-        None,
+        bounded::FillResources {
+            output: Some(&permit),
+            ..Default::default()
+        },
     ))
     .expect("exact replay");
     assert_eq!(tensor.shape.as_slice(), [1, 2]);
@@ -440,10 +443,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        None,
+        bounded::ScanResources::default(),
     ))
     .expect("first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length in-place mutation");
@@ -453,10 +453,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        None,
+        bounded::FillResources::default(),
     ))
     .expect_err("second pass cannot publish unvalidated new bytes");
     assert!(error
@@ -472,10 +469,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        None,
+        bounded::ScanResources::default(),
     ))
     .expect("new first pass");
     std::fs::write(&file, b"x,2\n3,4\n").expect("same-length malformed mutation");
@@ -488,10 +482,10 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
-        None,
-        None,
-        None,
-        Some(&diagnostic),
+        bounded::FillResources {
+            diagnostic: Some(&diagnostic),
+            ..Default::default()
+        },
     ))
     .expect_err("changed-source error precedes replay token error");
     assert!(error
@@ -513,10 +507,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
-        None,
-        None,
-        None,
-        None,
+        bounded::ScanResources::default(),
     ))
     .expect("out-of-range first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length mutation outside range");
@@ -526,10 +517,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
-        None,
-        None,
-        None,
-        None,
+        bounded::FillResources::default(),
     ))
     .expect_err("empty range still checks retained source before publication");
     assert!(error

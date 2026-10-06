@@ -7,11 +7,28 @@
 use super::*;
 use crate::context::host_effect::ExactHostEffectBytes;
 use runmat_filesystem::FsBoundedInput;
+use runmat_value::ExactHostAllocationPermit;
 
 mod fill;
 pub(super) use fill::fill_utf8;
 mod row;
 use row::{LineBuffer, RowReader};
+
+#[derive(Default)]
+pub(super) struct ScanResources<'a> {
+    pub(super) line: Option<ExactHostEffectBytes>,
+    pub(super) samples: Option<ExactHostEffectBytes>,
+    pub(super) field: Option<ExactHostEffectBytes>,
+    pub(super) diagnostic: Option<&'a dyn DiagnosticReservation>,
+}
+
+#[derive(Default)]
+pub(super) struct FillResources<'a> {
+    pub(super) line: Option<ExactHostEffectBytes>,
+    pub(super) field: Option<ExactHostEffectBytes>,
+    pub(super) output: Option<&'a dyn ExactHostAllocationPermit>,
+    pub(super) diagnostic: Option<&'a dyn DiagnosticReservation>,
+}
 
 pub(super) struct BoundedScanGeometry {
     pub(super) rows: usize,
@@ -65,13 +82,10 @@ pub(super) async fn scan_utf8(
     cooperation: &mut TabularCooperation<'_>,
     path: &impl TabularReadPath,
     options: &ReadMatrixOptions,
-    staged_line: Option<ExactHostEffectBytes>,
-    staged_samples: Option<ExactHostEffectBytes>,
-    mut staged_field: Option<ExactHostEffectBytes>,
-    diagnostic_reservation: Option<&dyn DiagnosticReservation>,
+    mut resources: ScanResources<'_>,
 ) -> BuiltinResult<BoundedScanGeometry> {
-    let mut reader = RowReader::new(source, staged_line);
-    let mut sample = SampleRows::new(staged_samples);
+    let mut reader = RowReader::new(source, resources.line.take());
+    let mut sample = SampleRows::new(resources.samples.take());
     while sample.count < sample.lines.len() {
         let Some(number) = reader
             .next(cooperation, path, options.num_header_lines)
@@ -115,8 +129,8 @@ pub(super) async fn scan_utf8(
             options,
             cooperation,
             path,
-            staged_field.as_mut(),
-            diagnostic_reservation,
+            resources.field.as_mut(),
+            resources.diagnostic,
         )
         .await;
         match result {
@@ -142,8 +156,8 @@ pub(super) async fn scan_utf8(
                 options,
                 cooperation,
                 path,
-                staged_field.as_mut(),
-                diagnostic_reservation,
+                resources.field.as_mut(),
+                resources.diagnostic,
             )
             .await
             {

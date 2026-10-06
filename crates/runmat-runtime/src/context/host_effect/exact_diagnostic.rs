@@ -8,56 +8,59 @@ use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 pub(crate) struct ExactHostEffectDiagnosticStrings {
-    remaining: usize,
-    claim: Option<HostEffectLiveAllocationClaim>,
+    message: String,
+    identifier: String,
+    builtin: String,
+    // Last field: all three physical String blocks drop before their charge.
+    claim: HostEffectLiveAllocationClaim,
 }
 
 impl ExactHostEffectDiagnosticStrings {
-    /// `authorized_bytes` must be exactly the sum of physical String payload
-    /// capacities reserved by `claim` at the owning stage/receipt boundary.
-    pub(crate) fn new(authorized_bytes: usize, claim: HostEffectLiveAllocationClaim) -> Self {
-        Self {
-            remaining: authorized_bytes,
-            claim: Some(claim),
-        }
-    }
-
-    pub(crate) fn copy(&mut self, text: &str) -> Result<String, HostEffectAllocationError> {
-        self.allocate(text.len(), |output| output.write_str(text))
-    }
-
+    /// The claim must reserve exactly the checked sum of the three requested
+    /// capacities. Construction retains it through every partial success.
     pub(crate) fn render(
-        &mut self,
-        requested_bytes: usize,
-        text: impl fmt::Display,
-    ) -> Result<String, HostEffectAllocationError> {
-        self.allocate(requested_bytes, |output| write!(output, "{text}"))
-    }
-
-    fn allocate(
-        &mut self,
-        requested_bytes: usize,
-        write_text: impl FnOnce(&mut ExactStringWriter) -> fmt::Result,
-    ) -> Result<String, HostEffectAllocationError> {
-        if requested_bytes > self.remaining {
+        authorized_bytes: usize,
+        message_bytes: usize,
+        message: impl fmt::Display,
+        identifier: &str,
+        builtin: &str,
+        claim: HostEffectLiveAllocationClaim,
+    ) -> Result<Self, HostEffectAllocationError> {
+        let total = message_bytes
+            .checked_add(identifier.len())
+            .and_then(|bytes| bytes.checked_add(builtin.len()))
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        if total != authorized_bytes {
             return Err(HostEffectAllocationError::ExceedsStageEnvelope);
         }
-        let mut output = ExactStringWriter::new(requested_bytes)?;
-        write_text(&mut output).map_err(|_| HostEffectAllocationError::InvalidInvocation)?;
-        let text = output.finish()?;
-        self.remaining -= requested_bytes;
-        Ok(text)
+        let mut output = ExactStringWriter::new(message_bytes)?;
+        write!(&mut output, "{message}")
+            .map_err(|_| HostEffectAllocationError::InvalidInvocation)?;
+        let message = output.finish()?;
+        let mut output = ExactStringWriter::new(identifier.len())?;
+        output
+            .write_str(identifier)
+            .map_err(|_| HostEffectAllocationError::InvalidInvocation)?;
+        let identifier = output.finish()?;
+        let mut output = ExactStringWriter::new(builtin.len())?;
+        output
+            .write_str(builtin)
+            .map_err(|_| HostEffectAllocationError::InvalidInvocation)?;
+        let builtin = output.finish()?;
+        Ok(Self {
+            message,
+            identifier,
+            builtin,
+            claim,
+        })
     }
 
-    pub(crate) fn finish(
-        mut self,
-    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
-        if self.remaining != 0 {
-            return Err(HostEffectAllocationError::InvalidInvocation);
-        }
-        self.claim
-            .take()
-            .ok_or(HostEffectAllocationError::InvalidInvocation)
+    pub(crate) fn into_error(self) -> crate::RuntimeError {
+        crate::build_runtime_error(self.message)
+            .with_identifier(self.identifier)
+            .with_builtin(self.builtin)
+            .with_retained_diagnostic_allocation(self.claim.into_diagnostic_retention())
+            .build()
     }
 }
 
@@ -151,19 +154,12 @@ mod tests {
         let claim = stage
             .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, 6)
             .expect("single diagnostic claim");
-        let mut owner = ExactHostEffectDiagnosticStrings::new(6, claim);
-        let message = owner.render(3, "hé").expect("three-byte message");
-        let identifier = owner.copy("id").expect("two-byte identifier");
-        let builtin = owner.copy("r").expect("one-byte builtin");
-        assert_eq!(message.capacity(), 3);
-        assert_eq!(identifier.capacity(), 2);
-        assert_eq!(builtin.capacity(), 1);
-        let claim = owner.finish().expect("all payload bytes consumed");
-        let error = runmat_async::runtime_error(message)
-            .with_identifier(identifier)
-            .with_builtin(builtin)
-            .with_retained_diagnostic_allocation(claim.into_diagnostic_retention())
-            .build();
+        let owner = ExactHostEffectDiagnosticStrings::render(6, 3, "hé", "id", "r", claim)
+            .expect("all three exact blocks");
+        assert_eq!(owner.message.capacity(), 3);
+        assert_eq!(owner.identifier.capacity(), 2);
+        assert_eq!(owner.builtin.capacity(), 1);
+        let error = owner.into_error();
         assert_eq!(error.message(), "hé");
         assert_eq!(error.identifier(), Some("id"));
         assert_eq!(error.context.builtin.as_deref(), Some("r"));
@@ -182,12 +178,31 @@ mod tests {
         let claim = stage
             .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, 2)
             .expect("claim");
-        let mut owner = ExactHostEffectDiagnosticStrings::new(2, claim);
         assert!(matches!(
-            owner.copy("three"),
+            ExactHostEffectDiagnosticStrings::render(2, 3, "abc", "", "", claim),
             Err(HostEffectAllocationError::ExceedsStageEnvelope)
         ));
-        drop(owner);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[test]
+    fn formatting_mismatch_after_partial_write_refunds_without_escaping_text() {
+        struct TooShort;
+        impl fmt::Display for TooShort {
+            fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+                output.write_str("a")
+            }
+        }
+
+        let ledger = ManagedHostEffectLedger::new(256);
+        let stage = ledger.reserve_stage(256).expect("stage");
+        let claim = stage
+            .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, 4)
+            .expect("claim");
+        assert!(matches!(
+            ExactHostEffectDiagnosticStrings::render(4, 2, TooShort, "i", "b", claim),
+            Err(HostEffectAllocationError::InvalidInvocation)
+        ));
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     }
 }
