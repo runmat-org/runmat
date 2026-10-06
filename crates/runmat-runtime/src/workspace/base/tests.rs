@@ -157,6 +157,23 @@ fn transient_values_are_rejected_before_state_changes() {
 }
 
 #[test]
+fn rooting_failure_keeps_its_typed_gc_source() {
+    use std::error::Error;
+
+    let error = base_workspace_error_to_runtime(BaseWorkspaceError::from(
+        runmat_gc::GcError::RootRegistrationFailed("root table unavailable".into()),
+    ));
+
+    assert_eq!(error.identifier(), Some("RunMat:Workspace:Rooting"));
+    let source = error.source().expect("typed GC source");
+    assert!(matches!(
+        source.downcast_ref::<runmat_gc::GcError>(),
+        Some(runmat_gc::GcError::RootRegistrationFailed(message))
+            if message == "root table unavailable"
+    ));
+}
+
+#[test]
 fn unchanged_tensor_entries_share_the_same_immutable_value() {
     let tensor = Value::Tensor(Tensor::new(vec![1.0; 1024], vec![32, 32]).unwrap());
     let entry = RootedWorkspaceEntry::new(tensor).unwrap();

@@ -14,13 +14,13 @@ pub enum BaseWorkspaceError {
     #[error("a workspace value is not storable: {0}")]
     TransientValue(#[from] TransientValueError),
     #[error("could not retain a base workspace value: {0}")]
-    Rooting(String),
+    Rooting(#[source] runmat_gc::GcError),
     #[error("publish pending workspace changes before reconciling the projection")]
     PendingChanges,
 }
 
 impl From<runmat_gc::GcError> for BaseWorkspaceError {
     fn from(error: runmat_gc::GcError) -> Self {
-        Self::Rooting(error.to_string())
+        Self::Rooting(error)
     }
 }

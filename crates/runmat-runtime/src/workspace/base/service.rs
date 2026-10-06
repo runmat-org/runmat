@@ -107,14 +107,25 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
 }
 
 pub(crate) fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeError {
-    let identifier = match &error {
-        BaseWorkspaceError::Closed => "Workspace:Closed",
-        BaseWorkspaceError::BorrowConflict => "Workspace:Busy",
-        BaseWorkspaceError::FutureRevision { .. } => "Workspace:RevisionMismatch",
-        BaseWorkspaceError::RevisionExhausted => "Workspace:RevisionExhausted",
-        BaseWorkspaceError::TransientValue(_) => "TransientSequenceNotStorable",
-        BaseWorkspaceError::Rooting(_) => "Workspace:Rooting",
-        BaseWorkspaceError::PendingChanges => "Workspace:PendingChanges",
-    };
-    semantic_error(identifier, error.to_string())
+    match error {
+        BaseWorkspaceError::Rooting(source) => {
+            let message = format!("could not retain a base workspace value: {source}");
+            crate::build_runtime_error(message)
+                .with_identifier("RunMat:Workspace:Rooting")
+                .with_source(source)
+                .build()
+        }
+        error => {
+            let identifier = match &error {
+                BaseWorkspaceError::Closed => "RunMat:Workspace:Closed",
+                BaseWorkspaceError::BorrowConflict => "RunMat:Workspace:Busy",
+                BaseWorkspaceError::FutureRevision { .. } => "RunMat:Workspace:RevisionMismatch",
+                BaseWorkspaceError::RevisionExhausted => "RunMat:Workspace:RevisionExhausted",
+                BaseWorkspaceError::TransientValue(_) => "RunMat:TransientSequenceNotStorable",
+                BaseWorkspaceError::PendingChanges => "RunMat:Workspace:PendingChanges",
+                BaseWorkspaceError::Rooting(_) => unreachable!("handled above"),
+            };
+            semantic_error(identifier, error.to_string())
+        }
+    }
 }
