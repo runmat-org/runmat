@@ -64,9 +64,10 @@ fn nested_process_bytecode(depth: usize) -> Bytecode {
             vec![
                 Instr::LoadString("java.lang.String".into()),
                 Instr::CallBuiltinMulti("javaObject".into(), 1, 1),
-                Instr::ReturnValue,
+                Instr::StoreVar(0),
+                Instr::Return,
             ],
-            0,
+            1,
         );
     }
 
@@ -103,9 +104,10 @@ fn nested_process_bytecode(depth: usize) -> Bytecode {
     let mut bytecode = Bytecode::with_instructions(
         vec![
             Instr::CallSemanticFunctionMulti(FunctionId(1), 0, 1),
-            Instr::ReturnValue,
+            Instr::StoreVar(0),
+            Instr::Return,
         ],
-        0,
+        1,
     );
     bytecode.function_registry = registry;
     bytecode
