@@ -714,13 +714,13 @@ async fn try_execute_resolved_callable(
     }
 }
 
+#[path = "descriptor/execution.rs"]
+mod execution;
+
 pub async fn execute_callable_descriptor(
     descriptor: CallableDescriptor,
 ) -> Result<ValueSequence, RuntimeError> {
-    // A dynamic call can suspend or reenter the interpreter. Keep its execution
-    // frame at the call boundary, rather than in every enclosing indexing or
-    // member-access future (including those that never invoke a callable).
-    Box::pin(execute_callable_descriptor_with_runtime(None, descriptor)).await
+    execution::execute(None, descriptor).await
 }
 
 pub async fn execute_callable_descriptor_in_context(
@@ -728,90 +728,8 @@ pub async fn execute_callable_descriptor_in_context(
     descriptor: CallableDescriptor,
 ) -> Result<ValueSequence, RuntimeError> {
     runtime
-        .scope(Box::pin(execute_callable_descriptor_with_runtime(
-            Some(runtime),
-            descriptor,
-        )))
+        .scope(execution::execute(Some(runtime), descriptor))
         .await
-}
-
-async fn execute_callable_descriptor_with_runtime(
-    runtime: Option<&crate::context::RuntimeContext>,
-    descriptor: CallableDescriptor,
-) -> Result<ValueSequence, RuntimeError> {
-    let CallableDescriptor {
-        target,
-        args,
-        requested_outputs,
-        metadata,
-    } = descriptor;
-    match target {
-        CallableTarget::Bound(binding) => {
-            let function = binding.function;
-            crate::callsite::with_function_input_callsite(
-                metadata.function_input_callsite.clone(),
-                async {
-                    match runtime {
-                        Some(runtime) => {
-                            crate::user_functions::try_call_bound_function_in_context(
-                                runtime,
-                                binding,
-                                &args,
-                                requested_outputs,
-                            )
-                            .await
-                        }
-                        None => {
-                            crate::user_functions::try_call_bound_function(
-                                binding,
-                                &args,
-                                requested_outputs,
-                            )
-                            .await
-                        }
-                    }
-                },
-            )
-            .await
-            .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
-        }
-        CallableTarget::Resolved {
-            identity,
-            fallback_policy,
-        } => {
-            execute_resolved_callable(
-                runtime,
-                identity,
-                args,
-                requested_outputs,
-                metadata,
-                fallback_policy,
-            )
-            .await
-        }
-        CallableTarget::FevalForward(func_value) => {
-            let value = match runtime {
-                Some(runtime) => {
-                    crate::call_feval_sequence_async_with_outputs_in_context(
-                        runtime,
-                        func_value,
-                        &args,
-                        requested_outputs,
-                    )
-                    .await?
-                }
-                None => {
-                    crate::call_feval_sequence_async_with_outputs(
-                        func_value,
-                        &args,
-                        requested_outputs,
-                    )
-                    .await?
-                }
-            };
-            Ok(value)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -821,10 +739,7 @@ mod tests;
 pub async fn try_execute_callable_descriptor(
     descriptor: CallableDescriptor,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
-    Box::pin(try_execute_callable_descriptor_with_runtime(
-        None, descriptor,
-    ))
-    .await
+    execution::try_execute(None, descriptor).await
 }
 
 pub async fn try_execute_callable_descriptor_in_context(
@@ -832,89 +747,6 @@ pub async fn try_execute_callable_descriptor_in_context(
     descriptor: CallableDescriptor,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
     runtime
-        .scope(Box::pin(try_execute_callable_descriptor_with_runtime(
-            Some(runtime),
-            descriptor,
-        )))
+        .scope(execution::try_execute(Some(runtime), descriptor))
         .await
-}
-
-async fn try_execute_callable_descriptor_with_runtime(
-    runtime: Option<&crate::context::RuntimeContext>,
-    descriptor: CallableDescriptor,
-) -> Result<Option<ValueSequence>, RuntimeError> {
-    let CallableDescriptor {
-        target,
-        args,
-        requested_outputs,
-        metadata,
-    } = descriptor;
-    match target {
-        CallableTarget::Bound(binding) => {
-            let function = binding.function;
-            crate::callsite::with_function_input_callsite(
-                metadata.function_input_callsite.clone(),
-                async {
-                    match runtime {
-                        Some(runtime) => {
-                            crate::user_functions::try_call_bound_function_in_context(
-                                runtime,
-                                binding,
-                                &args,
-                                requested_outputs,
-                            )
-                            .await
-                        }
-                        None => {
-                            crate::user_functions::try_call_bound_function(
-                                binding,
-                                &args,
-                                requested_outputs,
-                            )
-                            .await
-                        }
-                    }
-                },
-            )
-            .await
-            .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
-            .map(Some)
-        }
-        CallableTarget::Resolved {
-            identity,
-            fallback_policy,
-        } => {
-            try_execute_resolved_callable(
-                runtime,
-                identity,
-                args,
-                requested_outputs,
-                fallback_policy,
-                metadata.function_input_callsite,
-            )
-            .await
-        }
-        CallableTarget::FevalForward(func_value) => {
-            let value = match runtime {
-                Some(runtime) => {
-                    crate::call_feval_sequence_async_with_outputs_in_context(
-                        runtime,
-                        func_value,
-                        &args,
-                        requested_outputs,
-                    )
-                    .await?
-                }
-                None => {
-                    crate::call_feval_sequence_async_with_outputs(
-                        func_value,
-                        &args,
-                        requested_outputs,
-                    )
-                    .await?
-                }
-            };
-            Ok(Some(value))
-        }
-    }
 }
