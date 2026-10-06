@@ -1,7 +1,14 @@
 use runmat_value::Value;
 
+mod base;
 pub mod session;
 pub mod bindings;
+
+pub use base::{
+    BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
+    BaseWorkspaceReconciliation, BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceDelta,
+    WorkspaceRevision, MAX_BASE_WORKSPACE_ENTRIES, MAX_WORKSPACE_DELTA_CHANGES,
+};
 
 #[cfg(test)]
 use once_cell::sync::Lazy;
