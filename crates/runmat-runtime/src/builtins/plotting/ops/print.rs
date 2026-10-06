@@ -77,8 +77,13 @@ pub async fn print_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
-) -> BuiltinResult<bool> {
-    execute_print(runtime, requested_outputs, args).await
+) -> BuiltinResult<Value> {
+    let status = execute_print(runtime, requested_outputs, args).await?;
+    Ok(if requested_outputs == Some(0) {
+        Value::OutputList(Vec::new())
+    } else {
+        Value::Bool(status)
+    })
 }
 
 #[cfg(test)]
