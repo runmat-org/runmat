@@ -1655,6 +1655,9 @@ async fn interpret_function_with_counts_in_context_inner(
         cc.borrow_mut().push((in_count, out_count));
     });
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&runtime));
     let mut state = InterpreterState::new_in_context(
         bytecode.clone(),
         &mut vars,
@@ -1663,20 +1666,18 @@ async fn interpret_function_with_counts_in_context_inner(
         runtime,
     );
     state.missing_input_slots = missing_input_slots;
-    let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
-        name,
-        bytecode
-            .source_id
-            .and_then(|source| source.resolve_in(&state.context.runtime)),
-        bytecode_frame_span(bytecode),
-    );
+    let _debug_frame_guard =
+        runmat_runtime::debug_context::push_frame(name, source_id, bytecode_frame_span(bytecode));
     let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
     CALL_COUNTS.with(|cc| {
         cc.borrow_mut().pop();
     });
     let res = match res {
         Ok(InterpreterOutcome::Completed(completion)) => Ok(completion.values),
-        Err(e) => Err(e),
+        Err(error) => {
+            let error = attach_span_from_pc(bytecode, error);
+            Err(attach_call_frames(name, source_id, error))
+        }
     }?;
     runtime_globals::persist_declared_for_bytecode(bytecode, name, &vars);
     Ok(res)
@@ -1947,6 +1948,47 @@ mod tests {
             );
         })));
         let _ = crate::runtime::workspace::take_workspace_completion(outer_frame);
+    }
+
+    #[test]
+    fn semantic_function_error_keeps_its_selected_source_frame() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let source = runmat_runtime::source_context::lease_source_context_in_context(
+            &runtime,
+            "semantic_source.m",
+            Some("/workspace/private/semantic_source.m"),
+            "error('semantic source failure');",
+        )
+        .expect("semantic source lease");
+        let mut function = Bytecode::with_instructions(
+            vec![
+                Instr::LoadString("semantic source failure".to_string()),
+                Instr::CallBuiltinMulti("error".to_string(), 1, 0),
+                Instr::Return,
+            ],
+            0,
+        );
+        function.source_id = Some(crate::BytecodeSourceRef::Runtime(source.source_ref()));
+
+        let error = block_on(interpret_function_with_counts_in_context(
+            &function,
+            Vec::new(),
+            "semantic_source",
+            0,
+            0,
+            std::collections::HashSet::new(),
+            runtime,
+        ))
+        .expect_err("semantic function should return its language error");
+
+        assert_eq!(error.context.call_frames.len(), 1);
+        assert_eq!(error.context.call_frames[0].function, "semantic_source");
+        assert_eq!(
+            error.context.call_frames[0].source_id,
+            Some(source.source_id().0)
+        );
     }
 
     #[test]

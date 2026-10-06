@@ -3,7 +3,7 @@ use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use runmat_value::Value;
 use tracing::{debug, info, info_span};
 
-use runmat_hir::{LoweringContext, LoweringResult, SourceId};
+use runmat_hir::{LoweringContext, LoweringResult};
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_runtime::{build_runtime_error, gather_if_needed_async, RuntimeError};
@@ -23,7 +23,7 @@ use crate::execution::{
 };
 use crate::fusion::{build_fusion_snapshot, FusionPlanSnapshot};
 use crate::profiling::{gather_profiling, reset_provider_telemetry};
-use crate::source_pool::{line_col_from_offset, SourcePool};
+use crate::source_pool::SourcePool;
 use crate::telemetry::{TelemetryPlatformInfo, TelemetrySink};
 use crate::workspace::{
     determine_display_label_from_context, execution_display_context, format_type_info,

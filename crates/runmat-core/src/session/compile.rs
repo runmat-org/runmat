@@ -1215,30 +1215,7 @@ impl RunMatSession {
         error: &mut RuntimeError,
         runtime: &runmat_runtime::context::RuntimeContext,
     ) {
-        if !error.context.call_stack.is_empty() || error.context.call_frames.is_empty() {
-            return;
-        }
-        let mut rendered = Vec::new();
-        if error.context.call_frames_elided > 0 {
-            rendered.push(format!(
-                "... {} frames elided ...",
-                error.context.call_frames_elided
-            ));
-        }
-        for frame in error.context.call_frames.iter().rev() {
-            let mut line = frame.function.clone();
-            if let (Some(source_id), Some((start, _end))) = (frame.source_id, frame.span) {
-                if let Some(source) = runmat_runtime::source_context::source_info_in_context(
-                    runtime,
-                    SourceId(source_id),
-                ) {
-                    let (line_num, col) = line_col_from_offset(&source.text, start);
-                    line = format!("{} @ {}:{}:{}", frame.function, source.name, line_num, col);
-                }
-            }
-            rendered.push(line);
-        }
-        error.context.call_stack = rendered;
+        runmat_runtime::execution::preserve_source_call_stack_in_context(error, runtime);
     }
 
     fn prepare_session_semantic_function_registry(

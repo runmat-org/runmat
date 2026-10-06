@@ -361,17 +361,24 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionNameMismatch")
                     .build()
                 })?;
-            runmat_runtime::callsite::with_function_input_callsite(
+            let result = runmat_runtime::callsite::with_function_input_callsite(
                 input_callsite,
                 runmat_vm::invoke_semantic_function_value_in_context(
                     function.0,
                     &args,
                     requested_outputs,
                     &bound_registry,
-                    selected_runtime,
+                    selected_runtime.clone(),
                 ),
             )
-            .await
+            .await;
+            result.map_err(|mut error| {
+                runmat_runtime::execution::preserve_source_call_stack_in_context(
+                    &mut error,
+                    &selected_runtime,
+                );
+                error
+            })
         }
         .await,
     )

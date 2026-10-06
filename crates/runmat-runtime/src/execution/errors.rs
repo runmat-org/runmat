@@ -136,6 +136,17 @@ pub fn render_source_call_stack_in_context(
     rendered
 }
 
+/// Preserve the presentation form of authenticated source frames before the
+/// selected invocation releases their source leases.
+pub fn preserve_source_call_stack_in_context(
+    error: &mut RuntimeError,
+    runtime: &crate::context::RuntimeContext,
+) {
+    if error.context.call_stack.is_empty() && !error.context.call_frames.is_empty() {
+        error.context.call_stack = render_source_call_stack_in_context(error, runtime);
+    }
+}
+
 fn encode_runtime_failure_with_sources(
     error: &RuntimeError,
     mut portable_source: impl FnMut(usize) -> Result<runmat_types::ProgramSourceId, String>,
@@ -340,6 +351,14 @@ mod tests {
 
         let mut unrendered = error;
         unrendered.context.call_stack.clear();
+        preserve_source_call_stack_in_context(&mut unrendered, &runtime);
+        assert_eq!(
+            unrendered.context.call_stack,
+            vec![
+                "... 1 frames elided ...".to_string(),
+                "workerFunction @ remote_spmd.m:1:8".to_string(),
+            ]
+        );
         let portable = encode_runtime_failure_in_context(&unrendered, &runtime).unwrap();
         assert_eq!(
             portable.call_frames[0].program_source_id,
