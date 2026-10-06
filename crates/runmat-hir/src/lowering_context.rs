@@ -46,6 +46,9 @@ pub struct LoweringContext<'a> {
     /// Deterministic source ordinal for each top-level statement. Empty uses
     /// the ordinary single-source lowering contract.
     pub top_level_sources: &'a [ProgramSourceId],
+    /// Explicit primary source for a compiler-owned program. Generic
+    /// source-less embedding retains the historical None contract.
+    pub primary_source: Option<ProgramSourceId>,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -62,6 +65,7 @@ impl<'a> LoweringContext<'a> {
             top_level_await_enabled: true,
             external_class_declarations: &[],
             top_level_sources: &[],
+            primary_source: None,
         }
     }
 
@@ -124,6 +128,11 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
+    pub fn with_primary_source(mut self, source: ProgramSourceId) -> Self {
+        self.primary_source = Some(source);
+        self
+    }
+
     pub fn empty() -> Self {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
@@ -138,6 +147,7 @@ impl<'a> LoweringContext<'a> {
             top_level_await_enabled: true,
             external_class_declarations: &[],
             top_level_sources: &[],
+            primary_source: None,
         }
     }
 }

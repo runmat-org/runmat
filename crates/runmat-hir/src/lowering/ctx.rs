@@ -238,18 +238,24 @@ impl LoweringCtx {
                 "top-level source provenance does not match the statement count",
             ));
         }
+        if !context.top_level_sources.is_empty() && context.primary_source.is_none() {
+            return Err(HirError::new(
+                "source-bearing statements require an admitted primary source",
+            ));
+        }
+        let primary_source = context.primary_source.unwrap_or(ProgramSourceId(0));
         let source_for = |ordinal: usize| {
             context
                 .top_level_sources
                 .get(ordinal)
                 .copied()
-                .unwrap_or(ProgramSourceId(0))
+                .unwrap_or(primary_source)
         };
         let mut source_units = BTreeMap::new();
         for (ordinal, stmt) in prog.body.iter().enumerate() {
             let source = source_for(ordinal);
             source_units.entry(source).or_insert_with(|| {
-                if source == ProgramSourceId(0) {
+                if source == primary_source {
                     if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
                         SourceUnitKind::FunctionFile
                     } else {
@@ -264,7 +270,7 @@ impl LoweringCtx {
                 }
             });
         }
-        source_units.entry(ProgramSourceId(0)).or_insert_with(|| {
+        source_units.entry(primary_source).or_insert_with(|| {
             if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
                 SourceUnitKind::FunctionFile
             } else {
@@ -272,7 +278,10 @@ impl LoweringCtx {
             }
         });
         let mut ctx = Self {
-            assembly: HirAssembly::default(),
+            assembly: HirAssembly {
+                primary_source: context.primary_source,
+                ..HirAssembly::default()
+            },
             hir_index: HirIndex::default(),
             module: ModuleId(0),
             next_expr: 0,
@@ -313,7 +322,7 @@ impl LoweringCtx {
                 top_level_functions: Vec::new(),
                 classes: Vec::new(),
                 synthetic_entry_function: None,
-                script_sections: if source.0 == 0 {
+                script_sections: if source == primary_source {
                     prog.sections
                         .iter()
                         .map(|section| crate::HirScriptSection {
@@ -429,7 +438,7 @@ impl LoweringCtx {
             .filter(|stmt| !matches!(stmt, AstStmt::Function { .. } | AstStmt::ClassDef { .. }))
             .collect();
         if !executable.is_empty() {
-            ctx.module = modules_by_source[&ProgramSourceId(0)];
+            ctx.module = modules_by_source[&primary_source];
             let entry_function = ctx.take_function_id();
             ctx.assembly.modules[ctx.module.0].synthetic_entry_function = Some(entry_function);
             ctx.assembly.entrypoints.push(HirEntrypoint {
