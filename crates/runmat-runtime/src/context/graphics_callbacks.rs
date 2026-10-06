@@ -18,6 +18,7 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 #[path = "graphics_callbacks/claim.rs"]
 mod claim;
@@ -28,6 +29,10 @@ pub use host_request::GraphicsCallbackHostTicket;
 use host_request::HostReply;
 #[path = "graphics_callbacks/retirement.rs"]
 mod retirement;
+#[path = "graphics_callbacks/wake.rs"]
+mod wake;
+#[path = "graphics_callbacks/drive.rs"]
+mod drive;
 pub use runmat_value::{GraphicsCallbackDisposition, GraphicsCallbackHostFailure};
 
 /// Host metadata only. The session-side adapter constructs callable arguments
@@ -58,6 +63,7 @@ pub struct GraphicsCallbackIngress {
     live: Arc<CallbackClaim>,
     closed: Arc<AtomicBool>,
     sender: SyncSender<Envelope>,
+    admission_wake: Arc<Notify>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,6 +124,10 @@ impl GraphicsCallbackIngress {
                     failure: GraphicsCallbackIngressFailure::Closed,
                 },
             })?;
+        // The envelope is physically queued even if its exact claim retires
+        // in the following race check. Wake the session owner to discard it
+        // and release bounded ingress capacity.
+        self.admission_wake.notify_one();
         // A concurrent host admission can race session close between the
         // first liveness check and try_send. Closed queues never execute it.
         if !self.is_live() {
@@ -170,6 +180,7 @@ impl GraphicsCallbackIngress {
         if !self.is_live() {
             reply.reject_queued(GraphicsCallbackHostFailure::Retired);
         }
+        self.admission_wake.notify_one();
         Ok(ticket)
     }
 }
@@ -226,12 +237,14 @@ struct Inner {
     receiver: RefCell<Receiver<Envelope>>,
     sender: SyncSender<Envelope>,
     closed: Arc<AtomicBool>,
+    admission_wake: Arc<Notify>,
     registrations: RefCell<HashMap<u64, Registration>>,
     /// The session queue, not a process-global scene or a RuntimeContext
     /// service port, owns the selected callable's registration lifetime.
     property_registrations: RefCell<Vec<PropertyRegistration>>,
     maximum_registrations: NonZeroUsize,
     next_registration: Cell<u64>,
+    driving: Cell<bool>,
     draining: Cell<bool>,
     in_flight: RefCell<Option<InFlight>>,
 }
@@ -305,10 +318,12 @@ impl RuntimeGraphicsCallbackQueue {
             receiver: RefCell::new(receiver),
             sender,
             closed: Arc::new(AtomicBool::new(false)),
+            admission_wake: Arc::new(Notify::new()),
             registrations: RefCell::new(HashMap::new()),
             property_registrations: RefCell::new(Vec::new()),
             maximum_registrations,
             next_registration: Cell::new(1),
+            driving: Cell::new(false),
             draining: Cell::new(false),
             in_flight: RefCell::new(None),
         }))
@@ -443,6 +458,7 @@ impl RuntimeGraphicsCallbackQueue {
                 live: new_live,
                 closed: Arc::clone(&self.0.closed),
                 sender: self.0.sender.clone(),
+                admission_wake: Arc::clone(&self.0.admission_wake),
             });
         }
         drop(properties);
@@ -548,6 +564,7 @@ impl RuntimeGraphicsCallbackQueue {
                 live,
                 closed: Arc::clone(&self.0.closed),
                 sender: self.0.sender.clone(),
+                admission_wake: Arc::clone(&self.0.admission_wake),
             },
         ))
     }

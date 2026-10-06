@@ -10,6 +10,9 @@ impl RuntimeGraphicsCallbackQueue {
         if self.0.closed.swap(true, Ordering::AcqRel) {
             return;
         }
+        // Wake the one session-lane idle pump even when an embedding host
+        // retains its strong queue clone after session retirement.
+        self.0.admission_wake.notify_one();
 
         let in_flight = self.0.in_flight.borrow_mut().take();
         if let Some(state) = &in_flight {
