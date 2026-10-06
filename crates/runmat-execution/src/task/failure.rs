@@ -84,13 +84,10 @@ impl ProgramRuntimeFailure {
         source_map: Option<&crate::ExecutableSourceMapV2>,
     ) -> Result<(), ContractError> {
         self.validate()?;
-        let count = source_map.map_or(0, |map| map.entries.len());
         if self.call_frames.iter().any(|frame| {
-            frame.program_source_id.is_some_and(|source| {
-                usize::try_from(source.0)
-                    .ok()
-                    .is_none_or(|ordinal| ordinal >= count)
-            })
+            frame
+                .program_source_id
+                .is_some_and(|source| source_map.is_none_or(|map| !map.contains_source(source)))
         }) {
             return Err(ContractError::invalid(
                 "portable runtime failure source",
@@ -143,6 +140,23 @@ mod tests {
         let mut oversized = json;
         oversized["call_frames"][0]["source_id"] = serde_json::json!(u64::from(u32::MAX) + 1);
         assert!(serde_json::from_value::<ProgramRuntimeFailure>(oversized).is_err());
+    }
+
+    #[test]
+    fn portable_frame_rejects_an_unadmitted_map_even_when_length_matches() {
+        let map = crate::ExecutableSourceMapV2 {
+            entries: vec![crate::ExecutableSourceRecordV2 {
+                source_id: runmat_types::ProgramSourceId(1),
+                owner_identity: "owner".into(),
+                relative_path: "source.m".into(),
+                content_revision: crate::Digest::sha256(b"source"),
+                display_name: "source.m".into(),
+                text: "source".into(),
+            }],
+        };
+        let mut failure = failure();
+        failure.call_frames[0].program_source_id = Some(runmat_types::ProgramSourceId(0));
+        assert!(failure.validate_for_program_sources(Some(&map)).is_err());
     }
 
     #[test]

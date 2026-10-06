@@ -24,6 +24,15 @@ pub struct ExecutableSourceMapV2 {
 }
 
 impl ExecutableSourceMapV2 {
+    /// Exact constant-time ordinal membership, including for callers holding
+    /// a publicly constructed map that has not yet passed full admission.
+    pub fn contains_source(&self, source: ProgramSourceId) -> bool {
+        usize::try_from(source.0)
+            .ok()
+            .and_then(|ordinal| self.entries.get(ordinal))
+            .is_some_and(|record| record.source_id == source)
+    }
+
     pub fn new(entries: Vec<ExecutableSourceRecordV2>) -> Result<Self, ContractError> {
         let map = Self { entries };
         map.validate()?;
@@ -61,5 +70,34 @@ impl ExecutableSourceMapV2 {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_map_membership_requires_the_exact_dense_ordinal() {
+        let malformed = ExecutableSourceMapV2 {
+            entries: vec![ExecutableSourceRecordV2 {
+                source_id: ProgramSourceId(1),
+                owner_identity: "owner".into(),
+                relative_path: "source.m".into(),
+                content_revision: Digest::sha256(b"source"),
+                display_name: "source.m".into(),
+                text: "source".into(),
+            }],
+        };
+        assert!(!malformed.contains_source(ProgramSourceId(0)));
+        assert!(!malformed.contains_source(ProgramSourceId(1)));
+        assert!(malformed.validate().is_err());
+        let admitted = ExecutableSourceMapV2::new(vec![ExecutableSourceRecordV2 {
+            source_id: ProgramSourceId(0),
+            ..malformed.entries[0].clone()
+        }])
+        .expect("dense map");
+        assert!(admitted.contains_source(ProgramSourceId(0)));
+        assert!(!admitted.contains_source(ProgramSourceId(1)));
     }
 }
