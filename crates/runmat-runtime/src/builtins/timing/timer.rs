@@ -7,6 +7,8 @@
 //! deterministic across native and wasm hosts.
 
 mod property;
+mod arguments;
+use arguments::{apply_name_value_pairs, prepare_timer_property_pairs, PreparedTimerPair};
 use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility};
 
 use runmat_builtins::{
@@ -33,7 +35,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, HandleRef, IntValue, ObjectInstance, StructValue, Value};
 
-use crate::builtins::common::gpu_helpers::gather_value_async;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -382,7 +383,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 pub async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ensure_timer_class_registered();
-    let args = prepare_timer_name_value_args(&args, false).await?;
+    let args = prepare_timer_property_pairs(&args, false).await?;
     let mut object = default_timer_object(next_timer_name());
     apply_name_value_pairs(&mut object, &args, true)?;
     let target = runmat_gc::gc_allocate(Value::Object(object))
@@ -409,7 +410,7 @@ pub async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timerfind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    find_timers(prepare_timer_name_value_args(&args, true).await?, false)
+    find_timers(prepare_timer_property_pairs(&args, true).await?, false)
 }
 
 #[runtime_builtin(
@@ -423,7 +424,7 @@ pub async fn timerfind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    find_timers(prepare_timer_name_value_args(&args, true).await?, true)
+    find_timers(prepare_timer_property_pairs(&args, true).await?, true)
 }
 
 #[runtime_builtin(
@@ -456,7 +457,7 @@ pub async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
 pub async fn timer_startat_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let prepared = match rest.first() {
         Some(delay) => {
-            prepare_timer_name_value_args(
+            prepare_timer_property_pairs(
                 &[Value::String("StartDelay".to_string()), delay.clone()],
                 false,
             )
@@ -465,8 +466,8 @@ pub async fn timer_startat_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
         None => Vec::new(),
     };
     let delay = prepared
-        .get(1)
-        .map(|value| numeric_scalar(value, "startat"))
+        .first()
+        .map(|pair| numeric_scalar(&pair.value, "startat"))
         .transpose()?
         .filter(|seconds| *seconds > 0.0);
     start_timer_values(&value, delay).await?;
@@ -704,42 +705,6 @@ fn next_timer_name() -> String {
     })
 }
 
-fn apply_name_value_pairs(
-    object: &mut ObjectInstance,
-    args: &[Value],
-    constructor: bool,
-) -> BuiltinResult<()> {
-    if !args.len().is_multiple_of(2) {
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_INPUT,
-            "timer: name-value arguments must appear in pairs",
-        ));
-    }
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let property = canonical_property_name(&value_to_string(&args[idx])?)?;
-        if property.is_readonly() {
-            return Err(timer_error(
-                &TIMER_ERROR_INVALID_PROPERTY,
-                format!("timer: property '{}' is read-only", property.name()),
-            ));
-        }
-        let value = normalize_property_value(property, args[idx + 1].clone())?;
-        if !constructor && running_is_on(object) && property.frozen_while_running() {
-            return Err(timer_error(
-                &TIMER_ERROR_INVALID_PROPERTY,
-                format!(
-                    "timer: property '{}' cannot be changed while Running is on",
-                    property.name()
-                ),
-            ));
-        }
-        object.properties.insert(property.name().to_string(), value);
-        idx += 2;
-    }
-    Ok(())
-}
-
 async fn set_timer_property_object(
     obj: Value,
     property_name: &'static str,
@@ -761,46 +726,10 @@ async fn set_timer_property_object(
         ));
     }
     let args =
-        prepare_timer_name_value_args(&[Value::String(property_name.to_string()), value], false)
+        prepare_timer_property_pairs(&[Value::String(property_name.to_string()), value], false)
             .await?;
     apply_name_value_pairs(&mut object, &args, false)?;
     Ok(Value::Object(object))
-}
-
-async fn prepare_timer_name_value_args(args: &[Value], finding: bool) -> BuiltinResult<Vec<Value>> {
-    if !args.len().is_multiple_of(2) {
-        let name = if finding { "timerfind" } else { "timer" };
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_INPUT,
-            format!("{name}: property filters must appear in name-value pairs"),
-        ));
-    }
-    let mut prepared = Vec::with_capacity(args.len());
-    for pair in args.chunks_exact(2) {
-        let property = canonical_property_name(&value_to_string(&pair[0])?)?;
-        prepared.push(pair[0].clone());
-        if property.is_numeric() {
-            if crate::builtins::common::validation::value_contains_explicit_gpu(&pair[1]) {
-                let extension = if finding {
-                    &TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION
-                } else {
-                    &TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION
-                };
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    extension,
-                    if finding { "timerfind" } else { "timer" },
-                )?;
-            }
-            prepared.push(
-                gather_value_async(&pair[1])
-                    .await
-                    .map_err(|error| timer_error(&TIMER_ERROR_INVALID_INPUT, error.message()))?,
-            );
-        } else {
-            prepared.push(pair[1].clone());
-        }
-    }
-    Ok(prepared)
 }
 
 fn canonical_property_name(name: &str) -> BuiltinResult<TimerProperty> {
@@ -1234,9 +1163,12 @@ fn sleep_seconds(seconds: f64) {
     }
 }
 
-fn find_timers(args: Vec<Value>, include_invisible: bool) -> BuiltinResult<Value> {
+fn find_timers(args: Vec<PreparedTimerPair>, include_invisible: bool) -> BuiltinResult<Value> {
     ensure_timer_class_registered();
-    let filters = parse_filters(&args)?;
+    let filters: Vec<_> = args
+        .into_iter()
+        .map(|pair| (pair.property, normalize_find_value(pair.value)))
+        .collect();
     let mut matches = Vec::new();
     TIMER_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
@@ -1255,23 +1187,6 @@ fn find_timers(args: Vec<Value>, include_invisible: bool) -> BuiltinResult<Value
         }
     });
     handles_to_result(matches)
-}
-
-fn parse_filters(args: &[Value]) -> BuiltinResult<Vec<(TimerProperty, Value)>> {
-    if !args.len().is_multiple_of(2) {
-        return Err(timer_error(
-            &TIMER_ERROR_INVALID_INPUT,
-            "timerfind: name-value arguments must appear in pairs",
-        ));
-    }
-    let mut out = Vec::new();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        let name = canonical_property_name(&value_to_string(&args[idx])?)?;
-        out.push((name, normalize_find_value(args[idx + 1].clone())));
-        idx += 2;
-    }
-    Ok(out)
 }
 
 fn normalize_find_value(value: Value) -> Value {
