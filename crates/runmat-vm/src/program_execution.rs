@@ -630,7 +630,9 @@ async fn execute_parallel_region_request(
             })
     });
     match result {
-        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
+        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
+            &value, &runtime,
+        ) {
             Ok(value) => ProgramExecutionResponse::Success {
                 outputs: vec![value],
             },
@@ -838,7 +840,11 @@ async fn execute_function_request(
     match result {
         Ok(sequence) => match sequence
             .iter()
-            .map(runmat_runtime::execution::value_codec::encode_inline_value)
+            .map(|value| {
+                runmat_runtime::execution::value_codec::encode_inline_value_in_context(
+                    value, runtime,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(outputs) => ProgramExecutionResponse::Success { outputs },
@@ -874,7 +880,9 @@ async fn execute_unit_script(
             let value = result_slot
                 .and_then(|slot| values.get(slot).cloned())
                 .unwrap_or(runmat_value::Value::Num(0.0));
-            match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
+            match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
+                &value, &runtime,
+            ) {
                 Ok(value) => ProgramExecutionResponse::Success {
                     outputs: vec![value],
                 },

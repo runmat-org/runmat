@@ -27,7 +27,7 @@ pub(crate) async fn encode_spmd_output(
             .map(Box::new)
             .map(runmat_execution::SpmdOutputValue::Distributed);
     }
-    runmat_runtime::execution::value_codec::encode_inline_value(value)
+    runmat_runtime::execution::value_codec::encode_inline_value_in_context(value, runtime)
         .map(runmat_execution::SpmdOutputValue::Value)
         .map_err(super::value_codec_error)
 }

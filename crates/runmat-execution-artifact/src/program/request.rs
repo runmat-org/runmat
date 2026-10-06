@@ -12,7 +12,9 @@ use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V6: u16 = 6;
-pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION: u16 = PROGRAM_EXECUTION_REQUEST_SCHEMA_V6;
+/// V7 makes failure-frame source IDs program ordinals, never worker-local IDs.
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V7: u16 = 7;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION: u16 = PROGRAM_EXECUTION_REQUEST_SCHEMA_V7;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
 
@@ -27,7 +29,7 @@ pub fn admit_program_execution_request_bytes(bytes: &[u8]) -> ArtifactResult<()>
     })?;
     if header.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
         return Err(ArtifactError::Invalid(format!(
-            "unsupported program execution request schema {}; expected {}; rebuild the request with the current value-payload codec",
+            "unsupported program execution request schema {}; expected {}; rebuild the request with the current execution contract",
             header.schema_version, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
         )));
     }
@@ -521,7 +523,14 @@ mod tests {
         let error = admit_program_execution_request_bytes(frozen).unwrap_err();
         assert!(error
             .to_string()
-            .contains("unsupported program execution request schema 5; expected 6"));
+            .contains("unsupported program execution request schema 5; expected 7"));
+        let old_failure_frame_contract = br#"{"schema_version":6,"arguments":[]}"#;
+        assert!(
+            admit_program_execution_request_bytes(old_failure_frame_contract)
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported program execution request schema 6; expected 7")
+        );
         assert!(serde_json::from_slice::<ProgramExecutionRequest>(frozen).is_err());
     }
 

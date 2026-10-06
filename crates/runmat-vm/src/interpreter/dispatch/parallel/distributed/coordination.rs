@@ -15,8 +15,11 @@ pub(super) async fn agree(
         .map_err(super::super::capability_error)?
         .clone();
     let context = collective.context().clone();
-    let payload = runmat_runtime::execution::value_codec::encode_inline_value(&value)
-        .map_err(super::super::value_codec_error)?;
+    let payload = runmat_runtime::execution::value_codec::encode_inline_value_in_context(
+        &value,
+        &execution.runtime,
+    )
+    .map_err(super::super::value_codec_error)?;
     let digest = payload.logical_digest().map_err(|error| {
         crate::interpreter::errors::mex("CodistributedValueDigest", &error.to_string())
     })?;
@@ -58,7 +61,12 @@ pub(super) async fn broadcast_from(
         .clone();
     let context = collective.context().clone();
     let payload = (context.rank == root)
-        .then(|| runmat_runtime::execution::value_codec::encode_inline_value(&value))
+        .then(|| {
+            runmat_runtime::execution::value_codec::encode_inline_value_in_context(
+                &value,
+                &execution.runtime,
+            )
+        })
         .transpose()
         .map_err(super::super::value_codec_error)?;
     let sequence = collective.next_sequence(id)?;

@@ -12,6 +12,7 @@ pub(super) fn struct_array(
     value: &StructArray,
     path: &str,
     purpose: CodecPurpose,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<DurableStructArray, ValueCodecError> {
     let fields = value
         .field_names()
@@ -28,6 +29,7 @@ pub(super) fn struct_array(
                             item,
                             &format!("{}[{index}]", field_path(path, name)),
                             purpose,
+                            runtime,
                         )
                     })
                     .collect::<Result<_, _>>()?,
@@ -44,13 +46,16 @@ pub(super) fn object_array(
     value: &ObjectArray,
     path: &str,
     purpose: CodecPurpose,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<DurableObjectArray, ValueCodecError> {
     let elements = value
         .data()
         .iter()
         .enumerate()
         .map(|(index, item)| match item {
-            Value::Object(object) => plain_object(object, &index_path(path, index), purpose),
+            Value::Object(object) => {
+                plain_object(object, &index_path(path, index), purpose, runtime)
+            }
             _ => Err(ValueCodecError::unsupported(
                 &index_path(path, index),
                 "handle objects are not durable",
@@ -68,6 +73,7 @@ pub(super) fn plain_object(
     value: &ObjectInstance,
     path: &str,
     purpose: CodecPurpose,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<DurablePlainObject, ValueCodecError> {
     if value.persistence_payload_kind() != ObjectPersistencePayloadKind::PlainValue {
         return Err(ValueCodecError::unsupported(
@@ -81,7 +87,7 @@ pub(super) fn plain_object(
         .map(|(name, item)| {
             Ok(StructField {
                 name: name.clone(),
-                value: encode(item, &field_path(path, name), purpose)?,
+                value: encode(item, &field_path(path, name), purpose, runtime)?,
             })
         })
         .collect::<Result<Vec<_>, ValueCodecError>>()?;

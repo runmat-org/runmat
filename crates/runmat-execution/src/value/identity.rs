@@ -312,8 +312,8 @@ fn encode_exception_runtime(
             .array(3)
             .and_then(|encoder| encoder.str(&frame.function))
             .map_err(encoding)?;
-        match frame.source_id {
-            Some(source_id) => encoder.u64(source_id).map(|_| ()).map_err(encoding)?,
+        match frame.program_source_id {
+            Some(source_id) => encoder.u32(source_id.0).map(|_| ()).map_err(encoding)?,
             None => encoder.null().map(|_| ()).map_err(encoding)?,
         }
         encode_optional_span(encoder, frame.span)?;

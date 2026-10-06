@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ContractError;
+use runmat_types::ProgramSourceId;
 
 pub const MAX_PROGRAM_FAILURE_FRAMES: usize = 4096;
 const MAX_PROGRAM_FAILURE_MESSAGE_BYTES: usize = 1024 * 1024;
@@ -32,7 +33,8 @@ pub struct ProgramCallFrame {
     /// ProgramSourceId ordinal in the admitted artifact source map, never a
     /// worker/session SourceId. A receiver without that map must not use this
     /// number as a local runtime source identity.
-    pub source_id: Option<u64>,
+    #[serde(rename = "source_id")]
+    pub program_source_id: Option<ProgramSourceId>,
     pub span: Option<ProgramSourceSpan>,
 }
 
@@ -94,7 +96,7 @@ mod tests {
             task_id: None,
             call_frames: vec![ProgramCallFrame {
                 function: "work".into(),
-                source_id: Some(1),
+                program_source_id: Some(runmat_types::ProgramSourceId(1)),
                 span: None,
             }],
             call_frames_elided: 0,
@@ -108,6 +110,18 @@ mod tests {
         let mut failure = failure();
         failure.call_stack[0].push('\0');
         assert!(failure.validate().is_err());
+    }
+
+    #[test]
+    fn portable_frame_source_is_a_checked_program_ordinal() {
+        let failure = failure();
+        let json = serde_json::to_value(&failure).unwrap();
+        assert_eq!(json["call_frames"][0]["source_id"], 1);
+        let decoded: ProgramRuntimeFailure = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(decoded, failure);
+        let mut oversized = json;
+        oversized["call_frames"][0]["source_id"] = serde_json::json!(u64::from(u32::MAX) + 1);
+        assert!(serde_json::from_value::<ProgramRuntimeFailure>(oversized).is_err());
     }
 
     #[test]

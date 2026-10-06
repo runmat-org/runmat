@@ -6,7 +6,7 @@ mod path;
 
 pub use decode::decode_inline_value;
 pub use durable::{decode_durable_value, encode_durable_value, validate_durable_preparation};
-pub use encode::encode_inline_value;
+pub use encode::{encode_inline_value, encode_inline_value_in_context};
 pub use error::ValueCodecError;
 
 #[cfg(test)]
@@ -648,7 +648,7 @@ mod tests {
             .with_identifier("RunMat:portable:Failure")
             .with_call_frames(vec![crate::CallFrame {
                 function: "origin".into(),
-                source_id: Some(11),
+                source_id: None,
                 span: Some((2, 5)),
             }])
             .with_phase("execution")
@@ -661,7 +661,7 @@ mod tests {
             panic!("expected exception");
         };
         let original = decoded.original().expect("typed runtime provenance");
-        assert_eq!(original.context.call_frames[0].source_id, Some(11));
+        assert_eq!(original.context.call_frames[0].source_id, None);
         assert_eq!(original.context.phase.as_deref(), Some("execution"));
         assert_eq!(original.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert_eq!(decoded.stack, ["origin"]);
@@ -676,7 +676,7 @@ mod tests {
             panic!("expected repeated exception");
         };
         let repeated_original = repeated.original().expect("typed repeated provenance");
-        assert_eq!(repeated_original.context.call_frames[0].source_id, Some(11));
+        assert_eq!(repeated_original.context.call_frames[0].source_id, None);
         assert_eq!(
             repeated_original.context.phase.as_deref(),
             Some("execution")
@@ -686,6 +686,88 @@ mod tests {
             crate::GpuGatherRetry::Never
         );
         assert!(retained.original().is_some());
+    }
+
+    #[test]
+    fn nested_caught_exception_projects_selected_source_without_importing_worker_id() {
+        let base = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _unrelated = crate::source_context::lease_source_context_in_context(
+            &base,
+            "unrelated.m",
+            None,
+            "unrelated = 1;",
+        )
+        .unwrap();
+        let text = "error('caught')";
+        let map = runmat_execution::ExecutableSourceMapV2::new(vec![
+            runmat_execution::ExecutableSourceRecordV2 {
+                source_id: runmat_types::ProgramSourceId(0),
+                owner_identity: "fixture".into(),
+                relative_path: "remote_spmd.m".into(),
+                display_name: "remote_spmd.m".into(),
+                text: text.into(),
+                content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+            },
+        ])
+        .unwrap();
+        let runtime = crate::source_context::bind_portable_source_map_v2(base, &map).unwrap();
+        let worker_id = runtime
+            .program_source_id(runmat_types::ProgramSourceId(0))
+            .unwrap();
+        let original = crate::build_runtime_error("caught")
+            .with_identifier("RunMat:test:Caught")
+            .with_call_frames(vec![crate::CallFrame {
+                function: "remote_spmd".into(),
+                source_id: Some(worker_id.0),
+                span: Some((0, 5)),
+            }])
+            .build();
+        let nested = Value::Cell(
+            CellArray::new(
+                vec![Value::MException(
+                    crate::runtime_error::exception_from_error(original),
+                )],
+                1,
+                1,
+            )
+            .unwrap(),
+        );
+        assert!(encode_inline_value(&nested).is_err());
+        let payload = super::encode_inline_value_in_context(&nested, &runtime).unwrap();
+        let ValuePayload::Inline(root) = &payload else {
+            panic!("inline cell");
+        };
+        let InlineValue::Cell { values, .. } = root.as_ref() else {
+            panic!("cell");
+        };
+        let ValuePayload::Inline(member) = &values[0] else {
+            panic!("inline exception");
+        };
+        let InlineValue::Exception(exception) = member.as_ref() else {
+            panic!("exception");
+        };
+        assert_eq!(
+            exception.runtime.as_ref().unwrap().call_frames[0].program_source_id,
+            Some(runmat_types::ProgramSourceId(0))
+        );
+        assert_ne!(u64::try_from(worker_id.0).unwrap(), 0);
+        let Value::Cell(decoded) = decode_inline_value(&payload).unwrap() else {
+            panic!("cell");
+        };
+        let Value::MException(decoded) = &decoded.data[0] else {
+            panic!("exception");
+        };
+        assert_eq!(
+            decoded.original().unwrap().context.call_frames[0].source_id,
+            None
+        );
+        assert_eq!(
+            decoded.original().unwrap().context.call_stack,
+            ["remote_spmd @ remote_spmd.m:1:1"]
+        );
+        assert_eq!(decoded.stack, ["remote_spmd"]);
     }
 
     #[test]

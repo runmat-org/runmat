@@ -24,11 +24,18 @@ impl CodecPurpose {
 }
 
 pub fn encode_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
-    encode(value, "$", CodecPurpose::ExecutionV2)
+    encode(value, "$", CodecPurpose::ExecutionV2, None)
+}
+
+pub fn encode_inline_value_in_context(
+    value: &Value,
+    runtime: &crate::context::RuntimeContext,
+) -> Result<ValuePayload, ValueCodecError> {
+    encode(value, "$", CodecPurpose::ExecutionV2, Some(runtime))
 }
 
 pub(super) fn encode_durable_inline_value(value: &Value) -> Result<ValuePayload, ValueCodecError> {
-    encode(value, "$", CodecPurpose::DurablePreference)
+    encode(value, "$", CodecPurpose::DurablePreference, None)
 }
 
 /// Apply the same durable grammar before resident leaves are downloaded. The
@@ -36,13 +43,14 @@ pub(super) fn encode_durable_inline_value(value: &Value) -> Result<ValuePayload,
 pub(super) fn encode_durable_preparation_value(
     value: &Value,
 ) -> Result<ValuePayload, ValueCodecError> {
-    encode(value, "$", CodecPurpose::DurablePreferencePreparing)
+    encode(value, "$", CodecPurpose::DurablePreferencePreparing, None)
 }
 
 fn encode(
     value: &Value,
     path: &str,
     purpose: CodecPurpose,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<ValuePayload, ValueCodecError> {
     let inline = match value {
         Value::Int(value) => encode_integer_scalar(value),
@@ -88,7 +96,7 @@ fn encode(
                 .data
                 .iter()
                 .enumerate()
-                .map(|(index, value)| encode(value, &index_path(path, index), purpose))
+                .map(|(index, value)| encode(value, &index_path(path, index), purpose, runtime))
                 .collect::<Result<_, _>>()?,
         },
         Value::Struct(value) => {
@@ -98,7 +106,7 @@ fn encode(
                 .map(|(name, value)| {
                     Ok(StructField {
                         name: name.clone(),
-                        value: encode(value, &field_path(path, name), purpose)?,
+                        value: encode(value, &field_path(path, name), purpose, runtime)?,
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
@@ -110,7 +118,7 @@ fn encode(
             }
         }
         Value::StructArray(value) if purpose.durable() => {
-            InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose)?)
+            InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose, runtime)?)
         }
         Value::StructArray(_) => {
             return Err(ValueCodecError::unsupported(
@@ -128,10 +136,10 @@ fn encode(
             ))
         }
         Value::Object(value) if purpose.durable() => {
-            InlineValue::DurablePlainObject(aggregate::plain_object(value, path, purpose)?)
+            InlineValue::DurablePlainObject(aggregate::plain_object(value, path, purpose, runtime)?)
         }
         Value::ObjectArray(value) if purpose.durable() => {
-            InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose)?)
+            InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose, runtime)?)
         }
         Value::Object(value)
             if crate::parallel::codistributor::is_supported_class(&value.class_name) =>
@@ -144,7 +152,7 @@ fn encode(
                 .map(|(name, value)| {
                     Ok(RegisteredField {
                         name: name.clone(),
-                        value: encode(value, &field_path(path, name), purpose)?,
+                        value: encode(value, &field_path(path, name), purpose, runtime)?,
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
@@ -223,7 +231,9 @@ fn encode(
                 .captures
                 .iter()
                 .enumerate()
-                .map(|(index, value)| encode(value, &format!("{path}.capture[{index}]"), purpose))
+                .map(|(index, value)| {
+                    encode(value, &format!("{path}.capture[{index}]"), purpose, runtime)
+                })
                 .collect::<Result<_, _>>()?;
             let owner = match &closure.binding {
                 Some(binding) => CallableOwner::Bound(
@@ -259,7 +269,7 @@ fn encode(
                         "caught exception has a live opaque cause and cannot be transferred or stored",
                     ));
                 }
-                Some(exception_runtime_metadata(original, path)?)
+                Some(exception_runtime_metadata(original, path, runtime)?)
             } else {
                 None
             };
@@ -506,6 +516,7 @@ fn callable(
 fn exception_runtime_metadata(
     error: &crate::RuntimeError,
     path: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<ExceptionRuntimeMetadata, ValueCodecError> {
     fn portable(value: usize, path: &str) -> Result<u64, ValueCodecError> {
         u64::try_from(value).map_err(|_| {
@@ -527,7 +538,33 @@ fn exception_runtime_metadata(
         .map(|frame| {
             Ok(ExceptionCallFrame {
                 function: frame.function.clone(),
-                source_id: frame.source_id.map(|id| portable(id, path)).transpose()?,
+                program_source_id: frame
+                    .source_id
+                    .map(|id| {
+                        let runtime = runtime.ok_or_else(|| {
+                            ValueCodecError::unsupported(
+                        path,
+                        "caught exception source requires a selected portable program binding",
+                    )
+                        })?;
+                        let issued = crate::source_context::issued_source_ref_in_context(
+                            runtime,
+                            runmat_types::SourceId(id),
+                        )
+                        .ok_or_else(|| {
+                            ValueCodecError::unsupported(
+                                path,
+                                "caught exception source is missing or foreign",
+                            )
+                        })?;
+                        runtime.portable_ordinal_for_source(issued).ok_or_else(|| {
+                            ValueCodecError::unsupported(
+                                path,
+                                "caught exception source is absent from the portable program",
+                            )
+                        })
+                    })
+                    .transpose()?,
                 span: span(frame.span, path)?,
             })
         })
@@ -544,7 +581,13 @@ fn exception_runtime_metadata(
         task_id: error.context.task_id.clone(),
         call_frames,
         call_frames_elided: portable(error.context.call_frames_elided, path)?,
-        call_stack: error.context.call_stack.clone(),
+        call_stack: if error.context.call_stack.is_empty() {
+            runtime.map_or_else(Vec::new, |runtime| {
+                crate::execution::render_source_call_stack_in_context(error, runtime)
+            })
+        } else {
+            error.context.call_stack.clone()
+        },
         phase: error.context.phase.clone(),
         gpu_gather_retry: match error.gpu_gather_retry {
             crate::GpuGatherRetry::Legacy => ExceptionGpuGatherRetry::Legacy,
