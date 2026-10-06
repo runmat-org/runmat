@@ -1113,8 +1113,15 @@ end
         failure
             .call_frames
             .iter()
-            .any(|frame| frame.program_source_id.is_some()),
-        "the structured remote error must retain a worker-bound source frame"
+            .any(|frame| { frame.program_source_id == Some(runmat_types::ProgramSourceId(0)) }),
+        "the structured remote error must retain the admitted program source ordinal: {failure:?}"
+    );
+    assert!(
+        failure
+            .call_stack
+            .iter()
+            .any(|frame| frame.contains("remote_spmd.m:")),
+        "the worker must render its exact source before retiring the lease: {failure:?}"
     );
 }
 

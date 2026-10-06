@@ -1,13 +1,5 @@
 use super::*;
 
-struct RestoredCwd(PathBuf);
-
-impl Drop for RestoredCwd {
-    fn drop(&mut self) {
-        std::env::set_current_dir(&self.0).expect("restore original current directory");
-    }
-}
-
 fn execute_helper(session: &mut RunMatSession) -> crate::abi::RuntimeDiagnostic {
     let request = crate::abi::ExecutionRequest::for_source(
         crate::abi::SourceInput::Text {
@@ -43,10 +35,27 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
         "function y = secret()\n error('private source witness');\nend\n",
     )
     .expect("private companion source");
-    let _cwd = RestoredCwd(std::env::current_dir().expect("capture current directory"));
-    std::env::set_current_dir(temporary.path()).expect("select source root");
-
     let mut session = RunMatSession::with_options(false, false).expect("interpreter session");
+    let root = temporary.path().to_string_lossy().replace('\'', "''");
+    let request = crate::abi::ExecutionRequest::for_source(
+        crate::abi::SourceInput::Text {
+            name: "<dynamic-source-path-setup>".into(),
+            text: format!("addpath('{root}');"),
+        },
+        session.compat_mode(),
+        crate::abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    let setup = futures::executor::block_on(session.execute_request(request))
+        .result
+        .expect("public path setup");
+    assert!(
+        setup
+            .diagnostics
+            .iter()
+            .all(|item| item.severity != crate::abi::DiagnosticSeverity::Error),
+        "{setup:?}"
+    );
     let first = execute_helper(&mut session);
     assert!(
         first.message.contains("private source witness"),
