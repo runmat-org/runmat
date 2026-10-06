@@ -4,6 +4,8 @@ use super::{contract, documentation, inference};
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TIMER];
+
 timer_entry!(
     TIMER,
     "timer",

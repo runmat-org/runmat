@@ -1,4 +1,9 @@
+use super::constructors::TIMER;
+use super::discovery::{TIMERFIND, TIMERFINDALL};
+use super::methods::{START, STARTAT};
+use super::setters::*;
 use super::*;
+use crate::REQUIRED_DEFAULT_BINDING;
 use runmat_types::{
     BuiltinId, CallRequest, CallableFact, CallableIdentity, CapabilityRequirement, CapabilitySet,
     CellFact, DynamicReason, EffectKind, LiteralContext, LiteralValue, OutputSelection,
@@ -15,10 +20,12 @@ fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallReques
 
 #[test]
 fn all_runtime_timer_bindings_have_one_catalog_identity() {
-    assert_eq!(ENTRIES.len(), 21);
-    for (index, entry) in ENTRIES.iter().enumerate() {
+    let mut entries = Vec::new();
+    extend_entries(&mut entries);
+    assert_eq!(entries.len(), 21);
+    for (index, entry) in entries.iter().enumerate() {
         assert_eq!(entry.bindings.len(), REQUIRED_DEFAULT_BINDING.len());
-        assert!(ENTRIES[..index]
+        assert!(entries[..index]
             .iter()
             .all(|previous| previous.identity.name != entry.identity.name));
     }

@@ -4,6 +4,22 @@ use super::{contract, documentation, inference};
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &SET_TIMER_FCN,
+    &SET_START_FCN,
+    &SET_STOP_FCN,
+    &SET_ERROR_FCN,
+    &SET_PERIOD,
+    &SET_START_DELAY,
+    &SET_TASKS_TO_EXECUTE,
+    &SET_BUSY_MODE,
+    &SET_EXECUTION_MODE,
+    &SET_NAME,
+    &SET_TAG,
+    &SET_OBJECT_VISIBILITY,
+    &SET_USER_DATA,
+];
+
 macro_rules! timer_setter_entry {
     ($id:ident, $name:literal, $infer:expr) => {
         timer_entry!(

@@ -4,6 +4,8 @@ use super::{contract, documentation, inference};
 use crate::*;
 use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&START, &STARTAT, &STOP, &WAIT, &DELETE];
+
 timer_entry!(
     START,
     "__runmat_timer_start",

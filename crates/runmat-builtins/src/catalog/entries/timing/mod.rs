@@ -38,5 +38,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(pause::ENTRIES.iter().copied());
     values.extend(stopwatch::ENTRIES.iter().copied());
     values.extend(timeit::ENTRIES.iter().copied());
-    values.extend(timer::ENTRIES.iter().copied());
+    timer::extend_entries(values);
 }
