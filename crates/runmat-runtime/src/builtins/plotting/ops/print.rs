@@ -68,12 +68,6 @@ mod pending_tests;
 
 #[runtime_builtin(
     name = "print",
-    category = "plotting",
-    summary = "Export a figure to an image file.",
-    keywords = "print,plotting,figure export,png,save figure",
-    sink = true,
-    suppress_auto_output = true,
-    accel = "metadata",
     binding_variant = "default",
     context = true,
     builtin_path = "crate::builtins::plotting::print"

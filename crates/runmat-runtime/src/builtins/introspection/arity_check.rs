@@ -1,11 +1,9 @@
 use runmat_builtins::{
-    BuiltinErrorDescriptor, NARGINCHK_DESCRIPTOR, NARGINCHK_ERROR_ARGUMENT_INVALID,
-    NARGINCHK_ERROR_BOUNDS_INVALID, NARGINCHK_ERROR_CONTEXT_UNAVAILABLE,
-    NARGINCHK_ERROR_NOT_ENOUGH_INPUTS, NARGINCHK_ERROR_TOO_MANY_INPUTS,
-    NARGINCHK_INTEGER_CAPABILITIES, NARGOUTCHK_DESCRIPTOR, NARGOUTCHK_ERROR_ARGUMENT_INVALID,
+    BuiltinErrorDescriptor, NARGINCHK_ERROR_ARGUMENT_INVALID, NARGINCHK_ERROR_BOUNDS_INVALID,
+    NARGINCHK_ERROR_CONTEXT_UNAVAILABLE, NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
+    NARGINCHK_ERROR_TOO_MANY_INPUTS, NARGOUTCHK_ERROR_ARGUMENT_INVALID,
     NARGOUTCHK_ERROR_BOUNDS_INVALID, NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE,
     NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS, NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
-    NARGOUTCHK_INTEGER_CAPABILITIES,
 };
 use runmat_types::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_value::Value;
@@ -284,12 +282,6 @@ pub fn dispatch_nargoutchk_in_context(
     name = "narginchk",
     binding_variant = "default",
     context = true,
-    category = "introspection",
-    summary = "Validate current function input arity.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::NARGINCHK_DESCRIPTOR),
-    integer_capabilities(self::NARGINCHK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
 pub fn narginchk_builtin_registered(
@@ -303,12 +295,6 @@ pub fn narginchk_builtin_registered(
     name = "nargoutchk",
     binding_variant = "default",
     context = true,
-    category = "introspection",
-    summary = "Validate current function output arity.",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(self::NARGOUTCHK_DESCRIPTOR),
-    integer_capabilities(self::NARGOUTCHK_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
 pub fn nargoutchk_builtin_registered(
