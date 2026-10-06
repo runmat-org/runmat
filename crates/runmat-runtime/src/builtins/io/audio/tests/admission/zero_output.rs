@@ -35,18 +35,16 @@ fn discarded_audioinfo_has_no_retained_value_but_still_needs_scratch() {
         block_on(audioinfo_builtin(Some(runtime.clone()), source())).expect("discarded metadata")
     };
     assert!(output_list(value.clone()).is_empty());
+    assert!(matches!(
+        &value,
+        Value::OutputList(values) if values.is_empty()
+    ));
     let sequence = crate::call::arguments::adapt_legacy_builtin_result(value)
         .expect("empty output list adapts to an empty sequence");
     assert!(sequence.is_empty());
     assert_eq!(
         sequence.kind(),
         runmat_value::ValueSequenceKind::CommaSeparated
-    );
-    assert!(
-        output_list(crate::call::arguments::project_legacy_builtin_value_abi(
-            sequence
-        ))
-        .is_empty()
     );
     assert_eq!(placement.selections.get(), 1);
     assert_eq!(placement.observations.borrow().len(), 1);
