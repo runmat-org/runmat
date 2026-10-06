@@ -261,12 +261,9 @@ async fn execute_task(
     )?;
     let task_id = submission.request.id;
     let mut responses = pool
-        .execute_batch(
-            vec![(program.request.clone(), submission)],
-            resources.max_wall_millis,
-        )
+        .execute_batch(vec![(program.request.clone(), submission)])
         .await?;
-    let (response, attempt) = responses.pop().ok_or_else(|| {
+    let completion = responses.pop().ok_or_else(|| {
         NativeExecutionError::Protocol("transient task returned no response".into())
     })?;
     if !responses.is_empty() {
@@ -274,11 +271,20 @@ async fn execute_task(
             "transient task returned more than one response".into(),
         ));
     }
+    if completion.evidence.task.id() != task_id {
+        return Err(protocol(
+            "transient completion belongs to another submitted task",
+        ));
+    }
+    if runmat_runtime::interrupt::is_cancelled() {
+        return Err(NativeExecutionError::Cancelled);
+    }
     let executed = ExecutedAnalysisTask {
         identity,
         task_id,
-        response,
-        attempt,
+        response: completion.response,
+        attempt: completion.attempt,
+        evidence: completion.evidence,
     };
     let planned_attempt = resource_plan
         .map(|plan| planned_resource_attempt(plan, &executed))

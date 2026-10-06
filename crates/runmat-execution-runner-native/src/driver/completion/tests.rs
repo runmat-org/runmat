@@ -105,14 +105,14 @@ fn completion_publishes_result_and_history_once() {
     completion.complete(
         CompletedTask {
             result: Err("original".into()),
-            attempts: Vec::new(),
+            evidence: None,
         },
         NativeCheckpointEvidence::Durable,
     );
     completion.complete(
         CompletedTask {
             result: Err("late".into()),
-            attempts: Vec::new(),
+            evidence: None,
         },
         NativeCheckpointEvidence::Durable,
     );
@@ -141,8 +141,8 @@ fn late_worker_success_cannot_override_scheduler_cancellation() {
         .unwrap();
     let completed = from_snapshot(&driver.snapshot(), &request, Ok(success)).unwrap();
     assert_eq!(completed.result, Err("execution was cancelled".into()));
-    assert_eq!(completed.attempts.len(), 1);
-    assert!(completed.attempts[0]
+    assert_eq!(completed.evidence.as_ref().unwrap().attempts.len(), 1);
+    assert!(completed.evidence.as_ref().unwrap().attempts[0]
         .terminal
         .as_ref()
         .unwrap()
@@ -168,7 +168,7 @@ fn committed_original_result_wins_over_a_different_raw_response() {
     let completed =
         from_snapshot(&driver.snapshot(), &request, Err("stale raw error".into())).unwrap();
     assert_eq!(completed.result, Ok(success));
-    assert_eq!(completed.attempts.len(), 1);
+    assert_eq!(completed.evidence.as_ref().unwrap().attempts.len(), 1);
     let mut invalid = driver.snapshot();
     invalid.attempts.get_mut(&request.id).unwrap().terminal = None;
     assert!(from_snapshot(
@@ -207,7 +207,8 @@ fn uncertain_checkpoint_blocks_delivery_without_rewriting_original_execution() {
             .unwrap();
         let snapshot = driver.snapshot();
         let original = from_snapshot(&snapshot, &request, Ok(success.clone())).unwrap();
-        let history = original.attempts.clone();
+        let evidence = original.evidence.clone().unwrap();
+        let history = evidence.attempts.clone();
         let completion = TaskCompletion::new();
         completion.complete(original, checkpoint.clone());
         assert_eq!(
@@ -217,7 +218,10 @@ fn uncertain_checkpoint_blocks_delivery_without_rewriting_original_execution() {
         assert_eq!(completion.try_scheduler_result(), Some(Ok(success)));
         assert_eq!(completion.try_checkpoint_evidence(), Some(checkpoint));
         assert_eq!(completion.try_attempt_history(), Some(history));
+        assert_eq!(completion.try_execution_evidence(), Some(evidence));
         assert_eq!(snapshot.tasks[&request.task_id].state, TaskState::Succeeded);
         snapshot.validate().unwrap();
     }
 }
+
+mod analysis;

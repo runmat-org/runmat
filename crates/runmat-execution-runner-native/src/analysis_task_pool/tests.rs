@@ -102,8 +102,7 @@ impl AnalysisTaskPool for UntouchedPool {
     async fn execute_batch(
         &mut self,
         _: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        _: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
+    ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
         panic!("empty wave must not submit a graph")
     }
 }

@@ -116,11 +116,11 @@ pub(super) async fn run() {
             full = Some(checkpoint);
         } else {
             split = checkpoint;
-            attempts.push(attempt);
+            attempts.extend(attempt);
         }
     }
     let (checkpoint, attempt) = run_block(&workload, &mesh, split, 3, 8192, 2).await;
-    attempts.push(attempt);
+    attempts.extend(attempt);
     let full = full.unwrap();
     assert_eq!(checkpoint.next_interval(), 3);
     assert_eq!(checkpoint.next_output_ordinal(), 3);
@@ -170,7 +170,7 @@ async fn run_block(
     end_interval: usize,
     chunk: usize,
     ordinal: usize,
-) -> (FluidTransientCheckpoint, PlannedResourceUsageAttempt) {
+) -> (FluidTransientCheckpoint, Vec<PlannedResourceUsageAttempt>) {
     let directory = tempfile::tempdir().unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = directory.path().join("scheduled-fluid");
@@ -221,7 +221,7 @@ async fn run_block(
     let cold = import_fluid_transient_checkpoint(&source, done.response.clone(), &task).unwrap();
     assert_eq!(cold.checkpoint, done.original.checkpoint);
     request.recover_output(&cold.checkpoint, mesh).unwrap();
-    let mut accounting = done.attempt.accounting.clone();
+    let mut accounting = done.usage.attempts[0].accounting.clone();
     accounting.resources.artifact_bytes += 1;
     assert!(validate_analysis_phase_accounting(
         &task.host,
@@ -230,7 +230,7 @@ async fn run_block(
         &accounting
     )
     .is_err());
-    let mut accounting = done.attempt.accounting.clone();
+    let mut accounting = done.usage.attempts[0].accounting.clone();
     accounting.resources.allocation.memory_bytes += 1;
     assert!(validate_analysis_phase_accounting(
         &task.host,
@@ -262,5 +262,24 @@ async fn run_block(
     .unwrap();
     assert!(import_fluid_transient_checkpoint(&source, done.response.clone(), &foreign).is_err());
     println!("scheduled fluid block {ordinal}: original ranges, admitted allocation, closed output import PASS");
-    (cold.checkpoint, done.attempt)
+    done.execution.validate().unwrap();
+    assert_eq!(done.execution.attempts.len(), done.usage.attempts.len());
+    assert!(
+        runmat_analysis_fea::planning::resource::allocation_matches_plan(
+            &done.execution.attempts[0].request.task.resources,
+            &task.resource_plan.request,
+        )
+    );
+    let cold_execution: runmat_execution_runner::TaskExecutionEvidence =
+        serde_json::from_slice(&serde_json::to_vec(&done.execution).unwrap()).unwrap();
+    cold_execution.validate().unwrap();
+    assert_eq!(cold_execution, done.execution);
+    let usage = PlannedResourceUsageGraph::from_execution(
+        &task.resource_plan,
+        &cold_execution,
+        done.usage.wall_millis,
+    )
+    .unwrap();
+    assert_eq!(usage, done.usage);
+    (cold.checkpoint, done.usage.attempts)
 }

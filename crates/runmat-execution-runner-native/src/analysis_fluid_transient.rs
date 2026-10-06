@@ -8,7 +8,7 @@ use crate::{
 };
 use runmat_analysis_execution::{
     import_fluid_transient_checkpoint, AnalysisHostWorkload, ImportedFluidTransientCheckpoint,
-    PlannedResourceUsageAttempt, PreparedAnalysisTaskClosure, PreparedFluidTransientTask,
+    PlannedResourceUsageGraph, PreparedAnalysisTaskClosure, PreparedFluidTransientTask,
 };
 use runmat_execution::task::RetryPolicy;
 use runmat_execution_artifact::ProgramExecutionResponse;
@@ -20,13 +20,14 @@ pub struct FluidTransientBlockExecutionPolicy {
     pub priority: i16,
 }
 
-/// Original checkpoint, fenced response and scheduler accounting for the successful
-/// attempt. This is not a ledger of unsuccessful attempts or a completed fluid study.
+/// Original physical checkpoint plus complete portable task lineage and usage.
+/// Missing earlier consumption blocks this result; this is not a completed fluid study.
 pub struct CompletedFluidTransientBlockExecution {
     pub original: ImportedFluidTransientCheckpoint,
     pub host: AnalysisHostWorkload,
     pub response: ProgramExecutionResponse,
-    pub attempt: PlannedResourceUsageAttempt,
+    pub execution: runmat_execution_runner::TaskExecutionEvidence,
+    pub usage: PlannedResourceUsageGraph,
 }
 
 pub async fn execute_fluid_transient_block_locally(
@@ -42,6 +43,7 @@ pub(crate) async fn execute_with_pool(
     task: &PreparedFluidTransientTask,
     policy: FluidTransientBlockExecutionPolicy,
 ) -> NativeExecutionResult<CompletedFluidTransientBlockExecution> {
+    let started = std::time::Instant::now();
     let scope = pool.scope_id();
     let placement = pool.pool_id();
     let (executed, accounting) = execute_governed_analysis_task(
@@ -78,14 +80,20 @@ pub(crate) async fn execute_with_pool(
     .map_err(protocol)?;
     let original = import_fluid_transient_checkpoint(pool, executed.response.clone(), task)
         .map_err(protocol)?;
+    let wall_millis = u64::try_from(started.elapsed().as_millis())
+        .map_err(|_| protocol("fluid block observed wall interval overflowed"))?;
+    let usage = PlannedResourceUsageGraph::from_execution(
+        &task.resource_plan,
+        &executed.evidence,
+        wall_millis,
+    )
+    .map_err(protocol)?;
     Ok(CompletedFluidTransientBlockExecution {
         original,
         host: task.host.clone(),
         response: executed.response,
-        attempt: PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting,
-        },
+        execution: executed.evidence,
+        usage,
     })
 }
 

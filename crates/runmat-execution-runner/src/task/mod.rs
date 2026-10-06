@@ -1,4 +1,5 @@
 mod attempt;
+mod execution_evidence;
 mod execution_observation;
 mod graph;
 mod lifecycle;
@@ -11,6 +12,8 @@ pub use attempt::{
     AttemptFailureKind, AttemptRecord, AttemptReport, AttemptRequest, AttemptResourceAccounting,
     AttemptResourceAggregate, AttemptSuccess,
 };
+pub(crate) use execution_evidence::validate_history;
+pub use execution_evidence::TaskExecutionEvidence;
 pub use execution_observation::{AttemptExecutionObservation, AttemptExecutionTermination};
 pub use graph::TaskGraph;
 pub use lifecycle::{TaskRecord, TaskSubmission};

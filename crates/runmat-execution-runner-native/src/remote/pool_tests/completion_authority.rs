@@ -518,3 +518,33 @@ async fn missing_committed_object_fails_closed_instead_of_using_stale_outputs() 
         .unwrap_err()
         .contains("not downloaded"));
 }
+
+#[tokio::test]
+async fn original_terminal_loss_diagnostic_survives_remote_delivery() {
+    let fixture = fixture().await;
+    let message = "original transport lost the producer";
+    fixture.pool.apply_report(BackendReport::for_request(
+        &fixture.attempt,
+        AttemptReport::Lost {
+            message: message.into(),
+        },
+    ));
+    let snapshot = fixture.pool.snapshot();
+    let task = &snapshot.tasks[&fixture.attempt.task_id];
+    assert_eq!(
+        terminal_failure(&snapshot, fixture.attempt.task_id, task.state),
+        Some(message.into())
+    );
+    let evidence = snapshot
+        .task_execution_evidence(fixture.attempt.task_id)
+        .unwrap();
+    assert_eq!(
+        evidence.attempts[0]
+            .terminal
+            .as_ref()
+            .unwrap()
+            .diagnostic
+            .as_deref(),
+        Some(message)
+    );
+}

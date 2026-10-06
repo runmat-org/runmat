@@ -57,8 +57,9 @@ it does not establish task-pool placement, retry fencing or remote execution.
 ## Scheduled execution and fenced cold import
 
 The native block API submits the exact prepared closure and resource plan through
-`AnalysisTaskPool`. It returns the original checkpoint, immutable host/response and
-scheduler accounting for the successful attempt. Shared phase accounting verifies
+`AnalysisTaskPool`. It returns the original checkpoint, immutable host/response,
+complete portable task evidence and usage across every original attempt. Shared
+phase accounting verifies
 allocation/capabilities and observed output bytes. Workers and cold consumers use
 one source/admission owner. Cold import validates the exact closed output set,
 source/resource plan, admitted payload/transport inventory, checkpoint identity,
@@ -74,7 +75,8 @@ A 10^12 Pa reference accompanies nonzero original fluctuations; the witness conf
 that reported absolute pressure cannot reproduce the original fluctuation bits.
 Foreign interval outputs, excess output inventory and altered allocation/byte
 accounting reject. This is local scheduled execution and successful-attempt evidence,
-not a failed/retried-attempt ledger, remote execution or a completed study lifecycle.
+not measured unsuccessful artifact/retention consumption, remote execution or a
+completed study lifecycle.
 
 The witness exposed a shared transport defect: native placement substituted its
 own chunk policy for the policy used in task admission. The versioned host-v2
@@ -84,6 +86,21 @@ replace it. The descriptor/program identities bind that policy. Missing/invalid
 policy or old invocation versions reject, rather than falling back. Shared serial
 tests exercise cold policy retention and rejection before physical input reads.
 Output-set roots also reject their schema byte bound before any cache read.
+
+Portable evidence retains the admitted task, ordinal history, scheduler commit and
+observed driver clock/fence. Native completion freezes it alongside checkpoint delivery
+status; storage failure cannot rewrite execution success. Cold validation checks
+internal lineage, not trusted worker authorization. Local and remote analysis adapters
+carry this evidence and preserve original terminal diagnostics. They use shared-driver
+per-attempt/absolute deadlines rather than applying one attempt's wall limit to an
+entire queued/retried wave. Their separate cleanup bound limits terminal collection;
+a lost producer's logical closure does not prove process cessation.
+
+The public fluid block result retains that carrier. Its usage graph expands every
+reported original attempt against the independently admitted plan and uses the actual
+host wall interval. Missing earlier accounting blocks complete usage; neither the
+winner's accounting nor a reservation can fill the gap. Broader study coordinators
+still consume terminal-only accounting and require the same complete-history cutover.
 
 Remaining work includes cumulative failed/retried scheduler accounting, cancellation
 qualification, temporal receipts, original observations/field histories, mandatory

@@ -201,3 +201,79 @@ fn recovery_loss_keeps_attempt_history_without_inventing_worker_usage() {
         .task_resource_aggregate(request.task_id, 5)
         .is_err());
 }
+
+#[test]
+fn portable_history_preserves_lost_attempt_and_rejects_lineage_corruption() {
+    let mut fixture = common::fixture(1, 1);
+    let task = common::task(
+        "portable-history",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },
+    );
+    let first = common::submit(&mut fixture.driver, task);
+    let second = fixture
+        .driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &first,
+            AttemptReport::Lost {
+                message: "original producer lost".into(),
+            },
+        )))
+        .unwrap()
+        .into_iter()
+        .find_map(|action| match action {
+            DriverAction::Launch(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &second,
+            common::success(&second),
+        )))
+        .unwrap();
+    let snapshot = fixture.driver.snapshot();
+    let original = snapshot.task_execution_evidence(first.task_id).unwrap();
+    original.validate().unwrap();
+    let cold: runmat_execution_runner::TaskExecutionEvidence =
+        serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+    assert_eq!(cold, original);
+    assert_eq!(
+        cold.attempts[0]
+            .terminal
+            .as_ref()
+            .unwrap()
+            .diagnostic
+            .as_deref(),
+        Some("original producer lost")
+    );
+    assert!(cold.resource_aggregate(1).is_err());
+    for corruption in 0..9 {
+        let mut invalid = cold.clone();
+        match corruption {
+            0 => {
+                invalid.attempts.remove(0);
+            }
+            1 => {
+                invalid.attempts[1] = invalid.attempts[0].clone();
+            }
+            2 => invalid.attempts[0].request.driver_fence += 1,
+            3 => invalid.task.submission.request.resources.max_wall_millis += 1,
+            4 => invalid.task.committed.as_mut().unwrap().attempt_id = first.id,
+            5 => invalid.driver_fence = 0,
+            6 => invalid.task.attempt_count = 1,
+            7 => {
+                invalid.task.state = runmat_execution::state::TaskState::Running;
+                invalid.task.committed = None;
+            }
+            _ => {
+                invalid.task.state = runmat_execution::state::TaskState::Ready;
+                invalid.task.committed = None;
+                invalid.task.active_attempt = Some(first.id);
+            }
+        }
+        assert!(invalid.validate().is_err(), "corruption {corruption}");
+    }
+}

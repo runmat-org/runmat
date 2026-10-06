@@ -294,13 +294,13 @@ async fn execute_program<P: AnalysisTaskPool>(
     )
     .map_err(|error| error.to_string())?;
     let response = match pool
-        .execute_batch(
-            vec![(program.request().clone(), task)],
-            resources.max_wall_millis,
-        )
+        .execute_batch(vec![(program.request().clone(), task)])
         .await
     {
-        Ok(mut responses) if responses.len() == 1 => responses.remove(0).0,
+        Ok(_) if runmat_runtime::interrupt::is_cancelled() => {
+            return Err("assessment execution was cancelled".into())
+        }
+        Ok(mut responses) if responses.len() == 1 => responses.remove(0).response,
         Ok(_) => return Err("assessment host returned the wrong number of receipts".into()),
         Err(crate::NativeExecutionError::Cancelled) => {
             return Err("assessment execution was cancelled".into())

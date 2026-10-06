@@ -209,6 +209,12 @@ impl NativeProgramTask {
         self.completion.try_attempt_history()
     }
 
+    /// Original admitted task, complete history and commit, frozen at completion.
+    /// This does not bypass durable delivery or attest imported worker authority.
+    pub fn try_execution_evidence(&self) -> Option<runmat_execution_runner::TaskExecutionEvidence> {
+        self.completion.try_execution_evidence()
+    }
+
     /// Original scheduler verdict for inspection. This does not authorize result
     /// publication: `try_result` also requires durable checkpoint delivery.
     pub fn try_scheduler_result(&self) -> Option<Result<AttemptSuccess, String>> {

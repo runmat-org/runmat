@@ -69,7 +69,7 @@ async fn fault_parent() {
                 runmat_execution::task::RetryPolicy::TestPolicy { max_attempts: 2 };
         }
         let envelope = original.retry_resource_envelope().unwrap();
-        let task = session.submit(request, original).unwrap();
+        let task = session.submit(request, original.clone()).unwrap();
         let result = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Some(result) = task.try_result() {
@@ -81,6 +81,17 @@ async fn fault_parent() {
         .await
         .unwrap();
         let history = task.try_attempt_history().unwrap();
+        let evidence = task.try_execution_evidence().unwrap();
+        evidence.validate().unwrap();
+        assert_eq!(evidence.task.submission, original);
+        assert_eq!(evidence.attempts, history);
+        assert_eq!(
+            serde_json::from_slice::<runmat_execution_runner::TaskExecutionEvidence>(
+                &serde_json::to_vec(&evidence).unwrap()
+            )
+            .unwrap(),
+            evidence
+        );
         assert!(history.len() <= usize::from(envelope.maximum_attempts));
         assert_eq!(
             history.len(),

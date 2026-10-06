@@ -1,14 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use runmat_execution::identity::AttemptId;
-use runmat_execution::state::{AttemptState, TaskState};
 use runmat_execution::{PoolId, TaskId};
 use serde::{Deserialize, Serialize};
 
 use crate::cancellation::{CancellationTree, DeadlineIndex};
 use crate::pool::PoolRecord;
 use crate::scheduler::{FairnessState, ReadyQueue};
-use crate::task::{AttemptRecord, AttemptSuccess, ResultCommit, TaskGraph, TaskRecord};
+use crate::task::{AttemptRecord, TaskGraph, TaskRecord};
 
 use super::{DriverConfig, DriverEvent};
 use crate::{RunnerError, RunnerResult};
@@ -66,12 +65,6 @@ impl DriverSnapshot {
                 .map(|(id, task)| (*id, &task.submission.dependencies)),
         )?;
         for (task_id, task) in &self.tasks {
-            let retry = task.submission.retry_resource_envelope()?;
-            if task.attempt_count > retry.maximum_attempts {
-                return Err(RunnerError::Invalid(
-                    "attempt history exceeds admitted retry envelope".into(),
-                ));
-            }
             if task.submission.request.id != *task_id {
                 return Err(RunnerError::Invalid("task identity mismatch".into()));
             }
@@ -82,19 +75,8 @@ impl DriverSnapshot {
                     "task references an unknown pool or dependency".into(),
                 ));
             }
-            self.validate_commit(*task_id, task)?;
-            if let Some(attempt_id) = task.active_attempt {
-                let attempt = self.attempts.get(&attempt_id).ok_or_else(|| {
-                    RunnerError::Invalid("task references an unknown active attempt".into())
-                })?;
-                if attempt.request.task_id != *task_id {
-                    return Err(RunnerError::Invalid(
-                        "active attempt references a different task".into(),
-                    ));
-                }
-            }
         }
-        let mut ordinals: BTreeMap<TaskId, BTreeSet<u16>> = BTreeMap::new();
+        let mut histories: BTreeMap<TaskId, Vec<&AttemptRecord>> = BTreeMap::new();
         for (attempt_id, attempt) in &self.attempts {
             if attempt.request.id != *attempt_id
                 || !self.tasks.contains_key(&attempt.request.task_id)
@@ -107,39 +89,18 @@ impl DriverSnapshot {
                     "attempt identity or ownership reference is invalid".into(),
                 ));
             }
-            attempt
-                .validate_terminal(self.now_millis)
-                .map_err(RunnerError::Invalid)?;
-            let task = &self.tasks[&attempt.request.task_id];
-            let request = &attempt.request;
-            let expected_id = AttemptId::derive(&[
-                request.task_id.bytes().as_slice(),
-                request.ordinal.to_be_bytes().as_slice(),
-                request.driver_fence.to_be_bytes().as_slice(),
-            ]);
-            if request.id != expected_id
-                || request.task != task.submission.request
-                || request.scope_id != task.submission.request.scope_id
-                || request.ordinal == 0
-                || request.ordinal > task.attempt_count
-                || request.driver_fence == 0
-                || request.driver_fence > self.driver_fence
-                || !ordinals
-                    .entry(request.task_id)
-                    .or_default()
-                    .insert(request.ordinal)
-            {
-                return Err(RunnerError::Invalid(
-                    "snapshot attempt differs from its admitted task or fence".into(),
-                ));
-            }
+            histories
+                .entry(attempt.request.task_id)
+                .or_default()
+                .push(attempt);
         }
         for (id, task) in &self.tasks {
-            if ordinals.get(id).map_or(0, BTreeSet::len) != usize::from(task.attempt_count) {
-                return Err(RunnerError::Invalid(
-                    "snapshot attempt history differs from retry count".into(),
-                ));
-            }
+            crate::task::validate_history(
+                task,
+                histories.get(id).map_or(&[], Vec::as_slice),
+                self.driver_fence,
+                self.now_millis,
+            )?;
         }
         if self.ready.task_ids().any(|task_id| {
             !self
@@ -157,51 +118,6 @@ impl DriverSnapshot {
         }) {
             return Err(RunnerError::Invalid(
                 "ready task is missing from the ready queue".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_commit(&self, task_id: TaskId, task: &TaskRecord) -> RunnerResult<()> {
-        if (task.state == TaskState::Succeeded) != task.committed.is_some() {
-            return Err(RunnerError::Invalid(
-                "snapshot task success and committed result disagree".into(),
-            ));
-        }
-        let Some(commit) = &task.committed else {
-            return Ok(());
-        };
-        let attempt = self.attempts.get(&commit.attempt_id).ok_or_else(|| {
-            RunnerError::Invalid("snapshot commit references an unknown attempt".into())
-        })?;
-        if task.active_attempt.is_some()
-            || attempt.state != AttemptState::Completed
-            || attempt.request.task_id != task_id
-            || commit.driver_fence != attempt.request.driver_fence
-        {
-            return Err(RunnerError::Invalid(
-                "snapshot commit does not belong to a completed task attempt".into(),
-            ));
-        }
-        if attempt.terminal.as_ref().is_none_or(|terminal| {
-            terminal.disposition != crate::task::AttemptDisposition::Succeeded
-                || terminal.resources != commit.resources
-        }) {
-            return Err(RunnerError::Invalid(
-                "commit differs from original terminal attempt evidence".into(),
-            ));
-        }
-        let success = AttemptSuccess {
-            outputs: commit.outputs.clone(),
-            result_objects: commit.result_objects.clone(),
-            resources: commit.resources.clone(),
-        };
-        success
-            .validate_against(&attempt.request)
-            .map_err(RunnerError::Invalid)?;
-        if *commit != ResultCommit::from_success(commit.attempt_id, commit.driver_fence, success) {
-            return Err(RunnerError::Invalid(
-                "snapshot commit identity is invalid".into(),
             ));
         }
         Ok(())

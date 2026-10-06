@@ -1,7 +1,7 @@
 //! Complete scheduler-owned task history. Never aggregate only the winning retry.
 use runmat_execution::TaskId;
 
-use crate::task::{AttemptRecord, AttemptResourceAggregate};
+use crate::task::{AttemptRecord, AttemptResourceAggregate, TaskExecutionEvidence};
 use crate::{RunnerError, RunnerResult};
 
 use super::DriverSnapshot;
@@ -31,23 +31,22 @@ impl DriverSnapshot {
         task_id: TaskId,
         graph_wall_millis: u64,
     ) -> RunnerResult<AttemptResourceAggregate> {
+        self.task_execution_evidence(task_id)?
+            .resource_aggregate(graph_wall_millis)
+    }
+
+    /// Extract original admitted state without copying the enclosing pool inventory.
+    pub fn task_execution_evidence(&self, task_id: TaskId) -> RunnerResult<TaskExecutionEvidence> {
         let attempts = self
             .task_attempt_history(task_id)?
             .into_iter()
-            .map(|attempt| {
-                attempt
-                    .terminal
-                    .as_ref()
-                    .and_then(|terminal| terminal.resources.as_deref())
-                    .cloned()
-                    .ok_or_else(|| {
-                        RunnerError::Invalid(format!(
-                            "task attempt {} has no terminal resource accounting",
-                            attempt.request.ordinal
-                        ))
-                    })
-            })
-            .collect::<RunnerResult<Vec<_>>>()?;
-        AttemptResourceAggregate::new(attempts, graph_wall_millis).map_err(RunnerError::Invalid)
+            .cloned()
+            .collect();
+        Ok(TaskExecutionEvidence {
+            task: self.tasks[&task_id].clone(),
+            attempts,
+            driver_fence: self.driver_fence,
+            observed_at_driver_millis: self.now_millis,
+        })
     }
 }

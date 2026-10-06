@@ -1,20 +1,23 @@
 use super::*;
+use crate::analysis_task_pool::AnalysisTaskCompletion;
 use async_trait::async_trait;
 use runmat_analysis_execution::{PreparedAnalysisObjects, PreparedAnalysisProgram};
-use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::ResourceAccounting,
-};
+use runmat_execution::{identity::WorkerId, resource::ResourceInventory, state::PoolState};
 use runmat_execution_artifact::{
     cache::{CacheExport, CacheImport, FilesystemObjectStore},
     ArtifactAccess, ArtifactResult, ProgramExecutionObject, ProgramExecutionRequest,
     ProgramExecutionResponse,
 };
-use runmat_execution_runner::{AttemptResourceAccounting, AttemptSuccess, TaskSubmission};
+use runmat_execution_runner::port::BackendReport;
+use runmat_execution_runner::{
+    AttemptReport, AttemptSuccess, Driver, DriverAction, DriverCommand, DriverConfig, PoolSpec,
+    TaskSubmission, WorkerSpec,
+};
 
 pub(crate) struct RecordingPool {
     pub(crate) store: FilesystemObjectStore,
     pub tasks: Vec<TaskSubmission>,
+    driver: Option<Driver>,
 }
 impl RecordingPool {
     pub fn new(path: &std::path::Path) -> Self {
@@ -27,6 +30,7 @@ impl RecordingPool {
             )
             .unwrap(),
             tasks: Vec::new(),
+            driver: None,
         }
     }
 }
@@ -67,8 +71,7 @@ impl AnalysisTaskPool for RecordingPool {
     async fn execute_batch(
         &mut self,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        _: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
+    ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
         let mut results = Vec::new();
         for (program, submission) in tasks {
             for dependency in &submission.dependencies {
@@ -77,6 +80,19 @@ impl AnalysisTaskPool for RecordingPool {
                     "dependency was never executed on this pool"
                 );
             }
+            if self.driver.is_none() {
+                self.driver = Some(recording_driver(&submission)?);
+            }
+            let driver = self.driver.as_mut().unwrap();
+            let attempt = driver
+                .handle(DriverCommand::Submit(Box::new(submission.clone())))
+                .map_err(protocol)?
+                .into_iter()
+                .find_map(|action| match action {
+                    DriverAction::Launch(request) => Some(request),
+                    _ => None,
+                })
+                .ok_or_else(|| protocol("recording task was not admitted for execution"))?;
             let response = crate::execute_analysis_program_request(
                 &program,
                 &mut self.store,
@@ -94,30 +110,79 @@ impl AnalysisTaskPool for RecordingPool {
                 .iter()
                 .map(|object| object.encoded_length)
                 .sum();
-            let resources = AttemptResourceAccounting::new(
-                AttemptId::derive(&[
-                    b"recording-thermal-attempt",
-                    &(self.tasks.len() as u64).to_le_bytes(),
-                ]),
-                WorkerId::derive(&[b"test-not-scheduler-evidence"]),
-                ResourceAccounting::for_reserved_interval(
-                    submission.request.resources.clone(),
-                    1,
-                    bytes,
-                    0,
-                    0,
-                )
-                .unwrap(),
+            let success = AttemptSuccess::new(
+                &attempt,
+                outputs.clone(),
+                result_objects.clone(),
+                1,
+                bytes,
+                0,
             )
-            .unwrap();
-            let success = AttemptSuccess {
-                outputs: outputs.clone(),
-                result_objects: result_objects.clone(),
-                resources: Some(Box::new(resources)),
-            };
+            .map_err(protocol)?;
+            driver
+                .handle(DriverCommand::Tick {
+                    now_millis: driver.now_millis() + 1,
+                })
+                .map_err(protocol)?;
+            driver
+                .handle(DriverCommand::BackendReport(BackendReport::for_request(
+                    &attempt,
+                    AttemptReport::Succeeded {
+                        result: success.clone(),
+                    },
+                )))
+                .map_err(protocol)?;
+            let evidence = driver
+                .snapshot()
+                .task_execution_evidence(submission.request.id)
+                .map_err(protocol)?;
             self.tasks.push(submission);
-            results.push((response, Some(success)));
+            results.push(AnalysisTaskCompletion::new(evidence, Ok(success))?);
         }
         Ok(results)
     }
+}
+
+// This test substrate executes kernels directly; the portable driver owns all
+// admission/history/commit identities. Its accounting remains explicit test data.
+fn recording_driver(submission: &TaskSubmission) -> NativeExecutionResult<Driver> {
+    let scope = submission.request.scope_id;
+    let pool = submission.request.pool_id;
+    let inventory = ResourceInventory {
+        cpu_millicores: 1000,
+        memory_bytes: 1024 * 1024 * 1024,
+        scratch_bytes: 1024 * 1024 * 1024,
+        accelerators: Vec::new(),
+        capabilities: submission.request.resources.required_capabilities.clone(),
+    };
+    let mut driver = Driver::new(DriverConfig::default(), 1).map_err(protocol)?;
+    driver
+        .handle(DriverCommand::RegisterScope {
+            scope_id: scope,
+            parent: None,
+        })
+        .map_err(protocol)?;
+    driver
+        .handle(DriverCommand::CreatePool(PoolSpec {
+            id: pool,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory.clone(),
+        }))
+        .map_err(protocol)?;
+    driver
+        .handle(DriverCommand::SetPoolState {
+            pool_id: pool,
+            state: PoolState::Ready,
+        })
+        .map_err(protocol)?;
+    driver
+        .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            id: WorkerId::derive(&[b"recording-thermal-worker"]),
+            pool_id: pool,
+            resources: inventory,
+        }))
+        .map_err(protocol)?;
+    Ok(driver)
 }

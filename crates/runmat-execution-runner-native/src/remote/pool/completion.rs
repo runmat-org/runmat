@@ -17,7 +17,10 @@ impl RemotePoolDriver {
             let previous_events = driver.events().len();
             let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
-                Err(_) => return,
+                Err(error) => {
+                    tracing::error!(%task_id, %error, "remote scheduler rejected backend report");
+                    return;
+                }
             };
             let snapshot = driver.snapshot();
             let outcome = snapshot.tasks.get(&task_id).and_then(|task| {
@@ -128,7 +131,16 @@ fn terminal_failure(
         }
         _ => return None,
     };
-    Some(message.into())
+    Some(
+        snapshot
+            .attempts
+            .values()
+            .filter(|attempt| attempt.request.task_id == task_id)
+            .max_by_key(|attempt| attempt.request.ordinal)
+            .and_then(|attempt| attempt.terminal.as_ref())
+            .and_then(|terminal| terminal.diagnostic.clone())
+            .unwrap_or_else(|| message.into()),
+    )
 }
 
 #[cfg(test)]

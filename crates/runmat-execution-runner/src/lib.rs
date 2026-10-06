@@ -17,5 +17,6 @@ pub use pool::{PoolSpec, WorkerSpec};
 pub use task::{
     AttemptDisposition, AttemptExecutionObservation, AttemptExecutionTermination,
     AttemptFailureKind, AttemptReport, AttemptRequest, AttemptResourceAccounting,
-    AttemptResourceAggregate, AttemptSuccess, AttemptTerminal, TaskSubmission,
+    AttemptResourceAggregate, AttemptSuccess, AttemptTerminal, TaskExecutionEvidence,
+    TaskSubmission,
 };

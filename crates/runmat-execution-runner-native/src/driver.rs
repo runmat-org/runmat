@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
-use runmat_execution::state::{PoolState, TaskState};
+use runmat_execution::state::PoolState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{
@@ -301,28 +301,22 @@ impl LocalDriver {
             let terminal = registrations
                 .iter()
                 .filter_map(|(task_id, completion, _)| {
-                    snapshot.tasks.get(task_id).and_then(|task| {
-                        matches!(
-                            task.state,
-                            TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
-                        )
-                        .then(|| (Arc::clone(completion), task.state))
-                    })
+                    let state = snapshot.tasks.get(task_id)?.state;
+                    completion::from_task_snapshot(
+                        &snapshot,
+                        *task_id,
+                        Err(format!(
+                            "local task inherited terminal dependency state {state:?}"
+                        )),
+                    )
+                    .map(|original| (Arc::clone(completion), original))
                 })
                 .collect::<Vec<_>>();
             (actions, terminal, checkpoint)
         };
         drop(completions);
-        for (completion, state) in inherited_terminals {
-            completion.complete(
-                completion::CompletedTask {
-                    result: Err(format!(
-                        "local task inherited terminal dependency state {state:?}"
-                    )),
-                    attempts: Vec::new(),
-                },
-                checkpoint.clone(),
-            );
+        for (completion, original) in inherited_terminals {
+            completion.complete(original, checkpoint.clone());
         }
         Self::dispatch(Arc::clone(self), actions);
         Ok(registrations

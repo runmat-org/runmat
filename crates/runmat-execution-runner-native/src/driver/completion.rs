@@ -6,7 +6,9 @@ use std::sync::Mutex;
 
 use runmat_execution::state::TaskState;
 use runmat_execution_runner::task::AttemptRecord;
-use runmat_execution_runner::{AttemptRequest, AttemptSuccess, DriverSnapshot};
+use runmat_execution_runner::{
+    AttemptRequest, AttemptSuccess, DriverSnapshot, TaskExecutionEvidence,
+};
 
 use super::TransferResult;
 use crate::NativeCheckpointEvidence;
@@ -15,7 +17,7 @@ const MAX_BUFFERED_PROGRESS: usize = 256;
 
 pub(super) struct CompletedTask {
     pub result: TransferResult,
-    pub attempts: Vec<AttemptRecord>,
+    pub evidence: Option<TaskExecutionEvidence>,
 }
 
 struct PersistedCompletion {
@@ -54,7 +56,21 @@ impl TaskCompletion {
             .lock()
             .expect("task completion poisoned")
             .as_ref()
-            .map(|value| value.original.attempts.clone())
+            .map(|value| {
+                value
+                    .original
+                    .evidence
+                    .as_ref()
+                    .map_or_else(Vec::new, |evidence| evidence.attempts.clone())
+            })
+    }
+
+    pub(crate) fn try_execution_evidence(&self) -> Option<TaskExecutionEvidence> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .and_then(|value| value.original.evidence.clone())
     }
 
     /// Scheduler result for inspection, before the separate durable-delivery gate.
@@ -110,27 +126,36 @@ pub(super) fn from_snapshot(
     request: &AttemptRequest,
     observed: TransferResult,
 ) -> Option<CompletedTask> {
-    let task = snapshot.tasks.get(&request.task_id)?;
+    from_task_snapshot(snapshot, request.task_id, observed)
+}
+
+pub(super) fn from_task_snapshot(
+    snapshot: &DriverSnapshot,
+    task_id: runmat_execution::TaskId,
+    observed: TransferResult,
+) -> Option<CompletedTask> {
+    let task = snapshot.tasks.get(&task_id)?;
     if !matches!(
         task.state,
         TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
     ) {
         return None;
     }
-    let history: Vec<AttemptRecord> = match snapshot.task_attempt_history(request.task_id) {
-        Ok(history) => history.into_iter().cloned().collect(),
+    let evidence = match snapshot.task_execution_evidence(task_id) {
+        Ok(evidence) => evidence,
         Err(error) => {
             return Some(CompletedTask {
                 result: Err(format!(
                     "local scheduler terminal evidence is invalid: {error}"
                 )),
-                attempts: Vec::new(),
+                evidence: None,
             })
         }
     };
-    if history
+    if evidence
+        .attempts
         .iter()
-        .any(|attempt: &AttemptRecord| attempt.terminal.is_none())
+        .any(|attempt| attempt.terminal.is_none())
     {
         return None;
     }
@@ -152,7 +177,7 @@ pub(super) fn from_snapshot(
     };
     Some(CompletedTask {
         result,
-        attempts: history,
+        evidence: Some(evidence),
     })
 }
 

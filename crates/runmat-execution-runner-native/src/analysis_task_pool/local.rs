@@ -1,0 +1,122 @@
+use super::*;
+use std::time::{Duration, Instant};
+
+pub(crate) struct LocalAnalysisTaskPool {
+    session: NativeProgramSession,
+    store: FilesystemObjectStore,
+}
+
+impl LocalAnalysisTaskPool {
+    pub(crate) fn new(session: NativeProgramSession) -> Self {
+        Self {
+            store: session.object_store(),
+            session,
+        }
+    }
+
+    pub(crate) fn object_source(&self) -> crate::NativeProgramObjectSource {
+        self.session.object_source()
+    }
+}
+
+impl CacheImport for LocalAnalysisTaskPool {
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.store.read_verified(digest)
+    }
+}
+
+#[async_trait]
+impl AnalysisTaskPool for LocalAnalysisTaskPool {
+    fn scope_id(&self) -> ExecutionScopeId {
+        self.session.scope_id()
+    }
+
+    fn pool_id(&self) -> PoolId {
+        self.session.pool_id()
+    }
+
+    fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()> {
+        program.write_to(&mut self.store).map_err(protocol)
+    }
+
+    fn register_result_objects(
+        &mut self,
+        objects: &runmat_analysis_execution::PreparedAnalysisObjects,
+        _access: &ArtifactAccess,
+    ) -> NativeExecutionResult<()> {
+        for object in &objects.objects {
+            runmat_execution_artifact::cache::CacheExport::write_verified(&mut self.store, object)
+                .map_err(protocol)?;
+        }
+        Ok(())
+    }
+
+    fn register_recovery_object(
+        &mut self,
+        object: &runmat_execution_artifact::ProgramExecutionObject,
+    ) -> NativeExecutionResult<()> {
+        object.validate().map_err(protocol)?;
+        let logical = runmat_execution_artifact::LogicalObject::new(
+            runmat_execution_artifact::ObjectNamespace::Checkpoint,
+            "analysis-recovery-object",
+            object.reference.media_type.clone(),
+            object.bytes.clone(),
+        )
+        .map_err(protocol)?;
+        if logical.descriptor.digest != object.reference.logical_digest {
+            return Err(protocol(
+                "analysis recovery object bytes differ from their portable reference",
+            ));
+        }
+        runmat_execution_artifact::cache::CacheExport::write_verified(&mut self.store, &logical)
+            .map_err(protocol)
+    }
+
+    async fn execute_batch(
+        &mut self,
+        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+    ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>> {
+        let tasks = self.session.submit_graph(tasks)?;
+        let mut responses = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
+        let mut cancellation_started = None;
+        while responses.iter().any(Option::is_none) {
+            if cancellation_started.is_none() && runmat_runtime::interrupt::is_cancelled() {
+                self.session.cancel(CancellationReason::User);
+                cancellation_started = Some(Instant::now());
+            }
+            for (index, task) in tasks.iter().enumerate() {
+                if responses[index].is_some() {
+                    continue;
+                }
+                if let Some(result) = task.try_result() {
+                    if result.is_err() && cancellation_started.is_none() {
+                        self.session.cancel(CancellationReason::ParentScope);
+                        cancellation_started = Some(Instant::now());
+                    }
+                    let evidence = task.try_execution_evidence().ok_or_else(|| {
+                        protocol("local analysis completion lacks original execution evidence")
+                    })?;
+                    responses[index] = Some(AnalysisTaskCompletion::new(evidence, result)?);
+                }
+            }
+            if responses.iter().any(Option::is_none) {
+                // Cleanup is bounded separately; queued/retried work is governed by
+                // the shared driver's per-attempt and absolute task deadlines.
+                if cancellation_started
+                    .is_some_and(|at: Instant| at.elapsed() >= Duration::from_secs(5))
+                {
+                    return Err(protocol(
+                        "local analysis terminal collection exceeded its cancellation cleanup bound",
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        responses
+            .into_iter()
+            .map(|response| {
+                response.ok_or_else(|| protocol("local analysis task has no terminal response"))
+            })
+            .collect()
+    }
+}

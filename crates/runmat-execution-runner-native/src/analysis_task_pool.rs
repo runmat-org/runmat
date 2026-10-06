@@ -1,6 +1,4 @@
 use std::collections::BTreeSet;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use runmat_analysis_execution::{
@@ -16,7 +14,7 @@ use runmat_execution_artifact::cache::{CacheImport, FilesystemObjectStore};
 use runmat_execution_artifact::{
     ArtifactAccess, ArtifactResult, ProgramExecutionRequest, ProgramExecutionResponse,
 };
-use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
+use runmat_execution_runner::{AttemptSuccess, TaskExecutionEvidence, TaskSubmission};
 
 use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
 use crate::{
@@ -24,7 +22,13 @@ use crate::{
     RemotePoolDriver,
 };
 
+mod completion;
+mod local;
 mod phase;
+mod remote;
+pub(crate) use completion::{delivered_attempt, AnalysisTaskCompletion};
+pub(crate) use local::LocalAnalysisTaskPool;
+pub(crate) use remote::RemoteAnalysisTaskPool;
 #[cfg(test)]
 mod tests;
 pub(crate) use phase::{execute_governed_analysis_phase, execute_governed_analysis_task};
@@ -89,8 +93,7 @@ pub(crate) trait AnalysisTaskPool: CacheImport {
     async fn execute_batch(
         &mut self,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>>;
+    ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,15 +122,20 @@ pub(crate) struct ExecutedAnalysisTask {
     pub task_id: TaskId,
     pub response: ProgramExecutionResponse,
     pub attempt: Option<AttemptSuccess>,
+    pub evidence: TaskExecutionEvidence,
 }
 
 pub(crate) fn planned_resource_attempt(
     plan: &FeaResourcePlan,
     task: &ExecutedAnalysisTask,
 ) -> NativeExecutionResult<PlannedResourceUsageAttempt> {
-    let success = task.attempt.as_ref().ok_or_else(|| {
-        NativeExecutionError::Protocol("analysis task lacks scheduler attempt evidence".into())
-    })?;
+    task.evidence.validate().map_err(protocol)?;
+    if task.evidence.task.id() != task.task_id {
+        return Err(protocol(
+            "analysis task history belongs to another admitted task",
+        ));
+    }
+    let success = delivered_attempt(&task.response, task.attempt.as_ref())?;
     success.validate_accounting().map_err(protocol)?;
     let accounting = success.resources.as_deref().cloned().ok_or_else(|| {
         NativeExecutionError::Protocol("analysis task lacks scheduler resource accounting".into())
@@ -195,337 +203,33 @@ pub(crate) async fn execute_analysis_task_batch(
         admitted.push((identity, task_id));
         submissions.push((task.program.request.clone(), submission));
     }
-    let maximum_wall_millis = submissions
-        .iter()
-        .map(|(_, submission)| submission.request.resources.max_wall_millis)
-        .max()
-        .unwrap_or(0);
-    let responses = pool.execute_batch(submissions, maximum_wall_millis).await?;
+    let responses = pool.execute_batch(submissions).await?;
     if responses.len() != admitted.len() {
         return Err(NativeExecutionError::Protocol(
             "analysis task response inventory differs from its submitted wave".into(),
         ));
     }
-    Ok(admitted
+    if runmat_runtime::interrupt::is_cancelled() {
+        return Err(NativeExecutionError::Cancelled);
+    }
+    admitted
         .into_iter()
         .zip(responses)
-        .map(
-            |((identity, task_id), (response, attempt))| ExecutedAnalysisTask {
+        .map(|((identity, task_id), completion)| {
+            if completion.evidence.task.id() != task_id {
+                return Err(protocol(
+                    "analysis completion belongs to another submitted task",
+                ));
+            }
+            Ok(ExecutedAnalysisTask {
                 identity,
                 task_id,
-                response,
-                attempt,
-            },
-        )
-        .collect())
-}
-
-pub(crate) struct LocalAnalysisTaskPool {
-    session: NativeProgramSession,
-    store: FilesystemObjectStore,
-}
-
-impl LocalAnalysisTaskPool {
-    pub(crate) fn new(session: NativeProgramSession) -> Self {
-        Self {
-            store: session.object_store(),
-            session,
-        }
-    }
-
-    pub(crate) fn object_source(&self) -> crate::NativeProgramObjectSource {
-        self.session.object_source()
-    }
-}
-
-impl CacheImport for LocalAnalysisTaskPool {
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        self.store.read_verified(digest)
-    }
-}
-
-#[async_trait]
-impl AnalysisTaskPool for LocalAnalysisTaskPool {
-    fn scope_id(&self) -> ExecutionScopeId {
-        self.session.scope_id()
-    }
-
-    fn pool_id(&self) -> PoolId {
-        self.session.pool_id()
-    }
-
-    fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()> {
-        program.write_to(&mut self.store).map_err(protocol)
-    }
-
-    fn register_result_objects(
-        &mut self,
-        objects: &runmat_analysis_execution::PreparedAnalysisObjects,
-        _access: &ArtifactAccess,
-    ) -> NativeExecutionResult<()> {
-        for object in &objects.objects {
-            runmat_execution_artifact::cache::CacheExport::write_verified(&mut self.store, object)
-                .map_err(protocol)?;
-        }
-        Ok(())
-    }
-
-    fn register_recovery_object(
-        &mut self,
-        object: &runmat_execution_artifact::ProgramExecutionObject,
-    ) -> NativeExecutionResult<()> {
-        object.validate().map_err(protocol)?;
-        let logical = runmat_execution_artifact::LogicalObject::new(
-            runmat_execution_artifact::ObjectNamespace::Checkpoint,
-            "analysis-recovery-object",
-            object.reference.media_type.clone(),
-            object.bytes.clone(),
-        )
-        .map_err(protocol)?;
-        if logical.descriptor.digest != object.reference.logical_digest {
-            return Err(protocol(
-                "analysis recovery object bytes differ from their portable reference",
-            ));
-        }
-        runmat_execution_artifact::cache::CacheExport::write_verified(&mut self.store, &logical)
-            .map_err(protocol)
-    }
-
-    async fn execute_batch(
-        &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
-        let tasks = self.session.submit_graph(tasks)?;
-        let started = Instant::now();
-        let maximum_wall = Duration::from_millis(maximum_wall_millis);
-        let mut responses = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
-        let mut failure = None;
-        let mut deadline_exceeded = false;
-        let mut user_cancelled = runmat_runtime::interrupt::is_cancelled();
-        let mut cancellation_started = user_cancelled.then(Instant::now);
-        if user_cancelled {
-            self.session.cancel(CancellationReason::User);
-        }
-        while responses.iter().any(Option::is_none) {
-            for (index, task) in tasks.iter().enumerate() {
-                if responses[index].is_some() {
-                    continue;
-                }
-                if let Some(result) = task.try_result() {
-                    match result {
-                        Ok(success) => {
-                            responses[index] =
-                                Some((success_response(success.clone()), Some(success)))
-                        }
-                        Err(message) => {
-                            if !deadline_exceeded && !user_cancelled {
-                                if failure.is_none() {
-                                    self.session.cancel(CancellationReason::ParentScope);
-                                    cancellation_started = Some(Instant::now());
-                                }
-                                failure.get_or_insert(message);
-                            }
-                            responses[index] = Some((
-                                ProgramExecutionResponse::Failure {
-                                    message: "analysis peer failed".into(),
-                                },
-                                None,
-                            ));
-                        }
-                    }
-                }
-            }
-            if responses.iter().any(Option::is_none) {
-                if !deadline_exceeded
-                    && failure.is_none()
-                    && !user_cancelled
-                    && runmat_runtime::interrupt::is_cancelled()
-                {
-                    self.session.cancel(CancellationReason::User);
-                    user_cancelled = true;
-                    cancellation_started = Some(Instant::now());
-                }
-                if !deadline_exceeded
-                    && !user_cancelled
-                    && failure.is_none()
-                    && started.elapsed() >= maximum_wall
-                {
-                    self.session.cancel(CancellationReason::Deadline);
-                    deadline_exceeded = true;
-                    cancellation_started = Some(Instant::now());
-                }
-                if cancellation_started
-                    .is_some_and(|cancelled| cancelled.elapsed() >= Duration::from_secs(5))
-                {
-                    return Err(NativeExecutionError::Protocol(
-                        "local analysis cancellation did not reach quiescence".into(),
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-        if user_cancelled {
-            return Err(NativeExecutionError::Cancelled);
-        }
-        if let Some(message) = failure {
-            return Err(NativeExecutionError::Protocol(format!(
-                "local analysis task failed: {message}"
-            )));
-        }
-        if deadline_exceeded {
-            return Err(NativeExecutionError::Protocol(
-                "local analysis batch exceeded its wall-time limit after reaching quiescence"
-                    .into(),
-            ));
-        }
-        responses
-            .into_iter()
-            .map(|response| {
-                response.ok_or_else(|| {
-                    NativeExecutionError::Protocol(
-                        "local analysis task has no terminal response".into(),
-                    )
-                })
+                response: completion.response,
+                attempt: completion.attempt,
+                evidence: completion.evidence,
             })
-            .collect()
-    }
-}
-
-pub(crate) struct RemoteAnalysisTaskPool {
-    pool: Arc<RemotePoolDriver>,
-}
-
-impl RemoteAnalysisTaskPool {
-    pub(crate) fn new(pool: Arc<RemotePoolDriver>) -> Self {
-        Self { pool }
-    }
-}
-
-impl CacheImport for RemoteAnalysisTaskPool {
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        self.pool.read_verified(digest)
-    }
-}
-
-#[async_trait]
-impl AnalysisTaskPool for RemoteAnalysisTaskPool {
-    fn scope_id(&self) -> ExecutionScopeId {
-        self.pool.scope_id()
-    }
-
-    fn pool_id(&self) -> PoolId {
-        self.pool.pool_id()
-    }
-
-    fn register_program(&mut self, program: &PreparedAnalysisProgram) -> NativeExecutionResult<()> {
-        for object in &program.objects {
-            self.pool
-                .register_execution_object(object.reference.clone(), object.bytes.clone())?;
-        }
-        self.pool.register_program_input_inventory(
-            &program.request,
-            program
-                .objects
-                .iter()
-                .map(|object| object.reference.clone())
-                .collect(),
-        )
-    }
-
-    fn register_result_objects(
-        &mut self,
-        objects: &runmat_analysis_execution::PreparedAnalysisObjects,
-        access: &ArtifactAccess,
-    ) -> NativeExecutionResult<()> {
-        let references = objects
-            .references(access, runmat_execution::value::ValueRefKind::ResultObject)
-            .map_err(protocol)?;
-        for (object, reference) in objects.objects.iter().zip(references) {
-            self.pool
-                .register_execution_object(reference, object.bytes.clone())?;
-        }
-        Ok(())
-    }
-
-    fn register_recovery_object(
-        &mut self,
-        object: &runmat_execution_artifact::ProgramExecutionObject,
-    ) -> NativeExecutionResult<()> {
-        self.pool
-            .register_execution_object(object.reference.clone(), object.bytes.clone())
-    }
-
-    async fn execute_batch(
-        &mut self,
-        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
-        maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
-        let completions = self.pool.submit_graph(tasks)?;
-        let mut responses = Vec::with_capacity(completions.len());
-        let mut failure = None;
-        let started = Instant::now();
-        let maximum_wall = Duration::from_millis(maximum_wall_millis);
-        let mut deadline_exceeded = false;
-        let mut cancellation_started: Option<Instant> = None;
-        for completion in completions {
-            let mut waiting = Box::pin(completion.wait());
-            let terminal = if let Some(cancelled) = cancellation_started {
-                let remaining = Duration::from_secs(5).saturating_sub(cancelled.elapsed());
-                tokio::time::timeout(remaining, &mut waiting)
-                    .await
-                    .map_err(|_| {
-                        NativeExecutionError::Protocol(
-                            "remote analysis cancellation did not reach quiescence".into(),
-                        )
-                    })?
-            } else {
-                let remaining = maximum_wall.saturating_sub(started.elapsed());
-                match tokio::time::timeout(remaining, &mut waiting).await {
-                    Ok(terminal) => terminal,
-                    Err(_) => {
-                        self.pool.cancel(CancellationReason::Deadline)?;
-                        deadline_exceeded = true;
-                        cancellation_started = Some(Instant::now());
-                        tokio::time::timeout(Duration::from_secs(5), &mut waiting)
-                            .await
-                            .map_err(|_| {
-                                NativeExecutionError::Protocol(
-                                    "remote analysis deadline cancellation did not reach quiescence"
-                                        .into(),
-                                )
-                            })?
-                    }
-                }
-            };
-            match terminal {
-                Ok(success) => responses.push((success_response(success.clone()), Some(success))),
-                Err(message) => {
-                    if !deadline_exceeded {
-                        failure.get_or_insert(message);
-                    }
-                    responses.push((
-                        ProgramExecutionResponse::Failure {
-                            message: "analysis peer failed".into(),
-                        },
-                        None,
-                    ));
-                }
-            }
-        }
-        if let Some(message) = failure {
-            return Err(NativeExecutionError::Protocol(format!(
-                "remote analysis task failed: {message}"
-            )));
-        }
-        if deadline_exceeded {
-            return Err(NativeExecutionError::Protocol(
-                "remote analysis batch exceeded its wall-time limit after reaching quiescence"
-                    .into(),
-            ));
-        }
-        Ok(responses)
-    }
+        })
+        .collect()
 }
 
 fn success_response(success: AttemptSuccess) -> ProgramExecutionResponse {
