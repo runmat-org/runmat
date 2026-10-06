@@ -18,7 +18,7 @@ use crate::{BuiltinResult, RuntimeError};
 
 pub(super) struct PrintFsOwner {
     provider: Arc<dyn FsProvider>,
-    cwd: PathBuf,
+    cwd: Option<PathBuf>,
     lease: Option<CapturedFsResourceLease>,
 }
 
@@ -31,8 +31,13 @@ pub(super) struct PrintFsPath {
 impl PrintFsOwner {
     /// The filename may be resident, so retain the selected provider and CWD
     /// before the first materialization await.
-    pub(super) fn capture() -> io::Result<Self> {
-        let (provider, cwd) = fs::current_provider_with_current_dir()?;
+    pub(super) fn capture(known_path: Option<&Path>) -> io::Result<Self> {
+        let (provider, cwd) = if let Some(path) = known_path {
+            fs::capture_provider_for_paths(&[path])?
+        } else {
+            let (provider, cwd) = fs::current_provider_with_current_dir()?;
+            (provider, Some(cwd))
+        };
         let lease = fs::capture_resource_lease_for_effect(provider.clone())?;
         let owner = Self {
             provider,
@@ -47,7 +52,10 @@ impl PrintFsOwner {
         let path = if self.provider.path_namespace().is_absolute(&path) {
             path
         } else {
-            self.cwd.join(path)
+            self.cwd
+                .as_ref()
+                .ok_or_else(|| io::Error::other("relative PNG path has no captured directory"))?
+                .join(path)
         };
         let selected = PrintFsPath {
             provider: self.provider,
@@ -330,7 +338,7 @@ mod tests {
         let replacement = Arc::new(MemoryFsProvider::with_current_dir("/replacement"));
         let _restore = fs::replace_provider(selected.clone());
         fs::set_current_dir("/selected").expect("selected directory");
-        let owner = PrintFsOwner::capture().expect("capture selected owner");
+        let owner = PrintFsOwner::capture(None).expect("capture selected owner");
         fs::set_provider(replacement.clone());
         fs::set_current_dir("/replacement").expect("replacement directory");
         let path = owner
@@ -346,6 +354,20 @@ mod tests {
         assert!(replacement
             .read_project_path("/replacement/plot.png")
             .is_err());
+    }
+
+    #[test]
+    fn absolute_host_filename_captures_provider_without_cwd_dependency() {
+        let _lock = fs::provider_override_lock();
+        let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
+        let _restore = fs::replace_provider(selected);
+        let owner =
+            PrintFsOwner::capture(Some(Path::new("/exports/plot.png"))).expect("absolute capture");
+        assert!(owner.cwd.is_none());
+        let selected = owner
+            .path(PathBuf::from("/exports/plot.png"))
+            .expect("absolute path");
+        assert_eq!(selected.path_name(), Path::new("/exports/plot.png"));
     }
 
     #[test]

@@ -40,7 +40,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if !matches!(
             value.kind,
             ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
-        ) || known_invalid_text_scalar(value)
+        ) || known_invalid_print_text(value)
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-PRINT-TEXT",
@@ -105,4 +105,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         vec![ValueFact::scalar(ValueKindFact::Logical)],
         diagnostics,
     )
+}
+
+fn known_invalid_print_text(value: &ValueFact) -> bool {
+    if matches!(value.kind, ValueKindFact::Character) {
+        // The historical print parser consumes every character in a 1-row
+        // array, including pages. Do not reject a source-admitted form in
+        // static inference while that compatibility behavior remains live.
+        return matches!(&value.shape, ShapeFact::Shaped { dims }
+            if dims.first().is_some_and(|dim| matches!(dim, DimensionFact::Known(rows) if *rows != 1)));
+    }
+    known_invalid_text_scalar(value)
 }

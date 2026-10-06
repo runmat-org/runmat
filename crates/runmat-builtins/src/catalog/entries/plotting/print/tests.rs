@@ -94,6 +94,16 @@ fn print_inference_rejects_known_invalid_and_preserves_unknown() {
         &PRINT_CATALOG_ENTRY,
     );
     assert!(!duplicate.diagnostics.is_empty());
+    let paged_char = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(4), Some(2)]),
+        StorageFact::Dense,
+    );
+    assert!(
+        inference::infer(&request(vec![paged_char], vec![], 0), &PRINT_CATALOG_ENTRY)
+            .diagnostics
+            .is_empty()
+    );
 }
 
 #[test]

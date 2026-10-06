@@ -105,6 +105,9 @@ pub async fn print_builtin(
         _ => {}
     }
     let selected_figure = current_figure_handle();
+    if let Some(first) = args.first() {
+        crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
+    }
     preflight_host_arguments(&args)?;
     if args
         .first()
@@ -133,9 +136,9 @@ pub async fn print_builtin(
     // await. A resident handle is resolved and cloned after materialization.
     #[cfg(feature = "plot-core")]
     let early_scene = early_handle.and_then(clone_figure);
-    let owner = export::PrintFsOwner::capture().map_err(export::map_io)?;
+    let owner =
+        export::PrintFsOwner::capture(host_known_filename(&args)).map_err(export::map_io)?;
     if let Some(first) = args.first() {
-        crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
         if crate::builtins::common::validation::value_has_native_integer_class(first)
             && !export::await_effect(
                 runtime.as_ref(),
@@ -192,6 +195,13 @@ fn is_host_text(value: &Value) -> bool {
         value,
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
     )
+}
+
+fn host_known_filename(args: &[Value]) -> Option<&Path> {
+    args.iter().find_map(|value| match value {
+        Value::String(text) if !text.trim().starts_with('-') => Some(Path::new(text.trim())),
+        _ => None,
+    })
 }
 
 async fn gather_values(
@@ -324,14 +334,26 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
     let mut filenames = 0usize;
     let mut devices = 0usize;
     let mut dpi = PRINT_DEFAULT_DPI;
+    let mut dynamic_text = false;
     for (index, value) in args.iter().enumerate() {
         if index == 0 && figure_handle_arg(value)?.is_some() {
             continue;
         }
         let token = match value {
             Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => string_arg(value)?,
-            // Resident controls are validated after their admitted gather.
-            _ => continue,
+            // Only a directly resident operand can materialize into a valid
+            // scalar handle or text control. Containers are never print
+            // controls, even when they contain resident descendants.
+            Value::GpuTensor(_) => {
+                dynamic_text = true;
+                continue;
+            }
+            other => {
+                return Err(print_error_with_detail(
+                    &PRINT_ERROR_INVALID_INPUT,
+                    format!("expected string option or filename, got {other:?}"),
+                ));
+            }
         };
         let token = token.trim();
         if token.is_empty() {
@@ -354,6 +376,13 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
                     "filename must not contain NUL bytes",
                 ));
             }
+            let path = Path::new(token);
+            if !has_extension(path, "png") && path.file_name().is_none() {
+                return Err(print_error_with_detail(
+                    &PRINT_ERROR_INVALID_INPUT,
+                    "filename must include a file name before appending '.png'",
+                ));
+            }
         }
         if filenames > 1 || devices > 1 {
             return Err(print_error_with_detail(
@@ -361,6 +390,12 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
                 "too many filenames or device options",
             ));
         }
+    }
+    if filenames == 0 && !dynamic_text {
+        return Err(print_error_with_detail(
+            &PRINT_ERROR_INVALID_INPUT,
+            "filename is required for RunMat figure export",
+        ));
     }
     Ok(())
 }
@@ -606,6 +641,15 @@ mod tests {
         ))
         .expect_err("svg is not supported yet");
         assert!(err.message().contains("currently supports '-dpng'"));
+    }
+
+    #[test]
+    fn nested_container_is_not_materialized_as_a_print_control() {
+        let nested = runmat_value::CellArray::new(vec![Value::from("plot.png")], 1, 1)
+            .expect("one-cell fixture");
+        let error = preflight_host_arguments(&[Value::Cell(nested)])
+            .expect_err("container is not a scalar text operand");
+        assert_eq!(error.identifier(), PRINT_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
