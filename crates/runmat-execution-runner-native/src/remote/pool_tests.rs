@@ -1050,6 +1050,33 @@ async fn encrypted_remote_pool_executes_one_compiler_bound_rank_per_worker() {
 }
 
 #[tokio::test]
+async fn encrypted_remote_ranks_resolve_the_compiler_owned_source_name() {
+    let program = compile_spmd_region_bundle(
+        r#"
+spmd
+  origin = mfilename();
+end
+"#,
+        1,
+    )
+    .await;
+    let results = execute_encrypted_spmd_program(program).await.unwrap();
+    assert_eq!(results.len(), 2);
+    for result in results {
+        let [Some(runmat_execution::SpmdOutputValue::Value(value))] = result.outputs.as_slice()
+        else {
+            panic!("remote rank must return one ordinary compiler-owned source name");
+        };
+        assert_eq!(
+            runmat_runtime::execution::value_codec::decode_inline_value(value).unwrap(),
+            runmat_value::Value::String("remote_spmd".into()),
+            "remote rank {} resolved a different source after transport",
+            result.rank.0
+        );
+    }
+}
+
+#[tokio::test]
 async fn remote_rank_failure_releases_a_peer_blocked_in_a_collective() {
     let program = compile_spmd_region_bundle(
         r#"
@@ -1079,6 +1106,13 @@ end
         Some("RunMat:test:RemoteSpmdPrimary")
     );
     assert_eq!(failure.message, "primary rank failed");
+    assert!(
+        failure
+            .call_frames
+            .iter()
+            .any(|frame| frame.source_id.is_some()),
+        "the structured remote error must retain a worker-bound source frame"
+    );
 }
 
 async fn execute_encrypted_spmd_program(
