@@ -35,8 +35,8 @@ pub const WARNING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         effects: &[
             EffectKind::EnvironmentRead,
             EffectKind::EnvironmentWrite,
-            EffectKind::MayThrow,
             EffectKind::UserInterface,
+            EffectKind::MayThrow,
         ],
         capabilities: &[],
     },

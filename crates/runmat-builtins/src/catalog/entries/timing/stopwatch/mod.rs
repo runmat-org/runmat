@@ -46,8 +46,8 @@ pub const TIC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::Clock,
             EffectKind::EnvironmentWrite,
+            EffectKind::Clock,
             EffectKind::MayThrow,
         ],
         capabilities: &[],
@@ -77,8 +77,8 @@ pub const TOC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::Clock,
             EffectKind::EnvironmentRead,
+            EffectKind::Clock,
             EffectKind::MayThrow,
         ],
         capabilities: &[],
