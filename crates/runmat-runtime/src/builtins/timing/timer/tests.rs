@@ -240,7 +240,9 @@ fn timer_constructor_sets_defaults_and_name_values() {
 #[test]
 fn timer_family_declares_exact_integer_property_metadata() {
     for (name, capabilities) in [("timer", 2), ("timerfind", 1), ("timerfindall", 1)] {
-        let builtin = runmat_builtins::builtin_function_by_name(name).unwrap();
+        assert!(runmat_builtins::builtin_function_by_name(name).is_none());
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .expect("canonical timer catalog identity");
         assert_eq!(builtin.integer_capabilities.len(), capabilities, "{name}");
         assert_eq!(builtin.extensions.len(), 1, "{name}");
         assert!(builtin.integer_capabilities.iter().all(|capability| {
@@ -562,10 +564,13 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
     let ticks = Rc::new(std::cell::Cell::new(0usize));
     let errors = Rc::new(std::cell::Cell::new(0usize));
     let stops = Rc::new(std::cell::Cell::new(0usize));
+    let (finish_restarted, restarted_completion) = futures::channel::oneshot::channel::<()>();
+    let restarted_completion = Rc::new(RefCell::new(Some(restarted_completion)));
     let callback_ticks = ticks.clone();
     let callback_errors = errors.clone();
     let callback_stops = stops.clone();
     let callback_runtime = runtime.clone();
+    let callback_completion = restarted_completion.clone();
     let invoker: Rc<crate::user_functions::FunctionInvoker> =
         Rc::new(move |function, args, _requested_outputs| {
             let handle = args[0].clone();
@@ -573,6 +578,7 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
             let ticks = callback_ticks.clone();
             let errors = callback_errors.clone();
             let stops = callback_stops.clone();
+            let completion = callback_completion.clone();
             Box::pin(async move {
                 match function {
                     1 => {
@@ -586,6 +592,11 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
                                 .with_identifier("RunMat:TimerTest:OldGeneration")
                                 .build());
                         }
+                        let completion = completion
+                            .borrow_mut()
+                            .take()
+                            .expect("one restarted callback completion");
+                        completion.await.expect("release restarted callback");
                     }
                     2 => errors.set(errors.get() + 1),
                     3 => stops.set(stops.get() + 1),
@@ -619,6 +630,9 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
         panic!("timer handle");
     };
     assert_eq!(string_property(&handle, "Running").unwrap(), "on");
+    finish_restarted
+        .send(())
+        .expect("restarted callback remains retained");
     block_on(timer_wait_builtin(timer)).expect("new generation");
     assert_eq!(ticks.get(), 2);
     assert_eq!(errors.get(), 0);
