@@ -33,7 +33,7 @@ pub(super) const NARGINCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     summary: "Validate the number of inputs supplied to the current function.",
     description: "`narginchk(minArgs,maxArgs)` throws when the selected function received fewer than `minArgs` or more than `maxArgs` inputs. It produces no output; requesting a result reports `RunMat:TooManyOutputs`.",
     keywords: &["narginchk", "function arguments", "arity", "validation"],
-    related: &["nargoutchk", "nargin"],
+    related: &["nargoutchk"],
     sections: &[
         BuiltinDocumentationSection { heading: "Bounds and context", paragraphs: &[
             "`minArgs` accepts a nonnegative scalar single, double, or any of the eight integer classes. `maxArgs` accepts the same classes and positive single or double infinity for an unbounded maximum. Integer storage is read exactly, without floating conversion; out-of-range counts reject rather than round or saturate.",
@@ -53,7 +53,10 @@ pub(super) const NARGINCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     }],
     example_exemption: None,
     faqs: &[],
-    links: &[BuiltinDocumentationLink { label: "nargoutchk", target: BuiltinDocumentationLinkTarget::Builtin("nargoutchk") }],
+    links: &[
+        BuiltinDocumentationLink { label: "nargoutchk", target: BuiltinDocumentationLinkTarget::Builtin("nargoutchk") },
+        BuiltinDocumentationLink { label: "Function input counts with nargin", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/docs/FUNCTIONS.md#optional-arguments-with-nargin") },
+    ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Runtime arity checker", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/arity_check.rs") }],
@@ -73,7 +76,7 @@ pub(super) const NARGOUTCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumen
     summary: "Validate requested function outputs or return a legacy output-count message.",
     description: "`nargoutchk(minArgs,maxArgs)` throws when the current function's requested output count is outside the bounds. The discouraged three- and four-input forms validate an explicit count and return a message instead of throwing for a count violation.",
     keywords: &["nargoutchk", "function outputs", "arity", "validation"],
-    related: &["narginchk", "nargout"],
+    related: &["narginchk"],
     sections: &[
         BuiltinDocumentationSection { heading: "Forms and results", paragraphs: &[
             "The two-input form uses the selected function invocation's requested output count and produces no output; requesting a result reports `RunMat:TooManyOutputs`. A script or context-free embedding has no function output count and reports `RunMat:NargoutchkContextUnavailable` after its bounds are admitted.",
@@ -103,7 +106,10 @@ pub(super) const NARGOUTCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumen
     ],
     example_exemption: None,
     faqs: &[],
-    links: &[BuiltinDocumentationLink { label: "narginchk", target: BuiltinDocumentationLinkTarget::Builtin("narginchk") }],
+    links: &[
+        BuiltinDocumentationLink { label: "narginchk", target: BuiltinDocumentationLinkTarget::Builtin("narginchk") },
+        BuiltinDocumentationLink { label: "Function output counts with nargout", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/docs/FUNCTIONS.md#optional-arguments-with-nargin") },
+    ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Runtime arity checker", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/arity_check.rs") }],
