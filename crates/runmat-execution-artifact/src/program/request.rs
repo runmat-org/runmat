@@ -48,7 +48,7 @@ pub struct ProgramExecutionDescriptor {
 
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
-        self.artifact.validate_against(&self.recipe)?;
+        let artifact = self.artifact.validate_context(&self.recipe)?;
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
             || self.callable.validate().is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
@@ -58,7 +58,7 @@ impl ProgramExecutionDescriptor {
                 "program descriptor has an inconsistent callable or output contract".into(),
             ));
         }
-        if let Some(admission) = self.artifact.executable_unit_admission()? {
+        if let Some(admission) = artifact.unit_admission.as_ref() {
             if self.callable.semantic_function() != Some(admission.identity.entrypoint_function) {
                 return Err(ArtifactError::Invalid(
                     "program descriptor callable does not match its executable-unit entrypoint"
@@ -142,12 +142,16 @@ impl ProgramExecutionRequest {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
+        self.validate_context().map(|_| ())
+    }
+
+    fn validate_context(&self) -> ArtifactResult<super::artifact::ValidatedArtifactContext> {
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
         }
-        self.artifact.validate_against(&self.recipe)?;
+        let artifact = self.artifact.validate_context(&self.recipe)?;
         if self.callable.validate().is_err()
             || self
                 .assignment
@@ -165,9 +169,9 @@ impl ProgramExecutionRequest {
             ));
         }
         if self.artifact.form == ExecutableForm::ExecutableUnitV3 {
-            let admission = self
-                .artifact
-                .executable_unit_admission()?
+            let admission = artifact
+                .unit_admission
+                .as_ref()
                 .expect("executable-unit form returns its validated admission header");
             if self.callable.semantic_function() != Some(admission.identity.entrypoint_function)
                 || (admission.identity.entrypoint_kind
@@ -179,13 +183,12 @@ impl ProgramExecutionRequest {
                 ));
             }
         }
-        let source_map = self.artifact.executable_source_map_v2(&self.recipe)?;
         for argument in &self.arguments {
             argument
-                .validate_for_program_sources(ValueLimits::default(), source_map.as_ref())
+                .validate_for_program_sources(ValueLimits::default(), artifact.source_map.as_ref())
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         }
-        Ok(())
+        Ok(artifact)
     }
 
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
@@ -276,8 +279,8 @@ pub enum ProgramExecutionResponse {
 
 impl ProgramExecutionResponse {
     pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
-        request.validate()?;
-        let source_map = request.artifact.executable_source_map_v2(&request.recipe)?;
+        let artifact = request.validate_context()?;
+        let source_map = artifact.source_map.as_ref();
         match self {
             Self::Success { outputs } => {
                 if outputs.len() != usize::from(request.requested_outputs) {
@@ -285,14 +288,12 @@ impl ProgramExecutionResponse {
                         "program response differs from its output contract".into(),
                     ));
                 }
-                validate_output_payloads(outputs, source_map.as_ref())
+                validate_output_payloads(outputs, source_map)
             }
             Self::ExternalizedSuccess {
                 outputs,
                 result_objects,
-            } => {
-                validate_externalized_success(request, outputs, result_objects, source_map.as_ref())
-            }
+            } => validate_externalized_success(request, outputs, result_objects, source_map),
             Self::SpmdSuccess { outputs } => {
                 if !matches!(request.callable, ProgramCallable::SpmdRegion { .. })
                     || outputs.len() != usize::from(request.requested_outputs)
@@ -303,7 +304,7 @@ impl ProgramExecutionResponse {
                 }
                 for output in outputs.iter().flatten() {
                     output
-                        .validate_for_program_sources(source_map.as_ref())
+                        .validate_for_program_sources(source_map)
                         .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
                 }
                 Ok(())
@@ -317,8 +318,8 @@ impl ProgramExecutionResponse {
                 Ok(())
             }
             Self::RuntimeFailure { failure } => failure
-                .validate_for_program_sources(source_map.as_ref())
-                .map_err(|error| ArtifactError::Limit(error.to_string())),
+                .validate_for_program_sources(source_map)
+                .map_err(|error| ArtifactError::Invalid(error.to_string())),
         }
     }
 }

@@ -37,6 +37,11 @@ pub struct ProgramArtifact {
     pub executable_bytes: Vec<u8>,
 }
 
+pub(super) struct ValidatedArtifactContext {
+    pub(super) source_map: Option<runmat_execution::ExecutableSourceMapV2>,
+    pub(super) unit_admission: Option<runmat_execution::ExecutableUnitAdmission>,
+}
+
 impl ProgramArtifact {
     pub fn native_object(&self) -> ArtifactResult<Option<super::NativeObjectPayload>> {
         if self.form != ExecutableForm::NativeObjectV1 {
@@ -67,41 +72,6 @@ impl ProgramArtifact {
             .map_err(|error| ArtifactError::Invalid(error.to_string()))
     }
 
-    /// Exact validated portable source map, if this artifact carries one.
-    /// Source-less forms have no authority to carry portable source ordinals.
-    pub fn executable_source_map_v2(
-        &self,
-        recipe: &ProgramBuildRecipe,
-    ) -> ArtifactResult<Option<runmat_execution::ExecutableSourceMapV2>> {
-        match self.form {
-            ExecutableForm::ExecutableUnitV3 => {
-                let unit = self.executable_unit()?.expect("unit form has an envelope");
-                match unit.manifest.revisions.source_map_schema {
-                    1 => return Ok(None), // Legacy source-less admission remains explicit.
-                    2 => {}
-                    version => {
-                        return Err(ArtifactError::Invalid(format!(
-                            "unsupported executable source-map schema {version}"
-                        )))
-                    }
-                }
-                let component = unit
-                    .component(runmat_execution::ExecutableComponentKind::SourceMap)
-                    .ok_or_else(|| {
-                        ArtifactError::Invalid("executable source map is missing".into())
-                    })?;
-                runmat_execution::ExecutableSourceMapV2::decode(&component.bytes)
-                    .map(Some)
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
-            }
-            ExecutableForm::InterpreterRegionSourcesV1 => {
-                InterpreterRegionSourcesV1::decode(&self.executable_bytes, &recipe.program_revision)
-                    .map(|payload| Some(payload.source_map().clone()))
-            }
-            _ => Ok(None),
-        }
-    }
-
     pub fn materialize(
         recipe: &ProgramBuildRecipe,
         form: ExecutableForm,
@@ -128,6 +98,13 @@ impl ProgramArtifact {
     }
 
     pub fn validate_against(&self, recipe: &ProgramBuildRecipe) -> ArtifactResult<()> {
+        self.validate_context(recipe).map(|_| ())
+    }
+
+    pub(super) fn validate_context(
+        &self,
+        recipe: &ProgramBuildRecipe,
+    ) -> ArtifactResult<ValidatedArtifactContext> {
         if self.schema_version != PROGRAM_ARTIFACT_SCHEMA_VERSION
             || self.recipe_id != recipe.id()?
             || self.target != recipe.target
@@ -147,10 +124,18 @@ impl ProgramArtifact {
             ));
         }
         self.target.validate_form(self.form)?;
+        let mut context = ValidatedArtifactContext {
+            source_map: None,
+            unit_admission: self.executable_unit_admission()?,
+        };
         if self.form == ExecutableForm::InterpreterRegionSourcesV1 {
-            InterpreterRegionSourcesV1::decode(&self.executable_bytes, &recipe.program_revision)?;
+            let region = InterpreterRegionSourcesV1::decode(
+                &self.executable_bytes,
+                &recipe.program_revision,
+            )?;
+            context.source_map = Some(region.source_map().clone());
         }
-        if let Some(admission) = self.executable_unit_admission()? {
+        if let Some(admission) = context.unit_admission.as_ref() {
             if admission.identity.program != recipe.program_revision
                 || admission.identity.entrypoint != recipe.entrypoint
                 || admission.interop != recipe.interop
@@ -177,8 +162,28 @@ impl ProgramArtifact {
             // The transport envelope remains a bounded, opaque byte container
             // here. Validate its canonical bytes and component digests without
             // interpreting MIR, analysis, bytecode, or registry payloads.
-            self.executable_unit()?
+            let unit = self
+                .executable_unit()?
                 .expect("executable-unit form returns its validated envelope");
+            context.source_map = match unit.manifest.revisions.source_map_schema {
+                1 => None, // Explicit legacy source-less admission.
+                2 => {
+                    let component = unit
+                        .component(runmat_execution::ExecutableComponentKind::SourceMap)
+                        .ok_or_else(|| {
+                            ArtifactError::Invalid("executable source map is missing".into())
+                        })?;
+                    Some(
+                        runmat_execution::ExecutableSourceMapV2::decode(&component.bytes)
+                            .map_err(|error| ArtifactError::Invalid(error.to_string()))?,
+                    )
+                }
+                version => {
+                    return Err(ArtifactError::Invalid(format!(
+                        "unsupported executable source-map schema {version}"
+                    )))
+                }
+            };
         }
         if self.form == ExecutableForm::NativeObjectV1 {
             let payload = self
@@ -193,7 +198,7 @@ impl ProgramArtifact {
                 ));
             }
         }
-        Ok(())
+        Ok(context)
     }
 }
 
