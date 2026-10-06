@@ -92,11 +92,6 @@ impl TimingSessionState {
         self.latest
     }
 
-    #[cfg(test)]
-    pub(crate) fn clear(&mut self) {
-        self.latest = None;
-        self.starts.clear();
-    }
 }
 
 #[cfg(test)]
