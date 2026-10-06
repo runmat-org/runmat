@@ -19,9 +19,13 @@ const BUILTIN_NAME: &str = "open";
 #[runtime_builtin(
     name = "open",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::open"
 )]
-async fn open_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn open_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if args.len() != 1 {
         return Err(open_error(
             &OPEN_ERROR_ARG_COUNT,
@@ -57,21 +61,27 @@ async fn open_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     let path = resolve_open_path(&name).await?;
-    open_path(&path).await
+    open_path(runtime.as_ref(), &path).await
 }
 
-async fn open_path(path: &Path) -> BuiltinResult<Value> {
+async fn open_path(
+    runtime: Option<&crate::context::RuntimeContext>,
+    path: &Path,
+) -> BuiltinResult<Value> {
     let extension = normalized_extension(path);
     let path_text = path_to_string(path);
 
     if extension == "fig" {
-        if let Some(handle) = try_open_runmat_figure_scene(path).await? {
-            return Ok(Value::Num(handle as f64));
+        let args = [Value::String(path_text)];
+        let opened = match runtime {
+            Some(runtime) => {
+                crate::call_builtin_async_with_outputs_in_context(runtime, "openfig", &args, 1)
+                    .await
+            }
+            None => crate::call_builtin_async_with_outputs("openfig", &args, 1).await,
         }
-        let eval = crate::builtins::io::mat::load::evaluate(&[Value::String(path_text)])
-            .await
-            .map_err(|err| open_flow_error("open", err))?;
-        return Ok(eval.first_output());
+        .map_err(|err| open_flow_error("open", err))?;
+        return Ok(opened);
     }
 
     if extension == "mat" {
@@ -158,23 +168,6 @@ async fn call_extension_handler(extension: &str, path: &Path) -> BuiltinResult<O
             }
             builder.build()
         })
-}
-
-async fn try_open_runmat_figure_scene(path: &Path) -> BuiltinResult<Option<u32>> {
-    #[cfg(feature = "plot-core")]
-    {
-        let text = path_to_string(path);
-        match crate::builtins::plotting::import_figure_scene_from_path_async(&text).await {
-            Ok(Some(handle)) => Ok(Some(handle.as_u32())),
-            Ok(None) => Ok(None),
-            Err(_) => Ok(None),
-        }
-    }
-    #[cfg(not(feature = "plot-core"))]
-    {
-        let _ = path;
-        Ok(None)
-    }
 }
 
 fn normalized_extension(path: &Path) -> String {

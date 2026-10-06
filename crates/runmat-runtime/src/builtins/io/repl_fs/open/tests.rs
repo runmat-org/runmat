@@ -11,7 +11,7 @@ fn invalid_names_reject_without_host_or_provider_access() {
     );
     for value in [resident, pages, Value::Num(1.0)] {
         assert_eq!(
-            block_on(open_builtin(vec![value]))
+            block_on(open_builtin(None, vec![value]))
                 .unwrap_err()
                 .identifier(),
             OPEN_ERROR_NAME.identifier
@@ -87,9 +87,10 @@ impl Drop for CurrentDirGuard {
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     let outputs = crate::output_count::current_output_count();
     let (context, _) = crate::context::document_test_support::recording_context();
+    let selected = context.clone();
     block_on(context.scope(async move {
         let _outputs = crate::output_count::push_output_count(outputs);
-        open_builtin(args).await
+        open_builtin(Some(selected), args).await
     }))
 }
 
@@ -123,8 +124,11 @@ fn open_variable_name_requests_host_editor() {
     set_workspace(&[("answer", Value::Num(42.0))]);
 
     let (context, recorder) = crate::context::document_test_support::recording_context();
-    let result =
-        block_on(context.scope(open_builtin(vec![Value::from("answer")]))).expect("open variable");
+    let result = block_on(context.scope(open_builtin(
+        Some(context.clone()),
+        vec![Value::from("answer")],
+    )))
+    .expect("open variable");
 
     assert_eq!(result, empty_array());
     assert_eq!(
@@ -141,13 +145,13 @@ fn editor_file_requires_a_host_and_delivers_the_resolved_path() {
     let path = directory.path().join("editor.m");
     std::fs::write(&path, "value = 1;\n").unwrap();
     let args = vec![Value::from(path.to_string_lossy().into_owned())];
-    let error = block_on(open_builtin(args.clone())).unwrap_err();
+    let error = block_on(open_builtin(None, args.clone())).unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:host:DocumentInteractionUnavailable")
     );
     let (context, recorder) = crate::context::document_test_support::recording_context();
-    block_on(context.scope(open_builtin(args))).unwrap();
+    block_on(context.scope(open_builtin(Some(context.clone()), args))).unwrap();
     assert_eq!(
         *recorder.requests.borrow(),
         vec![crate::context::HostDocumentRequest::OpenFile {
@@ -175,9 +179,10 @@ fn zero_output_extension_handler_is_handled_without_viewer_fallthrough() {
     let _outputs = crate::output_count::push_output_count(Some(0));
     let _semantic_outputs = crate::output_context::push_output_count(0);
     assert_eq!(
-        block_on(open_builtin(vec![Value::from(
-            path.to_string_lossy().into_owned()
-        )]))
+        block_on(open_builtin(
+            None,
+            vec![Value::from(path.to_string_lossy().into_owned())]
+        ))
         .unwrap(),
         empty_array()
     );

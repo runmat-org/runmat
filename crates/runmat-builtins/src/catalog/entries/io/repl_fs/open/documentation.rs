@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION:BuiltinDocumentation=BuiltinDocumentation {
     title:Some("open"),
     slug:Some("open"),
     summary:"Open a file or variable using MATLAB-compatible dispatch.",
-    description:"`open(name)` resolves a workspace variable or file using RunMat's search path. MAT-files return a struct; RunMat figure scenes return a figure handle; custom `open<extension>` handlers receive the resolved path. Editor, viewer, and variable requests are delivered to the active application host. These routes report an error when no supporting host is installed.",
+    description:"`open(name)` resolves a workspace variable or file using RunMat's search path. MAT-files return a struct; RunMat figure archives dispatch through `openfig` and return a figure handle; custom `open<extension>` handlers receive the resolved path. Editor, viewer, and variable requests are delivered to the active application host. These routes report an error when no supporting host is installed.",
     keywords:&[
         "open",
         "file",
@@ -27,7 +27,7 @@ pub(super) const DOCUMENTATION:BuiltinDocumentation=BuiltinDocumentation {
                 "Names without an extension are searched on the current RunMat path using MATLAB-like file extensions.",
                 "Names with an explicit extension are first searched exactly on the current RunMat path so custom extensions such as `.log` can dispatch to `openlog`.",
                 "MAT-files are decoded through the same implementation as `load` and return a scalar struct with one field per variable.",
-                "`.fig` files first try RunMat figure-scene import and return a numeric figure handle when successful; otherwise RunMat decodes them as MAT-file containers until full MATLAB figure reconstruction is available.",
+                "`.fig` files dispatch to `openfig` and return its numeric figure handle. RunMat figure archives are not decoded as MAT-file containers.",
                 "For non-MAT files, RunMat looks for a semantic handler named `open<extension>` and passes the resolved file path as a string.",
                 "Known text, script, project/model, document, toolbox/install, executable, and spreadsheet extensions request the active host's editor or viewer. They return an empty 0-by-0 array after host acceptance, not a no-op success.",
                 "Requesting more than one output raises `RunMat:open:TooManyOutputs`.",
