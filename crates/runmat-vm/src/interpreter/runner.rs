@@ -1360,7 +1360,7 @@ mod tests {
             ],
             0,
         );
-        let expected_validation_error = RuntimeError::new(
+        let expected_validation_error = runmat_runtime::RuntimeError::new(
             bytecode
                 .validate_catch_scope_metadata()
                 .expect_err("fixture has invalid catch metadata"),
