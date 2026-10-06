@@ -19,6 +19,18 @@ pub struct ExecutableUnit {
 }
 
 impl ExecutableUnit {
+    /// Retain the canonical frame layout before installing executable regions.
+    pub(crate) fn retain_vm_layout(
+        bytecode: &mut runmat_vm::Bytecode,
+        hir: &runmat_hir::HirAssembly,
+        mir: &runmat_mir::MirAssembly,
+    ) -> Result<(), runmat_vm::LayoutError> {
+        if bytecode.layout.is_none() {
+            bytecode.layout = Some(runmat_vm::derive_layout(hir, mir)?);
+        }
+        Ok(())
+    }
+
     /// Bind immutable program ordinals to fresh session-issued provenance for
     /// one invocation. The returned context retains every lease while pending.
     pub(crate) fn bind_runtime_sources(

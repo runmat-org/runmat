@@ -353,6 +353,14 @@ pub(in crate::session) async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionCompileError")
                     .build()
                 })?;
+                crate::ExecutableUnit::retain_vm_layout(&mut bytecode, &lowering.assembly, &mir)
+                    .map_err(|error| {
+                        build_runtime_error(format!(
+                            "failed to retain executable VM layout: {error:?}"
+                        ))
+                        .with_identifier("RunMat:ExecutableLayout")
+                        .build()
+                    })?;
                 let unit = crate::ExecutableUnit::new(
                     executable_source,
                     revision,

@@ -1193,19 +1193,17 @@ impl RunMatSession {
                     .expect("canonical frontend returned no bytecode without an error"),
             )
         };
-        if bytecode.layout.is_none() {
-            bytecode.layout = Some(runmat_vm::derive_layout(&lowering.assembly, &mir).map_err(
-                |error| {
-                    RunError::Runtime(
-                        build_runtime_error(format!(
-                            "failed to retain executable VM layout: {error:?}"
-                        ))
-                        .with_identifier("RunMat:ExecutableLayout")
-                        .build(),
-                    )
-                },
-            )?);
-        }
+        crate::ExecutableUnit::retain_vm_layout(&mut bytecode, &lowering.assembly, &mir).map_err(
+            |error| {
+                RunError::Runtime(
+                    build_runtime_error(format!(
+                        "failed to retain executable VM layout: {error:?}"
+                    ))
+                    .with_identifier("RunMat:ExecutableLayout")
+                    .build(),
+                )
+            },
+        )?;
         source_table
             .validate_compiled_sources(&bytecode, &lowering.assembly)
             .map_err(|error| {
