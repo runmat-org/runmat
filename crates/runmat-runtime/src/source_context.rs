@@ -7,6 +7,8 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 mod lexical;
+mod current_overlay;
+use current_overlay::CurrentSourceOverlay;
 use lexical::SourceFileIdentity;
 pub use lexical::{lease_nested_source_context_in_context, NestedSourceIdentityError};
 
@@ -272,7 +274,7 @@ impl Drop for LeaseInner {
         if sources
             .leased_catalog
             .get(&id)
-            .is_some_and(|entry| entry.owner.as_ptr() == self as *const LeaseInner)
+            .is_some_and(|entry| std::ptr::eq(entry.owner.as_ptr(), self))
         {
             sources.leased_catalog.remove(&id);
             if sources.issued_authorities.get(&id) == Some(&self.authority) {
@@ -476,10 +478,12 @@ impl crate::context::SourceState {
     /// A fork gets a provenance snapshot, not a copy of the parent's lease
     /// authority. Expired leases contribute neither records nor retained text.
     pub(crate) fn fork_snapshot(&self) -> Self {
-        let mut snapshot = Self::default();
-        snapshot.current = self.current.clone();
-        snapshot.catalog = self.catalog.clone();
-        snapshot.imported_identities = self.imported_identities.clone();
+        let mut snapshot = Self {
+            current: self.current.clone(),
+            catalog: self.catalog.clone(),
+            imported_identities: self.imported_identities.clone(),
+            ..Self::default()
+        };
         for (id, entry) in &self.leased_catalog {
             if let Some(info) = entry.live_info() {
                 if snapshot.catalog.remove(id).is_none() {
@@ -556,15 +560,15 @@ runmat_thread_local! {
 
 pub struct SourceContextGuard {
     prev: Option<SourceInfo>,
-    invocation_current: Option<(Rc<RefCell<SourceCurrentProjection>>, Rc<Cell<bool>>)>,
+    invocation_current: Option<CurrentSourceOverlay>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for SourceContextGuard {
     fn drop(&mut self) {
         let prev = self.prev.take();
-        if let Some((current, live)) = &self.invocation_current {
-            current.borrow_mut().retire(live);
+        if let Some(overlay) = &self.invocation_current {
+            overlay.retire();
         } else if let Some(state) = &self.state {
             state.source.borrow_mut().current = prev;
         } else {
@@ -672,10 +676,10 @@ pub fn replace_current_source_context(
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
             let current = Rc::clone(current);
-            let live = current.borrow_mut().push(next);
+            let overlay = CurrentSourceOverlay::push(current, next);
             return SourceContextGuard {
                 prev: None,
-                invocation_current: Some((current, live)),
+                invocation_current: Some(overlay),
                 state: None,
             };
         }
@@ -736,10 +740,10 @@ pub fn replace_current_source_id_in_context(
         .or_else(|| runtime.source_current());
     if let Some(current) = current {
         let current = Rc::clone(current);
-        let live = current.borrow_mut().push(next);
+        let overlay = CurrentSourceOverlay::push(current, next);
         SourceContextGuard {
             prev: None,
-            invocation_current: Some((current, live)),
+            invocation_current: Some(overlay),
             state: None,
         }
     } else {

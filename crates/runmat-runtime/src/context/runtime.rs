@@ -362,9 +362,7 @@ impl RuntimeContext {
         &self,
         source: crate::source_context::RuntimeSourceRef,
     ) -> Option<runmat_types::ProgramSourceId> {
-        if source.resolve_in(self).is_none() {
-            return None;
-        }
+        source.resolve_in(self)?;
         self.program_sources.as_ref()?.source_ordinal(source)
     }
 

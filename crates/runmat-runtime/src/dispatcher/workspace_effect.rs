@@ -60,10 +60,7 @@ impl PostCallWorkspaceEffectFence {
                     })
                     .transpose();
                 let checkpoint = self.checkpoint();
-                let _roots = match roots {
-                    Ok(roots) => roots,
-                    Err(error) => return Err(error),
-                };
+                let _roots = roots?;
                 checkpoint.map(|()| value)
             }
         }
