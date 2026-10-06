@@ -1749,6 +1749,7 @@ mod tests {
         ));
         let (runtime, activation) =
             crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
+        let outer_frame = activation.frame();
         let mut child = Bytecode::with_instructions(
             vec![Instr::LoadConst(2.0), Instr::StoreVar(0), Instr::Return],
             1,
@@ -1780,6 +1781,7 @@ mod tests {
                 Some(Value::Num(1.0))
             );
         })));
+        let _ = crate::runtime::workspace::take_workspace_completion(outer_frame);
     }
 
     #[test]
