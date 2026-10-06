@@ -4,12 +4,10 @@ use super::*;
 
 #[runtime_builtin(
     name = "timer",
+    binding_variant = "default",
     category = "timing",
     summary = "Create a timer handle object for scheduled callbacks.",
     keywords = "timer,callback,start,stop,wait,timerfind",
-    descriptor(crate::builtins::timing::timer::TIMER_DESCRIPTOR),
-    extensions(crate::builtins::timing::timer::TIMER_EXTENSIONS),
-    integer_capabilities(crate::builtins::timing::timer::TIMER_INTEGER_CAPABILITIES),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -57,12 +55,10 @@ pub async fn timer_builtin(
 
 #[runtime_builtin(
     name = "timerfind",
+    binding_variant = "default",
     category = "timing",
     summary = "Find visible timer objects by property value.",
     keywords = "timerfind,timer,callback,handle",
-    descriptor(crate::builtins::timing::timer::TIMERFIND_DESCRIPTOR),
-    extensions(crate::builtins::timing::timer::TIMERFIND_EXTENSIONS),
-    integer_capabilities(crate::builtins::timing::timer::TIMERFIND_INTEGER_CAPABILITIES),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -80,12 +76,10 @@ pub async fn timerfind_builtin(
 
 #[runtime_builtin(
     name = "timerfindall",
+    binding_variant = "default",
     category = "timing",
     summary = "Find all timer objects by property value.",
     keywords = "timerfindall,timer,callback,handle",
-    descriptor(crate::builtins::timing::timer::TIMERFINDALL_DESCRIPTOR),
-    extensions(crate::builtins::timing::timer::TIMERFIND_EXTENSIONS),
-    integer_capabilities(crate::builtins::timing::timer::TIMERFIND_INTEGER_CAPABILITIES),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -103,13 +97,13 @@ pub async fn timerfindall_builtin(
 
 #[runtime_builtin(
     name = "__runmat_timer_start",
+    binding_variant = "default",
     execution_stack = "process",
     category = "timing",
     summary = "Start a timer object.",
     keywords = "timer,start",
     sink = true,
     suppress_auto_output = true,
-    descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -124,13 +118,13 @@ pub async fn timer_start_builtin(
 
 #[runtime_builtin(
     name = "__runmat_timer_startat",
+    binding_variant = "default",
     execution_stack = "process",
     category = "timing",
     summary = "Start a timer object at a requested time.",
     keywords = "timer,startat",
     sink = true,
     suppress_auto_output = true,
-    descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -161,13 +155,13 @@ pub async fn timer_startat_builtin(
 
 #[runtime_builtin(
     name = "__runmat_timer_stop",
+    binding_variant = "default",
     execution_stack = "process",
     category = "timing",
     summary = "Stop a timer object.",
     keywords = "timer,stop",
     sink = true,
     suppress_auto_output = true,
-    descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -182,13 +176,13 @@ pub async fn timer_stop_builtin(
 
 #[runtime_builtin(
     name = "__runmat_timer_wait",
+    binding_variant = "default",
     execution_stack = "process",
     category = "timing",
     summary = "Wait until timer objects finish.",
     keywords = "timer,wait",
     sink = true,
     suppress_auto_output = true,
-    descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
@@ -203,13 +197,13 @@ pub async fn timer_wait_builtin(
 
 #[runtime_builtin(
     name = "__runmat_timer_delete",
+    binding_variant = "default",
     execution_stack = "process",
     category = "timing",
     summary = "Delete a timer object.",
     keywords = "timer,delete",
     sink = true,
     suppress_auto_output = true,
-    descriptor(crate::builtins::timing::timer::TIMER_METHOD_DESCRIPTOR),
     context = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
