@@ -1845,7 +1845,11 @@ mod tests {
                     )
                     .await
                     .expect("zero-variable nested interpreter should own an exact child frame");
-                    assert!(result.is_empty());
+                    assert_eq!(
+                        result,
+                        vec![Value::Num(13.0)],
+                        "dynamic Current assignment should remain in the child frame's completed variables"
+                    );
                     assert_eq!(
                         crate::runtime::workspace::workspace_lookup("child_local"),
                         None
