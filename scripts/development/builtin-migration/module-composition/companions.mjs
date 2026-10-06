@@ -10,6 +10,18 @@ const COMPANIONS = Object.freeze([
     path: "crates/runmat-builtins/src/catalog/entries/exports.rs",
   }),
   Object.freeze({
+    parent_id: "catalog-io",
+    section: "declarations",
+    module: "declarations",
+    path: "crates/runmat-builtins/src/catalog/entries/io/declarations.rs",
+  }),
+  Object.freeze({
+    parent_id: "catalog-io",
+    section: "reexports",
+    module: "exports",
+    path: "crates/runmat-builtins/src/catalog/entries/io/exports.rs",
+  }),
+  Object.freeze({
     parent_id: "catalog-io-repl-fs",
     section: "declarations",
     module: "declarations",

@@ -52,6 +52,37 @@ test("generated companion exports preserve public Rust paths", () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("declaration and reexport companions compose without losing the exports module", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-rust-both-companions-"));
+  try {
+    const base = "catalog/entries/io";
+    const alpha = child("alpha", `crates/runmat-builtins/src/${base}/alpha.rs`, "private", 0);
+    alpha.reexports = [{ kind: "named", visibility: "public", condition: ALWAYS,
+      doc_hidden: false, items: [{ name: "Alpha", alias: null }] }];
+    const product = {
+      product_id: "catalog-io", crate_role: "catalog",
+      path: `crates/runmat-builtins/src/${base}/mod.rs`,
+      module_path: "crate::catalog::entries::io", state: "present",
+      aggregations: [], aggregation_exports: [],
+      children: [
+        alpha,
+        { ...child("declarations", `crates/runmat-builtins/src/${base}/declarations.rs`, "private", 2),
+          role: "support", companion_section: "declarations" },
+        { ...child("exports", `crates/runmat-builtins/src/${base}/exports.rs`, "private", 1),
+          role: "support", companion_section: "reexports" },
+      ],
+    };
+    write(root, `${base}/mod.rs`, renderModuleCompositionProduct(product));
+    write(root, `${base}/declarations.rs`, renderModuleCompositionCompanion(product, "declarations"));
+    write(root, `${base}/exports.rs`, renderModuleCompositionCompanion(product, "reexports"));
+    write(root, `${base}/alpha.rs`, "pub struct Alpha;\n");
+    write(root, "lib.rs", "pub mod catalog { pub mod entries { pub mod io; } }\npub use catalog::entries::io::Alpha;\n");
+    const compiled = spawnSync("rustc", ["--edition=2021", "--crate-type=lib", "--emit=metadata",
+      "-o", path.join(root, "out.rmeta"), path.join(root, "lib.rs")], { encoding: "utf8" });
+    assert.equal(compiled.status, 0, compiled.stderr);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("included declaration companion resolves children at the reviewed parent paths", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-composition-rust-declarations-"));
   try {

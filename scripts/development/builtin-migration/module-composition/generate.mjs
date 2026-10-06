@@ -52,7 +52,7 @@ export function renderModuleCompositionCompanion(value, section) {
     throw new Error(`${product.product_id}: companion is not activated by the reviewed projection`);
   }
   const body = section === "declarations"
-    ? declarations(product, { omitCompanions: true, forcePaths: true })
+    ? declarations(product, { omitCompanionSection: "declarations", forcePaths: true })
     : reexports(product.children, { placement: "companion", companion: true });
   return formatRustModule(`${HEADER}\n\n${body}${body ? "\n" : ""}`);
 }
@@ -68,8 +68,8 @@ function renderAggregationExports(exports) {
 
 export function generatedHeader() { return HEADER; }
 
-function declarations(product, { omitCompanions = false, forcePaths = false } = {}) {
-  return [...product.children].filter((child) => !omitCompanions || child.companion_section == null)
+function declarations(product, { omitCompanionSection = null, forcePaths = false } = {}) {
+  return [...product.children].filter((child) => child.companion_section !== omitCompanionSection)
     .sort((left, right) => left.declaration_order - right.declaration_order).map((child) => {
     const attributes = conditionLines(child.declaration_condition);
     // An included non-mod-rs file is not itself the module root. Explicit
