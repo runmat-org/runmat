@@ -3,6 +3,8 @@
 //! become part of the general instruction dispatch frame.
 
 use super::super::*;
+use std::future::Future;
+use std::pin::Pin;
 
 #[path = "dispatch/builtin.rs"]
 mod builtin;
@@ -26,15 +28,15 @@ pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub imports: &'a Vec<(Vec<String>, bool)>,
     pub pc: &'a mut usize,
     pub source_id: Option<runmat_hir::SourceId>,
-    pub call_arg_spans: &'a Option<Vec<runmat_hir::Span>>,
+    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub current_function_name: &'a str,
 }
 
-pub(in crate::interpreter::dispatch) async fn dispatch_call(
-    ctx: CallDispatchContext<'_>,
-) -> Result<Option<DispatchHandled>, RuntimeError> {
+pub(in crate::interpreter::dispatch) fn dispatch_call<'a>(
+    ctx: CallDispatchContext<'a>,
+) -> Pin<Box<dyn Future<Output = Result<Option<DispatchHandled>, RuntimeError>> + 'a>> {
     match ctx.instr {
         Instr::CallBuiltinMulti(..)
         | Instr::CallBuiltinMultiUsingOutputSlot(..)
@@ -43,18 +45,16 @@ pub(in crate::interpreter::dispatch) async fn dispatch_call(
         | Instr::CallFevalMulti(..)
         | Instr::CallFevalMultiUsingOutputSlot(..)
         | Instr::CallFevalExpandMultiOutput(..)
-        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(..) => {
-            Box::pin(builtin::dispatch(ctx)).await
-        }
+        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(..) => Box::pin(builtin::dispatch(ctx)),
         Instr::CallSemanticFunctionMulti(..)
         | Instr::CallSemanticFunctionMultiUsingOutputSlot(..)
         | Instr::CallSemanticNestedFunctionMulti { .. }
         | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
         | Instr::CallFunctionMulti { .. }
-        | Instr::CallFunctionMultiUsingOutputSlot { .. } => Box::pin(user::dispatch(ctx)).await,
+        | Instr::CallFunctionMultiUsingOutputSlot { .. } => Box::pin(user::dispatch(ctx)),
         Instr::CallWorkspaceFirstMulti { .. }
         | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. } => {
-            Box::pin(workspace::dispatch(ctx)).await
+            Box::pin(workspace::dispatch(ctx))
         }
         Instr::CallBuiltinExpandMultiOutput(..)
         | Instr::CallSuperConstructorExpandMultiOutput { .. }
@@ -64,12 +64,10 @@ pub(in crate::interpreter::dispatch) async fn dispatch_call(
         | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { .. }
         | Instr::CallSemanticFunctionExpandMultiOutput(..)
         | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. } => {
-            Box::pin(expanded::dispatch(ctx)).await
+            Box::pin(expanded::dispatch(ctx))
         }
         Instr::CallMethodOrMemberIndexMulti { .. }
-        | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => {
-            Box::pin(method::dispatch(ctx)).await
-        }
-        _ => Ok(None),
+        | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => Box::pin(method::dispatch(ctx)),
+        _ => unreachable!("call dispatcher received a non-call instruction"),
     }
 }

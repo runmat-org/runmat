@@ -1716,6 +1716,10 @@ async fn interpret_function_with_counts_in_context_inner(
 mod native_metadata_tests;
 
 #[cfg(test)]
+#[path = "runner/process_dispatch_tests.rs"]
+mod process_dispatch_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         interpret_function_with_counts_in_context, interpret_resume_in_context,

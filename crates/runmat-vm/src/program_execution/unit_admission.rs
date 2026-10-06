@@ -2,6 +2,7 @@ use runmat_execution::{ExecutableComponentKind, ExecutableUnitEnvelope};
 
 use crate::{Bytecode, FunctionRegistry, VmAssemblyLayout};
 
+#[path = "unit_admission/entrypoint.rs"]
 mod entrypoint;
 
 /// Fully decoded executable unit whose component identities and revisions have

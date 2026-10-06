@@ -4,10 +4,12 @@ mod call_output_sequence;
 mod calls;
 mod control_flow;
 mod exceptions;
+mod future;
 mod indexing;
 mod object;
 mod parallel;
 mod prepared_outputs;
+mod route;
 pub(crate) use parallel::encode_spmd_output;
 mod stack;
 
@@ -19,6 +21,7 @@ use crate::runtime::workspace::{
 use runmat_runtime::RuntimeError;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::future::Future;
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -689,33 +692,35 @@ fn pop_aggregate_literal_values(
     Ok(values)
 }
 
-pub async fn dispatch_instruction(
+pub fn dispatch_instruction<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+    hooks: DispatchHooks<'a>,
+) -> impl Future<Output = Result<Option<DispatchHandled>, RuntimeError>> + 'a {
+    future::dispatch_instruction(meta, state, hooks)
+}
+fn dispatch_immediate(
     meta: DispatchMeta<'_>,
     state: DispatchState<'_>,
     hooks: DispatchHooks<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     let DispatchMeta {
         instr,
-        bytecode,
         var_names,
-        function_registry,
-        source_id,
-        call_arg_spans,
-        invocation_arity,
         current_function_name,
+        ..
     } = meta;
     let DispatchState {
         stack,
         vars,
         sequence_register,
         context,
-        try_stack,
-        last_exception,
         imports,
         global_aliases,
         persistent_aliases,
         missing_input_slots,
         pc,
+        ..
     } = state;
     let DispatchHooks {
         store_var_before_overwrite,
@@ -725,107 +730,7 @@ pub async fn dispatch_instruction(
         store_local_after_store,
         store_local_after_fallback_store,
     } = hooks;
-    if let Some(handled) = parallel::dispatch(
-        instr,
-        stack,
-        vars,
-        pc,
-        sequence_register,
-        parallel::ParallelDispatchContext {
-            bytecode,
-            execution: context,
-            function_registry,
-            current_function_name,
-        },
-    )
-    .await?
-    {
-        return Ok(Some(handled));
-    }
-    if prepared_outputs::dispatch(
-        instr,
-        stack,
-        vars,
-        sequence_register,
-        current_function_name,
-        store_var_before_overwrite,
-        store_var_after_store,
-    )
-    .await?
-    {
-        return Ok(Some(DispatchHandled::Generic(
-            DispatchDecision::FallThrough,
-        )));
-    }
-    if let Some(handled) = calls::dispatch_call(calls::CallDispatchContext {
-        instr,
-        stack: &mut *stack,
-        vars: &mut *vars,
-        sequence_register: &mut *sequence_register,
-        context: &mut *context,
-        try_stack: &mut *try_stack,
-        last_exception: &mut *last_exception,
-        imports: &*imports,
-        pc: &mut *pc,
-        source_id,
-        call_arg_spans: &call_arg_spans,
-        invocation_arity,
-        function_registry,
-        current_function_name,
-    })
-    .await?
-    {
-        return Ok(Some(handled));
-    }
     match instr {
-        _ if indexing::dispatch_indexing(
-            instr,
-            stack,
-            vars,
-            function_registry,
-            *pc,
-            &context.runtime,
-            sequence_register,
-        )
-        .await? =>
-        {
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        _ if object::dispatch_object(
-            instr,
-            stack,
-            sequence_register,
-            object::ObjectDispatchContext {
-                vars,
-                runtime: &context.runtime,
-                current_function_name,
-                bytecode,
-                invocation_arity,
-            },
-        )
-        .await? =>
-        {
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        _ if arithmetic::dispatch_arithmetic(instr, stack, &context.runtime).await? => Ok(Some(
-            DispatchHandled::Generic(DispatchDecision::FallThrough),
-        )),
-        Instr::EmitStackTop { label } => {
-            emit_stack_top(stack, label, var_names).await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::EmitVar { var_index, label } => {
-            emit_var(vars, *var_index, label, var_names).await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::LoadConst(value) => {
             load_const(stack, *value);
             Ok(Some(DispatchHandled::Generic(
@@ -1028,36 +933,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::AndAnd(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-            crate::ops::control_flow::and_and(
-                logical_truth_from_value(
-                    &crate::interpreter::stack::pop_value(stack)?,
-                    "short-circuit && condition",
-                )
-                .await?,
-                *target,
-            ),
-            pc,
-        )))),
-        Instr::OrOr(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-            crate::ops::control_flow::or_or(
-                logical_truth_from_value(
-                    &crate::interpreter::stack::pop_value(stack)?,
-                    "short-circuit || condition",
-                )
-                .await?,
-                *target,
-            ),
-            pc,
-        )))),
-        Instr::JumpIfFalse(target) => {
-            let cond = crate::interpreter::stack::pop_value(stack)?;
-            let truth = logical_truth_from_value(&cond, "if condition").await?;
-            Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-                crate::ops::control_flow::jump_if_false(truth, *target),
-                pc,
-            ))))
-        }
         Instr::Jump(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
             crate::ops::control_flow::jump(*target),
             pc,
@@ -1166,36 +1041,6 @@ pub async fn dispatch_instruction(
         }
         Instr::CreateMatrix(rows, cols) => {
             create_matrix(stack, *rows, *cols)?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CreateMatrixFromSequences {
-            row_lengths,
-            elements,
-            ..
-        } => {
-            let rows = materialize_aggregate_rows(stack, sequence_register, row_lengths, elements)?;
-            stack.push(runmat_runtime::create_matrix_from_values(&rows).await?);
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CreateMatrixDynamic(num_rows) => {
-            create_matrix_dynamic(stack, *num_rows, |rows_data| async move {
-                runmat_runtime::create_matrix_from_values(&rows_data).await
-            })
-            .await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CreateRange(has_step) => {
-            let runtime = &context.runtime;
-            create_range(stack, *has_step, |args| async move {
-                crate::call::call_builtin_async(runtime, "colon", &args).await
-            })
-            .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

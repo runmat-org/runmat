@@ -169,15 +169,9 @@ pub type GraphicsCallbackResponder =
         GraphicsCallbackHostEvent,
     ) -> RuntimeServiceFuture<Result<GraphicsCallbackResult, RuntimeError>>;
 
-#[derive(Clone)]
-enum RegisteredCallback {
-    Completion(Rc<GraphicsCallbackHandler>),
-    Response(Rc<GraphicsCallbackResponder>),
-}
-
 struct Registration {
     selected: RuntimeContext,
-    callback: RegisteredCallback,
+    callback: Rc<GraphicsCallbackResponder>,
     figure: u32,
     kind: GraphicsCallbackKind,
     receiver: Option<GraphicsReceiverRef>,
@@ -310,13 +304,11 @@ impl RuntimeGraphicsCallbackQueue {
         kind: GraphicsCallbackKind,
         callback: Rc<GraphicsCallbackHandler>,
     ) -> Result<(GraphicsCallbackRegistration, GraphicsCallbackIngress), RuntimeError> {
-        self.register_inner(
-            selected,
-            figure,
-            kind,
-            None,
-            RegisteredCallback::Completion(callback),
-        )
+        let responder: Rc<GraphicsCallbackResponder> = Rc::new(move |event| {
+            let future = callback(event);
+            Box::pin(async move { future.await.map(|()| GraphicsCallbackResult::Completed) })
+        });
+        self.register_inner(selected, figure, kind, None, responder)
     }
 
     #[cfg(test)]
@@ -327,13 +319,7 @@ impl RuntimeGraphicsCallbackQueue {
         kind: GraphicsCallbackKind,
         callback: Rc<GraphicsCallbackResponder>,
     ) -> Result<(GraphicsCallbackRegistration, GraphicsCallbackIngress), RuntimeError> {
-        self.register_inner(
-            selected,
-            figure,
-            kind,
-            None,
-            RegisteredCallback::Response(callback),
-        )
+        self.register_inner(selected, figure, kind, None, callback)
     }
 
     /// Admit a production callback only for an exact live Figure lease and
@@ -348,13 +334,7 @@ impl RuntimeGraphicsCallbackQueue {
         callback: Rc<GraphicsCallbackResponder>,
     ) -> Result<(GraphicsCallbackRegistration, GraphicsCallbackIngress), RuntimeError> {
         let figure = self.validate_graphics_source(&selected, &receiver)?;
-        self.register_inner(
-            selected,
-            figure,
-            kind,
-            Some(receiver),
-            RegisteredCallback::Response(callback),
-        )
+        self.register_inner(selected, figure, kind, Some(receiver), callback)
     }
 
     fn validate_graphics_source(
@@ -420,7 +400,7 @@ impl RuntimeGraphicsCallbackQueue {
                 id,
                 Registration {
                     selected,
-                    callback: RegisteredCallback::Response(callback),
+                    callback,
                     figure,
                     kind,
                     receiver: Some(receiver),
@@ -498,7 +478,7 @@ impl RuntimeGraphicsCallbackQueue {
         figure: u32,
         kind: GraphicsCallbackKind,
         receiver: Option<GraphicsReceiverRef>,
-        callback: RegisteredCallback,
+        callback: Rc<GraphicsCallbackResponder>,
     ) -> Result<(GraphicsCallbackRegistration, GraphicsCallbackIngress), RuntimeError> {
         if self.0.registrations.borrow().len() >= self.0.maximum_registrations.get() {
             return Err(
@@ -658,16 +638,7 @@ impl RuntimeGraphicsCallbackQueue {
             }
             *self.0.in_flight.borrow_mut() = Some(InFlight::Invoking(Arc::clone(&envelope)));
             let event = envelope.event;
-            let result = selected
-                .scope(async move {
-                    match callback {
-                        RegisteredCallback::Completion(callback) => callback(event)
-                            .await
-                            .map(|()| GraphicsCallbackResult::Completed),
-                        RegisteredCallback::Response(callback) => callback(event).await,
-                    }
-                })
-                .await;
+            let result = selected.scope(async move { callback(event).await }).await;
             invocation.terminal();
             *self.0.in_flight.borrow_mut() = None;
             match result {

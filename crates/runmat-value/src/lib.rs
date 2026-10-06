@@ -40,9 +40,9 @@ pub use object::{
     ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef,
     GraphicsCallbackDisposition, GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure,
     GraphicsCallbackKind, GraphicsCallbackResult, GraphicsReceiverKind, GraphicsReceiverRef,
-    HandleRef, Listener,
-    MemmapElementType, MemmapFieldState, MemmapFormatPresentationState, MemmapReceiverAuthority,
-    MemmapReceiverState, ObjectArray, ObjectInstance, ObjectPersistencePayloadKind,
+    HandleRef, Listener, MemmapElementType, MemmapFieldState, MemmapFormatPresentationState,
+    MemmapReceiverAuthority, MemmapReceiverState, ObjectArray, ObjectInstance,
+    ObjectPersistencePayloadKind,
 };
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{

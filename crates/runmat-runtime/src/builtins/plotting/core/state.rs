@@ -52,6 +52,8 @@ pub use colormap::{
 mod clear_axes;
 #[path = "state/graphics_receiver.rs"]
 mod graphics_receiver;
+#[path = "state/interaction_exclusivity.rs"]
+mod interaction_exclusivity;
 pub use clear_axes::clear_axes_target;
 #[cfg(test)]
 pub use clear_axes::clear_current_axes;
@@ -2896,6 +2898,7 @@ pub fn set_zoom_mode_for_figure(
             &mut state.last_enabled_zoom_motion,
             command,
         );
+        interaction_exclusivity::zoom_selected_for_figure(state, true);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
@@ -2917,6 +2920,9 @@ pub fn set_zoom_mode_for_axes(
         validate_axes_index(state, axes_index)?;
         let mut mode = zoom_mode_for_target(state, Some(axes_index));
         apply_zoom_mode_command(&mut mode, &mut state.last_enabled_zoom_motion, command);
+        if mode.enabled {
+            interaction_exclusivity::zoom_activated_for_axes(state, axes_index);
+        }
         state.zoom_axes_modes.insert(axes_index, mode);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -2954,6 +2960,7 @@ pub fn set_zoom_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Resul
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
         state.zoom_mode.enabled = enabled;
+        interaction_exclusivity::zoom_selected_for_figure(state, false);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };
@@ -3200,6 +3207,7 @@ pub fn set_pan_mode_for_figure(
             &mut state.last_enabled_pan_motion,
             command,
         );
+        interaction_exclusivity::pan_selected_for_figure(state, true);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -3213,6 +3221,9 @@ pub fn set_pan_mode_for_axes(
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         let mut mode = pan_mode_for_target(state, Some(axes_index));
         apply_pan_mode_command(&mut mode, &mut state.last_enabled_pan_motion, command);
+        if mode.enabled {
+            interaction_exclusivity::pan_activated_for_axes(state, axes_index);
+        }
         state.pan_axes_modes.insert(axes_index, mode);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -3222,6 +3233,7 @@ pub fn set_pan_mode_for_axes(
 pub fn set_pan_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
     let ((), figure_clone) = with_figure_mut(handle, |state| {
         state.pan_mode.enabled = enabled;
+        interaction_exclusivity::pan_selected_for_figure(state, false);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
