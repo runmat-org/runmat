@@ -206,7 +206,7 @@ pub fn handle_builtin_outcome(
     let ExceptionRouteContext {
         try_stack,
         vars,
-        last_exception: _,
+        last_exception,
         pc,
     } = ctx;
     match result {
@@ -266,7 +266,7 @@ async fn handle_builtin_call_inner(
     let ExceptionRouteContext {
         try_stack: _,
         vars: _,
-        last_exception,
+        last_exception: _,
         pc,
     } = &exception;
     debug::trace_call_builtin(**pc, name, arg_count, stack);
