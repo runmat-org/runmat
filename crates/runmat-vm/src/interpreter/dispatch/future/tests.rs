@@ -63,9 +63,10 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
 
     let mut future = immediate_future!(&instruction);
 
-    let InstructionDispatchFutureState::Immediate(Some(deferred)) = &future.state else {
+    let InstructionDispatchFutureState::Immediate = &future.state else {
         panic!("LoadConst must use the unboxed immediate state");
     };
+    let deferred = future.immediate.as_ref().expect("deferred instruction");
     assert!(deferred.state.stack.is_empty());
     let mut context = Context::from_waker(std::task::Waker::noop());
     assert!(matches!(

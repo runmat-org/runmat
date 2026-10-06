@@ -12,11 +12,12 @@ type DispatchResult = Result<Option<DispatchHandled>, RuntimeError>;
 type SuspendedDispatchFuture<'a> = Pin<Box<dyn Future<Output = DispatchResult> + 'a>>;
 
 pub(super) struct InstructionDispatchFuture<'a> {
+    immediate: Option<ImmediateInstruction<'a>>,
     state: InstructionDispatchFutureState<'a>,
 }
 
 enum InstructionDispatchFutureState<'a> {
-    Immediate(Option<ImmediateInstruction<'a>>),
+    Immediate,
     Suspended(SuspendedDispatchFuture<'a>),
 }
 
@@ -30,9 +31,11 @@ impl Future for InstructionDispatchFuture<'_> {
     type Output = DispatchResult;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        match &mut self.state {
-            InstructionDispatchFutureState::Immediate(instruction) => {
-                let instruction = instruction
+        let this = self.as_mut().get_mut();
+        match &mut this.state {
+            InstructionDispatchFutureState::Immediate => {
+                let instruction = this
+                    .immediate
                     .take()
                     .expect("completed instruction future was polled again");
                 Poll::Ready(dispatch_immediate(
@@ -53,16 +56,14 @@ impl<'a> InstructionDispatchFuture<'a> {
         hooks: DispatchHooks<'a>,
     ) -> Self {
         Self {
-            state: InstructionDispatchFutureState::Immediate(Some(ImmediateInstruction {
-                meta,
-                state,
-                hooks,
-            })),
+            immediate: Some(ImmediateInstruction { meta, state, hooks }),
+            state: InstructionDispatchFutureState::Immediate,
         }
     }
 
     fn suspended(future: SuspendedDispatchFuture<'a>) -> Self {
         Self {
+            immediate: None,
             state: InstructionDispatchFutureState::Suspended(future),
         }
     }
