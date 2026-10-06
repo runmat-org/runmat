@@ -9,14 +9,18 @@ mod set_p;
 mod subsasgn;
 mod subsref;
 mod superclasses;
+mod functions;
+mod inputname;
 
-pub use function_dispatch::*;
-pub use get_p::*;
-pub use num_arguments_from_subscript::*;
-pub use set_p::*;
-pub use subsasgn::*;
-pub use subsref::*;
-pub use superclasses::*;
+pub use self::function_dispatch::*;
+pub use self::functions::*;
+pub use self::get_p::*;
+pub use self::inputname::*;
+pub use self::num_arguments_from_subscript::*;
+pub use self::set_p::*;
+pub use self::subsasgn::*;
+pub use self::subsref::*;
+pub use self::superclasses::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(function_dispatch::ENTRIES.iter().copied());
@@ -26,4 +30,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(subsasgn::ENTRIES.iter().copied());
     values.extend(subsref::ENTRIES.iter().copied());
     values.extend(superclasses::ENTRIES.iter().copied());
+    values.extend(functions::ENTRIES.iter().copied());
+    values.extend(inputname::ENTRIES.iter().copied());
 }
