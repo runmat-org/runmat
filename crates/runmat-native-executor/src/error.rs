@@ -8,6 +8,8 @@ pub enum NativeExecutorError {
     StaleValue,
     #[error("native execution failed: {0}")]
     Runtime(#[source] Box<runmat_runtime::RuntimeError>),
+    #[error("native source admission failed: {0}")]
+    SourceAdmission(#[from] runmat_runtime::context::ProgramSourceSelectionError),
     #[error("native execution host failed: {0}")]
     Host(String),
     #[error("native execution was cancelled")]

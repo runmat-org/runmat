@@ -274,6 +274,11 @@ fn native_executor_error(
 ) -> runmat_runtime::RuntimeError {
     match error {
         runmat_native_executor::NativeExecutorError::Runtime(original) => *original,
+        runmat_native_executor::NativeExecutorError::SourceAdmission(error) => {
+            runmat_runtime::build_runtime_error(error.to_string())
+                .with_identifier("RunMat:AotSourceAdmission")
+                .build()
+        }
         other => native_error(other),
     }
 }

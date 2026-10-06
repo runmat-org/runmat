@@ -6,6 +6,51 @@ fn context() -> crate::context::RuntimeContext {
 }
 
 #[test]
+fn nested_selected_program_sources_keep_exact_current_file_across_scopes() {
+    let runtime = context()
+        .with_program_sources([
+            ProgramSourceRecord {
+                ordinal: runmat_types::ProgramSourceId(0),
+                name: Arc::from("primary.m"),
+                fullpath_name: None,
+                text: Arc::from("primary text"),
+            },
+            ProgramSourceRecord {
+                ordinal: runmat_types::ProgramSourceId(1),
+                name: Arc::from("companion.m"),
+                fullpath_name: None,
+                text: Arc::from("companion text"),
+            },
+        ])
+        .expect("admit source records");
+    let primary = runtime
+        .clone()
+        .with_current_program_source(runmat_types::ProgramSourceId(0))
+        .expect("select primary");
+    let companion = primary
+        .clone()
+        .with_current_program_source(runmat_types::ProgramSourceId(1))
+        .expect("select companion");
+    futures::executor::block_on(primary.clone().scope(async {
+        assert_eq!(current_source_info().unwrap().name.as_ref(), "primary.m");
+        companion
+            .clone()
+            .scope(async {
+                assert_eq!(current_source_info().unwrap().name.as_ref(), "companion.m");
+            })
+            .await;
+        assert_eq!(current_source_info().unwrap().name.as_ref(), "primary.m");
+    }));
+    assert!(current_source_info().is_none());
+    assert!(matches!(
+        runtime.with_current_program_source(runmat_types::ProgramSourceId(2)),
+        Err(crate::context::ProgramSourceSelectionError::Missing(
+            runmat_types::ProgramSourceId(2)
+        ))
+    ));
+}
+
+#[test]
 fn equal_numeric_ids_in_distinct_sessions_never_exchange_source_authority() {
     let first = context();
     let second = context();

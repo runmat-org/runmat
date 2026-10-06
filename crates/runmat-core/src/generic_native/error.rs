@@ -29,6 +29,9 @@ pub(super) fn from_native_executor_error(
         runmat_native_executor::NativeExecutorError::UnsupportedSite(message) => {
             stage("NativeUnsupportedSite", message)
         }
+        runmat_native_executor::NativeExecutorError::SourceAdmission(error) => {
+            stage("NativeSourceAdmission", error)
+        }
         runmat_native_executor::NativeExecutorError::Unavailable => stage(
             "NativeUnavailable",
             "native execution is unavailable on this platform",

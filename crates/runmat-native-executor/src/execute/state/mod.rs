@@ -141,7 +141,32 @@ impl HostState {
                 requested_outputs,
             )
         };
-        let runtime = runtime.with_invocation_arity(invocation_arity);
+        let source_id = runtime.program_source_id(function.source);
+        let entry_source = function
+            .blocks
+            .iter()
+            .find(|block| block.id == function.entry)
+            .map(|block| {
+                block
+                    .instructions
+                    .first()
+                    .map_or(&block.terminator.source, |instruction| &instruction.source)
+            });
+        let frame_span = entry_source
+            .filter(|source| source.source == function.source)
+            .and_then(|source| {
+                let start = usize::try_from(source.span.start).ok()?;
+                let end = usize::try_from(source.span.end).ok()?;
+                (end >= start).then_some((start, end))
+            });
+        let runtime = runtime
+            .with_invocation_arity(invocation_arity)
+            .with_current_program_source(function.source)?
+            .with_debug_frame(runmat_runtime::debug_context::DebugFrame {
+                function: function.name.clone(),
+                source_id,
+                span: frame_span,
+            });
         let inherited_catch = runtime.active_catch_exception_shared();
         let construction_values = arguments
             .iter()
