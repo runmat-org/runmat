@@ -608,7 +608,7 @@ fn dropping_pending_callback_quarantines_exact_event_without_replay() {
     assert_eq!(invoked.get(), 1);
     assert!(matches!(
         *queue.0.in_flight.borrow(),
-        Some(InFlight::Indeterminate(envelope)) if envelope.event.position == Some((2.0, 3.0))
+        Some(InFlight::Indeterminate(ref envelope)) if envelope.event.position == Some((2.0, 3.0))
     ));
 }
 
