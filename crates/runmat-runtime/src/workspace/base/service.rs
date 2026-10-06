@@ -12,6 +12,10 @@ use super::{BaseWorkspaceError, BaseWorkspaceOwner, WorkspaceDelta};
 /// but those services do not gain base-workspace authority. Globals and
 /// persistents remain in the session-variable service and are only reported
 /// here through `global_names`.
+///
+/// The host invokes this adapter under its owning [`crate::context::RuntimeContext`].
+/// Outside a context, session-global lookup still reaches the transitional
+/// standalone store; that fallback is not canonical base-workspace state.
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceService {
     owner: BaseWorkspaceOwner,

@@ -43,7 +43,11 @@ async fn open_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return Err(open_error(&OPEN_ERROR_NAME, "open: name must not be empty"));
     }
 
-    if !should_treat_as_path(&name) && crate::workspace::lookup(&name).is_some() {
+    if !should_treat_as_path(&name)
+        && crate::workspace::try_lookup(&name)
+            .map_err(open_workspace_flow)?
+            .is_some()
+    {
         crate::context::legacy::request_document(
             crate::context::HostDocumentRequest::OpenVariable { name },
         )
@@ -237,4 +241,9 @@ fn open_flow_error(context: &str, err: RuntimeError) -> RuntimeError {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+fn open_workspace_flow(mut error: RuntimeError) -> RuntimeError {
+    error.context = error.context.with_builtin(BUILTIN_NAME);
+    error
 }

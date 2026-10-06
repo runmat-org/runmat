@@ -72,12 +72,12 @@ fn declared_symbols(args: &[Value]) -> BuiltinResult<Vec<SymbolicDeclaration>> {
 }
 
 fn assign_symbolic_value(name: &str, expr: SymbolicExpr) -> BuiltinResult<()> {
-    workspace::assign(name, Value::Symbolic(expr)).map_err(|err| {
-        syms_error_with_message(
-            &SYMS_ERRORS[2],
-            format!("{}: {}", SYMS_ERRORS[2].message, err),
-        )
-    })
+    workspace::try_assign(name, Value::Symbolic(expr)).map_err(syms_workspace_flow)
+}
+
+fn syms_workspace_flow(mut error: RuntimeError) -> RuntimeError {
+    error.context = error.context.with_builtin(BUILTIN_NAME);
+    error
 }
 
 fn is_assumption_keyword(token: &str) -> bool {

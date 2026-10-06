@@ -39,6 +39,10 @@ pub fn try_snapshot() -> Result<Option<Vec<(String, Value)>>, crate::RuntimeErro
     }))
 }
 
+/// Read session-global names associated with the active RuntimeContext. The
+/// resolver-storage branch is a standalone compatibility path for execution
+/// hosts not yet composed through RuntimeServicePorts; it is not canonical
+/// session authority.
 pub fn try_global_names() -> Result<Vec<String>, crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {

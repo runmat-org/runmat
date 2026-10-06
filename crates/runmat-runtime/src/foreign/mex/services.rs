@@ -84,12 +84,8 @@ impl MexHostServices for RuntimeMexHostServices {
             let _scope = self.runtime.enter();
             return Ok(crate::workspace::session::global_value(name));
         }
-        if let Some(service) = self.runtime.service_ports().workspace() {
-            Ok(service.lookup(name))
-        } else {
-            let _scope = self.runtime.enter();
-            Ok(crate::workspace::lookup(name))
-        }
+        let _scope = self.runtime.enter();
+        crate::workspace::try_lookup(name).map_err(runtime_diagnostic)
     }
 
     fn put_variable(&self, workspace: &str, name: &str, value: Value) -> Result<(), MexDiagnostic> {
@@ -99,15 +95,8 @@ impl MexHostServices for RuntimeMexHostServices {
             crate::workspace::session::store_global_named(name, value);
             return Ok(());
         }
-        if let Some(service) = self.runtime.service_ports().workspace() {
-            service.assign(name, value).map_err(runtime_diagnostic)
-        } else {
-            let _scope = self.runtime.enter();
-            crate::workspace::assign(name, value).map_err(|message| MexDiagnostic {
-                identifier: Some("RunMat:MEX:Workspace".into()),
-                message,
-            })
-        }
+        let _scope = self.runtime.enter();
+        crate::workspace::try_assign(name, value).map_err(runtime_diagnostic)
     }
 
     fn get_object_property(&self, object: Value, name: &str) -> Result<Value, MexDiagnostic> {

@@ -14,9 +14,19 @@ pub(super) async fn ensure_workspace_entries<'a>(
 pub(super) async fn collect_workspace_entries(
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
-    cooperation.completed(0).await?;
-    let snapshot = workspace::snapshot()
+    let snapshot = workspace::try_snapshot()
+        .map_err(save_workspace_flow)?
         .ok_or_else(|| save_error_with(&SAVE_ERROR_WORKSPACE, SAVE_ERROR_WORKSPACE.message))?;
+    let _roots =
+        crate::execution::RootedValueHandles::for_values(snapshot.iter().map(|(_, value)| value))
+            .map_err(|error| {
+            save_error_with_source(
+                &SAVE_ERROR_WORKSPACE,
+                format!("save: could not retain workspace values: {error}"),
+                error,
+            )
+        })?;
+    cooperation.completed(0).await?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
         let gathered = cooperation
@@ -131,11 +141,21 @@ pub(super) async fn append_struct_fields(
 }
 
 pub(super) async fn lookup_workspace(name: &str) -> BuiltinResult<Value> {
-    let value = workspace::lookup(name).ok_or_else(|| {
-        save_error_with(
-            &SAVE_ERROR_SELECTION,
-            format!("save: variable '{}' was not found in the workspace", name),
-        )
-    })?;
+    let value = workspace::try_lookup(name)
+        .map_err(save_workspace_flow)?
+        .ok_or_else(|| {
+            save_error_with(
+                &SAVE_ERROR_SELECTION,
+                format!("save: variable '{}' was not found in the workspace", name),
+            )
+        })?;
+    let _roots = crate::execution::RootedValueHandles::for_values(std::iter::once(&value))
+        .map_err(|error| {
+            save_error_with_source(
+                &SAVE_ERROR_WORKSPACE,
+                format!("save: could not retain workspace variable '{name}': {error}"),
+                error,
+            )
+        })?;
     gather_if_needed_async(&value).await
 }

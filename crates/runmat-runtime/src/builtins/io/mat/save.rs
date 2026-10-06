@@ -284,6 +284,11 @@ fn save_error_with_source(
     builder.build()
 }
 
+fn save_workspace_flow(mut error: RuntimeError) -> RuntimeError {
+    error.context = error.context.with_builtin(BUILTIN_NAME);
+    error
+}
+
 #[path = "save/workspace.rs"]
 mod workspace_io;
 use workspace_io::{
