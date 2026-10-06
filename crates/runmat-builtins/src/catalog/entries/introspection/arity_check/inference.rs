@@ -7,7 +7,7 @@ fn invalid_bound_literal(literal: &LiteralValue, maximum: bool) -> bool {
         LiteralValue::Number(_) | LiteralValue::Real { .. } => {
             LiteralContext::numeric_from_literal(literal).is_some_and(|value| {
                 value < 0.0
-                    || (!value.is_finite() && !(maximum && value == f64::INFINITY))
+                    || !(value.is_finite() || maximum && value == f64::INFINITY)
                     || (value.is_finite()
                         && (value.fract() != 0.0
                             || value > usize::MAX as f64
