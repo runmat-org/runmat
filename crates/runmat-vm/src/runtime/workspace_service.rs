@@ -338,6 +338,16 @@ mod tests {
         future.poll(&mut Context::from_waker(&waker))
     }
 
+    fn workspace_scope<F: Future>(
+        runtime: runmat_runtime::context::RuntimeContext,
+        service: &Rc<VmWorkspaceService>,
+        future: F,
+    ) -> impl Future<Output = F::Output> {
+        let activation =
+            super::super::workspace::frame_activation(runtime.local_identity(), service.frame);
+        activation.scope(runtime.scope(future))
+    }
+
     struct CountingWorkspaceService {
         inner: Rc<dyn RuntimeWorkspaceService>,
         snapshots: Cell<usize>,
@@ -479,23 +489,25 @@ mod tests {
         ));
         let (outer_runtime, outer_service) = VmWorkspaceService::prepare(base, None);
 
-        futures::executor::block_on(outer_runtime.scope(async {
-            let mut outer_values = vec![Value::Num(1.0)];
-            let outer_guard = super::super::workspace::set_transient_workspace_state(
-                HashMap::from([("x".to_string(), 0)]),
-                HashSet::from(["x".to_string()]),
-                &mut outer_values,
-                FrameGlobalBindings::default(),
-            );
-            assert_eq!(
-                outer_service.try_lookup("x").unwrap(),
-                Some(Value::Num(1.0))
-            );
+        futures::executor::block_on(workspace_scope(
+            outer_runtime.clone(),
+            &outer_service,
+            async {
+                let mut outer_values = vec![Value::Num(1.0)];
+                let outer_guard = super::super::workspace::set_transient_workspace_state(
+                    HashMap::from([("x".to_string(), 0)]),
+                    HashSet::from(["x".to_string()]),
+                    &mut outer_values,
+                    FrameGlobalBindings::default(),
+                );
+                assert_eq!(
+                    outer_service.try_lookup("x").unwrap(),
+                    Some(Value::Num(1.0))
+                );
 
-            let (inner_runtime, inner_service) =
-                VmWorkspaceService::prepare(outer_runtime.clone(), None);
-            inner_runtime
-                .scope(async {
+                let (inner_runtime, inner_service) =
+                    VmWorkspaceService::prepare(outer_runtime.clone(), None);
+                workspace_scope(inner_runtime, &inner_service, async {
                     let mut inner_values = vec![Value::Num(2.0)];
                     let inner_guard = super::super::workspace::set_transient_workspace_state(
                         HashMap::from([("x".to_string(), 0)]),
@@ -515,14 +527,15 @@ mod tests {
                 })
                 .await;
 
-            let error = inner_service.try_lookup("x").unwrap_err();
-            assert_eq!(error.identifier(), Some("RunMat:Workspace:FrameClosed"));
-            assert_eq!(
-                outer_service.try_lookup("x").unwrap(),
-                Some(Value::Num(1.0))
-            );
-            drop(outer_guard);
-        }));
+                let error = inner_service.try_lookup("x").unwrap_err();
+                assert_eq!(error.identifier(), Some("RunMat:Workspace:FrameClosed"));
+                assert_eq!(
+                    outer_service.try_lookup("x").unwrap(),
+                    Some(Value::Num(1.0))
+                );
+                drop(outer_guard);
+            },
+        ));
 
         let error = outer_service.try_lookup("x").unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Workspace:FrameClosed"));
@@ -549,7 +562,7 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
-        futures::executor::block_on(runtime.scope(async {
+        futures::executor::block_on(workspace_scope(runtime, &service, async {
             let mut values = vec![Value::Num(1.0)];
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
@@ -582,7 +595,7 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
-        let completed = futures::executor::block_on(runtime.scope(async {
+        let completed = futures::executor::block_on(workspace_scope(runtime, &service, async {
             let mut values = vec![Value::Num(1.0)];
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("g".to_string(), 0)]),
@@ -626,7 +639,7 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
-        futures::executor::block_on(runtime.scope(async {
+        futures::executor::block_on(workspace_scope(runtime, &service, async {
             let mut values = vec![Value::Num(1.0)];
             let guard = super::super::workspace::set_transient_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
@@ -681,7 +694,7 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
-        futures::executor::block_on(runtime.scope(async {
+        futures::executor::block_on(workspace_scope(runtime, &service, async {
             let mut values = vec![Value::Num(0.0)];
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
@@ -723,7 +736,7 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
-        futures::executor::block_on(runtime.scope(async {
+        futures::executor::block_on(workspace_scope(runtime, &service, async {
             let aliases = FrameGlobalBindings::default();
             aliases.declare_named(0, "x".into());
             runmat_runtime::workspace::session::store_global_named("x", Value::Num(9.0));
@@ -787,7 +800,7 @@ mod tests {
             drop(owner);
             allocation.unroot().unwrap();
 
-            futures::executor::block_on(runtime.scope(async {
+            futures::executor::block_on(workspace_scope(runtime, &service, async {
                 let mut values = Vec::new();
                 let guard = super::super::workspace::set_workspace_state(
                     HashMap::new(),

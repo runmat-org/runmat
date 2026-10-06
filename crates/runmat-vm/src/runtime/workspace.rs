@@ -1069,12 +1069,57 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
         assert_ne!(first.local_identity(), second.local_identity());
-        let mut first = Box::pin(first.scope(session("first")));
-        let mut second = Box::pin(second.scope(session("second")));
+        let first_frame = reserve_workspace_service_frame(first.local_identity(), None);
+        let second_frame = reserve_workspace_service_frame(second.local_identity(), None);
+        let mut first = Box::pin(
+            frame_activation(first.local_identity(), first_frame.id)
+                .scope(first.scope(session("first"))),
+        );
+        let mut second = Box::pin(
+            frame_activation(second.local_identity(), second_frame.id)
+                .scope(second.scope(session("second"))),
+        );
         assert!(poll(first.as_mut()).is_pending());
         assert!(poll(second.as_mut()).is_pending());
         assert!(poll(first.as_mut()).is_ready());
         assert!(poll(second.as_mut()).is_ready());
+    }
+
+    #[test]
+    fn active_frame_never_consumes_a_different_sole_reservation() {
+        reset_thread_state_for_tests();
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let owner = runtime.local_identity();
+        let missing = reserve_workspace_service_frame(owner, None);
+        let remaining = reserve_workspace_service_frame(owner, None);
+        release_pending_workspace_service_frame(owner, missing.id);
+        let activation = frame_activation(owner, missing.id);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            futures::executor::block_on(activation.scope(runtime.scope(async {
+                let mut vars = vec![Value::Num(1.0)];
+                let _guard = set_transient_workspace_state(
+                    HashMap::from([("x".to_string(), 0)]),
+                    HashSet::from(["x".to_string()]),
+                    &mut vars,
+                    FrameGlobalBindings::default(),
+                );
+            })));
+        }));
+        assert!(result.is_err());
+        PENDING_SERVICE_FRAMES.with(|frames| {
+            assert_eq!(
+                frames
+                    .borrow()
+                    .get(&WorkspaceOwner::Runtime(owner))
+                    .and_then(|pending| pending.first())
+                    .map(|frame| frame.id),
+                Some(remaining.id)
+            );
+        });
+        reset_thread_state_for_tests();
     }
 
     #[test]
@@ -1137,8 +1182,9 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
         let runtime_id = runtime.local_identity();
-        let _reserved = reserve_workspace_service_frame(runtime_id, None);
-        futures::executor::block_on(runtime.scope(async {
+        let reserved = reserve_workspace_service_frame(runtime_id, None);
+        let activation = frame_activation(runtime_id, reserved.id);
+        futures::executor::block_on(activation.scope(runtime.scope(async {
             let mut vars = vec![Value::Num(1.0), Value::Num(2.0)];
             let guard = set_workspace_state(
                 HashMap::from([("x".to_string(), 0), ("y".to_string(), 1)]),
@@ -1157,7 +1203,7 @@ mod tests {
             reconcile_workspace_vars(&mut vars);
             assert_eq!(vars, vec![Value::Num(0.0), Value::Num(0.0)]);
             drop(guard);
-        }));
+        })));
     }
 
     #[test]
@@ -1166,8 +1212,9 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
         let runtime_id = runtime.local_identity();
-        let _reserved = reserve_workspace_service_frame(runtime_id, None);
-        futures::executor::block_on(runtime.scope(async {
+        let reserved = reserve_workspace_service_frame(runtime_id, None);
+        let activation = frame_activation(runtime_id, reserved.id);
+        futures::executor::block_on(activation.scope(runtime.scope(async {
             let mut vars = vec![Value::Num(1.0)];
             let guard = set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
@@ -1181,7 +1228,7 @@ mod tests {
             reconcile_workspace_vars(&mut vars);
             assert_eq!(vars, vec![Value::Num(7.0)]);
             drop(guard);
-        }));
+        })));
     }
 
     #[test]
@@ -1229,7 +1276,10 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        futures::executor::block_on(runtime.scope(async {
+        let runtime_id = runtime.local_identity();
+        let reserved = reserve_workspace_service_frame(runtime_id, None);
+        let activation = frame_activation(runtime_id, reserved.id);
+        futures::executor::block_on(activation.scope(runtime.scope(async {
             let aliases = FrameGlobalBindings::default();
             aliases.declare_named(0, "alpha".into());
             runmat_runtime::workspace::session::store_global_named("alpha", Value::Num(7.0));
@@ -1257,7 +1307,7 @@ mod tests {
             assert_eq!(vars[0], Value::Num(7.0));
             reconcile_workspace_vars(&mut vars);
             assert_eq!(vars[0], Value::Num(9.0));
-        }));
+        })));
     }
 
     #[test]

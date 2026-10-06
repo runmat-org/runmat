@@ -85,9 +85,8 @@ pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
         .with(|frames| {
             let mut frames = frames.borrow_mut();
             let pending = frames.get_mut(&owner).and_then(|pending| {
-                let index = active
-                    .and_then(|active| pending.iter().position(|frame| frame.id == active))
-                    .or_else(|| (pending.len() == 1).then_some(0))?;
+                let active = active?;
+                let index = pending.iter().position(|frame| frame.id == active)?;
                 Some(pending.remove(index))
             });
             if frames.get(&owner).is_some_and(Vec::is_empty) {
