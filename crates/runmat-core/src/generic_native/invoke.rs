@@ -495,8 +495,12 @@ s.first(C{:}).second(later());
         });
     }
 
-    fn forced_native_failure(source_id: &str, program: &str) -> runmat_runtime::RuntimeError {
+    pub(super) fn forced_native_failure(
+        source_id: &str,
+        program: &str,
+    ) -> runmat_runtime::RuntimeError {
         let mut session = RunMatSession::with_options(false, false).expect("session init");
+        session.set_compat_mode(runmat_parser::CompatMode::RunMat);
         let unit = block_on(session.compile_executable_unit(
             ExecutableSource::new(source_id, "native_exception.m", program),
             None,
@@ -604,3 +608,7 @@ s.first(C{:}).second(later());
         });
     }
 }
+
+#[cfg(test)]
+#[path = "invoke/native_catch_tests.rs"]
+mod native_catch_tests;
