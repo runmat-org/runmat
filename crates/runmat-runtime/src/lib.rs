@@ -3666,11 +3666,13 @@ mod tests {
                 &callback,
                 Value::Closure(runmat_value::Closure {
                     function_name,
-                    binding: Some(runmat_value::BoundFunctionBinding::unavailable(65)),
+                    binding: Some(binding),
                     source_role: _,
                     captures,
                     ..
-                }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
+                }) if function_name == "event_callback"
+                    && binding == &runmat_value::BoundFunctionBinding::unavailable(65)
+                    && captures == &vec![Value::Num(9.0)]
             ));
         });
     }

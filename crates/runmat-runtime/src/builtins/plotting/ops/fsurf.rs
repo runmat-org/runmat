@@ -1372,7 +1372,7 @@ mod tests {
         ensure_plot_test_env();
         let _ = clear_figure(None);
         let _invoker = with_test_function(|x, y| x * x + y);
-        let prior_roots = super::state::callbacks::direct_root_count();
+        let prior_roots = super::super::state::callbacks::direct_root_count();
 
         let handle = block_on(fsurf_builtin(vec![
             test_bound("surface", 1),
@@ -1390,7 +1390,7 @@ mod tests {
             .expect("owning direct-call callback");
         assert_eq!(callback, test_bound("surface", 1));
         assert_eq!(
-            super::state::callbacks::direct_root_count(),
+            super::super::state::callbacks::direct_root_count(),
             prior_roots + 1
         );
         let mesh_density = get_builtin(vec![
@@ -1409,7 +1409,10 @@ mod tests {
         let z = surface.z_data.as_ref().unwrap();
         assert!((z[2][2] - 3.0).abs() < 1.0e-12);
         clear_figure(Some(current_figure_handle())).expect("clear callback scene");
-        assert_eq!(super::state::callbacks::direct_root_count(), prior_roots);
+        assert_eq!(
+            super::super::state::callbacks::direct_root_count(),
+            prior_roots
+        );
     }
 
     #[test]

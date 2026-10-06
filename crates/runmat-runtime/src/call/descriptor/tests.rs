@@ -68,6 +68,7 @@ fn absent_named_callable_is_a_producer_classified_language_failure() {
         "__runmat_missing_input_callable__".into(),
         Vec::new(),
         1,
+        None,
     ))
     .expect_err("missing callable");
     assert_eq!(
