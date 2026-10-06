@@ -271,9 +271,11 @@ pub(crate) async fn invoke(
             let mut values =
                 sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
             if requested_outputs == 1 {
-                ValueSequence::single(values.remove(0)).map_err(Into::into)
+                ValueSequence::single(values.remove(0))
+                    .map_err(crate::sequence::sequence_error_to_runtime)
             } else {
-                ValueSequence::comma_separated(values).map_err(Into::into)
+                ValueSequence::comma_separated(values)
+                    .map_err(crate::sequence::sequence_error_to_runtime)
             }
         }
         other => Err(runtime_descriptor_error_with_detail(

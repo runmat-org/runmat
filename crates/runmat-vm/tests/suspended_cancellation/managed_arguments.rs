@@ -57,7 +57,8 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         } else {
             value
         };
-        Ok(ValueSequence::single(value)?)
+        Ok(ValueSequence::single(value)
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
     })
 }
 
@@ -70,7 +71,8 @@ fn consume(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         .expect("single invocation");
     Box::pin(async move {
         if receiver.await.expect("test sender") {
-            Ok(ValueSequence::single(argument)?)
+            Ok(ValueSequence::single(argument)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
         } else {
             Err(runmat_runtime::RuntimeError::new(
                 "expected managed argument failure",

@@ -207,7 +207,10 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
     fn replacement(
         _: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>,
     ) -> RuntimeBuiltinFuture {
-        Box::pin(async { Ok(runmat_value::ValueSequence::single(Value::Num(99.0))?) })
+        Box::pin(async {
+            Ok(runmat_value::ValueSequence::single(Value::Num(99.0))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
+        })
     }
     impl RuntimeBuiltinService for Service {
         fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding> {

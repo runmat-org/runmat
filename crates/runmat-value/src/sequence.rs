@@ -114,16 +114,17 @@ impl ValueSequence {
     /// Transforms owned outputs without changing their sequence kind or
     /// cardinality. Each replacement is checked before it enters the sequence.
     /// A single-valued result does not allocate a temporary output vector.
-    pub fn try_map<E>(self, mut map: impl FnMut(Value) -> Result<Value, E>) -> Result<Self, E>
-    where
-        E: From<ValueSequenceError>,
-    {
+    pub fn try_map<E>(
+        self,
+        mut map: impl FnMut(Value) -> Result<Value, E>,
+        mut sequence_error: impl FnMut(ValueSequenceError) -> E,
+    ) -> Result<Self, E> {
         let storage = match self.0 {
             ValueSequenceStorage::Single(value) => {
                 let value = map(value)?;
                 validate_no_transient_sequence(&value)
                     .map_err(ValueSequenceError::from)
-                    .map_err(E::from)?;
+                    .map_err(&mut sequence_error)?;
                 ValueSequenceStorage::Single(value)
             }
             ValueSequenceStorage::CommaSeparated(values) => ValueSequenceStorage::CommaSeparated(
@@ -133,7 +134,7 @@ impl ValueSequence {
                         let value = map(value)?;
                         validate_no_transient_sequence(&value)
                             .map_err(ValueSequenceError::from)
-                            .map_err(E::from)?;
+                            .map_err(&mut sequence_error)?;
                         Ok(value)
                     })
                     .collect::<Result<Vec<_>, E>>()?,
@@ -174,7 +175,9 @@ mod tests {
         ] {
             let kind = sequence.kind();
             let expected = sequence.as_slice().to_vec();
-            let mapped = sequence.try_map::<ValueSequenceError>(Ok).unwrap();
+            let mapped = sequence
+                .try_map::<ValueSequenceError>(Ok, std::convert::identity)
+                .unwrap();
             assert_eq!(mapped.kind(), kind);
             assert_eq!(mapped.as_slice(), expected);
         }
@@ -187,7 +190,10 @@ mod tests {
             ValueSequence::comma_separated(vec![Value::Num(2.0)]).unwrap(),
         ] {
             let error = sequence
-                .try_map::<ValueSequenceError>(|_| Ok(Value::OutputList(Vec::new())))
+                .try_map::<ValueSequenceError>(
+                    |_| Ok(Value::OutputList(Vec::new())),
+                    std::convert::identity,
+                )
                 .unwrap_err();
             assert_eq!(
                 error,
@@ -206,13 +212,57 @@ mod tests {
         };
         let mut calls = 0;
         let error = sequence
-            .try_map(|_| {
-                calls += 1;
-                Err(expected.clone())
-            })
+            .try_map(
+                |_| {
+                    calls += 1;
+                    Err(expected.clone())
+                },
+                std::convert::identity,
+            )
             .unwrap_err();
         assert_eq!(error, expected);
         assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn mapping_uses_explicit_error_conversion_only_for_invalid_replacements() {
+        #[derive(Debug, PartialEq)]
+        enum MappingError {
+            Callback,
+            Invalid(ValueSequenceError),
+        }
+
+        let mut conversions = 0;
+        let error = ValueSequence::single(Value::Num(2.0))
+            .unwrap()
+            .try_map(
+                |_| Ok(Value::OutputList(Vec::new())),
+                |error| {
+                    conversions += 1;
+                    MappingError::Invalid(error)
+                },
+            )
+            .unwrap_err();
+        assert_eq!(conversions, 1);
+        assert_eq!(
+            error,
+            MappingError::Invalid(ValueSequenceError::TransientValue(
+                TransientValueError::LegacyOutputList
+            ))
+        );
+
+        let error = ValueSequence::single(Value::Num(2.0))
+            .unwrap()
+            .try_map(
+                |_| Err(MappingError::Callback),
+                |error| {
+                    conversions += 1;
+                    MappingError::Invalid(error)
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error, MappingError::Callback);
+        assert_eq!(conversions, 1);
     }
 
     #[test]

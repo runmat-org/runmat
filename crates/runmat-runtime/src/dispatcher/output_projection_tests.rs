@@ -58,9 +58,10 @@ fn pending_output_fixture(
             Some(control.presentation_outputs)
         );
         control.completed.set(control.completed.get() + 1);
-        Ok(ValueSequence::single(Value::Num(
-            requested_outputs.unwrap_or(0) as f64,
-        ))?)
+        Ok(
+            ValueSequence::single(Value::Num(requested_outputs.unwrap_or(0) as f64))
+                .map_err(crate::sequence::sequence_error_to_runtime)?,
+        )
     })
 }
 

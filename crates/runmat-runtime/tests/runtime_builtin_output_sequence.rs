@@ -33,13 +33,15 @@ const LEGACY_NAME: &str = "__runtime_builtin_legacy_sequence_fixture";
 )]
 async fn sequence_fixture(requested_outputs: Option<usize>) -> BuiltinResult<ValueSequence> {
     match requested_outputs {
-        None => ValueSequence::single(Value::Num(7.0)).map_err(Into::into),
+        None => ValueSequence::single(Value::Num(7.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
         Some(0) => Ok(ValueSequence::empty()),
-        Some(1) => ValueSequence::comma_separated(vec![Value::Num(11.0)]).map_err(Into::into),
+        Some(1) => ValueSequence::comma_separated(vec![Value::Num(11.0)])
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
         Some(count) => ValueSequence::comma_separated(
             (0..count).map(|index| Value::Num(index as f64)).collect(),
         )
-        .map_err(Into::into),
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
     }
 }
 

@@ -48,7 +48,7 @@ impl RootedValueHandles {
         Self::from_handles(collector)
     }
 
-    fn for_traced(value: &impl Trace) -> Result<Self, GcError> {
+    pub(crate) fn for_traced(value: &impl Trace) -> Result<Self, GcError> {
         let mut collector = HandleCollector::default();
         value.trace(&mut collector);
         Self::from_handles(collector)

@@ -675,11 +675,14 @@ fn compatibility_checked_builtin_sequence(
     result: runmat_value::ValueSequence,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let explicit = explicit_gpu_provenance(args)?;
-    result.try_map(|mut value| {
-        crate::compatibility::ensure_value_compatible(&value, name)?;
-        provenance::project(&mut value, explicit)?;
-        Ok(value)
-    })
+    result.try_map(
+        |mut value| {
+            crate::compatibility::ensure_value_compatible(&value, name)?;
+            provenance::project(&mut value, explicit)?;
+            Ok(value)
+        },
+        crate::sequence::sequence_error_to_runtime,
+    )
 }
 
 fn propagate_gpu_provenance(args: &[Value], result: &mut Value) -> Result<(), RuntimeError> {

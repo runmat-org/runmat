@@ -16,12 +16,6 @@ pub fn sequence_error_to_runtime(error: runmat_value::ValueSequenceError) -> Run
     semantic_error(identifier, error.to_string())
 }
 
-impl From<runmat_value::ValueSequenceError> for RuntimeError {
-    fn from(error: runmat_value::ValueSequenceError) -> Self {
-        sequence_error_to_runtime(error)
-    }
-}
-
 /// Constructs the checked one-value result used by runtime call boundaries.
 ///
 /// Keeping this fallible prevents fixtures and adapters from bypassing the

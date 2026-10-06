@@ -35,7 +35,8 @@ fn effects() -> Vec<&'static str> {
 fn fallback(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("fallback");
-        Ok(ValueSequence::single(Value::Num(17.0))?)
+        Ok(ValueSequence::single(Value::Num(17.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
     })
 }
 
@@ -63,7 +64,8 @@ fn untyped_failure(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 fn successful_override(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("override");
-        Ok(ValueSequence::single(Value::Num(29.0))?)
+        Ok(ValueSequence::single(Value::Num(29.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
     })
 }
 
@@ -71,13 +73,15 @@ fn sequence_override(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
     let requested_outputs = invocation.requested_outputs;
     Box::pin(async move {
         match requested_outputs {
-            None => ValueSequence::single(Value::Num(7.0)).map_err(Into::into),
+            None => ValueSequence::single(Value::Num(7.0))
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
             Some(0) => Ok(ValueSequence::empty()),
-            Some(1) => ValueSequence::comma_separated(vec![Value::Num(11.0)]).map_err(Into::into),
+            Some(1) => ValueSequence::comma_separated(vec![Value::Num(11.0)])
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
             Some(count) => ValueSequence::comma_separated(
                 (0..count).map(|index| Value::Num(index as f64)).collect(),
             )
-            .map_err(Into::into),
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
         }
     })
 }
@@ -98,7 +102,8 @@ fn observe_invocation(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
                 .borrow_mut()
                 .push((context.local_identity(), outputs))
         });
-        Ok(ValueSequence::single(Value::Num(1.0))?)
+        Ok(ValueSequence::single(Value::Num(1.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
     })
 }
 
@@ -237,7 +242,8 @@ fn requested_gather_adapts_only_the_selected_implementation() {
                 )
             } else {
                 record("host-effect");
-                Ok(ValueSequence::single(Value::Num(31.0))?)
+                Ok(ValueSequence::single(Value::Num(31.0))
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
             }
         })
     }

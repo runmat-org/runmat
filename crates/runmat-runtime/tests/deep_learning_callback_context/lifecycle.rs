@@ -53,7 +53,7 @@ impl Future for SuspendedCallback {
             Outcome::Error => Poll::Ready(Err(RuntimeError::new("selected callback error"))),
             Outcome::Identity => Poll::Ready(
                 ValueSequence::single(self.input.take().expect("callback input"))
-                    .map_err(Into::into),
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
             ),
             Outcome::Initializer => {
                 let Value::Tensor(shape) = self.input.take().expect("shape argument") else {
@@ -70,7 +70,7 @@ impl Future for SuspendedCallback {
                     ValueSequence::single(Value::Tensor(
                         Tensor::new(vec![0.25; count], dimensions).expect("fixture shape"),
                     ))
-                    .map_err(Into::into),
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
                 )
             }
         }
