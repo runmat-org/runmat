@@ -21,6 +21,8 @@ use std::sync::{Arc, Mutex};
 
 #[path = "pending/fixtures.rs"]
 mod fixtures;
+#[path = "pending/abandonment.rs"]
+mod abandonment;
 #[path = "pending/publication.rs"]
 mod publication;
 #[path = "pending/resident.rs"]
