@@ -116,7 +116,9 @@ impl Bytecode {
         manifest
             .validate()
             .map_err(|error| format!("{}: {}", error.path, error.message))?;
-        let compiled_functions = mir.functions.keys().copied().collect::<BTreeSet<_>>();
+        // Function metadata includes inherited declarations used to analyze
+        // this assembly. Only MIR bodies own newly compiled parallel records.
+        let compiled_functions = mir.bodies.keys().copied().collect::<BTreeSet<_>>();
         for function in manifest_function_owners(manifest)? {
             if !compiled_functions.contains(&function) {
                 return Err(format!(
@@ -622,9 +624,10 @@ fn program_point(
 mod tests {
     use super::*;
     use crate::{FunctionBytecode, FunctionRegistry, VmAssemblyLayout};
+    use runmat_hir::{FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span};
     use runmat_types::{
-        CollectiveContract, CollectiveId, CollectiveOperation, RegionId, SpmdContract,
-        SpmdLabRequirement,
+        CollectiveContract, CollectiveId, CollectiveOperation, ProgramSourceId, RegionId,
+        SpmdContract, SpmdLabRequirement,
     };
     use std::collections::HashMap;
 
@@ -646,6 +649,22 @@ mod tests {
             tag: None,
             dimension: None,
             reducer: None,
+        }
+    }
+
+    fn inherited_declaration(name: &str) -> runmat_mir::MirFunctionMetadata {
+        runmat_mir::MirFunctionMetadata {
+            source: ProgramSourceId(0),
+            name: FunctionName(name.into()),
+            parent: None,
+            enclosing_class: None,
+            class_method_owner: None,
+            kind: FunctionKind::Local,
+            source_role: runmat_types::FunctionSourceRole::Local,
+            argument_validations: Vec::new(),
+            captures: Vec::new(),
+            modifiers: FunctionModifiers::default(),
+            span: Span { start: 0, end: 1 },
         }
     }
 
@@ -673,8 +692,14 @@ mod tests {
             .bound_functions
             .insert(runmat_hir::FunctionId(7), retained);
 
+        let mut assembly = MirAssembly::default();
+        assembly
+            .functions
+            .insert(FunctionId(7), inherited_declaration("retained"));
+        assert!(!assembly.bodies.contains_key(&FunctionId(7)));
+
         bytecode
-            .install_parallel_regions(&MirAssembly::default(), &ParallelManifest::empty())
+            .install_parallel_regions(&assembly, &ParallelManifest::empty())
             .unwrap();
 
         assert_eq!(
@@ -692,7 +717,7 @@ mod tests {
         });
         let error = bytecode
             .install_parallel_regions(
-                &MirAssembly::default(),
+                &assembly,
                 &ParallelManifest {
                     schema_version: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,
                     parfor_regions: Vec::new(),
