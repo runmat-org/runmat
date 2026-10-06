@@ -24,7 +24,7 @@ use access::*;
 use arguments::{apply_name_value_pairs, prepare_timer_property_pairs, PreparedTimerPair};
 use callback::{
     callback_is_empty, run_callback, run_error_callback, text_callback_request,
-    update_average_period,
+    update_average_period, TimerCallback,
 };
 use class::*;
 use discovery::find_timers;

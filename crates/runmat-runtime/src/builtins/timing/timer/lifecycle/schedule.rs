@@ -15,7 +15,7 @@ pub(super) async fn run_timer_callbacks(
         .filter(|entry| entry.generation == generation)
         .map(|entry| (entry.execution_mode, entry.busy_mode))
         .ok_or_else(|| admission_error(TimerAdmissionError::ForeignOrDeleted))?;
-    run_callback(runtime, handle, "StartFcn", "StartFcn").await?;
+    run_callback(runtime, handle, TimerCallback::Start).await?;
     if !still_running(runtime, handle, generation) {
         return Ok(());
     }
@@ -37,7 +37,7 @@ pub(super) async fn run_timer_callbacks(
             update_average_period(handle, instant, executed)?;
         }
         last_fire = Some(fired);
-        run_callback(runtime, handle, "TimerFcn", "TimerFcn").await?;
+        run_callback(runtime, handle, TimerCallback::Timer).await?;
         if !still_running(runtime, handle, generation) {
             return Ok(());
         }

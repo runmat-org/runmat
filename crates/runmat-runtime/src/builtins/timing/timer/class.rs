@@ -12,8 +12,6 @@ const TIMER_CALLABLE_STOP: &str = "__runmat_timer_stop";
 const TIMER_CALLABLE_WAIT: &str = "__runmat_timer_wait";
 const TIMER_CALLABLE_DELETE: &str = "__runmat_timer_delete";
 
-pub(super) const CALLBACK_PROPS: [&str; 4] = ["TimerFcn", "StartFcn", "StopFcn", "ErrorFcn"];
-
 pub(super) fn ensure_timer_class_registered() {
     if crate::class_registry::get_class(&TIMER_CLASS.owned()).is_some() {
         return;
@@ -102,10 +100,11 @@ pub(super) fn ensure_timer_class_registered() {
 
 pub(super) fn default_timer_object(name: String) -> ObjectInstance {
     let mut object = ObjectInstance::new(TIMER_CLASS.to_string());
-    for prop in CALLBACK_PROPS {
-        object
-            .properties
-            .insert(prop.to_string(), Value::String(String::new()));
+    for callback in TimerCallback::ALL {
+        object.properties.insert(
+            callback.property().name().to_string(),
+            Value::String(String::new()),
+        );
     }
     for (property, value) in [
         ("Period", Value::Num(1.0)),

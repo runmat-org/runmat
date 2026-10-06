@@ -67,7 +67,7 @@ const TIMER_EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidenc
     ],
     verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "session timer ownership and callback tests", location: "crates/runmat-runtime/src/builtins/timing/timer/tests.rs" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM timer execution", location: "crates/runmat-core/src/tests.rs:timer_constructs_finds_starts_and_deletes_through_vm" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM timer execution", location: "crates/runmat-core/src/tests/timers.rs:timer_constructs_finds_starts_and_deletes_through_vm" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::BrowserTest, label: "browser timer task lifecycle", location: "crates/runmat-runtime/src/builtins/timing/timer/browser_tests.rs" },
     ],
     notes: &["Text callbacks require an executor-owned base-workspace source-evaluation producer, which is not yet installed. Source declarations and registered browser symbols are not execution evidence."],
