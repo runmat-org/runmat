@@ -206,10 +206,13 @@ fn delayed_text_callback_from_failed_foreground_generation_is_invalidated() {
 
     let waited = execute_text_request(&mut session, "wait(invalidated_timer);")
         .expect("invalidated callback failure is reported as a language outcome");
-    assert!(waited
-        .diagnostics
-        .iter()
-        .any(|diagnostic| { diagnostic.code == "RunMat:SourceEvaluation:GenerationInvalidated" }));
+    assert!(
+        waited.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:SourceEvaluation:GenerationInvalidated"
+        }),
+        "{:?}",
+        waited.diagnostics
+    );
 
     let observed = execute_text_request(
         &mut session,
