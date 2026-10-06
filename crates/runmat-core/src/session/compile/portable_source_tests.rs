@@ -201,9 +201,8 @@ fn pending_source_lease_coexists_with_interpreted_and_native_unit_invocations() 
 #[test]
 fn dropped_pending_public_eval_retires_only_its_source() {
     use futures::channel::oneshot;
-    use std::future::Future;
+    use futures::future::Either;
     use std::sync::{Arc, Mutex};
-    use std::task::{Context, Poll};
 
     let mut session = crate::RunMatSession::with_options(false, false).expect("session");
     let runtime = session.runtime_context.clone();
@@ -214,13 +213,20 @@ fn dropped_pending_public_eval_retires_only_its_source() {
         "sibling = 7;",
     )
     .expect("sibling source");
-    let observed = Arc::new(Mutex::new(None));
-    let observed_by_handler = Arc::clone(&observed);
+    let (reached_handler, handler_reached) = oneshot::channel();
+    let reached_handler = Arc::new(Mutex::new(Some(reached_handler)));
     let (release, gate) = oneshot::channel::<()>();
     let gate = Arc::new(Mutex::new(Some(gate)));
     session.install_async_input_handler(move |_| {
-        *observed_by_handler.lock().expect("observed source") =
-            runmat_runtime::source_context::current_source_info();
+        let source = runmat_runtime::source_context::current_source_info()
+            .expect("input handler runs within the eval source scope");
+        reached_handler
+            .lock()
+            .expect("handler signal")
+            .take()
+            .expect("no input replay")
+            .send(source)
+            .expect("public request retains its handler observer");
         let gate = gate
             .lock()
             .expect("input gate")
@@ -241,21 +247,17 @@ fn dropped_pending_public_eval_retires_only_its_source() {
         session.workspace_handle(),
     );
     let mut future = Box::pin(session.execute_request(request));
-    for _ in 0..16 {
-        let mut task = Context::from_waker(futures::task::noop_waker_ref());
-        assert!(matches!(
-            Future::poll(future.as_mut(), &mut task),
-            Poll::Pending
-        ));
-        if observed.lock().expect("observed source").is_some() {
-            break;
+    let eval_source = futures::executor::block_on(async {
+        match futures::future::select(future.as_mut(), handler_reached).await {
+            Either::Right((Ok(source), _pending_request)) => source,
+            Either::Right((Err(_), _pending_request)) => {
+                panic!("input handler observer was dropped before admission")
+            }
+            Either::Left((outcome, _pending_observer)) => {
+                panic!("public eval terminated before reaching pending input: {outcome:?}")
+            }
         }
-    }
-    let eval_source = observed
-        .lock()
-        .expect("observed source")
-        .clone()
-        .expect("public eval reached pending input");
+    });
     assert_eq!(eval_source.name.as_ref(), "<eval>");
     let eval_id = eval_source.source_id.expect("eval source identity");
     assert_eq!(eval_source.text.as_ref(), "input('wait: '); 41 + 1");
@@ -402,21 +404,20 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
         .find(|component| component.kind == runmat_execution::ExecutableComponentKind::SourceMap)
         .expect("source-map descriptor");
     descriptor.schema_version = 3;
-    let mut stale = request;
-    stale.artifact = ProgramArtifact::materialize(
-        &stale.recipe,
+    let error = ProgramArtifact::materialize(
+        &request.recipe,
         ExecutableForm::ExecutableUnitV3,
         future_schema
             .canonical_bytes()
             .expect("forward schema envelope"),
     )
-    .expect("forward schema artifact");
-    let response = futures::executor::block_on(runmat_vm::execute_program_request_with_context(
-        stale, runtime,
-    ));
-    assert!(matches!(
-        response,
-        ProgramExecutionResponse::Failure { message }
-            if message.contains("source map actual 3 expected 2")
-    ));
+    .expect_err("future source-map schema is rejected at artifact admission");
+    assert!(
+        matches!(
+            error,
+            runmat_execution_artifact::ArtifactError::Invalid(ref message)
+                if message == "unsupported executable source-map schema 3"
+        ),
+        "unexpected artifact admission error: {error:?}"
+    );
 }
