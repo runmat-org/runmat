@@ -8,6 +8,31 @@ use runmat_value::{Tensor, Value};
 use std::collections::BTreeMap;
 
 #[test]
+fn retired_native_frame_preserves_closed_error_with_and_without_retained_storage() {
+    for retain_storage in [false, true] {
+        let (function, input) = fixture(Value::Num(1.0));
+        let state =
+            NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
+        let service = state.service();
+        let retained = retain_storage.then(|| state.frame.clone());
+        drop(state);
+
+        for error in [
+            service.try_lookup("missing").unwrap_err(),
+            service.try_snapshot().unwrap_err(),
+            service.assign("missing", Value::Num(2.0)).unwrap_err(),
+        ] {
+            assert_eq!(error.identifier(), Some("RunMat:Workspace:FrameClosed"));
+            assert_eq!(
+                error.to_string(),
+                super::native_workspace_closed().to_string()
+            );
+        }
+        drop(retained);
+    }
+}
+
+#[test]
 fn only_external_workspace_mutation_requests_reconciliation() {
     let (function, input) = fixture(Value::Num(1.0));
     let state =

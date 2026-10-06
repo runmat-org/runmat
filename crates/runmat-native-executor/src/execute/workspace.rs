@@ -355,11 +355,19 @@ struct NativeWorkspaceService {
     session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
 }
 
+struct NativeWorkspaceClosed;
+
+impl From<NativeWorkspaceClosed> for runmat_runtime::RuntimeError {
+    fn from(_: NativeWorkspaceClosed) -> Self {
+        native_workspace_closed()
+    }
+}
+
 impl NativeWorkspaceService {
-    fn frame(&self) -> Result<Rc<NativeWorkspaceFrame>, runmat_runtime::RuntimeError> {
-        let frame = self.frame.upgrade().ok_or_else(native_workspace_closed)?;
+    fn frame(&self) -> Result<Rc<NativeWorkspaceFrame>, NativeWorkspaceClosed> {
+        let frame = self.frame.upgrade().ok_or(NativeWorkspaceClosed)?;
         if !frame.active.get() {
-            return Err(native_workspace_closed());
+            return Err(NativeWorkspaceClosed);
         }
         Ok(frame)
     }
