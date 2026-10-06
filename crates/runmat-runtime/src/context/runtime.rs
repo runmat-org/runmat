@@ -1,7 +1,7 @@
 use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionServices;
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::{
@@ -33,6 +33,19 @@ pub enum RuntimeLanguageMode {
     Matlab,
     RunMat,
     Strict,
+}
+
+/// Language and dynamic-source policy bound to one invocation.
+///
+/// Session defaults live in [`RuntimeContextState`]. An invocation projection
+/// lets independently pending work retain the policy captured at admission
+/// without mutating those shared defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeLanguagePolicy {
+    pub language_mode: RuntimeLanguageMode,
+    pub extensions_enabled: bool,
+    pub top_level_await_enabled: bool,
+    pub dynamic_eval_enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +106,7 @@ pub struct RuntimeContext {
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
+    invocation_language_policy: Option<Rc<Cell<RuntimeLanguagePolicy>>>,
     // Invocation-scoped, unlike shared session language state. Scoped guards
     // affect this invocation's clones, never an earlier/later generation.
     cancellation: Rc<RefCell<CancellationToken>>,
@@ -132,6 +146,7 @@ impl RuntimeContext {
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
+            invocation_language_policy: None,
             cancellation: Rc::new(RefCell::new(cancellation)),
         };
         {
@@ -426,31 +441,61 @@ impl RuntimeContext {
     }
 
     pub fn runmat_extensions_enabled(&self) -> bool {
-        self.state.runmat_extensions_enabled.get()
+        self.invocation_language_policy
+            .as_ref()
+            .map(|policy| policy.get().extensions_enabled)
+            .unwrap_or_else(|| self.state.runmat_extensions_enabled.get())
     }
 
     pub fn set_runmat_extensions_enabled(&self, enabled: bool) {
-        self.state.runmat_extensions_enabled.set(enabled);
+        if let Some(policy) = &self.invocation_language_policy {
+            let mut updated = policy.get();
+            updated.extensions_enabled = enabled;
+            policy.set(updated);
+        } else {
+            self.state.runmat_extensions_enabled.set(enabled);
+        }
     }
 
     pub fn language_mode(&self) -> RuntimeLanguageMode {
-        self.state.language_mode.get()
+        self.invocation_language_policy
+            .as_ref()
+            .map(|policy| policy.get().language_mode)
+            .unwrap_or_else(|| self.state.language_mode.get())
     }
 
     pub fn set_language_mode(&self, mode: RuntimeLanguageMode) {
-        self.state.language_mode.set(mode);
+        if let Some(policy) = &self.invocation_language_policy {
+            let mut updated = policy.get();
+            updated.language_mode = mode;
+            policy.set(updated);
+        } else {
+            self.state.language_mode.set(mode);
+        }
     }
 
     pub fn top_level_await_enabled(&self) -> bool {
-        self.state.top_level_await_enabled.get()
+        self.invocation_language_policy
+            .as_ref()
+            .map(|policy| policy.get().top_level_await_enabled)
+            .unwrap_or_else(|| self.state.top_level_await_enabled.get())
     }
 
     pub fn set_top_level_await_enabled(&self, enabled: bool) {
-        self.state.top_level_await_enabled.set(enabled);
+        if let Some(policy) = &self.invocation_language_policy {
+            let mut updated = policy.get();
+            updated.top_level_await_enabled = enabled;
+            policy.set(updated);
+        } else {
+            self.state.top_level_await_enabled.set(enabled);
+        }
     }
 
     pub fn dynamic_eval_enabled(&self) -> bool {
-        self.state.dynamic_eval_enabled.get()
+        self.invocation_language_policy
+            .as_ref()
+            .map(|policy| policy.get().dynamic_eval_enabled)
+            .unwrap_or_else(|| self.state.dynamic_eval_enabled.get())
     }
 
     pub fn execution_stack(&self) -> RuntimeExecutionStack {
@@ -503,7 +548,13 @@ impl RuntimeContext {
     }
 
     pub fn set_dynamic_eval_enabled(&self, enabled: bool) {
-        self.state.dynamic_eval_enabled.set(enabled);
+        if let Some(policy) = &self.invocation_language_policy {
+            let mut updated = policy.get();
+            updated.dynamic_eval_enabled = enabled;
+            policy.set(updated);
+        } else {
+            self.state.dynamic_eval_enabled.set(enabled);
+        }
     }
 
     pub fn callstack_limit(&self) -> usize {
@@ -530,6 +581,13 @@ impl RuntimeContext {
 
     pub fn with_service_ports(mut self, services: RuntimeServicePorts) -> Self {
         self.services = services;
+        self
+    }
+
+    /// Bind language policy to this invocation and its clones. This does not
+    /// change the session defaults observed by sibling or later invocations.
+    pub fn with_language_policy(mut self, policy: RuntimeLanguagePolicy) -> Self {
+        self.invocation_language_policy = Some(Rc::new(Cell::new(policy)));
         self
     }
 
@@ -571,19 +629,16 @@ impl RuntimeContext {
         child
             .state
             .runmat_extensions_enabled
-            .set(self.state.runmat_extensions_enabled.get());
-        child
-            .state
-            .language_mode
-            .set(self.state.language_mode.get());
+            .set(self.runmat_extensions_enabled());
+        child.state.language_mode.set(self.language_mode());
         child
             .state
             .top_level_await_enabled
-            .set(self.state.top_level_await_enabled.get());
+            .set(self.top_level_await_enabled());
         child
             .state
             .dynamic_eval_enabled
-            .set(self.state.dynamic_eval_enabled.get());
+            .set(self.dynamic_eval_enabled());
         child
             .state
             .execution_stack

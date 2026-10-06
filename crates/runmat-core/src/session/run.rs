@@ -835,6 +835,9 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
+        let source_registry_publication = self
+            .source_evaluator
+            .publish_for_execution(bytecode.function_registry());
         let _source_id_guard = runmat_runtime::source_context::replace_current_source_id_in_context(
             &execution_runtime,
             bytecode
@@ -1402,6 +1405,9 @@ impl RunMatSession {
                 .map_err(RunError::Runtime)?;
             self.function_registry = function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
+            source_registry_publication.finish(self.function_registry.clone());
+        } else {
+            drop(source_registry_publication);
         }
 
         if self.verbose {

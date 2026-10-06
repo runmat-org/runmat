@@ -56,7 +56,7 @@ pub use preferences::{
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, RuntimeContext,
     RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard, RuntimeLanguageMode,
-    DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+    RuntimeLanguagePolicy, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{ContextFuture, RuntimeContextGuard};
 pub(crate) use services::complete_process_output_requires_evidence;
@@ -79,8 +79,8 @@ pub use services::{
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{
-    RuntimeSourceEvaluationService, SessionSourceEvaluation, SourceEvaluationPolicy,
-    SourceEvaluationProvenance,
+    RuntimeSourceEvaluationAuthority, RuntimeSourceEvaluationService, SessionSourceEvaluation,
+    SourceEvaluationPolicy, SourceEvaluationProvenance,
 };
 pub(crate) use state::{RuntimeContextState, SourceState};
 pub use tcp::{

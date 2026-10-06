@@ -406,6 +406,10 @@ impl crate::context::SourceEvaluationProvenance for RuntimeSourceLease {
     fn source_id(&self) -> SourceId {
         RuntimeSourceLease::source_id(self)
     }
+
+    fn runtime_source_ref(&self) -> Option<RuntimeSourceRef> {
+        Some(self.source_ref())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
