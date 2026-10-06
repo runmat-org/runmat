@@ -270,7 +270,8 @@ mod tests {
         let claim = stage
             .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, 4)
             .expect("claim");
-        let source = std::str::from_utf8(b"\xff").unwrap_err();
+        let bytes = vec![0xff];
+        let source = std::str::from_utf8(&bytes).unwrap_err();
         assert!(matches!(
             ExactHostEffectDiagnosticStrings::render_with_utf8_source(
                 4, "a", "i", "b", source, claim,

@@ -244,7 +244,8 @@ mod tests {
             }
         }
 
-        let utf8 = std::str::from_utf8(b"\xff").unwrap_err();
+        let bytes = vec![0xff];
+        let utf8 = std::str::from_utf8(&bytes).unwrap_err();
         let error = FixedReaderDiagnostic::invalid_utf8_with_source(utf8, Some(&Cancelled));
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert!(error
