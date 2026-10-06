@@ -1092,6 +1092,9 @@ mod tests {
                 Some(Value::Num(8.0)),
                 "ordinary clear removes the frame binding, not the global value"
             );
+            assert_eq!(workspace_lookup("alpha"), Some(Value::Num(9.0)));
+            assert_eq!(vars[0], Value::Num(7.0));
+            reconcile_workspace_vars(&mut vars);
             assert_eq!(vars[0], Value::Num(9.0));
         }));
     }
