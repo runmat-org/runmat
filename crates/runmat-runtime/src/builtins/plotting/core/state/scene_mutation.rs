@@ -24,6 +24,16 @@ pub(super) fn get_state_for_query(
         .or_insert_with(|| FigureState::new(handle))
 }
 
+/// Change the style cursor/order used by a *later* plot. These fields are not
+/// part of the currently rendered Figure and cannot change an admitted scene
+/// snapshot; the later plot insertion obtains a scene successor itself.
+pub(super) fn get_state_for_future_plot_style(
+    registry: &mut PlotRegistry,
+    handle: FigureHandle,
+) -> &mut FigureState {
+    get_state_for_query(registry, handle)
+}
+
 /// Admit a mutable Figure before the caller can change scene or interaction
 /// state. A strong predecessor is parked until the registry guard releases.
 pub(super) fn get_state_mut(registry: &mut PlotRegistry, handle: FigureHandle) -> &mut FigureState {

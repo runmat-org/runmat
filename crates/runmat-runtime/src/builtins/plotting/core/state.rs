@@ -33,7 +33,8 @@ mod shared_figure;
 #[path = "state/scene_mutation.rs"]
 mod scene_mutation;
 use scene_mutation::{
-    existing_axes_state_mut, existing_state_mut, get_state_for_query, get_state_mut,
+    existing_axes_state_mut, existing_state_mut, get_state_for_future_plot_style,
+    get_state_for_query, get_state_mut,
 };
 #[cfg(test)]
 #[path = "state/scene_lease_tests.rs"]
@@ -1642,7 +1643,12 @@ pub fn set_color_order_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
+        // This setter historically creates a default Figure for a missing
+        // handle. Keep that admission behavior, but validate the axes before
+        // acquiring a successor for the existing scene.
+        let state = get_state_for_query(&mut reg, handle);
+        validate_axes_index(state, axes_index)?;
+        let state = get_state_mut(&mut reg, handle);
         state.color_cycle_for_axes_mut(axes_index).set_order(colors);
         state
             .figure
@@ -5846,7 +5852,7 @@ pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
+    let state = get_state_for_future_plot_style(&mut reg, handle);
     state.cycle_for_axes_mut(axes_index).set_order(order);
 }
 
@@ -5856,7 +5862,7 @@ pub fn next_line_style_for_axes(axes_index: usize) -> LineStyle {
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
+    let state = get_state_for_future_plot_style(&mut reg, handle);
     state.cycle_for_axes_mut(axes_index).next()
 }
 
@@ -5871,7 +5877,7 @@ pub fn line_color_for_axes_series_index(axes_index: usize, series_index: usize) 
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
+    let state = get_state_for_future_plot_style(&mut reg, handle);
     state
         .color_cycle_for_axes_mut(axes_index)
         .color_at(series_index)
@@ -5883,7 +5889,7 @@ pub fn line_color_for_target_axes_series_index(
     series_index: usize,
 ) -> Vec4 {
     let mut reg = registry();
-    let state = get_state_for_query(&mut reg, handle);
+    let state = get_state_for_future_plot_style(&mut reg, handle);
     state
         .color_cycle_for_axes_mut(axes_index)
         .color_at(series_index)
@@ -5895,7 +5901,7 @@ pub fn next_line_color_for_axes(axes_index: usize) -> Vec4 {
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_for_query(&mut reg, handle);
+    let state = get_state_for_future_plot_style(&mut reg, handle);
     state.color_cycle_for_axes_mut(axes_index).next()
 }
 

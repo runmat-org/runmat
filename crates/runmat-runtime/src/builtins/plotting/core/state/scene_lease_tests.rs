@@ -108,3 +108,61 @@ fn vacant_figure_has_one_lease_through_compound_registry_mutation() {
     drop(registry);
     drop(retired);
 }
+
+#[test]
+fn selecting_axes_rotates_scene_but_future_style_cycle_does_not() {
+    let _guard = lock_plot_test_registry();
+    let handle = new_figure_handle();
+    let (_, other_axes) = create_axes_for_figure(Some(handle)).expect("create first axes");
+    create_axes_for_figure(Some(handle)).expect("create second axes");
+    let before = {
+        let registry = registry();
+        registry.figures[&handle].scene_lease.clone()
+    };
+
+    select_axes_for_figure(handle, other_axes).expect("select axes");
+    let selected = {
+        let registry = registry();
+        registry.figures[&handle].scene_lease.clone()
+    };
+    assert!(!before.shares_lease(&selected));
+
+    // These counters and orders choose the next plot's style; they do not
+    // change the already-captured Figure or its active axes.
+    set_line_style_order_for_axes(other_axes, &[LineStyle::Solid]);
+    let _ = next_line_style_for_axes(other_axes);
+    let _ = line_color_for_target_axes_series_index(handle, other_axes, 0);
+    let _ = next_line_color_for_axes(other_axes);
+    let after_future_style = {
+        let registry = registry();
+        registry.figures[&handle].scene_lease.clone()
+    };
+    assert!(selected.shares_lease(&after_future_style));
+}
+
+#[test]
+fn color_order_axes_setter_preserves_missing_figure_creation_before_invalid_axes() {
+    let _guard = lock_plot_test_registry();
+    let missing = {
+        let registry = registry();
+        let missing = registry.next_handle;
+        assert!(!registry.figures.contains_key(&missing));
+        missing
+    };
+
+    let error = set_color_order_for_axes(missing, usize::MAX, &[])
+        .expect_err("invalid axes must still reject");
+    assert!(matches!(error, FigureError::InvalidSubplotIndex { .. }));
+    let created = {
+        let registry = registry();
+        registry.figures[&missing].scene_lease.clone()
+    };
+    assert_eq!(created.figure(), missing.as_u32());
+
+    set_color_order_for_axes(missing, 0, &[Vec4::ONE]).expect("default axes accepts color order");
+    let changed = {
+        let registry = registry();
+        registry.figures[&missing].scene_lease.clone()
+    };
+    assert!(!created.shares_lease(&changed));
+}
