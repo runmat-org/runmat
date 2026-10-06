@@ -244,7 +244,9 @@ mod tests {
                 "TimerFcn".into(),
                 Value::Closure(Closure {
                     function_name: "callback".into(),
-                    bound_function: None,
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                     captures: vec![
                         Value::HandleObject(HandleRef {
                             class_name: "Capture".into(),

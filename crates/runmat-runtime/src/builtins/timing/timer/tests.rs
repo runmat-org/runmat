@@ -7,7 +7,7 @@ use crate::context::{
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
 use runmat_types::SourceId;
-use runmat_value::{CharArray, IntegerStorage, Tensor};
+use runmat_value::{BoundFunctionBinding, CharArray, IntegerStorage, Tensor};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -77,7 +77,31 @@ impl RuntimeTimingService for TestClock {
 }
 
 thread_local! {
-    static TEST_SESSION: RefCell<Option<(RuntimeContext, Rc<RuntimeLocalTaskSupervisor>)>> = const { RefCell::new(None) };
+    static TEST_SESSION: RefCell<Option<(RuntimeContext, Rc<RuntimeLocalTaskSupervisor>, Vec<BoundFunctionBinding>)>> = const { RefCell::new(None) };
+}
+
+fn set_test_session(runtime: RuntimeContext, supervisor: Rc<RuntimeLocalTaskSupervisor>) {
+    let bindings = (1..=3)
+        .map(|function| {
+            crate::user_functions::test_support::exact_local_binding(&runtime, function)
+        })
+        .collect();
+    TEST_SESSION.with(|session| *session.borrow_mut() = Some((runtime, supervisor, bindings)));
+}
+
+fn timer_callback_value(name: &str, function: usize) -> Value {
+    TEST_SESSION.with(|session| {
+        let session = session.borrow();
+        let binding = session
+            .as_ref()
+            .expect("test session")
+            .2
+            .get(function.checked_sub(1).expect("fixture function number"))
+            .expect("registered fixture binding")
+            .clone();
+        assert_eq!(binding.function, function);
+        crate::user_functions::test_support::exact_local_value(name, binding)
+    })
 }
 
 fn reset_timer_state_for_tests() {
@@ -85,18 +109,15 @@ fn reset_timer_state_for_tests() {
 }
 
 fn reset_timer_state_for_tests_with_clock(clock: Option<Arc<Mutex<Duration>>>) {
-    TEST_SESSION.with(|session| {
-        let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        let owner = runtime.local_identity();
-        let mut ports =
-            RuntimeServicePorts::default().with_local_tasks(supervisor.submission_port(owner));
-        if let Some(clock) = clock {
-            ports = ports.with_timing(Rc::new(TestClock(clock)));
-        }
-        let runtime = runtime.with_service_ports(ports);
-        *session.borrow_mut() = Some((runtime, supervisor));
-    });
+    let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let owner = runtime.local_identity();
+    let mut ports =
+        RuntimeServicePorts::default().with_local_tasks(supervisor.submission_port(owner));
+    if let Some(clock) = clock {
+        ports = ports.with_timing(Rc::new(TestClock(clock)));
+    }
+    set_test_session(runtime.with_service_ports(ports), supervisor);
 }
 
 fn test_runtime() -> RuntimeContext {
@@ -109,9 +130,20 @@ fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
 
 fn install_timer_invoker(
     invoker: Option<Arc<crate::user_functions::FunctionInvoker>>,
-) -> crate::user_functions::FunctionInvokerGuard {
+) -> (
+    crate::user_functions::FunctionInvokerGuard,
+    crate::user_functions::BoundFunctionInvokerGuard,
+) {
     let _scope = test_runtime().enter();
-    crate::user_functions::install_semantic_function_invoker(invoker)
+    let semantic = crate::user_functions::install_semantic_function_invoker(invoker);
+    let bound = install_timer_bound_forwarders();
+    (semantic, bound)
+}
+
+fn install_timer_bound_forwarders() -> crate::user_functions::BoundFunctionInvokerGuard {
+    let bindings =
+        TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").2.clone());
+    crate::user_functions::test_support::install_bound_forwarders(bindings)
 }
 
 async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -241,10 +273,7 @@ fn timer_start_runs_function_callback_and_updates_state() {
         })));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("ExecutionMode".into()),
         Value::String("fixedSpacing".into()),
         Value::String("TasksToExecute".into()),
@@ -286,15 +315,9 @@ fn timer_stop_claims_stop_callback_once_and_wait_does_not_stop() {
     )));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("StopFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "done".into(),
-            function: 2,
-        },
+        timer_callback_value("done", 2),
         Value::String("StartDelay".into()),
         Value::Num(1.0),
     ]))
@@ -330,10 +353,7 @@ fn fixed_rate_drop_counts_missed_slots_without_executing_them() {
     )));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("ExecutionMode".into()),
         Value::String("fixedRate".into()),
         Value::String("BusyMode".into()),
@@ -382,10 +402,7 @@ fn fixed_delay_and_fixed_spacing_use_distinct_callback_anchors() {
         )));
         let timer = block_on(timer_builtin(vec![
             Value::String("TimerFcn".into()),
-            Value::BoundFunctionHandle {
-                name: "tick".into(),
-                function: 1,
-            },
+            timer_callback_value("tick", 1),
             Value::String("ExecutionMode".into()),
             Value::String(mode.into()),
             Value::String("Period".into()),
@@ -429,10 +446,7 @@ fn fixed_rate_queue_runs_due_work_and_error_reports_backlog() {
         )));
         let timer = block_on(timer_builtin(vec![
             Value::String("TimerFcn".into()),
-            Value::BoundFunctionHandle {
-                name: "tick".into(),
-                function: 1,
-            },
+            timer_callback_value("tick", 1),
             Value::String("ExecutionMode".into()),
             Value::String("fixedRate".into()),
             Value::String("BusyMode".into()),
@@ -487,13 +501,11 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
         });
     let scope = runtime.enter();
     let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker);
+    let _bound = install_timer_bound_forwarders();
     drop(scope);
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
     ]))
     .expect("timer");
     block_on(timer_start_builtin(timer.clone())).expect("first start");
@@ -547,23 +559,15 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
         });
     let scope = runtime.enter();
     let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker);
+    let _bound = install_timer_bound_forwarders();
     drop(scope);
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("ErrorFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "failed".into(),
-            function: 2,
-        },
+        timer_callback_value("failed", 2),
         Value::String("StopFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "done".into(),
-            function: 3,
-        },
+        timer_callback_value("done", 3),
     ]))
     .expect("timer");
     block_on(timer_start_builtin(timer.clone())).expect("first start");
@@ -602,10 +606,7 @@ fn deleting_a_pending_timer_cancels_its_child_without_late_callback() {
     )));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("StartDelay".into()),
         Value::Num(3_600.0),
     ]))
@@ -677,20 +678,11 @@ fn failed_timer_callback_delivers_original_exception_then_stop_once() {
     })));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("ErrorFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "failed".into(),
-            function: 2,
-        },
+        timer_callback_value("failed", 2),
         Value::String("StopFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "done".into(),
-            function: 3,
-        },
+        timer_callback_value("done", 3),
     ]))
     .expect("timer");
     block_on(timer_start_builtin(timer.clone())).expect("start");
@@ -724,7 +716,7 @@ fn text_callback_uses_executor_source_port_and_missing_port_rejects_before_runni
         .with_local_tasks(supervisor.submission_port(owner))
         .with_source_evaluation(Rc::new(RecordingSourceEvaluator(recorded.clone())));
     let runtime = runtime.with_service_ports(ports);
-    TEST_SESSION.with(|session| *session.borrow_mut() = Some((runtime, supervisor)));
+    set_test_session(runtime, supervisor);
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
         Value::String("answer = 42;".into()),
@@ -763,10 +755,7 @@ fn timer_handle_cannot_start_in_another_session_before_task_admission() {
     reset_timer_state_for_tests();
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
     ]))
     .expect("timer");
     let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
@@ -828,10 +817,7 @@ fn timer_tasks_to_execute_preserves_typed_integer_storage_exactly() {
     let tasks = Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tasks");
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        timer_callback_value("tick", 1),
         Value::String("ExecutionMode".into()),
         Value::String("fixedSpacing".into()),
         Value::String("TasksToExecute".into()),
