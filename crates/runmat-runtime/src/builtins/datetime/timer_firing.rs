@@ -122,43 +122,80 @@ fn parse_timer_text(text: &str, reference: NaiveDateTime) -> BuiltinResult<Naive
             "startat: relative words or timezone text require a separate instant authority",
         ));
     }
+    // Slash-date syntax is decoded before the generic datetime parser: the
+    // latter accepts short `%Y` fields literally, bypassing MATLAB's moving
+    // two-digit-year pivot for the documented mm/dd/yy representation.
+    let (date_part, time_part) = text
+        .split_once(' ')
+        .map_or((text, None), |(date, time)| (date, Some(time.trim())));
+    if date_part.contains('/') {
+        let date = parse_timer_slash_date(date_part, reference)?;
+        let time = match time_part {
+            None => NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            Some(time) => parse_timer_time(time).ok_or_else(|| {
+                datetime_error(format!("startat: invalid firing-time text '{text}'"))
+            })?,
+        };
+        return Ok(date.and_time(time));
+    }
     if let Some((naive, _)) = parse_datetime_text(text) {
         return Ok(naive);
     }
-    let slash: Vec<&str> = text.split('/').collect();
-    if slash.len() == 2 || slash.len() == 3 {
-        let month = slash[0].parse::<u32>();
-        let day = slash[1].parse::<u32>();
-        let year = if slash.len() == 2 {
-            Ok(reference.year())
-        } else {
-            slash[2].parse::<i32>().map(|short| {
-                if slash[2].len() == 2 && (0..=99).contains(&short) {
-                    let floor = reference.year() - 50;
-                    let mut expanded = floor.div_euclid(100) * 100 + short;
-                    if expanded < floor {
-                        expanded += 100;
-                    }
-                    expanded
-                } else {
-                    short
-                }
-            })
-        };
-        if let (Ok(month), Ok(day), Ok(year)) = (month, day, year) {
-            if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
-                return Ok(date.and_hms_opt(0, 0, 0).unwrap());
-            }
-        }
-    }
-    for format in ["%H:%M:%S", "%I:%M:%S %p", "%H:%M", "%I:%M %p"] {
-        if let Ok(time) = NaiveTime::parse_from_str(text, format) {
-            return Ok(reference.date().and_time(time));
-        }
+    if let Some(time) = parse_timer_time(text) {
+        return Ok(reference.date().and_time(time));
     }
     Err(datetime_error(format!(
         "startat: unable to parse firing-time text '{text}'"
     )))
+}
+
+fn parse_timer_slash_date(text: &str, reference: NaiveDateTime) -> BuiltinResult<NaiveDate> {
+    let parts: Vec<&str> = text.split('/').collect();
+    let invalid = || datetime_error(format!("startat: invalid firing-date text '{text}'"));
+    let (year, month, day) = match parts.as_slice() {
+        [month, day] => (
+            reference.year(),
+            month.parse::<u32>().map_err(|_| invalid())?,
+            day.parse::<u32>().map_err(|_| invalid())?,
+        ),
+        [first, second, third] if first.len() == 4 => (
+            first.parse::<i32>().map_err(|_| invalid())?,
+            second.parse::<u32>().map_err(|_| invalid())?,
+            third.parse::<u32>().map_err(|_| invalid())?,
+        ),
+        [month, day, year] => {
+            let month = month.parse::<u32>().map_err(|_| invalid())?;
+            let day = day.parse::<u32>().map_err(|_| invalid())?;
+            let year = if year.len() == 2 {
+                let short = year.parse::<i32>().map_err(|_| invalid())?;
+                let floor = reference.year() - 50;
+                let mut expanded = floor.div_euclid(100) * 100 + short;
+                if expanded < floor {
+                    expanded += 100;
+                }
+                expanded
+            } else if year.len() == 4 {
+                year.parse::<i32>().map_err(|_| invalid())?
+            } else {
+                return Err(invalid());
+            };
+            (year, month, day)
+        }
+        _ => return Err(invalid()),
+    };
+    NaiveDate::from_ymd_opt(year, month, day).ok_or_else(invalid)
+}
+
+fn parse_timer_time(text: &str) -> Option<NaiveTime> {
+    [
+        "%H:%M:%S%.f",
+        "%H:%M:%S",
+        "%I:%M:%S %p",
+        "%H:%M",
+        "%I:%M %p",
+    ]
+    .iter()
+    .find_map(|format| NaiveTime::parse_from_str(text, format).ok())
 }
 
 #[cfg(test)]
@@ -218,9 +255,16 @@ mod tests {
     fn text_forms_use_injected_local_date_and_fifty_year_pivot() {
         let current = reference();
         let strings = [
+            ("05-Oct-2026 14:30:05", (2026, 10, 5, 14, 30, 5)),
+            ("05-Oct-2026", (2026, 10, 5, 0, 0, 0)),
             ("10/06", (2026, 10, 6, 0, 0, 0)),
             ("10/06/75", (2075, 10, 6, 0, 0, 0)),
             ("10/06/76", (1976, 10, 6, 0, 0, 0)),
+            ("10/06/0075", (75, 10, 6, 0, 0, 0)),
+            ("10/06/2075", (2075, 10, 6, 0, 0, 0)),
+            ("10/06/2026", (2026, 10, 6, 0, 0, 0)),
+            ("14:30:05", (2026, 10, 5, 14, 30, 5)),
+            ("02:30:05 PM", (2026, 10, 5, 14, 30, 5)),
             ("14:30", (2026, 10, 5, 14, 30, 0)),
             ("02:30 PM", (2026, 10, 5, 14, 30, 0)),
         ];
@@ -232,6 +276,9 @@ mod tests {
                 .and_hms_opt(hour, minute, second)
                 .unwrap();
             assert_eq!(parsed.materialize_f64(), vec![datenum_from_naive(expected)]);
+        }
+        for invalid in ["10/06/7", "10/06/123", "10/06/20760", "10/32/26"] {
+            assert!(timer_firing_serials(vec![Value::String(invalid.into())], current).is_err());
         }
     }
 }
