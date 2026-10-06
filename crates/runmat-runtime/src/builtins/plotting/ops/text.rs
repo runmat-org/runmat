@@ -579,3 +579,7 @@ mod output_contract_tests {
         assert_eq!(error.identifier(), Some("RunMat:text:TooManyOutputs"));
     }
 }
+
+#[cfg(test)]
+#[path = "text/resident_tests.rs"]
+mod resident_tests;
