@@ -46,7 +46,9 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     mut resources: FillResources<'_>,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
-    let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
+    let count = rows
+        .checked_mul(cols)
+        .ok_or_else(|| matrix_overflow_with(resources.diagnostic))?;
     source.seek(SeekFrom::Start(0)).map_err(|source| {
         readmatrix_error_with_source(
             &READMATRIX_ERROR_IO_READ,
@@ -64,7 +66,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     let integer_dtype = integer_output_dtype(&options.output_template);
     let mut storage =
         FillStorage::new(rows, cols, count, integer_dtype, options, resources.output)?;
-    let mut reader = RowReader::new(source, resources.line.take());
+    let mut reader = RowReader::new(source, resources.line.take(), resources.diagnostic);
     let mut data_row = 0usize;
     let mut semantic_error = None;
     while let Some(line_number) = reader
@@ -110,7 +112,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
             continue;
         }
         if field_count > geometry.columns || data_row >= geometry.rows {
-            return Err(changed_source());
+            return Err(changed_source(resources.diagnostic));
         }
         if selected && semantic_error.is_none() {
             let last_col = first_col + cols;
@@ -131,14 +133,16 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
                 checked_row_work(cooperation, path, padded).await?;
             }
         }
-        data_row = data_row.checked_add(1).ok_or_else(matrix_overflow)?;
+        data_row = data_row
+            .checked_add(1)
+            .ok_or_else(|| matrix_overflow_with(resources.diagnostic))?;
     }
     if data_row != geometry.rows {
-        return Err(changed_source());
+        return Err(changed_source(resources.diagnostic));
     }
     let replay_digest = reader.finish_digest();
     if replay_digest != geometry.source_digest {
-        return Err(changed_source());
+        return Err(changed_source(resources.diagnostic));
     }
     if let Some(error) = semantic_error {
         return Err(error);
@@ -146,11 +150,8 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     storage.into_tensor(rows, cols)
 }
 
-fn changed_source() -> RuntimeError {
-    readmatrix_error_with(
-        &READMATRIX_ERROR_IO_READ,
-        "readmatrix: opened source changed between validation and output",
-    )
+fn changed_source(reservation: Option<&dyn DiagnosticReservation>) -> RuntimeError {
+    FixedReaderDiagnostic::ChangedSource.render(reservation)
 }
 
 struct FillTarget<'a> {

@@ -88,12 +88,14 @@ pub(super) struct RowReader<'a> {
     first_data_line: bool,
     text_start: usize,
     digest: Sha256,
+    diagnostic: Option<&'a dyn DiagnosticReservation>,
 }
 
 impl<'a> RowReader<'a> {
     pub(super) fn new(
         source: &'a mut FsBoundedInput,
         staged_line: Option<ExactHostEffectBytes>,
+        diagnostic: Option<&'a dyn DiagnosticReservation>,
     ) -> Self {
         Self {
             source: BoundedByteReader::new(source),
@@ -103,6 +105,7 @@ impl<'a> RowReader<'a> {
             first_data_line: true,
             text_start: 0,
             digest: Sha256::new(),
+            diagnostic,
         }
     }
 
@@ -138,7 +141,7 @@ impl<'a> RowReader<'a> {
                 })?;
                 if available.is_empty() {
                     if pending_len != 0 {
-                        return Err(invalid_utf8());
+                        return Err(invalid_utf8(self.diagnostic));
                     }
                     break;
                 }
@@ -152,6 +155,7 @@ impl<'a> RowReader<'a> {
                     &mut pending,
                     &mut pending_len,
                     &available[..count],
+                    self.diagnostic,
                 )?;
                 self.digest.update(&available[..count]);
                 self.source.consume(count);
@@ -159,7 +163,7 @@ impl<'a> RowReader<'a> {
                 checked_row_work(cooperation, path, count).await?;
                 if complete_line {
                     if pending_len != 0 {
-                        return Err(invalid_utf8());
+                        return Err(invalid_utf8(self.diagnostic));
                     }
                     break;
                 }
@@ -167,12 +171,10 @@ impl<'a> RowReader<'a> {
             if !saw_bytes {
                 return Ok(None);
             }
-            self.line_number = self.line_number.checked_add(1).ok_or_else(|| {
-                readmatrix_error_with(
-                    &READMATRIX_ERROR_IO_READ,
-                    "readmatrix: input line number exceeds platform limits",
-                )
-            })?;
+            self.line_number = self
+                .line_number
+                .checked_add(1)
+                .ok_or_else(|| FixedReaderDiagnostic::LineOverflow.render(self.diagnostic))?;
             if self.line.as_bytes().last() == Some(&b'\n') {
                 self.line.pop_ascii();
             }
@@ -223,11 +225,8 @@ impl<'a> RowReader<'a> {
     }
 }
 
-fn invalid_utf8() -> RuntimeError {
-    readmatrix_error_with(
-        &READMATRIX_ERROR_IO_READ,
-        "readmatrix: file contains bytes that are invalid for Encoding 'utf-8'",
-    )
+fn invalid_utf8(reservation: Option<&dyn DiagnosticReservation>) -> RuntimeError {
+    FixedReaderDiagnostic::InvalidUtf8.render(reservation)
 }
 
 fn append_utf8_chunk(
@@ -235,16 +234,14 @@ fn append_utf8_chunk(
     pending: &mut [u8; 3],
     pending_len: &mut usize,
     chunk: &[u8],
+    diagnostic: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<()> {
     let mut bytes = [0_u8; 4099];
     let total = pending_len
         .checked_add(chunk.len())
-        .ok_or_else(matrix_overflow)?;
+        .ok_or_else(|| matrix_overflow_with(diagnostic))?;
     if total > bytes.len() {
-        return Err(readmatrix_error_with(
-            &READMATRIX_ERROR_IO_READ,
-            "readmatrix: decoded input chunk exceeds the bounded reader capacity",
-        ));
+        return Err(FixedReaderDiagnostic::ChunkOverflow.render(diagnostic));
     }
     bytes[..*pending_len].copy_from_slice(&pending[..*pending_len]);
     bytes[*pending_len..total].copy_from_slice(chunk);
@@ -266,7 +263,7 @@ fn append_utf8_chunk(
     };
     line.append_validated(text)?;
     if tail.len() > pending.len() {
-        return Err(invalid_utf8());
+        return Err(invalid_utf8(diagnostic));
     }
     pending[..tail.len()].copy_from_slice(tail);
     *pending_len = tail.len();

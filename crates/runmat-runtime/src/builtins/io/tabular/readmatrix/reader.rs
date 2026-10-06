@@ -55,8 +55,9 @@ pub(super) async fn read_default_staged(
     // Each holds at most bytes from this opened extent. The sample owner is
     // dropped before replay; replay needs only line and field scratch.
     let capacity = usize::try_from(extent).map_err(|_| matrix_overflow())?;
-    let diagnostic_bytes =
-        maximum_numeric_diagnostic_bytes(capacity).ok_or_else(matrix_overflow)?;
+    let diagnostic_bytes = maximum_numeric_diagnostic_bytes(capacity)
+        .and_then(|numeric| maximum_fixed_diagnostic_bytes().map(|fixed| numeric.max(fixed)))
+        .ok_or_else(matrix_overflow)?;
     let diagnostic_bytes = u64::try_from(diagnostic_bytes).map_err(|_| matrix_overflow())?;
     let claim_bytes =
         u64::try_from(stage.live_claim_metadata_bytes()).map_err(|_| matrix_overflow())?;
@@ -483,13 +484,15 @@ fn strip_utf8_bom(text: &str) -> &str {
     text.strip_prefix('\u{FEFF}').unwrap_or(text)
 }
 
+mod diagnostic;
+use diagnostic::{maximum_fixed_diagnostic_bytes, DiagnosticReservation, FixedReaderDiagnostic};
 mod numeric;
 pub(super) use numeric::parse_integer_numeric_token;
 use numeric::{
     integer_output_dtype, maximum_numeric_diagnostic_bytes,
     parse_integer_numeric_token_with_reservation, parse_numeric_token,
     parse_numeric_token_with_reservation, validate_numeric_token,
-    validate_numeric_token_with_reservation, DiagnosticReservation,
+    validate_numeric_token_with_reservation,
 };
 
 #[cfg(test)]

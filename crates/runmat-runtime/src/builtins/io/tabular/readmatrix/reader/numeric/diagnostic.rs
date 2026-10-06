@@ -2,10 +2,8 @@
 //! The staged caller uses its checked byte length for an exact retained
 //! allocation; ordinary `to_string` below does not certify resource use.
 
-use crate::context::host_effect::{
-    ExactHostEffectDiagnosticStrings, HostEffectAllocationError, HostEffectLiveAllocationClaim,
-    HostEffectReceipt, HostEffectStagePermit,
-};
+use super::super::diagnostic::DiagnosticReservation;
+use crate::context::host_effect::{ExactHostEffectDiagnosticStrings, HostEffectAllocationError};
 use runmat_builtins::READMATRIX_ERROR_NON_NUMERIC_TOKEN;
 use std::fmt;
 use std::fmt::Write as _;
@@ -20,31 +18,6 @@ pub(super) struct NumericTokenDiagnostic<'a> {
     token: &'a str,
     line: usize,
     column: usize,
-}
-
-pub(in crate::builtins::io::tabular::readmatrix::reader) trait DiagnosticReservation {
-    fn reserve_diagnostic_claim(
-        &self,
-        bytes: usize,
-    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError>;
-}
-
-impl DiagnosticReservation for HostEffectStagePermit {
-    fn reserve_diagnostic_claim(
-        &self,
-        bytes: usize,
-    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
-        HostEffectStagePermit::reserve_diagnostic_claim(self, bytes)
-    }
-}
-
-impl DiagnosticReservation for HostEffectReceipt {
-    fn reserve_diagnostic_claim(
-        &self,
-        bytes: usize,
-    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
-        HostEffectReceipt::reserve_diagnostic_claim(self, bytes)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -151,8 +124,8 @@ fn decimal_digits(mut number: usize) -> usize {
 mod tests {
     use super::*;
     use crate::context::host_effect::{
-        HostEffectLiveAllocationKind, HostEffectStageReservation, ManagedHostEffectLedger,
-        ManagedHostEffectStageReservation,
+        HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind, HostEffectStageReservation,
+        ManagedHostEffectLedger, ManagedHostEffectStageReservation,
     };
     use std::sync::Arc;
 

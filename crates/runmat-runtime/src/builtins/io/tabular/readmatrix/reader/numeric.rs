@@ -3,7 +3,6 @@ use super::*;
 use std::borrow::Cow;
 
 mod diagnostic;
-pub(in crate::builtins::io::tabular::readmatrix::reader) use diagnostic::DiagnosticReservation;
 use diagnostic::NumericTokenDiagnostic;
 
 pub(in crate::builtins::io::tabular::readmatrix::reader) fn maximum_numeric_diagnostic_bytes(

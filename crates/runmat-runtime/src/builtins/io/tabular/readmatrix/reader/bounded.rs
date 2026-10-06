@@ -84,7 +84,7 @@ pub(super) async fn scan_utf8(
     options: &ReadMatrixOptions,
     mut resources: ScanResources<'_>,
 ) -> BuiltinResult<BoundedScanGeometry> {
-    let mut reader = RowReader::new(source, resources.line.take());
+    let mut reader = RowReader::new(source, resources.line.take(), resources.diagnostic);
     let mut sample = SampleRows::new(resources.samples.take());
     while sample.count < sample.lines.len() {
         let Some(number) = reader
@@ -135,7 +135,9 @@ pub(super) async fn scan_utf8(
         .await;
         match result {
             Ok(count) if count != 0 => {
-                rows = rows.checked_add(1).ok_or_else(matrix_overflow)?;
+                rows = rows
+                    .checked_add(1)
+                    .ok_or_else(|| matrix_overflow_with(resources.diagnostic))?;
                 columns = columns.max(count);
             }
             Err(error) if semantic_error.is_none() => semantic_error = Some(error),
@@ -162,7 +164,9 @@ pub(super) async fn scan_utf8(
             .await
             {
                 Ok(count) if count != 0 => {
-                    rows = rows.checked_add(1).ok_or_else(matrix_overflow)?;
+                    rows = rows
+                        .checked_add(1)
+                        .ok_or_else(|| matrix_overflow_with(resources.diagnostic))?;
                     columns = columns.max(count);
                 }
                 Err(error) => semantic_error = Some(error),
@@ -225,10 +229,13 @@ async fn validate_row(
 }
 
 pub(super) fn matrix_overflow() -> RuntimeError {
-    readmatrix_error_with(
-        &READMATRIX_ERROR_TENSOR_BUILD,
-        "readmatrix: matrix dimensions exceed addressable storage",
-    )
+    matrix_overflow_with(None)
+}
+
+pub(super) fn matrix_overflow_with(
+    reservation: Option<&dyn DiagnosticReservation>,
+) -> RuntimeError {
+    FixedReaderDiagnostic::MatrixOverflow.render(reservation)
 }
 
 #[cfg(test)]
