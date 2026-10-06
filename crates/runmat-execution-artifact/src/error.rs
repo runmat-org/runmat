@@ -15,3 +15,20 @@ pub enum ArtifactError {
 }
 
 pub type ArtifactResult<T> = Result<T, ArtifactError>;
+
+pub(crate) fn contract_error(error: runmat_execution::ContractError) -> ArtifactError {
+    contract_error_in("execution contract", error)
+}
+
+pub(crate) fn contract_error_in(
+    context: &str,
+    error: runmat_execution::ContractError,
+) -> ArtifactError {
+    let message = format!("{context}: {error}");
+    match error {
+        runmat_execution::ContractError::Limit { .. } => ArtifactError::Limit(message),
+        runmat_execution::ContractError::Invalid { .. }
+        | runmat_execution::ContractError::UnsupportedSchema { .. }
+        | runmat_execution::ContractError::MalformedProtocol(_) => ArtifactError::Invalid(message),
+    }
+}

@@ -6,7 +6,7 @@ use super::{
     InterpreterRegionSourcesV1, ProgramArtifactId, ProgramBuildRecipe, ProgramRecipeId,
     ProgramTarget,
 };
-use crate::{ArtifactError, ArtifactResult};
+use crate::{error::contract_error, ArtifactError, ArtifactResult};
 
 pub const PROGRAM_ARTIFACT_SCHEMA_VERSION: u16 = 2;
 
@@ -58,7 +58,7 @@ impl ProgramArtifact {
         }
         runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&self.executable_bytes)
             .map(Some)
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+            .map_err(contract_error)
     }
 
     pub fn executable_unit_admission(
@@ -69,7 +69,7 @@ impl ProgramArtifact {
         }
         runmat_execution::ExecutableUnitEnvelope::admission(&self.executable_bytes)
             .map(Some)
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+            .map_err(contract_error)
     }
 
     pub fn materialize(
@@ -175,7 +175,7 @@ impl ProgramArtifact {
                         })?;
                     Some(
                         runmat_execution::ExecutableSourceMapV2::decode(&component.bytes)
-                            .map_err(|error| ArtifactError::Invalid(error.to_string()))?,
+                            .map_err(contract_error)?,
                     )
                 }
                 version => {
