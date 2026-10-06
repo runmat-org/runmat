@@ -51,4 +51,3 @@ pub const SUPTITLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: Some(&SUPTITLE_INTEGER_AUDIT),
     suppress_auto_output: true,
 };
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&SUPTITLE_CATALOG_ENTRY];

@@ -1,6 +1,6 @@
 use runmat_builtins::{
-    BuiltinErrorDescriptor, EXPLICIT_GPU_INPUT_EXTENSION, INTEGER_AXES_EXTENSION,
-    TEXT_ERROR_INTERNAL, TEXT_ERROR_INVALID_ARGUMENT,
+    BuiltinErrorDescriptor, INTEGER_AXES_EXTENSION, TEXT_ERROR_INTERNAL,
+    TEXT_ERROR_INVALID_ARGUMENT, TEXT_EXPLICIT_GPU_INPUT_EXTENSION,
 };
 use runmat_builtins::{TEXT_DESCRIPTOR, TEXT_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
@@ -78,7 +78,7 @@ pub async fn text_builtin(
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &EXPLICIT_GPU_INPUT_EXTENSION,
+            &TEXT_EXPLICIT_GPU_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }

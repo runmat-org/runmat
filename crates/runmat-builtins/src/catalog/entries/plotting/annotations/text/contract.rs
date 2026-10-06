@@ -5,14 +5,15 @@ pub const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionD
     description: "text with a typed-integer numeric axes alias is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:TextIntegerAxesHandleExtension"),
 };
-pub const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "text-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "text with explicit gpuArray coordinates is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TextExplicitGpuInputExtension"),
-};
+pub const TEXT_EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "text-explicit-gpu-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "text with explicit gpuArray coordinates is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:TextExplicitGpuInputExtension"),
+    };
 pub const TEXT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INTEGER_AXES_EXTENSION, EXPLICIT_GPU_INPUT_EXTENSION];
+    [INTEGER_AXES_EXTENSION, TEXT_EXPLICIT_GPU_INPUT_EXTENSION];
 
 const INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
     BuiltinIntegerInputCapability {
