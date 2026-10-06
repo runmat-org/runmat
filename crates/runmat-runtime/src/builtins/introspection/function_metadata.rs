@@ -198,7 +198,8 @@ mod tests {
             "metadata_file".into(),
             Some("/tmp/metadata_file.m".into()),
             "function metadata_file; end".into(),
-        )]);
+        )])
+        .expect("function metadata source catalog admission");
         let _catalog = crate::user_functions::install_source_function_catalog(Some(
             std::sync::Arc::new(vec![
                 crate::user_functions::SourceFunctionInfo {
@@ -311,7 +312,8 @@ mod tests {
                 "origin".into(),
                 Some("/origin/origin.m".into()),
                 "function origin; end".into(),
-            )]);
+            )])
+            .expect("function metadata source catalog admission");
             let _catalog = crate::user_functions::install_source_function_catalog(Some(
                 std::sync::Arc::new(vec![crate::user_functions::SourceFunctionInfo {
                     source_id,
@@ -331,7 +333,8 @@ mod tests {
             "unrelated".into(),
             Some("/destination/unrelated.m".into()),
             "function unrelated; end".into(),
-        )]);
+        )])
+        .expect("function metadata source catalog admission");
         let _catalog = crate::user_functions::install_source_function_catalog(Some(
             std::sync::Arc::new(vec![crate::user_functions::SourceFunctionInfo {
                 source_id,

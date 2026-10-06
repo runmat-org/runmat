@@ -1,3 +1,4 @@
+use runmat_execution::identity::{Digest, DigestStream};
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::SourceId;
 use std::cell::RefCell;
@@ -13,6 +14,72 @@ pub struct SourceInfo {
     pub text: Arc<str>,
 }
 
+/// Each async invocation owns this foreground view. A guard removes only its
+/// own overlay, even when another guard finishes first.
+#[derive(Debug)]
+pub(crate) struct SourceCatalogProjection {
+    base: HashMap<SourceId, SourceInfo>,
+    overlays: Vec<(usize, HashMap<SourceId, SourceInfo>)>,
+    next_token: Option<usize>,
+}
+
+impl SourceCatalogProjection {
+    pub(crate) fn new(base: HashMap<SourceId, SourceInfo>) -> Self {
+        Self {
+            base,
+            overlays: Vec::new(),
+            next_token: Some(0),
+        }
+    }
+
+    pub(crate) fn snapshot_catalog(&self) -> HashMap<SourceId, SourceInfo> {
+        self.current().clone()
+    }
+
+    fn current(&self) -> &HashMap<SourceId, SourceInfo> {
+        self.overlays
+            .last()
+            .map_or(&self.base, |(_, catalog)| catalog)
+    }
+
+    fn push(
+        &mut self,
+        catalog: HashMap<SourceId, SourceInfo>,
+    ) -> Result<usize, SourceCatalogAdmissionError> {
+        let token = self
+            .next_token
+            .ok_or(SourceCatalogAdmissionError::ProjectionExhausted)?;
+        self.next_token = token.checked_add(1);
+        self.overlays.push((token, catalog));
+        Ok(token)
+    }
+
+    fn remove(&mut self, token: usize) {
+        if let Some(index) = self.overlays.iter().position(|(owned, _)| *owned == token) {
+            self.overlays.remove(index);
+        }
+    }
+}
+
+fn imported_identity(info: &SourceInfo) -> Digest {
+    let mut digest = DigestStream::new();
+    for field in [
+        Some(info.name.as_ref()),
+        info.fullpath_name.as_deref(),
+        Some(info.text.as_ref()),
+    ] {
+        match field {
+            Some(value) => {
+                digest.update(&[1]);
+                digest.update(&(value.len() as u64).to_le_bytes());
+                digest.update(value.as_bytes());
+            }
+            None => digest.update(&[0]),
+        }
+    }
+    digest.finish()
+}
+
 #[derive(Debug)]
 pub(crate) struct LeasedSource {
     owner: Weak<LeaseInner>,
@@ -24,7 +91,11 @@ impl LeasedSource {
     }
 }
 
-fn resolved_source_info(source: &crate::context::SourceState, id: SourceId) -> Option<SourceInfo> {
+fn resolved_source_info(
+    source: &crate::context::SourceState,
+    catalog: &HashMap<SourceId, SourceInfo>,
+    id: SourceId,
+) -> Option<SourceInfo> {
     let leased = source
         .leased_catalog
         .get(&id)
@@ -32,10 +103,10 @@ fn resolved_source_info(source: &crate::context::SourceState, id: SourceId) -> O
     // An untyped foreground import can use the same integer, but it cannot
     // decide which source an issued lease denotes. Fail closed rather than
     // attributing either caller's span to the other's text.
-    if leased.is_some() && source.catalog.contains_key(&id) {
+    if leased.is_some() && catalog.contains_key(&id) {
         return None;
     }
-    leased.or_else(|| source.catalog.get(&id).cloned())
+    leased.or_else(|| catalog.get(&id).cloned())
 }
 
 #[derive(Debug)]
@@ -195,7 +266,10 @@ impl crate::context::SourceState {
             let next = self.next_issued_id.ok_or(SourceIdExhausted)?;
             self.next_issued_id = next.checked_add(1);
             let id = SourceId(next);
-            if !self.catalog.contains_key(&id) && !self.leased_catalog.contains_key(&id) {
+            if !self.catalog.contains_key(&id)
+                && !self.imported_identities.contains_key(&id)
+                && !self.leased_catalog.contains_key(&id)
+            {
                 return Ok(id);
             }
         }
@@ -207,6 +281,7 @@ impl crate::context::SourceState {
         let mut snapshot = Self::default();
         snapshot.current = self.current.clone();
         snapshot.catalog = self.catalog.clone();
+        snapshot.imported_identities = self.imported_identities.clone();
         for (id, entry) in &self.leased_catalog {
             if let Some(info) = entry.live_info() {
                 if snapshot.catalog.remove(id).is_none() {
@@ -273,21 +348,78 @@ impl Drop for SourceContextGuard {
 
 pub struct SourceCatalogGuard {
     prev: HashMap<SourceId, SourceInfo>,
+    invocation_catalog: Option<(Rc<RefCell<SourceCatalogProjection>>, usize)>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    registered_ids: Vec<SourceId>,
 }
 
 impl Drop for SourceCatalogGuard {
     fn drop(&mut self) {
         let prev = std::mem::take(&mut self.prev);
-        if let Some(state) = &self.state {
+        if let Some((catalog, token)) = &self.invocation_catalog {
+            catalog.borrow_mut().remove(*token);
+        } else if let Some(state) = &self.state {
             state.source.borrow_mut().catalog = prev;
         } else {
             SOURCE_CATALOG.with(|catalog| {
                 *catalog.borrow_mut() = prev;
             });
         }
+        if let Some(state) = &self.state {
+            let mut source = state.source.borrow_mut();
+            for id in &self.registered_ids {
+                let Some(count) = source.active_imports.get_mut(id) else {
+                    continue;
+                };
+                *count -= 1;
+                if *count == 0 {
+                    source.active_imports.remove(id);
+                }
+            }
+        }
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceCatalogAdmissionError {
+    DuplicateSourceId(SourceId),
+    LeasedSourceId(SourceId),
+    PreviouslyIssuedSourceId(SourceId),
+    ConflictingImport(SourceId),
+    TooManyImports(SourceId),
+    ProjectionExhausted,
+}
+
+impl std::fmt::Display for SourceCatalogAdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicateSourceId(id) => write!(formatter, "duplicate source identity {}", id.0),
+            Self::LeasedSourceId(id) => write!(formatter, "source identity {} is leased", id.0),
+            Self::PreviouslyIssuedSourceId(id) => {
+                write!(formatter, "source identity {} was already issued", id.0)
+            }
+            Self::ConflictingImport(id) => {
+                write!(
+                    formatter,
+                    "source identity {} has different imported text",
+                    id.0
+                )
+            }
+            Self::TooManyImports(id) => {
+                write!(
+                    formatter,
+                    "source identity {} has too many active imports",
+                    id.0
+                )
+            }
+            Self::ProjectionExhausted => {
+                formatter.write_str("source catalog projection is exhausted")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SourceCatalogAdmissionError {}
 
 /// Replace the current source text for this thread.
 ///
@@ -342,10 +474,7 @@ pub fn replace_current_source_id(source_id: Option<SourceId>) -> SourceContextGu
         }
     }
     if let Some(state) = active_state() {
-        let next = source_id.and_then(|id| {
-            let source = state.source.borrow();
-            resolved_source_info(&source, id)
-        });
+        let next = source_id.and_then(source_info);
         let prev = std::mem::replace(&mut state.source.borrow_mut().current, next);
         SourceContextGuard {
             prev,
@@ -388,7 +517,15 @@ pub fn replace_current_source_id_in_context(
     }
 }
 
-pub fn replace_source_catalog(entries: Vec<(SourceId, String, String)>) -> SourceCatalogGuard {
+/// Admit a context-free embedding catalog or a poll-local foreground view.
+///
+/// An imported numeric identity may never alias a session-issued lease or
+/// later denote different source text. The returned guard is synchronous;
+/// async callers must create it inside `RuntimeContext::scope` so each future
+/// owns its view across suspension.
+pub fn replace_source_catalog(
+    entries: Vec<(SourceId, String, String)>,
+) -> Result<SourceCatalogGuard, SourceCatalogAdmissionError> {
     replace_source_catalog_with_fullpaths(
         entries
             .into_iter()
@@ -399,11 +536,11 @@ pub fn replace_source_catalog(entries: Vec<(SourceId, String, String)>) -> Sourc
 
 pub fn replace_source_catalog_with_fullpaths(
     entries: Vec<(SourceId, String, Option<String>, String)>,
-) -> SourceCatalogGuard {
-    let next = entries
-        .into_iter()
-        .map(|(source_id, name, fullpath_name, text)| {
-            (
+) -> Result<SourceCatalogGuard, SourceCatalogAdmissionError> {
+    let mut next = HashMap::with_capacity(entries.len());
+    for (source_id, name, fullpath_name, text) in entries {
+        if next
+            .insert(
                 source_id,
                 SourceInfo {
                     source_id: Some(source_id),
@@ -412,18 +549,85 @@ pub fn replace_source_catalog_with_fullpaths(
                     text: Arc::<str>::from(text),
                 },
             )
-        })
-        .collect::<HashMap<_, _>>();
-    if let Some(state) = active_state() {
-        let prev = std::mem::replace(&mut state.source.borrow_mut().catalog, next);
-        SourceCatalogGuard {
-            prev,
-            state: Some(state),
+            .is_some()
+        {
+            return Err(SourceCatalogAdmissionError::DuplicateSourceId(source_id));
         }
+    }
+    let projection = crate::context::legacy::active()
+        .and_then(|runtime| runtime.source_catalog_view().map(Rc::clone));
+    if projection
+        .as_ref()
+        .is_some_and(|catalog| catalog.borrow().next_token.is_none())
+    {
+        return Err(SourceCatalogAdmissionError::ProjectionExhausted);
+    }
+    let state = active_state();
+    if let Some(state) = &state {
+        let source = state.source.borrow();
+        for (id, info) in &next {
+            if source
+                .leased_catalog
+                .get(id)
+                .and_then(LeasedSource::live_info)
+                .is_some()
+            {
+                return Err(SourceCatalogAdmissionError::LeasedSourceId(*id));
+            }
+            if source.next_issued_id.is_none_or(|next| id.0 < next)
+                && !source.imported_identities.contains_key(id)
+            {
+                return Err(SourceCatalogAdmissionError::PreviouslyIssuedSourceId(*id));
+            }
+            if source
+                .imported_identities
+                .get(id)
+                .is_some_and(|identity| *identity != imported_identity(info))
+            {
+                return Err(SourceCatalogAdmissionError::ConflictingImport(*id));
+            }
+            if source.active_imports.get(id) == Some(&usize::MAX) {
+                return Err(SourceCatalogAdmissionError::TooManyImports(*id));
+            }
+        }
+    }
+    let registered_ids = next.keys().copied().collect::<Vec<_>>();
+    if let Some(state) = &state {
+        let mut source = state.source.borrow_mut();
+        for id in &registered_ids {
+            *source.active_imports.entry(*id).or_default() += 1;
+            source
+                .imported_identities
+                .entry(*id)
+                .or_insert_with(|| imported_identity(&next[id]));
+        }
+    }
+    if let Some(catalog) = projection {
+        let token = catalog.borrow_mut().push(next)?;
+        return Ok(SourceCatalogGuard {
+            prev: HashMap::new(),
+            invocation_catalog: Some((catalog, token)),
+            state,
+            registered_ids,
+        });
+    }
+    if let Some(state) = state {
+        let prev = std::mem::replace(&mut state.source.borrow_mut().catalog, next);
+        Ok(SourceCatalogGuard {
+            prev,
+            invocation_catalog: None,
+            state: Some(state),
+            registered_ids,
+        })
     } else {
         let prev =
             SOURCE_CATALOG.with(|catalog| std::mem::replace(&mut *catalog.borrow_mut(), next));
-        SourceCatalogGuard { prev, state: None }
+        Ok(SourceCatalogGuard {
+            prev,
+            invocation_catalog: None,
+            state: None,
+            registered_ids: Vec::new(),
+        })
     }
 }
 
@@ -435,6 +639,11 @@ pub fn source_catalog_entries() -> Vec<(SourceId, String, String)> {
 }
 
 pub fn source_catalog_entries_with_fullpaths() -> Vec<(SourceId, String, Option<String>, String)> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(catalog) = runtime.source_catalog_view() {
+            return catalog_entries(catalog.borrow().current());
+        }
+    }
     if let Some(state) = active_state() {
         return catalog_entries(&state.source.borrow().catalog);
     }
@@ -478,9 +687,15 @@ pub fn current_source_info() -> Option<SourceInfo> {
 }
 
 pub fn source_info(source_id: SourceId) -> Option<SourceInfo> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(catalog) = runtime.source_catalog_view() {
+            let source = runtime.state().source.borrow();
+            return resolved_source_info(&source, catalog.borrow().current(), source_id);
+        }
+    }
     if let Some(state) = active_state() {
         let source = state.source.borrow();
-        return resolved_source_info(&source, source_id);
+        return resolved_source_info(&source, &source.catalog, source_id);
     }
     SOURCE_CATALOG.with(|catalog| catalog.borrow().get(&source_id).cloned())
 }
@@ -489,8 +704,19 @@ pub fn source_info_in_context(
     runtime: &crate::context::RuntimeContext,
     source_id: SourceId,
 ) -> Option<SourceInfo> {
+    let active = crate::context::legacy::active();
+    let catalog = runtime.source_catalog_view().or_else(|| {
+        active
+            .as_ref()
+            .filter(|active| Rc::ptr_eq(active.state(), runtime.state()))
+            .and_then(crate::context::RuntimeContext::source_catalog_view)
+    });
     let source = runtime.state().source.borrow();
-    resolved_source_info(&source, source_id)
+    if let Some(catalog) = catalog {
+        resolved_source_info(&source, catalog.borrow().current(), source_id)
+    } else {
+        resolved_source_info(&source, &source.catalog, source_id)
+    }
 }
 
 /// Seed a newly-created standalone runtime context from the ambient source
@@ -508,6 +734,10 @@ pub fn inherit_legacy_source_context(context: &crate::context::RuntimeContext) {
     let catalog = SOURCE_CATALOG.with(|catalog| catalog.borrow().clone());
     let mut state = context.state().source.borrow_mut();
     state.current = current;
+    state.imported_identities = catalog
+        .iter()
+        .map(|(id, info)| (*id, imported_identity(info)))
+        .collect();
     state.catalog = catalog;
 }
 
@@ -692,6 +922,53 @@ mod lease_tests {
     }
 
     #[test]
+    fn pending_foreground_catalog_guards_are_poll_local() {
+        let session = runtime();
+        let pending = |id: SourceId, text: &'static str| {
+            session.scope(async move {
+                let _catalog = replace_source_catalog(vec![(id, text.into(), text.into())])
+                    .expect("poll-local source catalog admission");
+                std::future::poll_fn(|_| {
+                    assert_eq!(source_info(id).unwrap().text.as_ref(), text);
+                    Poll::<()>::Pending
+                })
+                .await;
+            })
+        };
+        let mut first = Box::pin(pending(SourceId(11), "first"));
+        let mut second = Box::pin(pending(SourceId(12), "second"));
+        let waker = std::task::Waker::from(Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        assert!(first.as_mut().poll(&mut cx).is_pending());
+        assert!(second.as_mut().poll(&mut cx).is_pending());
+        assert!(first.as_mut().poll(&mut cx).is_pending());
+        drop(first);
+        assert!(second.as_mut().poll(&mut cx).is_pending());
+        drop(second);
+        assert!(source_info_in_context(&session, SourceId(11)).is_none());
+        assert!(source_info_in_context(&session, SourceId(12)).is_none());
+    }
+
+    #[test]
+    fn out_of_order_foreground_guard_drop_preserves_newer_overlay() {
+        let runtime = runtime();
+        futures::executor::block_on(runtime.scope(async {
+            let first = replace_source_catalog(vec![(SourceId(21), "first".into(), "one".into())])
+                .expect("first catalog");
+            let second =
+                replace_source_catalog(vec![(SourceId(22), "second".into(), "two".into())])
+                    .expect("second catalog");
+            assert!(source_info(SourceId(21)).is_none());
+            assert_eq!(source_info(SourceId(22)).unwrap().text.as_ref(), "two");
+            drop(first);
+            assert_eq!(source_info(SourceId(22)).unwrap().text.as_ref(), "two");
+            drop(second);
+            assert!(source_info(SourceId(21)).is_none());
+            assert!(source_info(SourceId(22)).is_none());
+        }));
+    }
+
+    #[test]
     fn interleaved_foreground_guards_do_not_remove_leased_sources() {
         let runtime = runtime();
         let _scope = runtime.enter();
@@ -701,7 +978,8 @@ mod lease_tests {
             "foreground".into(),
             None,
             "statement".into(),
-        )]);
+        )])
+        .expect("foreground source catalog admission");
         let second = lease_source_context_in_context(&runtime, "second", None, "two").unwrap();
         drop(guard);
         assert_eq!(source_info(first.source_id()).unwrap().text.as_ref(), "one");
@@ -723,19 +1001,93 @@ mod lease_tests {
         let lease =
             lease_source_context_in_context(&runtime, "issued", None, "issued text").unwrap();
         let _scope = runtime.enter();
-        let guard = replace_source_catalog_with_fullpaths(vec![(
+        let error = replace_source_catalog_with_fullpaths(vec![(
             lease.source_id(),
             "untrusted".into(),
             None,
             "untrusted text".into(),
-        )]);
-        assert!(source_info(lease.source_id()).is_none());
-        assert_eq!(lease.source_info().text.as_ref(), "issued text");
-        drop(guard);
+        )])
+        .err()
+        .expect("live issued source must reject a raw import before publication");
+        assert_eq!(
+            error,
+            SourceCatalogAdmissionError::LeasedSourceId(lease.source_id())
+        );
         assert_eq!(
             source_info(lease.source_id()).unwrap().text.as_ref(),
             "issued text"
         );
+        assert_eq!(lease.source_info().text.as_ref(), "issued text");
+    }
+
+    #[test]
+    fn raw_import_rejects_retired_ids_and_conflicting_reuse_without_issuer_poisoning() {
+        let runtime = runtime();
+        let issued = lease_source_context_in_context(&runtime, "issued", None, "first").unwrap();
+        let retired = issued.source_id();
+        drop(issued);
+        let _scope = runtime.enter();
+        let error = replace_source_catalog(vec![(retired, "old".into(), "wrong".into())])
+            .err()
+            .expect("retired runtime identity must remain reserved");
+        assert_eq!(
+            error,
+            SourceCatalogAdmissionError::PreviouslyIssuedSourceId(retired)
+        );
+        let future = SourceId(usize::MAX - 1);
+        let first = replace_source_catalog(vec![(future, "imported".into(), "text".into())])
+            .expect("independent raw identity");
+        drop(first);
+        let conflict = replace_source_catalog(vec![(future, "imported".into(), "changed".into())])
+            .err()
+            .expect("one raw identity cannot denote different text later");
+        assert_eq!(
+            conflict,
+            SourceCatalogAdmissionError::ConflictingImport(future)
+        );
+        let same = replace_source_catalog(vec![(future, "imported".into(), "text".into())])
+            .expect("identical raw provenance may be scoped again");
+        drop(same);
+        let next = lease_source_context_in_context(&runtime, "next", None, "second").unwrap();
+        assert_eq!(next.source_id(), SourceId(1));
+    }
+
+    #[test]
+    fn live_raw_import_reserves_exact_id_until_and_after_guard_drop() {
+        let runtime = runtime();
+        runtime.state().source.borrow_mut().next_issued_id = Some(5);
+        let _scope = runtime.enter();
+        let guard = replace_source_catalog(vec![(SourceId(5), "raw".into(), "text".into())])
+            .expect("raw import admission");
+        let first = lease_source_context_in_context(&runtime, "issued", None, "other").unwrap();
+        assert_eq!(first.source_id(), SourceId(6));
+        drop(guard);
+        let second = lease_source_context_in_context(&runtime, "later", None, "later").unwrap();
+        assert_eq!(second.source_id(), SourceId(7));
+        assert!(source_info(SourceId(5)).is_none());
+    }
+
+    #[test]
+    fn duplicate_raw_rows_reject_before_catalog_mutation() {
+        let runtime = runtime();
+        let _scope = runtime.enter();
+        let error = replace_source_catalog(vec![
+            (SourceId(5), "first".into(), "one".into()),
+            (SourceId(5), "second".into(), "two".into()),
+        ])
+        .err()
+        .expect("duplicate source identity");
+        assert_eq!(
+            error,
+            SourceCatalogAdmissionError::DuplicateSourceId(SourceId(5))
+        );
+        assert!(source_info(SourceId(5)).is_none());
+        assert!(runtime
+            .state()
+            .source
+            .borrow()
+            .imported_identities
+            .is_empty());
     }
 
     #[test]

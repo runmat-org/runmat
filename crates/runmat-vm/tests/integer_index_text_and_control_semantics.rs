@@ -12,7 +12,8 @@ fn execute_source_with_catalog(
         source_id,
         "/tmp/integer_index_text_and_control_semantics.m".to_string(),
         source.to_string(),
-    )]);
+    )])
+    .expect("source catalog admission");
     test_helpers::interpret(&bytecode).map_err(Box::new)
 }
 

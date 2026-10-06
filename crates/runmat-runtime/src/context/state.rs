@@ -126,6 +126,8 @@ impl Drop for RuntimeContextState {
 pub(crate) struct SourceState {
     pub current: Option<SourceInfo>,
     pub catalog: HashMap<SourceId, SourceInfo>,
+    pub(crate) active_imports: HashMap<SourceId, usize>,
+    pub(crate) imported_identities: HashMap<SourceId, runmat_execution::identity::Digest>,
     pub(crate) leased_catalog: HashMap<SourceId, crate::source_context::LeasedSource>,
     pub(crate) next_issued_id: Option<usize>,
 }
@@ -135,6 +137,8 @@ impl Default for SourceState {
         Self {
             current: None,
             catalog: HashMap::new(),
+            active_imports: HashMap::new(),
+            imported_identities: HashMap::new(),
             leased_catalog: HashMap::new(),
             next_issued_id: Some(0),
         }

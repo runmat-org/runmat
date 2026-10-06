@@ -42,7 +42,8 @@ fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_value::Va
         source_id,
         source_name,
         source_text,
-    )]);
+    )])
+    .expect("source catalog admission");
     interpret(&bytecode).expect("execute bytecode")
 }
 
@@ -2160,7 +2161,8 @@ fn mfilename_reads_current_source_context() {
         runmat_hir::SourceId(0),
         "/tmp/runmat_vm_mfilename_probe.m".to_string(),
         source_text,
-    )]);
+    )])
+    .expect("source catalog admission");
     let vars = interpret(&bytecode).expect("execute bytecode");
     assert!(
         vars.iter().any(|v| {

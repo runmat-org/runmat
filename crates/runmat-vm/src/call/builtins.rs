@@ -1280,7 +1280,8 @@ mod tests {
                 "analysis.m".to_string(),
                 Some("/project/analysis.m".to_string()),
                 "value = eval('mfilename()');".to_string(),
-            )]);
+            )])
+            .expect("dynamic eval source catalog admission");
         let _current = runmat_runtime::source_context::replace_current_source_id(Some(source_id));
         let dynamic = dynamic_source_context(&runtime, "<eval>", "mfilename()")
             .expect("session-owned source lease");
