@@ -166,9 +166,7 @@ impl TimerSessionState {
     }
 
     pub(crate) fn finish(&mut self, handle: &HandleRef, generation: u64) -> Option<bool> {
-        let Some(entry) = self.record_mut(handle) else {
-            return None;
-        };
+        let entry = self.record_mut(handle)?;
         if entry.generation != generation || entry.phase != TimerPhase::Running {
             return None;
         }
@@ -198,13 +196,10 @@ impl TimerSessionState {
     }
 
     pub(crate) fn delete(&mut self, handle: &HandleRef) -> Option<RuntimeLocalTaskLease> {
-        let Some(index) = self
+        let index = self
             .records
             .iter()
-            .position(|entry| entry.handle == *handle)
-        else {
-            return None;
-        };
+            .position(|entry| entry.handle == *handle)?;
         let entry = self.records.remove(index);
         entry.lease
     }
