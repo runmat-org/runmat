@@ -265,6 +265,7 @@ pub struct RuntimeSourceLease(Rc<LeaseInner>);
 pub(crate) struct ProgramSourceBinding {
     sources: HashMap<runmat_types::ProgramSourceId, RuntimeSourceRef>,
     _leases: Vec<RuntimeSourceLease>,
+    portable_map: Option<Arc<runmat_execution::ExecutableSourceMapV2>>,
 }
 
 impl ProgramSourceBinding {
@@ -279,12 +280,24 @@ impl ProgramSourceBinding {
         self.sources.get(&ordinal).copied()
     }
 
+    pub(crate) fn portable_map(&self) -> Option<&Arc<runmat_execution::ExecutableSourceMapV2>> {
+        self.portable_map.as_ref()
+    }
+
+    pub(crate) fn retain_portable_map(
+        &mut self,
+        map: Arc<runmat_execution::ExecutableSourceMapV2>,
+    ) {
+        self.portable_map = Some(map);
+    }
+
     /// A worker owns copied source records in its SourceState catalog. Its
     /// projection therefore retains no lease on the parent's source issuer.
     pub(crate) fn fork_snapshot(&self) -> Self {
         Self {
             sources: self.sources.clone(),
             _leases: Vec::new(),
+            portable_map: self.portable_map.clone(),
         }
     }
 }
@@ -298,7 +311,10 @@ pub struct ProgramSourceRecord {
 }
 #[path = "source_context/portable.rs"]
 mod portable;
-pub use portable::{bind_portable_source_map_v2, PortableSourceBindingError};
+pub use portable::{
+    bind_portable_source_map_v2, bind_portable_source_map_v2_with_records,
+    PortableSourceBindingError,
+};
 #[cfg(test)]
 #[path = "source_context/authority_tests.rs"]
 mod authority_tests;
@@ -352,6 +368,7 @@ pub(crate) fn bind_program_sources(
     Ok(ProgramSourceBinding {
         sources,
         _leases: leases,
+        portable_map: None,
     })
 }
 
