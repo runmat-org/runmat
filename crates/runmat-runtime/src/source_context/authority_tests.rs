@@ -51,6 +51,48 @@ fn nested_selected_program_sources_keep_exact_current_file_across_scopes() {
 }
 
 #[test]
+fn retired_admitted_source_fails_before_current_file_changes() {
+    let runtime = context()
+        .with_program_sources([ProgramSourceRecord {
+            ordinal: runmat_types::ProgramSourceId(0),
+            name: Arc::from("retired.m"),
+            fullpath_name: None,
+            text: Arc::from("retired text"),
+        }])
+        .expect("admit source");
+    let id = runtime
+        .program_source_id(runmat_types::ProgramSourceId(0))
+        .unwrap();
+    // A session teardown/revocation removes the issuing authority. Keep the
+    // compiled binding in this test so selection must reject the stale ref.
+    runtime
+        .state()
+        .source
+        .borrow_mut()
+        .issued_authorities
+        .remove(&id);
+    assert!(matches!(
+        runtime.with_current_program_source(runmat_types::ProgramSourceId(0)),
+        Err(crate::context::ProgramSourceSelectionError::Retired(
+            runmat_types::ProgramSourceId(0)
+        ))
+    ));
+}
+
+#[test]
+fn unbound_native_embedding_clears_ambient_file_for_its_scope() {
+    let _outer = replace_current_source_context(Some("unrelated.m"), Some("outer text"));
+    assert_eq!(current_source_info().unwrap().name.as_ref(), "unrelated.m");
+    let unbound = context()
+        .with_current_program_source(runmat_types::ProgramSourceId(0))
+        .expect("unbound direct embedding is permitted");
+    futures::executor::block_on(unbound.scope(async {
+        assert!(current_source_info().is_none());
+    }));
+    assert_eq!(current_source_info().unwrap().name.as_ref(), "unrelated.m");
+}
+
+#[test]
 fn equal_numeric_ids_in_distinct_sessions_never_exchange_source_authority() {
     let first = context();
     let second = context();

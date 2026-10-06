@@ -71,6 +71,49 @@ fn forced_native_nested_functions_project_exact_debug_frames() {
 }
 
 #[test]
+fn forced_native_companion_uses_its_admitted_file_not_primary() {
+    runmat_gc::gc_test_context(|| {
+        let _cwd_lock = super::cwd_lock();
+        let directory = tempfile::TempDir::new().expect("companion directory");
+        let driver = "function value = nativeFrameDriver()\nvalue = nativeFrameCompanion();\nend\n";
+        std::fs::write(directory.path().join("nativeFrameDriver.m"), driver)
+            .expect("write primary source");
+        std::fs::write(
+            directory.path().join("nativeFrameCompanion.m"),
+            "function [name, file] = nativeFrameCompanion()\ninfo = getcallinfo();\nname = info.name;\nfile = mfilename();\nend\n",
+        )
+        .expect("write companion source");
+        let _cwd = super::push_cwd(directory.path());
+        let mut session = RunMatSession::with_options(false, false).expect("session");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new("native-companion@1", "nativeFrameDriver.m", driver),
+            None,
+        ))
+        .expect("compile discovered companion");
+        assert!(
+            unit.source_map()
+                .entries()
+                .iter()
+                .any(|entry| entry.relative_path.ends_with("nativeFrameCompanion.m")),
+            "companion must have its own admitted source record"
+        );
+        let values = block_on(session.invoke_executable(
+            &unit,
+            invocation("nativeFrameCompanion", 2),
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native companion call");
+        assert_eq!(
+            values.as_slice(),
+            &[
+                Value::String("nativeFrameCompanion".into()),
+                Value::String("nativeFrameCompanion".into()),
+            ]
+        );
+    });
+}
+
+#[test]
 fn pending_native_frame_retires_on_drop_and_fresh_call_has_one_frame() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(false, false).expect("session");
