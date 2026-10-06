@@ -21,6 +21,7 @@ mod shading;
 mod view;
 mod palette_generators;
 mod annotations;
+mod print;
 
 pub use self::animatedline::*;
 pub use self::annotations::*;
@@ -38,6 +39,7 @@ pub use self::hidden::*;
 pub use self::hold::*;
 pub use self::linkaxes::*;
 pub use self::palette_generators::*;
+pub use self::print::*;
 pub use self::r#box::*;
 pub use self::set::*;
 pub use self::shading::*;
@@ -64,4 +66,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(view::ENTRIES.iter().copied());
     values.extend(palette_generators::ENTRIES.iter().copied());
     values.extend(annotations::ENTRIES.iter().copied());
+    values.extend(print::ENTRIES.iter().copied());
 }
