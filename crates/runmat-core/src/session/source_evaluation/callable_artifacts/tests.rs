@@ -1,3 +1,4 @@
+use super::super::CallableArtifactIndex;
 use super::*;
 use std::collections::HashMap;
 

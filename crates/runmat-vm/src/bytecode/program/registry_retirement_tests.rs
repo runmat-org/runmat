@@ -193,9 +193,32 @@ fn execution_snapshot_clone_is_shared_until_publication_mutates() {
     assert!(!std::sync::Arc::ptr_eq(&original.data, &publication.data));
     assert_eq!(original.resolve_name("new"), None);
     assert_eq!(publication.resolve_name("new"), Some(FunctionId(4)));
-    let serialized = serde_json::to_value(&publication).expect("registry record");
+    let error = serde_json::to_value(&publication)
+        .expect_err("live session source authority must not enter portable bytecode");
+    assert!(error
+        .to_string()
+        .contains("session source authority cannot enter portable bytecode"));
+}
+
+#[test]
+fn portable_registry_record_keeps_flat_wire_shape() {
+    let function = FunctionBytecode {
+        function: FunctionId(1),
+        display_name: "portable".into(),
+        source_id: Some(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0))),
+        ..Default::default()
+    };
+    let registry = FunctionRegistry::new(HashMap::from([(function.function, function)]));
+    let serialized = serde_json::to_value(&registry).expect("portable registry record");
     assert!(serialized.get("functions").is_some());
     assert!(serialized.get("data").is_none());
+    let restored: FunctionRegistry =
+        serde_json::from_value(serialized).expect("portable roundtrip");
+    assert_eq!(restored.resolve_name("portable"), Some(FunctionId(1)));
+    assert_eq!(
+        restored.get(FunctionId(1)).unwrap().source_id,
+        Some(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)))
+    );
 }
 
 #[test]

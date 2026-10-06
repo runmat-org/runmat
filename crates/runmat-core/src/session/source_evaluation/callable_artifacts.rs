@@ -11,8 +11,8 @@ use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{BoundFunctionBinding, Value};
 
 use super::{
-    CallableArtifactIndex, CallableArtifactSelectionError, FunctionRegistryGeneration,
-    PreparedGenerationImport, SessionSourceEvaluator,
+    CallableArtifactSelectionError, FunctionRegistryGeneration, PreparedGenerationImport,
+    SessionSourceEvaluator,
 };
 
 #[path = "callable_artifacts/errors.rs"]
