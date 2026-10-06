@@ -659,7 +659,7 @@ mod tests {
             parent: None,
             enclosing_class: None,
             class_method_owner: None,
-            kind: FunctionKind::Local,
+            kind: FunctionKind::Named,
             source_role: runmat_types::FunctionSourceRole::Local,
             argument_validations: Vec::new(),
             captures: Vec::new(),
