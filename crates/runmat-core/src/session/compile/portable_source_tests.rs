@@ -193,3 +193,49 @@ fn dropped_pending_public_eval_retires_only_its_source() {
         "dropped input future released gate"
     );
 }
+
+#[test]
+fn retained_function_handle_error_keeps_original_source_after_later_public_calls() {
+    let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    let mut execute = |name: &str, text: &str| {
+        let request = crate::abi::ExecutionRequest::for_source(
+            crate::abi::SourceInput::Text {
+                name: name.into(),
+                text: text.into(),
+            },
+            session.compat_mode(),
+            crate::abi::HostExecutionPolicy::default(),
+            session.workspace_handle(),
+        );
+        futures::executor::block_on(session.execute_request(request))
+            .result
+            .expect("public source execution")
+    };
+    let definition = execute(
+        "original_retained.m",
+        "function y = retainedBoom()\nerror(\"RunMat:retained:boom\", \"retained body failed\");\ny = 1;\nend",
+    );
+    assert!(definition.diagnostics.is_empty());
+    let capture = execute("capture_handle.m", "saved = @retainedBoom;");
+    assert!(capture.diagnostics.is_empty());
+    let outcome = execute("later_call.m", "saved();");
+    let error = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "RunMat:retained:boom")
+        .expect("retained body error remains visible");
+    assert!(
+        error
+            .callstack
+            .iter()
+            .any(|frame| frame.contains("original_retained.m")),
+        "retained call must cite the definition source, not the later call: {error:?}"
+    );
+    assert!(
+        error
+            .callstack
+            .iter()
+            .all(|frame| !frame.contains("capture_handle.m")),
+        "retained body must not be attributed to handle construction: {error:?}"
+    );
+}
