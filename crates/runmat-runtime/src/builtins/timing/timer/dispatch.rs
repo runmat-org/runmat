@@ -5,7 +5,7 @@ use super::*;
 pub(super) async fn start_timer_values(
     runtime: &RuntimeContext,
     value: &Value,
-    override_delay: Option<f64>,
+    override_delay: Option<std::time::Duration>,
 ) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_timer_handle(handle) => {

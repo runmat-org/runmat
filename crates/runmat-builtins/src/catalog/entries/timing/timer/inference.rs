@@ -170,8 +170,12 @@ fn infer_method(
     callbacks: CallbackPhase,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
-    let expected = if optional_delay { 1..=2 } else { 1..=1 };
-    if !expected.contains(&request.arguments.len()) {
+    let valid_arity = if optional_delay {
+        matches!(request.arguments.len(), 1 | 2 | 4 | 7)
+    } else {
+        request.arguments.len() == 1
+    };
+    if !valid_arity {
         diagnostics.push(argument_error(
             "RM-CATALOG-TIMER-METHOD-ARITY",
             "timer method has an invalid number of arguments",

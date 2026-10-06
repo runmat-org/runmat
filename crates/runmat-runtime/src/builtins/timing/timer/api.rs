@@ -119,11 +119,15 @@ pub async fn timer_startat_builtin(
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
     admit_timer_method_outputs(&runtime, requested_outputs, "startat")?;
-    if rest.len() > 1 {
+    if matches!(rest.len(), 2 | 4 | 5) || rest.len() > 6 {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
-            "startat: expected a timer and at most one delay",
+            "startat: expected one firing time or Y/M/D[/H/MI/S] components",
         ));
+    }
+    if !rest.is_empty() && !is_legacy_relative_scalar(&rest) {
+        start_at_absolute(&runtime, &value, rest).await?;
+        return Ok(Value::Num(0.0));
     }
     crate::compatibility::ensure_builtin_extension_enabled_in_context(
         &runtime,
@@ -144,7 +148,9 @@ pub async fn timer_startat_builtin(
         .first()
         .map(|pair| numeric_scalar(&pair.value, "startat"))
         .transpose()?
-        .filter(|seconds| *seconds > 0.0);
+        .filter(|seconds| *seconds > 0.0)
+        .map(|seconds| duration_property(seconds, "StartDelay"))
+        .transpose()?;
     start_timer_values(&runtime, &value, delay).await?;
     Ok(Value::Num(0.0))
 }

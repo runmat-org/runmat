@@ -64,6 +64,23 @@ fn startat_accepts_optional_delay_other_methods_do_not() {
     let delay = ValueFact::unknown(DynamicReason::RuntimeValue);
     let call = request(vec![receiver, delay], Vec::new());
     assert!(inference::startat(&call, &STARTAT).diagnostics.is_empty());
+    for count in [4, 7] {
+        let call = request(
+            vec![ValueFact::unknown(DynamicReason::RuntimeValue); count],
+            Vec::new(),
+        );
+        assert!(inference::startat(&call, &STARTAT).diagnostics.is_empty());
+    }
+    for count in [3, 5, 6, 8] {
+        let call = request(
+            vec![ValueFact::unknown(DynamicReason::RuntimeValue); count],
+            Vec::new(),
+        );
+        assert!(inference::startat(&call, &STARTAT)
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-TIMER-METHOD-ARITY"));
+    }
     assert!(inference::start(&call, &START)
         .diagnostics
         .iter()

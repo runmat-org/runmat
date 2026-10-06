@@ -11,6 +11,7 @@ mod callback;
 mod discovery;
 mod dispatch;
 mod lifecycle;
+mod startat;
 pub use api::*;
 use arguments::{apply_name_value_pairs, prepare_timer_property_pairs, PreparedTimerPair};
 use callback::{
@@ -27,6 +28,7 @@ use runmat_builtins::{
     TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION, TIMER_METHOD_STATUS_EXTENSION,
     TIMER_STARTAT_RELATIVE_EXTENSION,
 };
+use startat::{is_legacy_relative_scalar, start_at_absolute};
 
 use runmat_types::MemberAccess;
 use std::collections::HashMap;

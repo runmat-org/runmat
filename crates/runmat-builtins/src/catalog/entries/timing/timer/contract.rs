@@ -118,7 +118,49 @@ pub const TIMER_STARTAT_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Positive relative delay in seconds.",
     },
 ];
-pub const TIMER_STARTAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+pub const TIMER_STARTAT_ABSOLUTE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Timer handle or timer cell array.",
+    },
+    BuiltinParamDescriptor {
+        name: "firingTime",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Absolute datetime, date text, date vector, or serial-date array.",
+    },
+];
+pub const TIMER_STARTAT_COMPONENT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Timer handle or timer cell array.",
+    },
+    BuiltinParamDescriptor {
+        name: "year, month, day[, hour, minute, second]",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Three or six broadcast-compatible calendar components.",
+    },
+];
+pub const TIMER_STARTAT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "startat(t, firingTime)",
+        inputs: &TIMER_STARTAT_ABSOLUTE_INPUTS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "startat(t, year, month, day[, hour, minute, second])",
+        inputs: &TIMER_STARTAT_COMPONENT_INPUTS,
+        outputs: &[],
+    },
     BuiltinSignatureDescriptor {
         label: "startat(t, relativeSeconds) (RunMat extension)",
         inputs: &TIMER_STARTAT_INPUTS,

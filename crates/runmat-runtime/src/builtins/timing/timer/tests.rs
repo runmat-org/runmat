@@ -63,6 +63,24 @@ impl RuntimeTimingService for TestClock {
         Duration::from_secs(1_700_000_000) + self.monotonic_elapsed()
     }
 
+    fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
+        let utc = local.and_utc();
+        Some(Duration::new(
+            u64::try_from(utc.timestamp()).ok()?,
+            utc.timestamp_subsec_nanos(),
+        ))
+    }
+
+    fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
+        Some(
+            chrono::DateTime::from_timestamp(
+                i64::try_from(epoch.as_secs()).ok()?,
+                epoch.subsec_nanos(),
+            )?
+            .naive_utc(),
+        )
+    }
+
     fn process_cpu_seconds(&self) -> Option<f64> {
         None
     }
@@ -250,6 +268,94 @@ fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects()
         block_on(super::timer_stop_builtin(Some(runtime), Some(1), timer)),
         Ok(Value::Num(0.0))
     ));
+}
+
+#[test]
+fn absolute_startat_uses_injected_wall_clock_without_relative_extension() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "tick".into(),
+            function: 1,
+        },
+    ]))
+    .expect("timer");
+    let future = chrono::DateTime::from_timestamp(1_700_000_002, 0)
+        .unwrap()
+        .naive_utc()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    block_on(super::timer_startat_builtin(
+        Some(test_runtime()),
+        Some(0),
+        timer.clone(),
+        vec![Value::String(future)],
+    ))
+    .expect("absolute date text starts without the RunMat extension");
+    let Value::HandleObject(handle) = &timer else {
+        panic!("expected timer handle")
+    };
+    assert_eq!(string_property(handle, "Running").unwrap(), "on");
+    block_on(timer_stop_builtin(timer)).expect("stop");
+}
+
+#[test]
+fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "tick".into(),
+            function: 1,
+        },
+    ]))
+    .expect("timer");
+    let now = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+        .unwrap()
+        .naive_utc();
+    for instant in [
+        now - chrono::Duration::seconds(1),
+        now + chrono::Duration::days(26),
+    ] {
+        let date = instant.format("%Y-%m-%d %H:%M:%S").to_string();
+        let error = block_on(super::timer_startat_builtin(
+            Some(test_runtime()),
+            Some(0),
+            timer.clone(),
+            vec![Value::String(date)],
+        ))
+        .expect_err("invalid absolute date");
+        assert_eq!(error.identifier(), Some("RunMat:timer:InvalidInput"));
+    }
+    let dates = Value::StringArray(
+        runmat_value::StringArray::new(
+            vec![
+                (now + chrono::Duration::seconds(1))
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string(),
+                (now + chrono::Duration::seconds(2))
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string(),
+            ],
+            vec![1, 2],
+        )
+        .unwrap(),
+    );
+    let error = block_on(super::timer_startat_builtin(
+        Some(test_runtime()),
+        Some(0),
+        timer.clone(),
+        vec![dates],
+    ))
+    .expect_err("firing array cannot address a scalar timer");
+    assert_eq!(error.identifier(), Some("RunMat:timer:InvalidInput"));
+    let Value::HandleObject(handle) = timer else {
+        panic!("expected timer handle")
+    };
+    assert_eq!(string_property(&handle, "Running").unwrap(), "off");
 }
 
 #[test]

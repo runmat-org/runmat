@@ -23,7 +23,7 @@ impl TimerRunConfig {
     fn admit(
         runtime: &RuntimeContext,
         handle: &HandleRef,
-        override_delay: Option<f64>,
+        override_delay: Option<Duration>,
     ) -> BuiltinResult<Self> {
         ensure_valid_timer(handle)?;
         if callback_is_empty(&property(handle, "TimerFcn")?) {
@@ -63,9 +63,11 @@ impl TimerRunConfig {
                     "timer: invalid ObjectVisibility value",
                 )
             })?;
-        let delay = override_delay.unwrap_or(numeric_property(handle, "StartDelay")?);
         let period = numeric_property(handle, "Period")?;
-        let start_delay = duration_property(delay, "StartDelay")?;
+        let start_delay = match override_delay {
+            Some(delay) => delay,
+            None => duration_property(numeric_property(handle, "StartDelay")?, "StartDelay")?,
+        };
         let period = duration_property(period, "Period")?;
         let tasks = if execution_mode == TimerExecutionMode::SingleShot {
             1
@@ -122,7 +124,7 @@ fn admission_error(error: TimerAdmissionError) -> RuntimeError {
 pub(super) async fn start_one_timer(
     runtime: &RuntimeContext,
     handle: HandleRef,
-    override_delay: Option<f64>,
+    override_delay: Option<Duration>,
 ) -> BuiltinResult<()> {
     if runtime.timer_session().borrow().record(&handle).is_none() {
         return Err(admission_error(TimerAdmissionError::ForeignOrDeleted));
