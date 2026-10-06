@@ -6,6 +6,9 @@ use super::super::*;
 use std::future::Future;
 use std::pin::Pin;
 
+type CallFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<DispatchHandled>, RuntimeError>> + 'a>>;
+
 #[path = "dispatch/builtin.rs"]
 mod builtin;
 #[path = "dispatch/expanded.rs"]
@@ -36,7 +39,7 @@ pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
 
 pub(in crate::interpreter::dispatch) fn dispatch_call<'a>(
     ctx: CallDispatchContext<'a>,
-) -> Pin<Box<dyn Future<Output = Result<Option<DispatchHandled>, RuntimeError>> + 'a>> {
+) -> CallFuture<'a> {
     match ctx.instr {
         Instr::CallBuiltinMulti(..)
         | Instr::CallBuiltinMultiUsingOutputSlot(..)
@@ -45,17 +48,15 @@ pub(in crate::interpreter::dispatch) fn dispatch_call<'a>(
         | Instr::CallFevalMulti(..)
         | Instr::CallFevalMultiUsingOutputSlot(..)
         | Instr::CallFevalExpandMultiOutput(..)
-        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(..) => Box::pin(builtin::dispatch(ctx)),
+        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(..) => suspend_builtin(ctx),
         Instr::CallSemanticFunctionMulti(..)
         | Instr::CallSemanticFunctionMultiUsingOutputSlot(..)
         | Instr::CallSemanticNestedFunctionMulti { .. }
         | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
         | Instr::CallFunctionMulti { .. }
-        | Instr::CallFunctionMultiUsingOutputSlot { .. } => Box::pin(user::dispatch(ctx)),
+        | Instr::CallFunctionMultiUsingOutputSlot { .. } => suspend_user(ctx),
         Instr::CallWorkspaceFirstMulti { .. }
-        | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. } => {
-            Box::pin(workspace::dispatch(ctx))
-        }
+        | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. } => suspend_workspace(ctx),
         Instr::CallBuiltinExpandMultiOutput(..)
         | Instr::CallSuperConstructorExpandMultiOutput { .. }
         | Instr::CallSuperMethodExpandMultiOutput { .. }
@@ -63,11 +64,38 @@ pub(in crate::interpreter::dispatch) fn dispatch_call<'a>(
         | Instr::CallWorkspaceFirstExpandMultiOutput { .. }
         | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { .. }
         | Instr::CallSemanticFunctionExpandMultiOutput(..)
-        | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. } => {
-            Box::pin(expanded::dispatch(ctx))
-        }
+        | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. } => suspend_expanded(ctx),
         Instr::CallMethodOrMemberIndexMulti { .. }
-        | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => Box::pin(method::dispatch(ctx)),
+        | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => suspend_method(ctx),
         _ => unreachable!("call dispatcher received a non-call instruction"),
     }
+}
+
+// As with the top-level instruction router, isolate concrete future
+// construction from this exhaustive match. Otherwise an unoptimized build
+// reserves the largest call-family future whenever it selects even a small
+// semantic-call child, once for every live Process frame.
+#[inline(never)]
+fn suspend_builtin(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
+    Box::pin(builtin::dispatch(ctx))
+}
+
+#[inline(never)]
+fn suspend_user(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
+    Box::pin(user::dispatch(ctx))
+}
+
+#[inline(never)]
+fn suspend_workspace(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
+    Box::pin(workspace::dispatch(ctx))
+}
+
+#[inline(never)]
+fn suspend_expanded(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
+    Box::pin(expanded::dispatch(ctx))
+}
+
+#[inline(never)]
+fn suspend_method(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
+    Box::pin(method::dispatch(ctx))
 }

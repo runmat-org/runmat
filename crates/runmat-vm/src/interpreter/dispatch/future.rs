@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 type DispatchResult = Result<Option<DispatchHandled>, RuntimeError>;
+type SuspendedDispatchFuture<'a> = Pin<Box<dyn Future<Output = DispatchResult> + 'a>>;
 
 pub(super) struct InstructionDispatchFuture<'a> {
     state: InstructionDispatchFutureState<'a>,
@@ -16,7 +17,7 @@ pub(super) struct InstructionDispatchFuture<'a> {
 
 enum InstructionDispatchFutureState<'a> {
     Immediate(Option<ImmediateInstruction<'a>>),
-    Suspended(Pin<Box<dyn Future<Output = DispatchResult> + 'a>>),
+    Suspended(SuspendedDispatchFuture<'a>),
 }
 
 struct ImmediateInstruction<'a> {
@@ -60,7 +61,7 @@ impl<'a> InstructionDispatchFuture<'a> {
         }
     }
 
-    fn suspended(future: Pin<Box<dyn Future<Output = DispatchResult> + 'a>>) -> Self {
+    fn suspended(future: SuspendedDispatchFuture<'a>) -> Self {
         Self {
             state: InstructionDispatchFutureState::Suspended(future),
         }
@@ -79,33 +80,104 @@ pub(super) fn dispatch_instruction<'a>(
             InstructionDispatchFuture::immediate(meta, state, hooks)
         }
         InstructionDispatchFamily::Parallel => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_parallel(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_parallel(meta, state))
         }
-        InstructionDispatchFamily::PreparedOutput => InstructionDispatchFuture::suspended(
-            Box::pin(dispatch_prepared_output(meta, state, hooks)),
-        ),
+        InstructionDispatchFamily::PreparedOutput => {
+            InstructionDispatchFuture::suspended(suspend_prepared_output(meta, state, hooks))
+        }
         InstructionDispatchFamily::Call => {
             InstructionDispatchFuture::suspended(dispatch_call(meta, state))
         }
         InstructionDispatchFamily::Indexing => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_indexing_family(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_indexing(meta, state))
         }
         InstructionDispatchFamily::Object => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_object_family(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_object(meta, state))
         }
         InstructionDispatchFamily::Arithmetic => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_arithmetic_family(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_arithmetic(meta, state))
         }
         InstructionDispatchFamily::Output => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_output(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_output(meta, state))
         }
         InstructionDispatchFamily::Logical => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_logical(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_logical(meta, state))
         }
         InstructionDispatchFamily::Aggregate => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_aggregate(meta, state)))
+            InstructionDispatchFuture::suspended(suspend_aggregate(meta, state))
         }
     }
+}
+
+// Keep construction of each concrete async family outside the exhaustive
+// router. In debug builds, constructing all of these futures in one function
+// makes that synchronous function reserve stack for the largest concrete
+// future even though it returns only one boxed owner. Semantic Process calls
+// construct a child instruction while every parent poll frame is live, so
+// that transient maximum otherwise grows with ordinary call depth.
+#[inline(never)]
+fn suspend_parallel<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_parallel(meta, state))
+}
+
+#[inline(never)]
+fn suspend_prepared_output<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+    hooks: DispatchHooks<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_prepared_output(meta, state, hooks))
+}
+
+#[inline(never)]
+fn suspend_indexing<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_indexing_family(meta, state))
+}
+
+#[inline(never)]
+fn suspend_object<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_object_family(meta, state))
+}
+
+#[inline(never)]
+fn suspend_arithmetic<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_arithmetic_family(meta, state))
+}
+
+#[inline(never)]
+fn suspend_output<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_output(meta, state))
+}
+
+#[inline(never)]
+fn suspend_logical<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_logical(meta, state))
+}
+
+#[inline(never)]
+fn suspend_aggregate<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> SuspendedDispatchFuture<'a> {
+    Box::pin(dispatch_aggregate(meta, state))
 }
 
 async fn dispatch_parallel(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
