@@ -276,6 +276,16 @@ impl RuntimeContext {
             .map(|map| map.as_ref())
     }
 
+    pub fn portable_ordinal_for_source(
+        &self,
+        source: crate::source_context::RuntimeSourceRef,
+    ) -> Option<runmat_types::ProgramSourceId> {
+        if source.resolve_in(self).is_none() {
+            return None;
+        }
+        self.program_sources.as_ref()?.source_ordinal(source)
+    }
+
     pub(crate) fn retain_portable_program_source_map(
         &mut self,
         map: std::sync::Arc<runmat_execution::ExecutableSourceMapV2>,

@@ -67,6 +67,7 @@ impl ProgramTarget {
             | ExecutableForm::InterpreterBytecodeV2
             | ExecutableForm::InterpreterScriptV1
             | ExecutableForm::InterpreterScriptV2
+            | ExecutableForm::InterpreterRegionSourcesV1
             | ExecutableForm::TestAttemptV1
             | ExecutableForm::MeshingWorkload
             | ExecutableForm::ExecutableUnitV3 => self.cohort == ProgramTargetCohort::Portable,

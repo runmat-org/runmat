@@ -1439,10 +1439,22 @@ end
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
-    let executable_bytes = runmat_vm::encode_interpreter_script_v2(&bytecode).unwrap();
+    let source_map = runmat_execution::ExecutableSourceMapV2::decode(
+        &envelope
+            .component(runmat_execution::ExecutableComponentKind::SourceMap)
+            .expect("portable parallel product contains source map")
+            .bytes,
+    )
+    .unwrap();
+    let executable_bytes = runmat_vm::encode_portable_region_sources_v1(
+        &bytecode,
+        &source_map,
+        &recipe.program_revision,
+    )
+    .unwrap();
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterScriptV2,
+        ExecutableForm::InterpreterRegionSourcesV1,
         executable_bytes,
     )
     .unwrap();
@@ -1450,7 +1462,7 @@ end
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterScriptV2,
+            ExecutableForm::InterpreterRegionSourcesV1,
             artifact.executable_bytes.clone(),
         )
         .build()
@@ -1591,17 +1603,29 @@ async fn compile_spmd_region_bundle(
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
+    let source_map = runmat_execution::ExecutableSourceMapV2::decode(
+        &envelope
+            .component(runmat_execution::ExecutableComponentKind::SourceMap)
+            .expect("portable SPMD product contains source map")
+            .bytes,
+    )
+    .unwrap();
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterScriptV2,
-        runmat_vm::encode_interpreter_script_v2(&bytecode).unwrap(),
+        ExecutableForm::InterpreterRegionSourcesV1,
+        runmat_vm::encode_portable_region_sources_v1(
+            &bytecode,
+            &source_map,
+            &recipe.program_revision,
+        )
+        .unwrap(),
     )
     .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterScriptV2,
+            ExecutableForm::InterpreterRegionSourcesV1,
             artifact.executable_bytes.clone(),
         )
         .build()

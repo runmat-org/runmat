@@ -19,6 +19,8 @@ pub enum ExecutableForm {
     MeshingWorkload = 5,
     InterpreterBytecodeV2 = 6,
     InterpreterScriptV2 = 7,
+    /// Versioned region payload containing the exact source map and script.
+    InterpreterRegionSourcesV1 = 8,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

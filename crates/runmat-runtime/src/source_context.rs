@@ -280,6 +280,15 @@ impl ProgramSourceBinding {
         self.sources.get(&ordinal).copied()
     }
 
+    pub(crate) fn source_ordinal(
+        &self,
+        source: RuntimeSourceRef,
+    ) -> Option<runmat_types::ProgramSourceId> {
+        self.sources
+            .iter()
+            .find_map(|(ordinal, selected)| (*selected == source).then_some(*ordinal))
+    }
+
     pub(crate) fn portable_map(&self) -> Option<&Arc<runmat_execution::ExecutableSourceMapV2>> {
         self.portable_map.as_ref()
     }

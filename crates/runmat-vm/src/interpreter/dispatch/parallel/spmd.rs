@@ -62,12 +62,14 @@ pub(super) async fn execute(
         let rank_results = match execution.runtime.execution().spmd_execution_mode() {
             runmat_runtime::execution::SpmdExecutionMode::IsolatedWorkers => {
                 runmat_runtime::execution::validate_spawn_captures(&captures)?;
-                let program = crate::encode_interpreter_script_v2(bytecode).map_err(|error| {
-                    crate::interpreter::errors::mex(
-                        "ExecutionProgram",
-                        &format!("failed to encode the exact SPMD program: {error}"),
-                    )
-                })?;
+                let program =
+                    crate::program_execution::capture_region_sources(bytecode, &execution.runtime)
+                        .map_err(|error| {
+                            crate::interpreter::errors::mex(
+                                "ExecutionProgram",
+                                &format!("failed to encode the exact SPMD program: {error}"),
+                            )
+                        })?;
                 execution
                     .runtime
                     .execution()
