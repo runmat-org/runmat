@@ -1,5 +1,11 @@
 use runmat_plot::plots::Figure;
 
+#[path = "engine/capability.rs"]
+mod capability;
+pub(crate) use capability::ensure_png_export_available;
+#[cfg(all(test, not(feature = "plot-core")))]
+pub(crate) use capability::PngExportUnavailable;
+
 #[cfg(not(any(feature = "gui", all(target_arch = "wasm32", feature = "plot-web"))))]
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 use super::state::{clone_figure, FigureHandle};

@@ -47,7 +47,7 @@ fn resident_handle_selects_scene_after_pending_gather_then_retains_it_through_ex
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin(
+    let mut call = Box::pin(print_builtin_direct(
         None,
         vec![Value::GpuTensor(handle), Value::from("/resident.png")],
     ));
@@ -140,7 +140,7 @@ fn wide_resident_integer_handle_uses_one_authenticated_download() {
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin(
+    let mut call = Box::pin(print_builtin_direct(
         None,
         vec![Value::GpuTensor(handle), Value::from("/integer.png")],
     ));
@@ -212,7 +212,7 @@ fn cancelled_pending_resident_gather_has_no_stage_or_download_replay() {
         cancellation.token(),
     );
     let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin(
+    let mut call = Box::pin(print_builtin_direct(
         Some(runtime),
         vec![
             Value::GpuTensor(handle),

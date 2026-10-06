@@ -70,19 +70,43 @@ mod pending_tests;
     name = "print",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::plotting::print"
 )]
 pub async fn print_builtin(
     runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    execute_print(runtime, requested_outputs, args).await
+}
+
+#[cfg(test)]
+async fn print_builtin_direct(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    execute_print(runtime, crate::output_count::current_output_count(), args).await
+}
+
+async fn execute_print(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    let selected_runtime = runtime.clone();
+    let operation = print_in_context(runtime.as_ref(), requested_outputs, args);
+    match selected_runtime.as_ref() {
+        Some(runtime) => runtime.scope(operation).await,
+        None => operation.await,
+    }
+}
+
+async fn print_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     mut args: Vec<Value>,
 ) -> BuiltinResult<bool> {
-    let requested_outputs = if let Some(runtime) = runtime.as_ref() {
-        runtime
-            .scope(async { crate::output_count::current_output_count() })
-            .await
-    } else {
-        crate::output_count::current_output_count()
-    };
     match requested_outputs {
         Some(count) if count > 1 => {
             return Err(print_error_with_detail(
@@ -91,7 +115,7 @@ pub async fn print_builtin(
             ));
         }
         Some(1) => {
-            if let Some(runtime) = runtime.as_ref() {
+            if let Some(runtime) = runtime {
                 crate::compatibility::ensure_builtin_extension_enabled_in_context(
                     runtime,
                     &PRINT_STATUS_OUTPUT_EXTENSION,
@@ -106,7 +130,6 @@ pub async fn print_builtin(
         }
         _ => {}
     }
-    let selected_figure = current_figure_handle();
     if let Some(first) = args.first() {
         crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
     }
@@ -114,7 +137,7 @@ pub async fn print_builtin(
         .first()
         .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
     {
-        if let Some(runtime) = runtime.as_ref() {
+        if let Some(runtime) = runtime {
             crate::compatibility::ensure_builtin_extension_enabled_in_context(
                 runtime,
                 &PRINT_INTEGER_FIGURE_EXTENSION,
@@ -141,6 +164,14 @@ pub async fn print_builtin(
         }
     }
     let known_filename = preflight_host_arguments(&args)?;
+    super::engine::ensure_png_export_available().map_err(|source| {
+        print_error_with_source(
+            format!("{}: {source}", PRINT_ERROR_RENDER.message),
+            &PRINT_ERROR_RENDER,
+            source,
+        )
+    })?;
+    let selected_figure = current_figure_handle();
     #[cfg(feature = "plot-core")]
     let early_handle = match args.first() {
         Some(value) if is_host_text(value) => Some(selected_figure),
@@ -157,11 +188,9 @@ pub async fn print_builtin(
     // the ordinary argument gather never repeats the download.
     if let Some(first @ Value::GpuTensor(_)) = args.first() {
         if crate::builtins::common::validation::value_has_native_integer_class(first) {
-            let mut cooperation = runtime
-                .as_ref()
-                .map(crate::context::RuntimeContext::cpu_cooperation);
+            let mut cooperation = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
             let prepared = export::await_effect(
-                runtime.as_ref(),
+                runtime,
                 crate::builtins::common::validation::prepare_direct_integer_f64_boundary(
                     first,
                     cooperation.as_mut(),
@@ -193,7 +222,7 @@ pub async fn print_builtin(
     // Host-known invalid controls are rejected before any resident download or
     // filesystem service capture. Dynamic controls receive the same parser
     // after materialization.
-    let args = gather_values(runtime.as_ref(), &args).await?;
+    let args = gather_values(runtime, &args).await?;
     let request = parse_print_args(&args, selected_figure)?;
     let path = request.output_path()?;
     let selected = owner.path(path).map_err(export::map_io)?;
@@ -210,18 +239,15 @@ pub async fn print_builtin(
         )
     })?;
     #[cfg(feature = "plot-core")]
-    let bytes = export::await_effect(
-        runtime.as_ref(),
-        render_png(scene, request.width, request.height),
-    )
-    .await??;
+    let bytes =
+        export::await_effect(runtime, render_png(scene, request.width, request.height)).await??;
     #[cfg(not(feature = "plot-core"))]
     let bytes = export::await_effect(
-        runtime.as_ref(),
+        runtime,
         render_png(request.figure, request.width, request.height),
     )
     .await??;
-    export::replace_png(runtime.as_ref(), &selected, &bytes).await?;
+    export::replace_png(runtime, &selected, &bytes).await?;
     Ok(true)
 }
 

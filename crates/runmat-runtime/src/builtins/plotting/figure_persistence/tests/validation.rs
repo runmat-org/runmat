@@ -20,6 +20,37 @@ fn saveas_rejects_unsupported_or_mismatched_extensions() {
     assert!(mismatch_err.message().contains("does not match"));
 }
 
+#[cfg(not(feature = "plot-core"))]
+#[test]
+fn saveas_png_uses_shared_renderer_capability_before_file_effects() {
+    let _guard = setup();
+    let _filesystem_lock = runmat_filesystem::provider_override_lock();
+    let filesystem = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir(
+        "/figures",
+    ));
+    let _filesystem = runmat_filesystem::replace_provider(filesystem.clone());
+    let figure = figure_builtin(vec![]).expect("figure");
+
+    let error = block_on(saveas_builtin(vec![
+        Value::Num(figure),
+        Value::from("/figures/not-created.png"),
+    ]))
+    .expect_err("PNG export requires the shared renderer capability");
+    assert_eq!(error.identifier(), ERROR_RENDER.identifier);
+    let mut source = std::error::Error::source(&error);
+    let mut found = false;
+    while let Some(error) = source {
+        found |= error
+            .downcast_ref::<crate::builtins::plotting::engine::PngExportUnavailable>()
+            .is_some();
+        source = error.source();
+    }
+    assert!(found, "typed renderer capability cause must be retained");
+    assert!(filesystem
+        .read_project_path("/figures/not-created.png")
+        .is_err());
+}
+
 #[test]
 fn openfig_rejects_reuse_mode_until_tracking_exists() {
     let _guard = setup();

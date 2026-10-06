@@ -28,6 +28,16 @@ async fn execute_saveas_in_context(
 ) -> BuiltinResult<bool> {
     reject_resident_persistence_arguments(&args, SAVEAS)?;
     let request = parse_saveas_args(&args)?;
+    if request.format == SaveFormat::Png {
+        crate::builtins::plotting::engine::ensure_png_export_available().map_err(|source| {
+            persistence_error_with_source(
+                &ERROR_RENDER,
+                SAVEAS,
+                format!("saveas: {source}"),
+                source,
+            )
+        })?;
+    }
     let selected = FigureFsPath::capture(&request.output_path).map_err(|error| {
         persistence_error_with_source(
             &ERROR_IO,

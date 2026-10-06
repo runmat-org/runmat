@@ -28,7 +28,10 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
     });
     let _selected = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin(None, vec![Value::from("/selected.png")]));
+    let mut call = Box::pin(print_builtin_direct(
+        None,
+        vec![Value::from("/selected.png")],
+    ));
     await_operation_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),
@@ -75,7 +78,7 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
         source.token(),
     );
     let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin(
+    let mut call = Box::pin(print_builtin_direct(
         Some(runtime),
         vec![Value::from("/cancelled.png")],
     ));
@@ -123,7 +126,10 @@ fn revoked_selected_print_lease_after_pending_write_prevents_publication() {
     });
     let _selected = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
-    let mut call = Box::pin(print_builtin(None, vec![Value::from("/revoked.png")]));
+    let mut call = Box::pin(print_builtin_direct(
+        None,
+        vec![Value::from("/revoked.png")],
+    ));
     await_operation_start(start_receiver, call.as_mut());
     assert!(
         provider.gate.lock().unwrap().is_none(),

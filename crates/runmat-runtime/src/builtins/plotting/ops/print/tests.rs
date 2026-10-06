@@ -5,6 +5,9 @@ use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry}
 use futures::executor::block_on;
 use runmat_value::Tensor;
 
+#[path = "tests/dispatcher.rs"]
+mod dispatcher;
+
 fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
     let guard = lock_plot_registry();
     ensure_plot_test_env();
@@ -65,7 +68,7 @@ fn print_descriptor_signatures_cover_png_forms() {
 #[test]
 fn print_rejects_unsupported_device() {
     let _guard = setup();
-    let err = block_on(print_builtin(
+    let err = block_on(print_builtin_direct(
         None,
         vec![Value::from("plot"), Value::from("-dsvg")],
     ))
@@ -87,16 +90,22 @@ fn output_admission_precedes_render_and_file_effects() {
     let _guard = setup();
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
     let one = crate::output_count::push_output_count(Some(1));
-    let error = block_on(print_builtin(None, vec![Value::from("never-created.png")]))
-        .expect_err("status output is an extension");
+    let error = block_on(print_builtin_direct(
+        None,
+        vec![Value::from("never-created.png")],
+    ))
+    .expect_err("status output is an extension");
     assert_eq!(
         error.identifier(),
         PRINT_STATUS_OUTPUT_EXTENSION.error_identifier
     );
     drop(one);
     let _two = crate::output_count::push_output_count(Some(2));
-    let error = block_on(print_builtin(None, vec![Value::from("never-created.png")]))
-        .expect_err("excess outputs");
+    let error = block_on(print_builtin_direct(
+        None,
+        vec![Value::from("never-created.png")],
+    ))
+    .expect_err("excess outputs");
     assert_eq!(error.identifier(), PRINT_ERROR_TOO_MANY_OUTPUTS.identifier);
 }
 
@@ -114,7 +123,7 @@ fn print_adds_png_extension_and_writes_png() {
     let output = stem.with_extension("png");
     let _ = std::fs::remove_file(&output);
     let _statement = crate::output_count::push_output_count(Some(0));
-    block_on(print_builtin(
+    block_on(print_builtin_direct(
         None,
         vec![
             Value::String(stem.to_string_lossy().into_owned()),
@@ -213,7 +222,7 @@ fn integer_alias_admission_and_exactness_precede_filesystem_capture() {
         runmat_value::IntValue::U8(1),
         runmat_value::IntValue::U64(u64::MAX),
     ] {
-        let error = block_on(print_builtin(
+        let error = block_on(print_builtin_direct(
             None,
             vec![Value::Int(integer), Value::from("/never-mounted/plot.png")],
         ))
@@ -225,7 +234,7 @@ fn integer_alias_admission_and_exactness_precede_filesystem_capture() {
     }
     drop(_matlab);
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let error = block_on(print_builtin(
+    let error = block_on(print_builtin_direct(
         None,
         vec![
             Value::Int(runmat_value::IntValue::U64(u64::MAX)),
@@ -258,8 +267,11 @@ fn pre_cancelled_public_print_preserves_existing_target() {
         source.token(),
     );
     let _statement = crate::output_count::push_output_count(Some(0));
-    let error = block_on(print_builtin(Some(runtime), vec![Value::from("/plot.png")]))
-        .expect_err("pre-cancelled call");
+    let error = block_on(print_builtin_direct(
+        Some(runtime),
+        vec![Value::from("/plot.png")],
+    ))
+    .expect_err("pre-cancelled call");
     assert!(error
         .identifier()
         .is_some_and(|id| id.ends_with(":Cancelled")));
