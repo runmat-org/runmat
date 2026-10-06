@@ -1,4 +1,8 @@
 use super::*;
+use crate::{
+    BuiltinContractMaturity, BuiltinDocumentationAuthority, BuiltinDocumentationStatus,
+    BuiltinInferenceRule, BuiltinIntegerAuditKind, BuiltinOutputMode,
+};
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, LiteralContext, OutputSelection,
     RequestedOutputCount, ShapeFact, ValueFact,

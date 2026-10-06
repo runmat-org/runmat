@@ -34,7 +34,7 @@ pub const ASSERT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::MayThrow, EffectKind::MaySuspend],
+        effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
