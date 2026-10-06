@@ -262,7 +262,8 @@ pub enum ExceptionFailureOrigin {
 pub struct ExceptionCallFrame {
     pub function: String,
     /// Portable program-source ordinal. Never a worker-local SourceId.
-    pub source_id: Option<u64>,
+    #[serde(rename = "source_id")]
+    pub program_source_id: Option<runmat_types::ProgramSourceId>,
     pub span: Option<(u64, u64)>,
 }
 
@@ -466,7 +467,7 @@ mod exception_protocol_tests {
             task_id: None,
             call_frames: vec![ExceptionCallFrame {
                 function: "origin".into(),
-                source_id: Some(7),
+                program_source_id: Some(runmat_types::ProgramSourceId(7)),
                 span: Some((2, 5)),
             }],
             call_frames_elided: 0,

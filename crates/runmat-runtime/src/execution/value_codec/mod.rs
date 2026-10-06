@@ -749,8 +749,8 @@ mod tests {
             panic!("exception");
         };
         assert_eq!(
-            exception.runtime.as_ref().unwrap().call_frames[0].source_id,
-            Some(0)
+            exception.runtime.as_ref().unwrap().call_frames[0].program_source_id,
+            Some(runmat_types::ProgramSourceId(0))
         );
         assert_ne!(u64::try_from(worker_id.0).unwrap(), 0);
         let Value::Cell(decoded) = decode_inline_value(&payload).unwrap() else {
@@ -762,6 +762,10 @@ mod tests {
         assert_eq!(
             decoded.original().unwrap().context.call_frames[0].source_id,
             None
+        );
+        assert_eq!(
+            decoded.original().unwrap().context.call_stack,
+            ["remote_spmd @ remote_spmd.m:1:1"]
         );
         assert_eq!(decoded.stack, ["remote_spmd"]);
     }

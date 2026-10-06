@@ -1113,7 +1113,7 @@ end
         failure
             .call_frames
             .iter()
-            .any(|frame| frame.source_id.is_some()),
+            .any(|frame| frame.program_source_id.is_some()),
         "the structured remote error must retain a worker-bound source frame"
     );
 }

@@ -89,7 +89,6 @@ pub fn encode_runtime_failure_in_context(
         .ok_or_else(|| "runtime failure refers to a missing or foreign source".to_string())?;
         runtime
             .portable_ordinal_for_source(issued)
-            .map(|ordinal| u64::from(ordinal.0))
             .ok_or_else(|| "runtime failure source is absent from its portable binding".into())
     })?;
     if failure.call_stack.is_empty() {
@@ -139,7 +138,7 @@ pub fn render_source_call_stack_in_context(
 
 fn encode_runtime_failure_with_sources(
     error: &RuntimeError,
-    mut portable_source: impl FnMut(usize) -> Result<u64, String>,
+    mut portable_source: impl FnMut(usize) -> Result<runmat_types::ProgramSourceId, String>,
 ) -> Result<ProgramRuntimeFailure, String> {
     let span = error
         .span
@@ -152,7 +151,7 @@ fn encode_runtime_failure_with_sources(
         .map(|frame| {
             Ok(ProgramCallFrame {
                 function: frame.function.clone(),
-                source_id: frame.source_id.map(&mut portable_source).transpose()?,
+                program_source_id: frame.source_id.map(&mut portable_source).transpose()?,
                 span: frame
                     .span
                     .map(|(offset, length)| encode_span(offset, length))
@@ -313,8 +312,16 @@ mod tests {
             .with_call_stack(vec!["workerFunction at sample.m:2:4".into()])
             .build();
         let portable = encode_runtime_failure_in_context(&error, &runtime).unwrap();
-        assert_eq!(portable.call_frames[0].source_id, Some(0));
-        assert_ne!(portable.call_frames[0].source_id, Some(source_id.0 as u64));
+        assert_eq!(
+            portable.call_frames[0].program_source_id,
+            Some(runmat_types::ProgramSourceId(0))
+        );
+        assert_ne!(
+            portable.call_frames[0]
+                .program_source_id
+                .map(|id| id.0 as usize),
+            Some(source_id.0)
+        );
         let decoded = decode_runtime_failure(portable).unwrap();
         assert_eq!(decoded.message(), "bad parallel value");
         assert_eq!(decoded.identifier(), Some("RunMat:ParallelValue"));
@@ -334,7 +341,10 @@ mod tests {
         let mut unrendered = error;
         unrendered.context.call_stack.clear();
         let portable = encode_runtime_failure_in_context(&unrendered, &runtime).unwrap();
-        assert_eq!(portable.call_frames[0].source_id, Some(0));
+        assert_eq!(
+            portable.call_frames[0].program_source_id,
+            Some(runmat_types::ProgramSourceId(0))
+        );
         assert_eq!(
             portable.call_stack,
             vec![

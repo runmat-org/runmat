@@ -118,7 +118,7 @@ fn encode(
             }
         }
         Value::StructArray(value) if purpose.durable() => {
-            InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose)?)
+            InlineValue::DurableStructArray(aggregate::struct_array(value, path, purpose, runtime)?)
         }
         Value::StructArray(_) => {
             return Err(ValueCodecError::unsupported(
@@ -136,10 +136,10 @@ fn encode(
             ))
         }
         Value::Object(value) if purpose.durable() => {
-            InlineValue::DurablePlainObject(aggregate::plain_object(value, path, purpose)?)
+            InlineValue::DurablePlainObject(aggregate::plain_object(value, path, purpose, runtime)?)
         }
         Value::ObjectArray(value) if purpose.durable() => {
-            InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose)?)
+            InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose, runtime)?)
         }
         Value::Object(value)
             if crate::parallel::codistributor::is_supported_class(&value.class_name) =>
@@ -538,7 +538,7 @@ fn exception_runtime_metadata(
         .map(|frame| {
             Ok(ExceptionCallFrame {
                 function: frame.function.clone(),
-                source_id: frame
+                program_source_id: frame
                     .source_id
                     .map(|id| {
                         let runtime = runtime.ok_or_else(|| {
@@ -557,15 +557,12 @@ fn exception_runtime_metadata(
                                 "caught exception source is missing or foreign",
                             )
                         })?;
-                        runtime
-                            .portable_ordinal_for_source(issued)
-                            .map(|ordinal| u64::from(ordinal.0))
-                            .ok_or_else(|| {
-                                ValueCodecError::unsupported(
-                                    path,
-                                    "caught exception source is absent from the portable program",
-                                )
-                            })
+                        runtime.portable_ordinal_for_source(issued).ok_or_else(|| {
+                            ValueCodecError::unsupported(
+                                path,
+                                "caught exception source is absent from the portable program",
+                            )
+                        })
                     })
                     .transpose()?,
                 span: span(frame.span, path)?,
@@ -584,7 +581,13 @@ fn exception_runtime_metadata(
         task_id: error.context.task_id.clone(),
         call_frames,
         call_frames_elided: portable(error.context.call_frames_elided, path)?,
-        call_stack: error.context.call_stack.clone(),
+        call_stack: if error.context.call_stack.is_empty() {
+            runtime.map_or_else(Vec::new, |runtime| {
+                crate::execution::render_source_call_stack_in_context(error, runtime)
+            })
+        } else {
+            error.context.call_stack.clone()
+        },
         phase: error.context.phase.clone(),
         gpu_gather_retry: match error.gpu_gather_retry {
             crate::GpuGatherRetry::Legacy => ExceptionGpuGatherRetry::Legacy,
