@@ -7,7 +7,9 @@ use crate::context::{
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
 use runmat_types::SourceId;
-use runmat_value::{BoundFunctionBinding, CharArray, IntegerStorage, Tensor};
+use runmat_value::{
+    BoundFunctionBinding, CellArray, CharArray, IntegerStorage, ObjectArray, StringArray, Tensor,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -276,10 +278,7 @@ fn absolute_startat_uses_injected_wall_clock_without_relative_extension() {
     reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        Value::FunctionHandle("tick".into()),
     ]))
     .expect("timer");
     let future = chrono::DateTime::from_timestamp(1_700_000_002, 0)
@@ -307,10 +306,7 @@ fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
     reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
-        Value::BoundFunctionHandle {
-            name: "tick".into(),
-            function: 1,
-        },
+        Value::FunctionHandle("tick".into()),
     ]))
     .expect("timer");
     let now = chrono::DateTime::from_timestamp(1_700_000_000, 0)
@@ -356,6 +352,82 @@ fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
         panic!("expected timer handle")
     };
     assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+}
+
+#[test]
+fn startat_uses_column_major_timer_arrays_and_accepts_nd_object_arrays() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
+    let timers = (0..4)
+        .map(|_| {
+            block_on(timer_builtin(vec![
+                Value::String("TimerFcn".into()),
+                Value::FunctionHandle("tick".into()),
+            ]))
+            .expect("timer")
+        })
+        .collect::<Vec<_>>();
+    let cell = Value::Cell(CellArray::new(timers.clone(), 2, 2).unwrap());
+    let (ordered, shape) = super::startat::receiver_handles(&test_runtime(), &cell).unwrap();
+    let expected = [0, 2, 1, 3]
+        .map(|index| match &timers[index] {
+            Value::HandleObject(handle) => handle.clone(),
+            _ => panic!("timer handle"),
+        })
+        .to_vec();
+    assert_eq!(shape, vec![2, 2]);
+    assert_eq!(ordered, expected);
+
+    let object_array = Value::ObjectArray(
+        ObjectArray::from_handles(TIMER_CLASS.to_string(), expected, vec![2, 1, 2]).unwrap(),
+    );
+    let now = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+        .unwrap()
+        .naive_utc();
+    let dates = Value::StringArray(
+        StringArray::new(
+            (1..=4)
+                .map(|seconds| {
+                    (now + chrono::Duration::seconds(seconds))
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
+                .collect(),
+            vec![2, 1, 2],
+        )
+        .unwrap(),
+    );
+    block_on(super::timer_startat_builtin(
+        Some(test_runtime()),
+        Some(0),
+        object_array.clone(),
+        vec![dates],
+    ))
+    .expect("N-D object array of timers");
+    for timer in &timers {
+        let Value::HandleObject(handle) = timer else {
+            panic!("timer handle")
+        };
+        assert_eq!(string_property(handle, "Running").unwrap(), "on");
+    }
+    block_on(timer_stop_builtin(object_array)).expect("stop object array");
+}
+
+#[test]
+fn startat_empty_object_array_preserves_shape_and_has_no_lifecycle_effect() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
+    let array =
+        Value::ObjectArray(ObjectArray::empty(TIMER_CLASS.to_string(), vec![0, 2, 1]).unwrap());
+    let empty_dates = Value::StringArray(StringArray::new(Vec::new(), vec![0, 2, 1]).unwrap());
+    block_on(super::timer_startat_builtin(
+        Some(test_runtime()),
+        Some(0),
+        array,
+        vec![empty_dates],
+    ))
+    .expect("empty matching arrays");
+    assert!(test_runtime().timer_session().borrow().handles().is_empty());
 }
 
 #[test]

@@ -10524,6 +10524,36 @@ fn timer_constructs_finds_starts_and_deletes_through_vm() {
 }
 
 #[test]
+fn timer_absolute_startat_datevec_dispatches_in_matlab_mode() {
+    let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let source = r#"
+        t = timer('TimerFcn', @(src, evt) 0);
+        startat(t, datevec(now + 2/86400));
+        running = t.Running;
+        stop(t);
+        stopped = t.Running;
+        delete(t);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("absolute startat request");
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "absolute startat diagnostics: {:?}",
+        outcome.diagnostics
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "running",
+        &runmat_value::Value::String("on".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "stopped",
+        &runmat_value::Value::String("off".into())
+    ));
+}
+
+#[test]
 fn timer_member_method_start_works_through_vm() {
     let _timer_lock = TIMER_CORE_TEST_LOCK.lock().unwrap();
     let mut session = RunMatSession::with_options(false, false).expect("session init");

@@ -1,4 +1,5 @@
-//! Recursive timer-handle method dispatch over scalar and cell inputs.
+//! Timer-handle method dispatch in MATLAB linear order over scalar, cell, and
+//! homogeneous object-array receivers.
 
 use super::*;
 
@@ -12,7 +13,13 @@ pub(super) async fn start_timer_values(
             start_one_timer(runtime, handle.clone(), override_delay).await
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.iter_column_major() {
+                Box::pin(start_timer_values(runtime, item, override_delay)).await?;
+            }
+            Ok(())
+        }
+        Value::ObjectArray(array) if array.class_name().is(TIMER_CLASS) => {
+            for item in array.data() {
                 Box::pin(start_timer_values(runtime, item, override_delay)).await?;
             }
             Ok(())
@@ -34,7 +41,13 @@ pub(super) async fn stop_timer_values(
             stop_one_timer(runtime, handle, call_stop).await
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.iter_column_major() {
+                Box::pin(stop_timer_values(runtime, item, call_stop)).await?;
+            }
+            Ok(())
+        }
+        Value::ObjectArray(array) if array.class_name().is(TIMER_CLASS) => {
+            for item in array.data() {
                 Box::pin(stop_timer_values(runtime, item, call_stop)).await?;
             }
             Ok(())
@@ -55,7 +68,13 @@ pub(super) async fn wait_timer_values(
             wait_one_timer(runtime, handle).await
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.iter_column_major() {
+                Box::pin(wait_timer_values(runtime, item)).await?;
+            }
+            Ok(())
+        }
+        Value::ObjectArray(array) if array.class_name().is(TIMER_CLASS) => {
+            for item in array.data() {
                 Box::pin(wait_timer_values(runtime, item)).await?;
             }
             Ok(())
@@ -82,7 +101,13 @@ pub(super) async fn delete_timer_values(
             Ok(())
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.iter_column_major() {
+                Box::pin(delete_timer_values(runtime, item)).await?;
+            }
+            Ok(())
+        }
+        Value::ObjectArray(array) if array.class_name().is(TIMER_CLASS) => {
+            for item in array.data() {
                 Box::pin(delete_timer_values(runtime, item)).await?;
             }
             Ok(())

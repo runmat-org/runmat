@@ -58,6 +58,10 @@ fn timer_inference_owns_handle_fact_and_rejects_late_invalid_property() {
 
 #[test]
 fn startat_accepts_optional_delay_other_methods_do_not() {
+    assert_eq!(
+        STARTAT.contract.compatibility,
+        crate::BuiltinCompatibility::Matlab
+    );
     assert_eq!(STARTAT.descriptor.signatures[0].inputs.len(), 2);
     assert_eq!(START.descriptor.signatures[0].inputs.len(), 1);
     let receiver = ValueFact::unknown(DynamicReason::RuntimeValue);

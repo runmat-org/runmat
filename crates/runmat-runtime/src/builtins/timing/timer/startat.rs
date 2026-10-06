@@ -36,11 +36,7 @@ pub(super) async fn start_at_absolute(
     }
     let mut delays = Vec::with_capacity(handles.len());
     for index in 0..handles.len() {
-        let serial_index = if scalar {
-            0
-        } else {
-            column_major_index(index, &receiver_shape)?
-        };
+        let serial_index = if scalar { 0 } else { index };
         let naive = crate::builtins::datetime::naive_from_datenum(serial_values[serial_index])
             .map_err(|error| startat_date_error(error))?;
         let epoch = timing.local_datetime_to_epoch(naive).ok_or_else(|| {
@@ -69,7 +65,7 @@ pub(super) async fn start_at_absolute(
     Ok(())
 }
 
-fn receiver_handles(
+pub(super) fn receiver_handles(
     runtime: &RuntimeContext,
     receiver: &Value,
 ) -> BuiltinResult<(Vec<HandleRef>, Vec<usize>)> {
@@ -86,7 +82,7 @@ fn receiver_handles(
         }
         Value::Cell(cell) => {
             let mut handles = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            for item in cell.iter_column_major() {
                 let Value::HandleObject(handle) = item else {
                     return Err(timer_error(
                         &TIMER_ERROR_INVALID_HANDLE,
@@ -104,30 +100,31 @@ fn receiver_handles(
             }
             Ok((handles, cell.shape.clone()))
         }
+        Value::ObjectArray(array) if array.class_name().is(TIMER_CLASS) => {
+            let mut handles = Vec::with_capacity(array.len());
+            for item in array.data() {
+                let Value::HandleObject(handle) = item else {
+                    return Err(timer_error(
+                        &TIMER_ERROR_INVALID_HANDLE,
+                        "startat: timer object array must contain handles",
+                    ));
+                };
+                ensure_valid_timer(handle)?;
+                if runtime.timer_session().borrow().record(handle).is_none() {
+                    return Err(timer_error(
+                        &TIMER_ERROR_INVALID_HANDLE,
+                        "startat: timer belongs to another session",
+                    ));
+                }
+                handles.push(handle.clone());
+            }
+            Ok((handles, array.shape().to_vec()))
+        }
         _ => Err(timer_error(
             &TIMER_ERROR_INVALID_HANDLE,
-            "startat: expected a timer handle or timer cell array",
+            "startat: expected a timer handle or timer array",
         )),
     }
-}
-
-fn column_major_index(row_major_index: usize, shape: &[usize]) -> BuiltinResult<usize> {
-    let rows = shape[0];
-    let cols = shape[1];
-    let page_len = rows.checked_mul(cols).ok_or_else(|| {
-        timer_error(
-            &TIMER_ERROR_INVALID_INPUT,
-            "startat: timer array size overflow",
-        )
-    })?;
-    if page_len == 0 {
-        return Ok(0);
-    }
-    let page = row_major_index / page_len;
-    let within_page = row_major_index % page_len;
-    let row = within_page / cols;
-    let col = within_page % cols;
-    Ok(page * page_len + col * rows + row)
 }
 
 fn startat_date_error(error: RuntimeError) -> RuntimeError {

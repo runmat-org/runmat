@@ -75,15 +75,6 @@ macro_rules! timer_effects {
     };
 }
 
-macro_rules! timer_compatibility {
-    (STARTAT) => {
-        BuiltinCompatibility::RunMat
-    };
-    ($identity:ident) => {
-        BuiltinCompatibility::Matlab
-    };
-}
-
 macro_rules! timer_entry {
     ($id:ident, $name:literal, $doc:expr, $descriptor:expr, $infer:expr,
      $stack:expr, $extensions:expr, $integers:expr, $auto_output:expr) => {
@@ -96,7 +87,9 @@ macro_rules! timer_entry {
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Incomplete,
                 inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new($infer)),
-                compatibility: timer_compatibility!($id),
+                // MATLAB absolute startat forms coexist with explicitly gated
+                // RunMat relative/status forms on the same method identity.
+                compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: BuiltinAsyncBehavior::MaySuspend,
                 purity: BuiltinPurity::Impure,
                 semantic_kind: BuiltinSemanticKind::General,

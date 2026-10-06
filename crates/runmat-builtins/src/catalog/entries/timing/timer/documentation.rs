@@ -145,7 +145,7 @@ pub(super) const INTERNAL_METHOD: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: None, slug: None,
     summary: "Internal timer method binding.",
-    description: "The compiler routes timer handle methods through these hidden, session-bound runtime identities. MATLAB method calls have no output; assignable numeric status is a RunMat-only extension. The current startat relative-seconds form is also RunMat-only. User-facing syntax and examples belong to timer.",
+    description: "The compiler routes timer handle methods through these hidden, session-bound runtime identities. MATLAB method calls have no output; assignable numeric status and startat relative seconds are separately gated RunMat-only forms. Absolute startat dates use the MATLAB method identity. User-facing syntax and examples belong to timer.",
     keywords: &["timer", "method"], related: &["timer"], sections: &[],
     examples: &[], example_exemption: Some("Hidden method bindings are exercised by timer lifecycle examples and VM method tests."),
     faqs: &[], links: &[], media: &[], evidence: TIMER_EVIDENCE,
