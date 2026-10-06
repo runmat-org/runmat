@@ -7,20 +7,29 @@ use std::collections::{HashMap, HashSet};
 pub(crate) struct MirLoweringContext {
     binding_locals: HashMap<BindingId, MirLocalId>,
     async_functions: HashSet<FunctionId>,
+    external_async_functions: HashSet<FunctionId>,
     next_local: usize,
     temp_locals: RefCell<Vec<MirLocal>>,
 }
 
 impl MirLoweringContext {
-    pub(crate) fn with_async_functions(async_functions: HashSet<FunctionId>) -> Self {
+    pub(crate) fn with_async_functions(
+        async_functions: HashSet<FunctionId>,
+        external_async_functions: HashSet<FunctionId>,
+    ) -> Self {
         Self {
             async_functions,
+            external_async_functions,
             ..Self::default()
         }
     }
 
     pub(crate) fn is_async_function(&self, function: FunctionId) -> bool {
         self.async_functions.contains(&function)
+    }
+
+    pub(crate) fn is_external_async_function(&self, function: FunctionId) -> bool {
+        self.external_async_functions.contains(&function)
     }
 
     pub(crate) fn local_for_binding(&self, binding: BindingId) -> Result<MirLocalId, HirError> {

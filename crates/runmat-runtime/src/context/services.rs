@@ -220,10 +220,11 @@ pub trait RuntimeAnalysisService {
 
 /// Session-owned authority over the exact immutable executable active in an invocation.
 pub trait RuntimeProgramService {
-    /// Freeze the complete active compiler product for this exact semantic function.
+    /// Freeze this function's original product after validating its active caller.
     fn freeze_executable(
         &self,
         function: runmat_types::ProgramFunctionId,
+        invocation_revision: &runmat_execution::ProgramRevision,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, crate::RuntimeError>;
 
     fn freeze_bound_callable(

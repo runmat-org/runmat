@@ -177,6 +177,11 @@ fn remap_rvalue(
                 remap_call_arg(argument, remap);
             }
         }
+        MirRvalue::ExternalFuture { args, .. } => {
+            for argument in args {
+                remap_call_arg(argument, remap);
+            }
+        }
         MirRvalue::Distributed(operation) => remap_distributed(operation, remap)?,
         MirRvalue::Collective(operation) => remap_collective(operation, remap)?,
         MirRvalue::WorkspaceFirstStaticProperty { .. }

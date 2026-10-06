@@ -190,8 +190,11 @@ fn create_async_future_value(
             function: function.0,
             arguments,
             requested_outputs,
-            program_revision: context.runtime.program_revision().cloned(),
-            program,
+            program_revision: program
+                .as_ref()
+                .map(|capture| capture.revision.clone())
+                .or_else(|| context.runtime.program_revision().cloned()),
+            program: program.map(|capture| capture.bytes),
         })
         .map(Value::Future)
         .map_err(execution_error)

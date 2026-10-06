@@ -48,6 +48,12 @@ pub(crate) fn infer_rvalue(
                 },
             ))
         }
+        MirRvalue::ExternalFuture { .. } => ValueFact::scalar(ValueKindFact::Execution(
+            runmat_types::ExecutionFact::Future {
+                output: Box::new(dynamic_value()),
+                state: runmat_types::FutureStateFact::Lazy,
+            },
+        )),
         MirRvalue::Spawn(operand) => {
             let output = match operand_fact_with_summaries(operand, state, summaries).kind {
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
@@ -187,10 +193,7 @@ fn function_handle_fact(
 ) -> ValueFact {
     let summary = match identity {
         runmat_hir::CallableIdentity::BoundFunction(function)
-        | runmat_hir::CallableIdentity::AnonymousFunction(function)
-        | runmat_hir::CallableIdentity::ExternalFunction { function, .. } => {
-            summaries.get(function)
-        }
+        | runmat_hir::CallableIdentity::AnonymousFunction(function) => summaries.get(function),
         _ => None,
     };
     ValueFact::scalar(ValueKindFact::Callable(runmat_types::CallableFact {

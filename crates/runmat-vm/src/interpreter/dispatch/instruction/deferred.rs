@@ -19,7 +19,8 @@ pub(super) async fn execute(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
+        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count)
+        | Instr::CreateExternalFuture(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             stack.push(create_async_future_value(
                 context, *function, *out_count, args,

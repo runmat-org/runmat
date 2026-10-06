@@ -235,6 +235,7 @@ pub enum Instr {
     CallFevalExpandMultiOutputUsingOutputSlot(Vec<ArgumentSpec>, usize),
     // Create a lazy semantic-future descriptor from call arguments.
     CreateSemanticFuture(FunctionId, usize, usize),
+    CreateExternalFuture(FunctionId, Vec<ArgumentSpec>, usize),
     CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgumentSpec>, usize),
     // Explicit async spawn boundary.
     Spawn,
@@ -539,6 +540,7 @@ impl Instr {
             Instr::CallFevalExpandMultiOutput(specs, _)
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
+            | Instr::CreateExternalFuture(_, specs, _)
             | Instr::CallFunctionExpandMultiOutput { specs, .. }
             | Instr::CallWorkspaceFirstExpandMultiOutput { specs, .. }
             | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. }

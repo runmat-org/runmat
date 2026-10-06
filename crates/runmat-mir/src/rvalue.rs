@@ -61,6 +61,14 @@ pub enum MirRvalue {
         syntax: CallSyntax,
         requested_outputs: RequestedOutputCount,
     },
+    /// A stable retained function identity, never remapped as a unit-local ordinal.
+    ExternalFuture {
+        function: FunctionId,
+        display_name: String,
+        args: Vec<MirCallArg>,
+        syntax: CallSyntax,
+        requested_outputs: RequestedOutputCount,
+    },
     Spawn(MirOperand),
     Distributed(crate::parallel::MirDistributedOp),
     Collective(crate::parallel::MirCollectiveOp),

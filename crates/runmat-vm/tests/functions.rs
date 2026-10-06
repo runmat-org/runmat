@@ -5,13 +5,11 @@ use std::convert::TryFrom;
 use test_helpers::compile_source;
 use test_helpers::interpret;
 
-struct ProviderSelectionCleanup;
-
-impl Drop for ProviderSelectionCleanup {
-    fn drop(&mut self) {
-        runmat_accelerate_api::set_thread_provider(None);
-        runmat_accelerate_api::clear_provider();
-    }
+fn scoped_provider() -> runmat_accelerate_api::ThreadProviderGuard {
+    static PROVIDER: std::sync::OnceLock<runmat_accelerate::simple_provider::InProcessProvider> =
+        std::sync::OnceLock::new();
+    let provider = PROVIDER.get_or_init(runmat_accelerate::simple_provider::InProcessProvider::new);
+    runmat_accelerate_api::ThreadProviderGuard::set(Some(provider))
 }
 
 fn execute_source(source: &str) -> Vec<runmat_value::Value> {
@@ -419,10 +417,10 @@ fn arguments_block_in_range_requires_matching_numeric_classes() {
 
 #[test]
 fn arguments_block_resident_integer_validation_preserves_source_ownership() {
-    runmat_accelerate::simple_provider::register_inprocess_provider();
-    let _provider_cleanup = ProviderSelectionCleanup;
-    let provider = runmat_accelerate_api::provider().expect("test provider");
-    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    // This fixture owns its provider selection; parallel CPU tests must never
+    // acquire a temporary global default that disappears while they use it.
+    let before = runmat_accelerate_api::provider().map(|provider| provider.device_id());
+    let provider_guard = scoped_provider();
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(
         r#"
@@ -440,12 +438,11 @@ fn arguments_block_resident_integer_validation_preserves_source_ownership() {
         end
         "#,
     );
-    drop(_provider);
-    runmat_accelerate_api::set_thread_provider(None);
-    runmat_accelerate_api::clear_provider();
-    assert!(
-        runmat_accelerate_api::provider().is_none(),
-        "resident validator test must restore the active provider"
+    drop(provider_guard);
+    assert_eq!(
+        runmat_accelerate_api::provider().map(|provider| provider.device_id()),
+        before,
+        "resident validator must restore its caller's provider selection"
     );
 }
 
@@ -1805,8 +1802,7 @@ fn assignin_compiled_transfer_preserves_all_integer_classes_exactly() {
 
 #[test]
 fn assignin_preserves_resident_integer_provider_ownership() {
-    runmat_accelerate::simple_provider::register_inprocess_provider();
-    let _provider_cleanup = ProviderSelectionCleanup;
+    let _provider_guard = scoped_provider();
     let vars = execute_source(
         "base = uint64(9007199254740992); source_gpu = gpuArray([base + uint64(1) intmax('uint64')]); assignin('base','assigned_gpu',source_gpu); copied = evalin('base','gather(assigned_gpu)');",
     );

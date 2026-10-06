@@ -142,7 +142,7 @@ fn visit_rvalue(value: &MirRvalue, out: &mut ReferencedFunctions) {
             visit_operand(base, out);
             visit_operand(member, out);
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
                 visit_call_arg(argument, out);
             }

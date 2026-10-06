@@ -184,8 +184,7 @@ fn collect_call_observation(
             let callee = match &call.callee {
                 crate::MirCallee::Static(
                     runmat_hir::CallableIdentity::BoundFunction(function)
-                    | runmat_hir::CallableIdentity::AnonymousFunction(function)
-                    | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+                    | runmat_hir::CallableIdentity::AnonymousFunction(function),
                 ) => *function,
                 _ => return,
             };

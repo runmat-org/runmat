@@ -149,6 +149,22 @@ pub(crate) fn lower_expr_with_replacements(
                 } else {
                     call_rvalue(call, args, arg_spans)?
                 }
+            } else if let HirCallableRef::ExternalFunction {
+                function,
+                display_name,
+            } = &call.callee
+            {
+                if ctx.is_external_async_function(*function) {
+                    MirRvalue::ExternalFuture {
+                        function: *function,
+                        display_name: display_name.clone(),
+                        args,
+                        syntax: call.syntax.clone(),
+                        requested_outputs: call.requested_outputs,
+                    }
+                } else {
+                    call_rvalue(call, args, arg_spans)?
+                }
             } else {
                 call_rvalue(call, args, arg_spans)?
             }
@@ -627,14 +643,13 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
             | CallableIdentity::DynamicName(_)
             | CallableIdentity::Imported(_)
             | CallableIdentity::Method(_)
-            | CallableIdentity::AnonymousFunction(_),
+            | CallableIdentity::AnonymousFunction(_)
+            | CallableIdentity::ExternalFunction { .. },
         )
         | MirCallee::SuperConstructor { .. }
         | MirCallee::SuperMethod { .. }
         | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
-        MirCallee::Static(
-            CallableIdentity::BoundFunction(_) | CallableIdentity::ExternalFunction { .. },
-        ) => BuiltinSemantics {
+        MirCallee::Static(CallableIdentity::BoundFunction(_)) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::NeverSuspends,
             effects: runmat_builtins::BuiltinEffects::none(),

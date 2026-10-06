@@ -170,6 +170,12 @@ pub(super) fn evaluate_rvalue(
             args,
             requested_outputs,
             ..
+        }
+        | MirRvalue::ExternalFuture {
+            function,
+            args,
+            requested_outputs,
+            ..
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
             runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
@@ -190,8 +196,11 @@ pub(super) fn evaluate_rvalue(
                     function: function.0,
                     arguments,
                     requested_outputs: requested_outputs.fixed_count(),
-                    program_revision: state.runtime.program_revision().cloned(),
-                    program,
+                    program_revision: program
+                        .as_ref()
+                        .map(|capture| capture.revision.clone())
+                        .or_else(|| state.runtime.program_revision().cloned()),
+                    program: program.map(|capture| capture.bytes),
                 })
                 .map_err(execution_service_error)?;
             Ok(vec![state.arena.insert(Value::Future(future))])

@@ -12,13 +12,18 @@ impl Walker<'_> {
     pub(super) fn identity(&mut self, from: &str, identity: &CallableIdentity, reason: Reason) {
         match identity {
             CallableIdentity::BoundFunction(function)
-            | CallableIdentity::AnonymousFunction(function)
-            | CallableIdentity::ExternalFunction { function, .. } => self.retain_function(
+            | CallableIdentity::AnonymousFunction(function) => self.retain_function(
                 *function,
                 Certainty::Definite,
                 Some(from.into()),
                 reason,
                 identity.display_name(),
+            ),
+            CallableIdentity::ExternalFunction { display_name, .. } => self.named_dynamic(
+                from,
+                Kind::ExternalCallable,
+                display_name.clone(),
+                "retained external callable requires its original program authority",
             ),
             CallableIdentity::Builtin(id) => self.builtin_reference(
                 from,

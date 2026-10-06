@@ -42,8 +42,7 @@ fn collect_escaped_handles(value: &MirRvalue, reachable: &mut BTreeSet<FunctionI
     fn operand(operand: &crate::MirOperand, reachable: &mut BTreeSet<FunctionId>) {
         if let crate::MirOperand::FunctionHandle(
             runmat_hir::CallableIdentity::BoundFunction(function)
-            | runmat_hir::CallableIdentity::AnonymousFunction(function)
-            | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+            | runmat_hir::CallableIdentity::AnonymousFunction(function),
         ) = operand
         {
             reachable.insert(*function);
@@ -63,7 +62,7 @@ fn collect_escaped_handles(value: &MirRvalue, reachable: &mut BTreeSet<FunctionI
                 operand(argument.operand(), reachable);
             }
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future { args, .. } | MirRvalue::ExternalFuture { args, .. } => {
             for argument in args {
                 operand(argument.operand(), reachable);
             }
@@ -118,8 +117,7 @@ fn collect_calls(value: &MirRvalue, callees: &mut BTreeSet<FunctionId>) {
         MirRvalue::Call(call) => {
             if let MirCallee::Static(
                 runmat_hir::CallableIdentity::BoundFunction(function)
-                | runmat_hir::CallableIdentity::AnonymousFunction(function)
-                | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+                | runmat_hir::CallableIdentity::AnonymousFunction(function),
             ) = &call.callee
             {
                 callees.insert(*function);

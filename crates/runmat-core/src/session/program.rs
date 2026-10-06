@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+mod retained;
+
 use runmat_runtime::context::{RuntimeProgramCallable, RuntimeProgramService};
 use runmat_types::ProgramFunctionId;
 
@@ -9,6 +11,7 @@ use crate::ExecutableUnit;
 #[derive(Default)]
 pub(super) struct SessionProgramService {
     active: RefCell<Vec<ExecutableUnit>>,
+    retained: RefCell<retained::RetainedPrograms>,
 }
 
 impl SessionProgramService {
@@ -24,11 +27,19 @@ impl RuntimeProgramService for SessionProgramService {
     fn freeze_executable(
         &self,
         function: ProgramFunctionId,
+        invocation_revision: &runmat_execution::ProgramRevision,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, runmat_runtime::RuntimeError> {
         let active = self.active.borrow();
-        active
+        let caller = active
             .last()
-            .ok_or_else(|| program_error("no executable is active"))?
+            .ok_or_else(|| program_error("no executable is active"))?;
+        if &caller.revision().program_revision != invocation_revision {
+            return Err(program_error(
+                "invocation revision differs from its active original product",
+            ));
+        }
+        let retained = self.retained.borrow();
+        self.resolve(caller, &retained, function)?
             .portable_envelope_for_function(function)
             .map_err(program_error)
     }
@@ -39,9 +50,11 @@ impl RuntimeProgramService for SessionProgramService {
         display_name: &str,
     ) -> Result<RuntimeProgramCallable, runmat_runtime::RuntimeError> {
         let active = self.active.borrow();
-        let unit = active
+        let caller = active
             .last()
             .ok_or_else(|| program_error("no executable is active"))?;
+        let retained = self.retained.borrow();
+        let unit = self.resolve(caller, &retained, function)?;
         let analysis = unit.function_analysis(function).cloned().ok_or_else(|| {
             program_error(format!(
                 "active executable does not contain callable function {}",

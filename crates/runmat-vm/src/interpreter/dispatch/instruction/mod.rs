@@ -78,6 +78,7 @@ pub(super) fn dispatch<'a>(
         }
         Instr::CreateSemanticFuture(_, _, _)
         | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+        | Instr::CreateExternalFuture(_, _, _)
         | Instr::Spawn
         | Instr::Await => Either::Right(Box::pin(deferred::execute(meta, state, hooks))),
         Instr::CallSemanticFunctionMulti(_, _, _)

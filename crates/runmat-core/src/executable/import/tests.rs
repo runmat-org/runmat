@@ -175,3 +175,30 @@ fn preserves_opaque_optional_metadata_and_rejects_required_unknown_sections() {
     envelope.validate().unwrap();
     assert!(ExecutableUnit::from_portable_envelope(&envelope).is_err());
 }
+
+#[test]
+fn rejects_products_advertising_pre_external_deferred_schemas() {
+    let envelope = original().portable_envelope().unwrap();
+    for kind in [Kind::Mir, Kind::Bytecode, Kind::FunctionRegistry] {
+        let mut legacy = envelope.clone();
+        let revision = match kind {
+            Kind::Mir => &mut legacy.manifest.revisions.mir_schema,
+            Kind::Bytecode => &mut legacy.manifest.revisions.bytecode_schema,
+            Kind::FunctionRegistry => &mut legacy.manifest.revisions.function_registry_schema,
+            _ => unreachable!(),
+        };
+        *revision -= 1;
+        legacy
+            .manifest
+            .components
+            .iter_mut()
+            .find(|descriptor| descriptor.kind == kind)
+            .unwrap()
+            .schema_version -= 1;
+        legacy.validate().unwrap();
+        assert!(
+            ExecutableUnit::from_portable_envelope(&legacy).is_err(),
+            "old {kind:?} schema must not silently acquire new deferred semantics"
+        );
+    }
+}

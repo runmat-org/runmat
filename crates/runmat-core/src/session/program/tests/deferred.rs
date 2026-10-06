@@ -206,3 +206,5 @@ async fn raw_script_capture_has_original_product_and_restores_session_context() 
     .unwrap();
     assert_eq!(artifact.executable_unit().unwrap().unwrap(), envelope);
 }
+
+mod persistent;

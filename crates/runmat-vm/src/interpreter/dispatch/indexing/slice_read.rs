@@ -341,21 +341,7 @@ pub(super) async fn dispatch(
                     return Ok(true);
                 }
 
-                let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                    crate::interpreter::errors::mex(
-                        "AccelerationProviderUnavailable",
-                        "No acceleration provider registered",
-                    )
-                })?;
-                let host = provider.download(handle).await.map_err(|e| {
-                    crate::interpreter::errors::mex(
-                        "AccelerationOperationFailed",
-                        &format!("slice: {e}"),
-                    )
-                })?;
-                let tensor = runmat_value::Tensor::new(host.data, host.shape)
-                    .map_err(|e| map_slice_shape_error("slice", e))?;
-                base = Value::Tensor(tensor);
+                base = runmat_runtime::gather_if_needed_async(&base).await?;
             }
             match base {
                 Value::Object(obj) => {

@@ -1275,6 +1275,8 @@ impl RunMatSession {
             self.generic_native_cache
                 .publish_session_registry(&self.function_registry, &function_registry_after_success)
                 .map_err(RunError::Runtime)?;
+            self.program_service
+                .publish(&interactive_unit, &function_registry_after_success);
             self.function_registry = function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)

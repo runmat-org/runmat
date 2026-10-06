@@ -29,6 +29,11 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         .filter(|function| function.modifiers.is_async)
         .map(|function| function.id)
         .collect();
+    let external_async_functions = hir
+        .bound_function_modifiers
+        .iter()
+        .filter_map(|(id, modifiers)| modifiers.is_async.then_some(*id))
+        .collect::<HashSet<_>>();
     for function in &hir.functions {
         let module = hir
             .modules
@@ -56,7 +61,10 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
             function.id,
             lower_function_with_context(
                 function,
-                MirLoweringContext::with_async_functions(async_functions.clone()),
+                MirLoweringContext::with_async_functions(
+                    async_functions.clone(),
+                    external_async_functions.clone(),
+                ),
             )?,
         );
     }

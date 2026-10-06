@@ -291,6 +291,7 @@ fn rvalue_calls_are_pure(value: &MirRvalue) -> bool {
             right_temps.iter().all(statement_calls_are_pure)
         }
         MirRvalue::Future { .. }
+        | MirRvalue::ExternalFuture { .. }
         | MirRvalue::Spawn(_)
         | MirRvalue::Distributed(_)
         | MirRvalue::Collective(_) => false,

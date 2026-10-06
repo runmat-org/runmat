@@ -98,4 +98,30 @@ async fn raw_wasm_script_captures_complete_original_program() {
     )
     .unwrap();
     assert_eq!(artifact.executable_unit().unwrap().unwrap(), envelope);
+
+    // A later caller must capture the earlier declaration's complete product,
+    // even when its own local function ordinal collides with the retained ID.
+    let later = runmat_core::abi::ExecutionRequest::for_source(
+        runmat_core::abi::SourceInput::Text {
+            name: "later_caller.m".into(),
+            text: "f = rawAsync(5);\nfunction y = unrelated(x); y = x + 90; end".into(),
+        },
+        Default::default(),
+        runmat_core::abi::HostExecutionPolicy::default(),
+        runmat_core::abi::WorkspaceHandle(uuid::Uuid::nil()),
+    );
+    session
+        .execute_request(later)
+        .await
+        .result
+        .expect("retained WASM capture");
+    let retained = service
+        .original
+        .borrow_mut()
+        .take()
+        .expect("original retained call");
+    assert_eq!(retained.program_revision, call.program_revision);
+    assert_eq!(retained.program, call.program);
+    assert_eq!(retained.function, call.function);
+    assert_eq!(retained.arguments, call.arguments);
 }

@@ -88,7 +88,7 @@ pub(crate) fn rvalue_contract(
                 effects.0.insert(EffectKind::Unknown);
             }
         }
-        MirRvalue::Future { .. } | MirRvalue::Spawn(_) => {
+        MirRvalue::Future { .. } | MirRvalue::ExternalFuture { .. } | MirRvalue::Spawn(_) => {
             effects.0.insert(EffectKind::MaySuspend);
             capabilities
                 .0
@@ -116,8 +116,7 @@ fn bound_function(call: &crate::MirCall) -> Option<FunctionId> {
     match &call.callee {
         crate::MirCallee::Static(
             runmat_hir::CallableIdentity::BoundFunction(function)
-            | runmat_hir::CallableIdentity::AnonymousFunction(function)
-            | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+            | runmat_hir::CallableIdentity::AnonymousFunction(function),
         ) => Some(*function),
         _ => None,
     }

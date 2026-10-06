@@ -84,7 +84,7 @@ pub fn rvalue_construct_kind(value: &crate::MirRvalue) -> MirConstructKind {
         R::MetaClass(_) => K::MetaClass,
         R::Colon => K::Colon,
         R::End => K::End,
-        R::Future { .. } => K::Future,
+        R::Future { .. } | R::ExternalFuture { .. } => K::Future,
         R::Spawn(_) => K::Spawn,
         R::Distributed(operation) => match operation {
             D::Create { .. } => K::DistributedCreate,
@@ -168,7 +168,9 @@ pub fn rvalue_declared_requirements(
                 }
             }
         }
-        crate::MirRvalue::Future { .. } | crate::MirRvalue::Spawn(_) => {
+        crate::MirRvalue::Future { .. }
+        | crate::MirRvalue::ExternalFuture { .. }
+        | crate::MirRvalue::Spawn(_) => {
             effects.0.insert(EffectKind::MaySuspend);
             capabilities
                 .0

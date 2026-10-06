@@ -2,27 +2,34 @@
 use crate::{context::RuntimeContext, RuntimeError};
 use runmat_types::ProgramFunctionId;
 
+/// Inseparable original callable revision and its complete portable product.
+pub struct DeferredProgramCapture {
+    pub revision: runmat_execution::ProgramRevision,
+    pub bytes: Vec<u8>,
+}
+
 pub fn capture_deferred_program(
     runtime: &RuntimeContext,
     function: ProgramFunctionId,
-) -> Result<Option<Vec<u8>>, RuntimeError> {
+) -> Result<Option<DeferredProgramCapture>, RuntimeError> {
     if !runtime.execution().requires_program_capture() {
         return Ok(None);
     }
+    let invocation_revision = runtime
+        .program_revision()
+        .ok_or_else(|| capture_error("active invocation has no original program revision"))?;
     let program = runtime
         .service_ports()
         .require_program("capture deferred program")
         .map_err(|error| capture_error(error.to_string()))?
-        .freeze_executable(function)?;
-    if runtime.program_revision() != Some(&program.manifest.identity.program) {
-        return Err(capture_error(
-            "active program revision differs from deferred callable",
-        ));
-    }
-    program
+        .freeze_executable(function, invocation_revision)?;
+    let bytes = program
         .canonical_bytes()
-        .map(Some)
-        .map_err(|error| capture_error(error.to_string()))
+        .map_err(|error| capture_error(error.to_string()))?;
+    Ok(Some(DeferredProgramCapture {
+        revision: program.manifest.identity.program,
+        bytes,
+    }))
 }
 
 fn capture_error(message: impl Into<String>) -> RuntimeError {

@@ -900,10 +900,10 @@ pub fn read_gpu_slice_from_plan(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
         crate::runtime_error::semantic_error(
             "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
+            "No acceleration provider registered for slice source",
         )
     })?;
     if plan.indices.is_empty() {

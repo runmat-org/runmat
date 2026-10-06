@@ -244,7 +244,14 @@ impl LoweringCtx {
         context: &LoweringContext<'_>,
     ) -> Result<(HirAssembly, HirIndex), HirError> {
         let mut ctx = Self {
-            assembly: HirAssembly::default(),
+            assembly: HirAssembly {
+                bound_function_modifiers: context
+                    .function_modifiers
+                    .iter()
+                    .map(|(id, value)| (*id, value.clone()))
+                    .collect(),
+                ..HirAssembly::default()
+            },
             hir_index: HirIndex::default(),
             module: ModuleId(0),
             next_expr: 0,

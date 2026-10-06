@@ -1,3 +1,5 @@
+mod deferred;
+
 use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
@@ -2347,30 +2349,10 @@ impl Compiler {
                 self.emit(Instr::LoadConst(-0.0));
                 Ok(())
             }
-            MirRvalue::Future {
-                function,
-                args,
-                requested_outputs,
-                ..
-            } => {
-                let (specs, has_expansion) = self.mir_call_arg_specs(args);
-                for arg in args {
-                    self.compile_mir_call_arg(arg)?;
-                }
-                let out_count = requested_outputs.fixed_count();
-                if has_expansion {
-                    self.emit(Instr::CreateSemanticFutureExpandMultiOutput(
-                        *function, specs, out_count,
-                    ));
-                } else {
-                    self.emit(Instr::CreateSemanticFuture(
-                        *function,
-                        args.len(),
-                        out_count,
-                    ));
-                }
-                Ok(())
-            }
+            MirRvalue::Future { function, args, requested_outputs, .. } =>
+                self.compile_local_future(*function, args, requested_outputs.fixed_count()),
+            MirRvalue::ExternalFuture { function, args, requested_outputs, .. } =>
+                self.compile_external_future(*function, args, requested_outputs.fixed_count()),
             MirRvalue::Spawn(operand) => {
                 self.compile_mir_operand(operand)?;
                 self.emit(Instr::Spawn);

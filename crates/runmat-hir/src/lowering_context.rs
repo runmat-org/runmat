@@ -1,4 +1,4 @@
-use crate::FunctionId;
+use crate::{FunctionId, FunctionModifiers};
 use runmat_types::ExternalClassDeclaration;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -34,6 +34,7 @@ impl FunctionOutputArity {
 
 pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
+    pub function_modifiers: &'a HashMap<FunctionId, FunctionModifiers>,
     pub bound_functions: &'a HashMap<String, FunctionId>,
     pub function_output_arities: &'a HashMap<FunctionId, FunctionOutputArity>,
     pub known_project_symbols: &'a HashSet<String>,
@@ -49,6 +50,7 @@ impl<'a> LoweringContext<'a> {
     pub fn new(variables: &'a HashMap<String, usize>) -> Self {
         Self {
             variables,
+            function_modifiers: empty_function_modifiers(),
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
@@ -66,6 +68,14 @@ impl<'a> LoweringContext<'a> {
         bound_functions: &'a HashMap<String, FunctionId>,
     ) -> Self {
         self.bound_functions = bound_functions;
+        self
+    }
+
+    pub fn with_function_modifiers(
+        mut self,
+        modifiers: &'a HashMap<FunctionId, FunctionModifiers>,
+    ) -> Self {
+        self.function_modifiers = modifiers;
         self
     }
 
@@ -119,6 +129,7 @@ impl<'a> LoweringContext<'a> {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
+            function_modifiers: empty_function_modifiers(),
             bound_functions: empty_bound_functions(),
             function_output_arities: empty_function_output_arities(),
             known_project_symbols: empty_project_symbols(),
@@ -162,4 +173,9 @@ fn empty_private_function_aliases() -> &'static HashMap<String, HashMap<String, 
     static EMPTY_PRIVATE_FUNCTION_ALIASES: OnceLock<HashMap<String, HashMap<String, String>>> =
         OnceLock::new();
     EMPTY_PRIVATE_FUNCTION_ALIASES.get_or_init(HashMap::new)
+}
+
+fn empty_function_modifiers() -> &'static HashMap<FunctionId, FunctionModifiers> {
+    static EMPTY: OnceLock<HashMap<FunctionId, FunctionModifiers>> = OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
 }
