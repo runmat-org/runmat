@@ -136,7 +136,7 @@ pub(super) async fn execute(
                     Value::Distributed(Box::new(handle))
                 }
             };
-            crate::runtime::workspace::mark_workspace_assigned(output.slot);
+            crate::runtime::workspace::mark_workspace_assigned(output.slot, &vars[output.slot]);
         }
         Ok(())
     }

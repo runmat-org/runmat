@@ -26,7 +26,7 @@ pub fn redirect_exception_to_catch(
             }
             vars[var_idx] = Value::MException(mex);
             refresh_vars(vars);
-            mark_workspace_assigned(var_idx);
+            mark_workspace_assigned(var_idx, &vars[var_idx]);
         }
         *pc = handler.catch_pc;
         ExceptionHandling::Caught

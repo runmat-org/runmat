@@ -646,7 +646,7 @@ async fn eval_workspace_source(
     else {
         return Ok(Value::OutputList(Vec::new()));
     };
-    let target_vars = unsafe { (*frame.vars_ptr).clone() };
+    let target_vars = frame.vars.clone();
     let (outcome, updated_workspace, effects) = interpret_dynamic_workspace_eval(
         bytecode,
         target_vars,

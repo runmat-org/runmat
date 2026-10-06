@@ -142,6 +142,10 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
         Ok(super::super::session::global_names())
     }
 
+    fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
+        BaseWorkspaceProjectionService::ensure_effect_authority(self)
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
         self.with_live_projection_mut(|projection| projection.assign(name, value))
     }

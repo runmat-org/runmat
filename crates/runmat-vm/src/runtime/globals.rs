@@ -1,6 +1,6 @@
 use crate::bytecode::instr::Instr;
 use crate::bytecode::program::Bytecode;
-use crate::runtime::workspace::refresh_workspace_state;
+use crate::runtime::workspace::refresh_workspace_slot;
 use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
 use runmat_value::Value;
 use std::collections::HashMap;
@@ -65,10 +65,9 @@ pub fn declare_global(
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
-                refresh_workspace_state(vars);
             }
             vars[i] = v;
-            refresh_workspace_state(vars);
+            refresh_workspace_slot(i, &vars[i]);
         }
     }
 }
@@ -88,10 +87,9 @@ pub fn declare_global_named(
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
-                refresh_workspace_state(vars);
             }
             vars[i] = v;
-            refresh_workspace_state(vars);
+            refresh_workspace_slot(i, &vars[i]);
         }
         global_aliases.declare_named(i, name);
     }
@@ -103,10 +101,9 @@ pub fn declare_persistent(func_name: &str, indices: Vec<usize>, vars: &mut Vec<V
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
-                refresh_workspace_state(vars);
             }
             vars[i] = v;
-            refresh_workspace_state(vars);
+            refresh_workspace_slot(i, &vars[i]);
         }
     }
 }
@@ -128,10 +125,9 @@ pub fn declare_persistent_named(
         if let Some(v) = val_opt {
             if i >= vars.len() {
                 vars.resize(i + 1, Value::Num(0.0));
-                refresh_workspace_state(vars);
             }
             vars[i] = v;
-            refresh_workspace_state(vars);
+            refresh_workspace_slot(i, &vars[i]);
         }
         persistent_aliases.insert(i, name);
     }
