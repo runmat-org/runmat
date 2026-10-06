@@ -2,6 +2,10 @@ use std::rc::Rc;
 
 use super::{CoveragePlan, ExecutableRevision, ExecutableSource, ExecutableSourceMap};
 
+#[path = "unit/compiled_owners.rs"]
+mod compiled_owners;
+use compiled_owners::compiled_function_owners;
+
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
 pub struct ExecutableUnit {
@@ -133,12 +137,13 @@ impl ExecutableUnit {
             .iter()
             .map(|region| region.contract.clone())
             .collect::<Vec<_>>();
-        // `functions` also inventories inherited declarations needed for
-        // analysis. Only bodies in this assembly own freshly compiled region
-        // metadata; inherited bodies must retain their existing contracts.
-        let compiled_functions = mir.bodies.keys().copied().collect();
+        let current_program = revision
+            .program_revision
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        let compiled_functions = compiled_function_owners(current_program, &mir, &bytecode)?;
         bytecode.install_regions(&region_contracts, &compiled_functions)?;
-        bytecode.install_parallel_regions(&mir, &analysis.parallel)?;
+        bytecode.install_parallel_regions(&mir, &analysis.parallel, &compiled_functions)?;
         let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
         let layout = bytecode
             .layout
@@ -305,6 +310,10 @@ impl ExecutableUnit {
         &self.functions
     }
 }
+
+#[cfg(test)]
+#[path = "unit/tests.rs"]
+mod tests;
 
 pub fn reachability_requires_python(report: &runmat_mir::analysis::ReachabilityReport) -> bool {
     report.nodes.iter().any(|node| {

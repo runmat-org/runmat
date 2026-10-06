@@ -112,13 +112,11 @@ impl Bytecode {
         &mut self,
         mir: &MirAssembly,
         manifest: &ParallelManifest,
+        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
     ) -> Result<(), String> {
         manifest
             .validate()
             .map_err(|error| format!("{}: {}", error.path, error.message))?;
-        // Function metadata includes inherited declarations used to analyze
-        // this assembly. Only MIR bodies own newly compiled parallel records.
-        let compiled_functions = mir.bodies.keys().copied().collect::<BTreeSet<_>>();
         for function in manifest_function_owners(manifest)? {
             if !compiled_functions.contains(&function) {
                 return Err(format!(
@@ -218,7 +216,7 @@ impl Bytecode {
         self.spmd_regions.clear();
         self.distributed_values.clear();
         self.collective_contracts.clear();
-        for function in &compiled_functions {
+        for function in compiled_functions {
             if let Some(bytecode) = self.function_registry.functions.get_mut(function) {
                 clear_parallel_metadata(bytecode);
             }
@@ -699,7 +697,7 @@ mod tests {
         assert!(!assembly.bodies.contains_key(&FunctionId(7)));
 
         bytecode
-            .install_parallel_regions(&assembly, &ParallelManifest::empty())
+            .install_parallel_regions(&assembly, &ParallelManifest::empty(), &BTreeSet::new())
             .unwrap();
 
         assert_eq!(
@@ -732,6 +730,7 @@ mod tests {
                     distributed_values: Vec::new(),
                     collectives: Vec::new(),
                 },
+                &BTreeSet::new(),
             )
             .expect_err("foreign parallel ownership must fail before mutation");
         assert!(error.contains("outside the compiled assembly"));
