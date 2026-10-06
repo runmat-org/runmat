@@ -48,13 +48,33 @@ impl ExecutableUnit {
         preferred_function: Option<&str>,
         interop: runmat_types::InteropManifest,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        self.portable_envelope_with_entrypoint(interop, |unit| {
+            super::portable_entrypoint::resolve(unit, preferred_function)
+        })
+    }
+
+    pub(crate) fn portable_envelope_for_current_definition(
+        &self,
+        current: &std::collections::HashSet<runmat_hir::FunctionId>,
+        primary_source: runmat_types::ProgramSourceId,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        self.portable_envelope_with_entrypoint(runmat_types::InteropManifest::empty(), |unit| {
+            super::portable_entrypoint::resolve_current_definition(unit, current, primary_source)
+        })
+    }
+
+    fn portable_envelope_with_entrypoint(
+        &self,
+        interop: runmat_types::InteropManifest,
+        resolve: impl FnOnce(&Self) -> Result<super::portable_entrypoint::PortableEntrypoint, String>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
         let interop =
             runmat_types::InteropManifest::merge([self.inferred_interop_manifest(), interop])
                 .map_err(|error| format!("{}: {}", error.path, error.message))?;
         let payloads = self.component_payloads()?;
         let revisions = self.component_revisions()?;
         let components = component_descriptors(&payloads, &revisions)?;
-        let entrypoint = super::portable_entrypoint::resolve(self, preferred_function)?;
+        let entrypoint = resolve(self)?;
         let mut capabilities = runmat_types::CapabilitySet(
             self.analysis()
                 .functions

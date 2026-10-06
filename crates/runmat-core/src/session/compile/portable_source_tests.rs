@@ -152,6 +152,129 @@ fn retained_definition_content_not_session_allocation_order_decides_portable_ide
     );
 }
 
+#[test]
+fn definition_only_public_source_exports_exact_multi_function_artifact() {
+    use runmat_value::Value;
+
+    let mut source = crate::RunMatSession::with_options(false, false).expect("source session");
+    let execute = |session: &mut crate::RunMatSession, name: &str, text: &str| {
+        let request = crate::abi::ExecutionRequest::for_source(
+            crate::abi::SourceInput::Text {
+                name: name.into(),
+                text: text.into(),
+            },
+            session.compat_mode(),
+            crate::abi::HostExecutionPolicy::default(),
+            session.workspace_handle(),
+        );
+        futures::executor::block_on(session.execute_request(request))
+            .result
+            .expect("public source execution")
+    };
+    let definition = execute(
+        &mut source,
+        "different_filename.m",
+        "function y = retainedFirst(); y = 3; end\nfunction y = retainedSecond(); y = 7; end",
+    );
+    assert!(definition.diagnostics.is_empty());
+    for name in ["retainedFirst", "retainedSecond"] {
+        assert!(
+            source.function_registry.resolve_name(name).is_some(),
+            "definition-only execution publishes {name}"
+        );
+    }
+    let capture = execute(&mut source, "capture.m", "saved = @retainedSecond;");
+    assert!(capture.diagnostics.is_empty());
+    let saved = source
+        .get_variables()
+        .expect("source workspace")
+        .get("saved")
+        .cloned()
+        .expect("retained handle");
+    let source_runtime = source.runtime_context.clone();
+    let service = std::rc::Rc::clone(
+        source_runtime
+            .service_ports()
+            .require_callable_artifacts("export retained function")
+            .expect("callable artifact service"),
+    );
+    let bundle = futures::executor::block_on(service.export(
+        source_runtime,
+        vec![saved],
+        runmat_runtime::context::RuntimeCallableArtifactLimits::default(),
+    ))
+    .expect("export retained function and its definition unit");
+    assert_eq!(bundle.unit_bytes().len(), 1);
+    let later = execute(&mut source, "later_script.m", "unrelated = 11;");
+    assert!(later.diagnostics.is_empty());
+    let still_saved = source
+        .get_variables()
+        .expect("retained source workspace")
+        .get("saved")
+        .cloned()
+        .expect("retained handle after an unrelated script");
+    let later_runtime = source.runtime_context.clone();
+    let later_bundle = futures::executor::block_on(service.export(
+        later_runtime,
+        vec![still_saved],
+        runmat_runtime::context::RuntimeCallableArtifactLimits::default(),
+    ))
+    .expect("inherited callable retains its original unit");
+    assert_eq!(bundle.unit_bytes(), later_bundle.unit_bytes());
+    let admitted = runmat_vm::admit_executable_unit(&bundle.unit_bytes()[0])
+        .expect("admit the selected function artifact");
+    assert_eq!(
+        admitted.envelope().manifest.identity.entrypoint,
+        "retainedFirst"
+    );
+    assert!(
+        admitted
+            .registry()
+            .functions
+            .values()
+            .any(|body| body.display_name == "retainedSecond"),
+        "one envelope retains the companion definition"
+    );
+
+    let destination = crate::RunMatSession::with_options(false, false).expect("destination");
+    let destination_runtime = destination.runtime_context.clone();
+    let service = std::rc::Rc::clone(
+        destination_runtime
+            .service_ports()
+            .require_callable_artifacts("import retained function")
+            .expect("destination artifact service"),
+    );
+    let prepared = futures::executor::block_on(service.prepare_admit(
+        destination_runtime.clone(),
+        bundle,
+        runmat_runtime::context::RuntimeCallableArtifactLimits::default(),
+    ))
+    .expect("prepare exact retained function import");
+    let committed = prepared.commit().expect("commit retained function import");
+    let Value::BoundFunctionHandle {
+        function,
+        authority,
+        ..
+    } = committed.values()[0].clone()
+    else {
+        panic!("imported function retains a bound handle");
+    };
+    let result = futures::executor::block_on(
+        runmat_runtime::user_functions::try_call_bound_function_in_context(
+            &destination_runtime,
+            runmat_value::BoundFunctionBinding {
+                function,
+                authority,
+            },
+            &[],
+            1,
+        ),
+    )
+    .expect("selected destination invoker")
+    .expect("imported companion executes");
+    assert_eq!(result.as_slice(), &[Value::Num(7.0)]);
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn pending_source_lease_coexists_with_interpreted_and_native_unit_invocations() {

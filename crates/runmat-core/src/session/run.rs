@@ -537,7 +537,7 @@ impl RunMatSession {
             bytecode,
             portable_source_map: _,
             function_registry_after_success,
-            current_function_ids: _,
+            current_function_ids,
             next_semantic_function_id_after_success,
         } = prepared;
         let interactive_unit = {
@@ -580,26 +580,42 @@ impl RunMatSession {
                 )
             })?;
         let active_registry = bytecode.function_registry();
-        let callable_artifact = if active_registry
-            .functions
-            .values()
-            .any(|body| body.binding_origin.is_some())
-        {
+        // Only this compilation's definitions need a new artifact. Inherited
+        // session definitions already retain their own indexed envelopes.
+        let has_current_artifact_origin = current_function_ids.iter().any(|function| {
+            active_registry
+                .get(*function)
+                .is_some_and(|body| body.binding_origin.is_some())
+        });
+        let callable_artifact = if has_current_artifact_origin {
             Some(
-                interactive_unit
-                    .portable_envelope()
-                    .and_then(|envelope| {
-                        envelope
-                            .canonical_bytes()
-                            .map_err(|error| error.to_string())
-                    })
-                    .map_err(|error| {
+                (if interactive_unit.bytecode().instructions.is_empty() {
+                    let primary_source = lowering.assembly.primary_source.ok_or_else(|| {
                         RunError::Runtime(
-                            build_runtime_error(error)
+                            build_runtime_error("definition-only executable has no primary source")
                                 .with_identifier("RunMat:CallableArtifact:ExecutableProduct")
                                 .build(),
                         )
-                    })?,
+                    })?;
+                    interactive_unit.portable_envelope_for_current_definition(
+                        &current_function_ids,
+                        primary_source,
+                    )
+                } else {
+                    interactive_unit.portable_envelope()
+                })
+                .and_then(|envelope| {
+                    envelope
+                        .canonical_bytes()
+                        .map_err(|error| error.to_string())
+                })
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:CallableArtifact:ExecutableProduct")
+                            .build(),
+                    )
+                })?,
             )
         } else {
             None

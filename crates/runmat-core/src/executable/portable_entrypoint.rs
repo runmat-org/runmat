@@ -30,6 +30,66 @@ pub(super) fn resolve(
     script_entrypoint(unit)
 }
 
+/// An interactive definition-only source has no script entrypoint. Select an
+/// exact compiled function for indexing its callable artifact without
+/// changing the ordinary source-name/script executable selection contract.
+pub(super) fn resolve_compiled_function(
+    unit: &ExecutableUnit,
+    function: runmat_hir::FunctionId,
+) -> Result<PortableEntrypoint, String> {
+    let metadata = unit
+        .mir()
+        .functions
+        .get(&function)
+        .ok_or_else(|| "callable artifact function has no MIR metadata".to_string())?;
+    if metadata.kind == runmat_hir::FunctionKind::SyntheticEntrypoint {
+        return Err("synthetic script entrypoint is not a callable definition".into());
+    }
+    function_entrypoint(unit, &metadata.name.0, function)
+}
+
+pub(super) fn resolve_current_definition(
+    unit: &ExecutableUnit,
+    current: &std::collections::HashSet<runmat_hir::FunctionId>,
+    primary_source: runmat_types::ProgramSourceId,
+) -> Result<PortableEntrypoint, String> {
+    use runmat_types::FunctionSourceRole;
+
+    let mut candidates = current
+        .iter()
+        .filter_map(|function| {
+            let metadata = unit.mir().functions.get(function)?;
+            let body = unit.functions().get(*function)?;
+            if metadata.kind == runmat_hir::FunctionKind::SyntheticEntrypoint
+                || body.binding_origin.is_none()
+            {
+                return None;
+            }
+            let role = match metadata.source_role {
+                FunctionSourceRole::Primary => 0,
+                FunctionSourceRole::Local => 1,
+                FunctionSourceRole::Method => 2,
+                FunctionSourceRole::Nested => 3,
+                FunctionSourceRole::Anonymous => 4,
+                FunctionSourceRole::Unknown | FunctionSourceRole::Synthetic => 5,
+            };
+            Some((
+                metadata.source != primary_source,
+                role,
+                metadata.source.0,
+                function.0,
+                *function,
+            ))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_unstable();
+    let function = candidates
+        .first()
+        .map(|candidate| candidate.4)
+        .ok_or_else(|| "definition-only executable has no current callable body".to_string())?;
+    resolve_compiled_function(unit, function)
+}
+
 fn function_entrypoint(
     unit: &ExecutableUnit,
     name: &str,
