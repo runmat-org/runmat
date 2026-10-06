@@ -11,8 +11,9 @@ fn saveas_descriptor_covers_core_forms() {
         .iter()
         .map(|sig| sig.label)
         .collect::<Vec<_>>();
-    assert!(labels.contains(&"ok = saveas(fig, filename)"));
-    assert!(labels.contains(&"ok = saveas(fig, filename, formattype)"));
+    assert!(labels.contains(&"saveas(fig, filename)"));
+    assert!(labels.contains(&"saveas(fig, filename, formattype)"));
+    assert!(labels.contains(&"ok = saveas(___)"));
 }
 
 #[test]
@@ -92,4 +93,41 @@ fn hgsave_rejects_typed_integer_handle_spellings() {
             .expect_err("typed integer handles are outside hgsave's contract");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
+}
+
+#[test]
+fn sink_status_output_is_runmat_only_and_admitted_before_file_effects() {
+    let _guard = setup();
+    let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+    let _one = crate::output_count::push_output_count(Some(1));
+    for call in [SAVEAS, SAVEFIG, HGSAVE] {
+        let error = match call {
+            SAVEAS => block_on(saveas_builtin(vec![
+                Value::Num(current_figure_handle().as_u32() as f64),
+                Value::from("/never-created.fig"),
+            ])),
+            SAVEFIG => block_on(savefig_builtin(vec![Value::from("/never-created.fig")])),
+            HGSAVE => block_on(hgsave_builtin(vec![Value::from("/never-created.fig")])),
+            _ => unreachable!(),
+        }
+        .expect_err("status output requires RunMat compatibility");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::FIGURE_PERSISTENCE_STATUS_OUTPUT_EXTENSION.error_identifier
+        );
+    }
+}
+
+#[test]
+fn canonical_catalog_placement_has_no_legacy_gpu_or_fusion_registration() {
+    let gpu_names = crate::builtins::common::spec::builtin_gpu_specs()
+        .map(|spec| spec.name)
+        .collect::<Vec<_>>();
+    assert!(!gpu_names.contains(&SAVEAS));
+    assert!(!gpu_names.contains(&SAVEFIG));
+
+    let fusion_names = crate::builtins::common::spec::builtin_fusion_specs()
+        .map(|spec| spec.name)
+        .collect::<Vec<_>>();
+    assert!(!fusion_names.contains(&"figure_persistence"));
 }

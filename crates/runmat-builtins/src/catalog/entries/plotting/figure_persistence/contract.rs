@@ -1,5 +1,15 @@
 use crate::*;
 
+pub const FIGURE_PERSISTENCE_STATUS_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "figure-persistence-status-output",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Request a logical completion status from a figure persistence sink",
+        error_identifier: Some("RunMat:compatibility:FigurePersistenceStatusOutputExtension"),
+    };
+pub const FIGURE_PERSISTENCE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [FIGURE_PERSISTENCE_STATUS_OUTPUT_EXTENSION];
+
 pub const FIGURE_PERSISTENCE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor =
     BuiltinErrorDescriptor {
         code: "RM.FIGURE_PERSISTENCE.INVALID_ARGUMENT",

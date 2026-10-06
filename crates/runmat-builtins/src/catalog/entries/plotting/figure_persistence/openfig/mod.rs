@@ -51,7 +51,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Forms", paragraphs: &[
             "The `.fig` extension is appended when absent. `new` imports another copy. `visible`/`invisible` (and `on`/`off`) override restored visibility.",
-            "`reuse` is recognized but not implemented by the current file-to-live-figure registry. The catalog remains incomplete until canonical-path reuse semantics are implemented and qualified.",
+            "`new` imports another live copy. `reuse` returns the session-owned open copy for the same provider and canonical path when it still exists; otherwise it imports a new copy. Visibility options apply to both paths.",
         ]},
         BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
             "Filename, copy mode, and visibility are textual roles. Numeric and resident numeric arguments reject before provider access. The call reads host or virtual-filesystem bytes, creates host plotting state, launches no numeric GPU kernel, and can suspend during I/O/import.",
@@ -66,7 +66,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ], media: &[], evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "openfig runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/figure_persistence/openfig/mod.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Single and multiple figure round-trip tests", location: "builtins::plotting::figure_persistence::tests" }],
-        notes: &["Legacy documentation is retained; reuse and transactional multi-figure restore remain incomplete."],
+        notes: &["The complete archive is decoded and validated before any figure becomes visible. Import failures retire every provisional handle and restore the previous current figure."],
     }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

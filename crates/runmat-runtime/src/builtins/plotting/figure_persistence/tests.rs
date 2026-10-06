@@ -3,9 +3,13 @@ use crate::builtins::plotting::figure::figure_builtin;
 use crate::builtins::plotting::plot::plot_builtin;
 use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
 use crate::builtins::plotting::{
-    clear_figure, figure_handles, reset_hold_state_for_run, reset_plot_state,
+    clear_figure, close_figure, figure_handles, reset_hold_state_for_run, reset_plot_state,
 };
 use futures::executor::block_on;
+use runmat_builtins::{
+    BuiltinIntegerAuditKind, HGLOAD_INTEGER_AUDIT, HGSAVE_INTEGER_AUDIT, OPENFIG_INTEGER_AUDIT,
+    SAVEAS_DESCRIPTOR,
+};
 
 fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
     let guard = lock_plot_registry();
@@ -29,5 +33,12 @@ fn temp_path(stem: &str) -> PathBuf {
 }
 
 mod contract;
+mod archive_validation;
+mod filesystem;
+mod publication;
 mod roundtrip;
+mod save_validation;
+mod selected_binding;
+mod staging_fixture;
 mod validation;
+mod load_validation;

@@ -1,12 +1,13 @@
 use crate::*;
 use runmat_types::*;
 
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
+const STATUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
     ty: BuiltinParamType::LogicalArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Logical completion status returned by the current RunMat implementation.",
+    description: "RunMat-only logical completion status when one output is requested.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
@@ -15,21 +16,26 @@ const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Graphics hierarchy, filename, and optional version.",
 }];
-const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
-        label: "ok = hgsave(filename)",
+        label: "hgsave(filename)",
         inputs: &INPUTS,
-        outputs: &OUTPUT,
+        outputs: &NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = hgsave(h, filename)",
+        label: "hgsave(h, filename)",
         inputs: &INPUTS,
-        outputs: &OUTPUT,
+        outputs: &NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = hgsave(..., version)",
+        label: "hgsave(..., version)",
         inputs: &INPUTS,
-        outputs: &OUTPUT,
+        outputs: &NO_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ok = hgsave(___)",
+        inputs: &INPUTS,
+        outputs: &STATUS_OUTPUT,
     },
 ];
 pub const HGSAVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -45,11 +51,12 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     keywords: &["hgsave", "graphics save", "fig", "plotting"], related: &["hgload", "savefig"],
     sections: &[
         BuiltinDocumentationSection { heading: "Forms", paragraphs: &[
-            "`hgsave(filename)` saves the current figure. `hgsave(h,filename)` accepts scalar double graphics handles and handle arrays. The current implementation deduplicates handles that resolve to one parent figure; this is documented current behavior, not completion of arbitrary top-level graphics-subtree semantics.",
-            "`-v6`, `-v7`, and `-v7.3` are currently accepted while writing RunMat's scene archive. They do not establish MATLAB FIG binary interchange or distinct encodings.",
+            "`hgsave(filename)` saves the current figure. `hgsave(h,filename)` accepts scalar double graphics handles and handle arrays. An array cannot contain an object together with one of its ancestors or descendants. The typed roots retain input order during admission. The current archive still collapses each accepted root to its parent figure and stores the first occurrence of each parent, so arbitrary top-level graphics-subtree persistence remains incomplete.",
+            "`-v6`, `-v7`, `-v7.3`, and `compact` select bounded encoding profiles inside RunMat's versioned scene archive. They do not establish MATLAB FIG binary interchange.",
         ]},
         BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
             "The operation is an I/O sink and fusion boundary. Typed-integer handle spellings and gpuArray numeric arguments reject before file effects. No numeric GPU kernel is launched; scene data uses the same exporter as `savefig`.",
+            "In RunMat compatibility mode, requesting one output returns a host logical completion status. MATLAB compatibility mode rejects that extension before file effects.",
         ]},
     ],
     examples: &[BuiltinExample { id: "hierarchy", title: "Save a graphics hierarchy", program: "plot(1:4);\nhgsave(gcf,\"legacy_plot.fig\");", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: super::PLOT_CORE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(exist('legacy_plot.fig','file') == 2);" } }],
@@ -59,7 +66,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ], media: &[], evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "hgsave runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/figure_persistence/hgsave/mod.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "hgsave and hgload round-trip tests", location: "builtins::plotting::figure_persistence::tests" }],
-        notes: &["Legacy sidecar scope is conserved; arbitrary graphics-subtree, version, output, and staged-publication semantics remain incomplete."],
+        notes: &["Arbitrary graphics-subtree persistence remains incomplete. Local providers use staged replacement; remote publication depends on the provider acquiring an equivalent staged-output capability."],
     }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -89,7 +96,7 @@ pub const HGSAVE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     placement: super::PLACEMENT,
     link: super::LINK,
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &super::FIGURE_PERSISTENCE_EXTENSIONS,
     integer_capabilities: &[],
     integer_audit: Some(&HGSAVE_INTEGER_AUDIT),
     suppress_auto_output: true,

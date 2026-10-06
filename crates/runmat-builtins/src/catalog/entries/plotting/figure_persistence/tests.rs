@@ -71,10 +71,10 @@ fn documentation_conserves_legacy_sidecar_inventory() {
 
 #[test]
 fn descriptors_conserve_documented_form_inventory() {
-    assert_eq!(SAVEAS_DESCRIPTOR.signatures.len(), 2);
-    assert_eq!(SAVEFIG_DESCRIPTOR.signatures.len(), 3);
+    assert_eq!(SAVEAS_DESCRIPTOR.signatures.len(), 3);
+    assert_eq!(SAVEFIG_DESCRIPTOR.signatures.len(), 4);
     assert_eq!(OPENFIG_DESCRIPTOR.signatures.len(), 4);
-    assert_eq!(HGSAVE_DESCRIPTOR.signatures.len(), 3);
+    assert_eq!(HGSAVE_DESCRIPTOR.signatures.len(), 4);
     assert_eq!(HGLOAD_DESCRIPTOR.signatures.len(), 2);
     assert_eq!(
         HGLOAD_DESCRIPTOR.output_mode,

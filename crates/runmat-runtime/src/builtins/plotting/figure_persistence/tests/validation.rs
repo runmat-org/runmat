@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn saveas_rejects_unsupported_or_mismatched_extensions() {
+fn saveas_rejects_unsupported_extensions_and_explicit_format_wins() {
     let _guard = setup();
     let fig = figure_builtin(vec![]).expect("figure");
     let jpg_err = block_on(saveas_builtin(vec![
@@ -11,13 +11,14 @@ fn saveas_rejects_unsupported_or_mismatched_extensions() {
     .expect_err("jpg is unsupported");
     assert!(jpg_err.message().contains("not available yet"));
 
-    let mismatch_err = block_on(saveas_builtin(vec![
+    let request = parse_saveas_args(&[
         Value::Num(fig),
         Value::String("plot.fig".into()),
         Value::String("png".into()),
-    ]))
-    .expect_err("extension/format mismatch");
-    assert!(mismatch_err.message().contains("does not match"));
+    ])
+    .expect("explicit format takes precedence");
+    assert_eq!(request.format, SaveFormat::Png);
+    assert_eq!(request.output_path, PathBuf::from("plot.fig"));
 }
 
 #[cfg(not(feature = "plot-core"))]
@@ -52,82 +53,162 @@ fn saveas_png_uses_shared_renderer_capability_before_file_effects() {
 }
 
 #[test]
-fn openfig_rejects_reuse_mode_until_tracking_exists() {
+fn openfig_reuse_returns_the_session_owned_open_copy() {
     let _guard = setup();
-    let err = block_on(openfig_builtin(vec![
-        Value::String("missing.fig".into()),
+    let figure = figure_builtin(vec![]).expect("source figure");
+    let path = temp_path("reuse");
+    let _ = std::fs::remove_file(&path);
+    block_on(savefig_builtin(vec![
+        Value::Num(figure),
+        Value::String(path.to_string_lossy().into_owned()),
+    ]))
+    .expect("save reusable figure");
+    reset_plot_state();
+
+    let first = block_on(openfig_builtin(vec![Value::String(
+        path.to_string_lossy().into_owned(),
+    )]))
+    .expect("open new copy");
+    let reused = block_on(openfig_builtin(vec![
+        Value::String(path.to_string_lossy().into_owned()),
         Value::String("reuse".into()),
     ]))
-    .expect_err("reuse is not implemented");
-    assert!(err.message().contains("reuse mode"));
+    .expect("reuse open copy");
+    assert_eq!(reused, first);
+    assert_eq!(figure_handles().len(), 1);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
-fn decode_figure_bundle_rejects_hostile_counts_before_allocating() {
-    let mut bytes = FIG_MAGIC.to_vec();
-    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-    let err = decode_figure_bundle(&bytes, OPENFIG).expect_err("hostile count");
-    assert!(err.message().contains("too many figures"));
-}
-
-#[test]
-fn decode_figure_bundle_rejects_oversized_payload_length() {
-    let mut bytes = FIG_MAGIC.to_vec();
-    bytes.extend_from_slice(&1u32.to_le_bytes());
-    bytes.extend_from_slice(
-        &(ReplayLimits::default().max_scene_payload_bytes as u64 + 1).to_le_bytes(),
-    );
-    let err = decode_figure_bundle(&bytes, OPENFIG).expect_err("oversized payload");
-    assert!(err.message().contains("exceeds maximum scene payload size"));
-}
-
-#[test]
-fn hgload_applies_property_overrides_and_returns_old_values() {
+fn openfig_reuse_does_not_cross_runtime_sessions() {
     let _guard = setup();
-    let fig = figure_builtin(vec![
-        Value::String("Name".into()),
-        Value::String("Before".into()),
-    ])
-    .expect("figure");
-    let path = temp_path("hgload");
+    let figure = figure_builtin(vec![]).expect("source figure");
+    let path = temp_path("reuse_sessions");
     let _ = std::fs::remove_file(&path);
-    block_on(hgsave_builtin(vec![
-        Value::Num(fig),
+    block_on(savefig_builtin(vec![
+        Value::Num(figure),
         Value::String(path.to_string_lossy().into_owned()),
     ]))
-    .expect("hgsave");
-    clear_figure(None).expect("clear");
-    let mut overrides = StructValue::new();
-    overrides.insert("Name", Value::String("After".into()));
-    overrides.insert("NotAProperty", Value::Num(1.0));
-    let _outputs = crate::output_count::push_output_count(Some(2));
-    let result = block_on(hgload_builtin(vec![
-        Value::String(path.to_string_lossy().into_owned()),
-        Value::Struct(overrides),
-    ]))
-    .expect("hgload");
-    let Value::OutputList(outputs) = result else {
-        panic!("expected output list");
-    };
-    assert_eq!(outputs.len(), 2);
-    let Value::Cell(cell) = &outputs[1] else {
-        panic!("expected old values cell");
-    };
-    let Value::Struct(old) = &cell.data[0] else {
-        panic!("expected old values struct");
-    };
-    assert_eq!(
-        old.fields.get("Name"),
-        Some(&Value::String("Before".into()))
-    );
-    assert!(!old.fields.contains_key("NotAProperty"));
-    let _ = std::fs::remove_file(&path);
+    .expect("save reusable figure");
+    reset_plot_state();
+    let first_runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let second_runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let filename = Value::String(path.to_string_lossy().into_owned());
+
+    let first = block_on(execute_openfig(
+        Some(first_runtime.clone()),
+        Some(1),
+        vec![filename.clone()],
+    ))
+    .expect("first session opens copy");
+    let first_reused = block_on(execute_openfig(
+        Some(first_runtime),
+        Some(1),
+        vec![filename.clone(), Value::String("reuse".into())],
+    ))
+    .expect("first session reuses copy");
+    let second = block_on(execute_openfig(
+        Some(second_runtime),
+        Some(1),
+        vec![filename, Value::String("reuse".into())],
+    ))
+    .expect("second session opens independent copy");
+    assert_eq!(first_reused, first);
+    assert_ne!(second, first);
+    assert_eq!(figure_handles().len(), 2);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
-fn savefig_rejects_non_fig_extension() {
+fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
     let _guard = setup();
-    let err = block_on(savefig_builtin(vec![Value::String("plot.png".into())]))
-        .expect_err("savefig requires fig");
-    assert!(err.message().contains("expected a .fig filename"));
+    let first = figure_builtin(vec![]).expect("first source figure");
+    let second = figure_builtin(vec![]).expect("second source figure");
+    let path = temp_path("reuse_partial_close");
+    let _ = std::fs::remove_file(&path);
+    block_on(savefig_builtin(vec![
+        Value::Tensor(tensor(&[first, second])),
+        Value::String(path.to_string_lossy().into_owned()),
+    ]))
+    .expect("save figure bundle");
+    reset_plot_state();
+
+    let opened = block_on(openfig_builtin(vec![Value::String(
+        path.to_string_lossy().into_owned(),
+    )]))
+    .expect("open complete bundle");
+    let Value::Tensor(opened) = opened else {
+        panic!("expected a handle row");
+    };
+    let handles = opened.data;
+    assert_eq!(handles.len(), 2);
+    let survivor = FigureHandle::from(handles[1] as u32);
+    close_figure(Some(FigureHandle::from(handles[0] as u32))).expect("close one imported copy");
+
+    let reopened = block_on(openfig_builtin(vec![
+        Value::String(path.to_string_lossy().into_owned()),
+        Value::String("reuse".into()),
+    ]))
+    .expect("partial reuse entry must reimport the whole bundle");
+    let Value::Tensor(reopened) = reopened else {
+        panic!("expected a replacement handle row");
+    };
+    assert_eq!(reopened.data.len(), 2);
+    assert!(reopened
+        .data
+        .iter()
+        .all(|handle| *handle != survivor.as_u32() as f64));
+    assert_eq!(figure_handles().len(), 3);
+    let _ = std::fs::remove_file(path);
+}
+
+#[cfg(feature = "plot-core")]
+#[test]
+fn openfig_validates_the_complete_archive_before_importing_any_figure() {
+    let _guard = setup();
+    let figure = figure_builtin(vec![]).expect("source figure");
+    let valid = block_on(export_figure_snapshot(
+        clone_figure(FigureHandle::from(figure as u32)).expect("source snapshot"),
+        SAVEFIG,
+    ))
+    .expect("valid scene payload");
+    let archive = block_on(encode_figure_bundle(
+        None,
+        &[valid, b"not-a-scene".to_vec()],
+        FigureArchiveProfile::Default,
+        SAVEFIG,
+    ))
+    .expect("mixed archive");
+    let path = temp_path("transactional_import");
+    std::fs::write(&path, archive).expect("write mixed archive");
+    reset_plot_state();
+    let before = figure_handles();
+
+    block_on(openfig_builtin(vec![Value::String(
+        path.to_string_lossy().into_owned(),
+    )]))
+    .expect_err("invalid second scene rejects whole archive");
+    assert_eq!(figure_handles(), before);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn save_rejects_excessive_selection_before_resolving_or_cloning_handles() {
+    let missing = FigureHandle::from(u32::MAX);
+    let selected = vec![missing; MAX_FIGURE_BUNDLE_COUNT + 1];
+    let path = FigureFsPath::capture(Path::new("never-created.fig")).expect("capture path");
+    let error = block_on(save_figures(
+        None,
+        &path,
+        &selected,
+        FigureArchiveProfile::Default,
+        SAVEFIG,
+    ))
+    .expect_err("selection bound");
+    assert!(error.message().contains("too many figures"));
+    assert!(!error.message().contains("does not exist"));
 }

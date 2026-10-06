@@ -1,12 +1,13 @@
 use crate::*;
 use runmat_types::*;
 
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
+const STATUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
     ty: BuiltinParamType::LogicalArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Logical completion status returned by the current RunMat implementation.",
+    description: "RunMat-only logical completion status when one output is requested.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
@@ -15,16 +16,21 @@ const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Figure, filename, and optional format.",
 }];
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
-        label: "ok = saveas(fig, filename)",
+        label: "saveas(fig, filename)",
         inputs: &INPUTS,
-        outputs: &OUTPUT,
+        outputs: &NO_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "ok = saveas(fig, filename, formattype)",
+        label: "saveas(fig, filename, formattype)",
         inputs: &INPUTS,
-        outputs: &OUTPUT,
+        outputs: &NO_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "ok = saveas(___)",
+        inputs: &INPUTS,
+        outputs: &STATUS_OUTPUT,
     },
 ];
 pub const SAVEAS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -52,7 +58,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
             "The call is an I/O and fusion boundary. It gathers handle, filename, and format metadata; integer plot data nested in the scene remains scene data. Direct typed-integer or gpuArray arguments reject before file I/O.",
-            "PNG uses the shared plotting renderer. FIG uses RunMat's scene archive rather than claiming MATLAB FIG binary interchange. Unsupported export formats fail before any partial output is written. The current implementation returns a host logical completion status; output compatibility remains incomplete pending the status-extension cutover.",
+            "PNG uses the shared plotting renderer. FIG uses RunMat's scene archive rather than claiming MATLAB FIG binary interchange. Unsupported export formats fail before any partial output is written. In RunMat compatibility mode, requesting one output returns a host logical completion status. MATLAB compatibility mode rejects that extension before file effects.",
         ]},
     ],
     examples: &[
@@ -100,7 +106,7 @@ pub const SAVEAS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     placement: super::PLACEMENT,
     link: super::LINK,
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &super::FIGURE_PERSISTENCE_EXTENSIONS,
     integer_capabilities: &[],
     integer_audit: Some(&SAVEAS_INTEGER_AUDIT),
     suppress_auto_output: true,

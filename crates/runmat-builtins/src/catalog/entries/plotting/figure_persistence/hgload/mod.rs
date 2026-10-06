@@ -61,7 +61,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
             "The operation reads host or virtual-filesystem bytes and creates host plotting state. Numeric and GPU-resident arguments reject without gather; no numeric GPU kernel is launched. RunMat FIG is a RunMat scene archive rather than a claim of MATLAB FIG binary interchange.",
-            "The current callable still uses the legacy multi-output value adapter. Maturity remains incomplete until the transient `ValueSequence` boundary and transactional restore path are installed and executed.",
+            "The operation constructs a transient zero-, one-, or two-value result before committing imported figures. Invalid output cardinality or property restoration failure leaves no partially imported hierarchy.",
         ]},
     ],
     examples: &[BuiltinExample { id: "override", title: "Load and override a figure name", program: "plot(1:3);\nhgsave(gcf,\"named.fig\");\n[h,old]=hgload(\"named.fig\",struct(\"Name\",\"Loaded\"));", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: super::PLOT_CORE, verification: BuiltinExampleVerification::Figure { minimum_figures: 2, assertions: "assert(ishandle(h)); assert(strcmp(get(h,'Name'),'Loaded'));" } }],
@@ -71,7 +71,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ], media: &[], evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "hgload runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/figure_persistence/hgload/mod.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "hgload property override regression coverage", location: "builtins::plotting::figure_persistence::tests" }],
-        notes: &["Legacy sidecar fields are retained; output sequencing and transactional restore remain incomplete."],
+        notes: &["The internal operation uses `ValueSequence`; the registered callable retains the workspace's legacy value projection until the shared callable ABI migration reaches this builtin."],
     }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
