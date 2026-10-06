@@ -223,9 +223,8 @@ fn function_file_localfunctions_excludes_primary_at_public_call_boundary() {
         )
         .unwrap();
         assert!(called.error.is_none(), "{:?}", called.error);
-        let Some(runmat_value::Value::Cell(handles)) =
-            session.get_variables().unwrap().get("selected_handles")
-        else {
+        let variables = session.get_variables().unwrap();
+        let Some(runmat_value::Value::Cell(handles)) = variables.get("selected_handles") else {
             panic!("localfunctions must return a cell");
         };
         assert_eq!(handles.data.len(), 1);

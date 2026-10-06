@@ -5,7 +5,7 @@ mod checked;
 pub mod session;
 pub mod bindings;
 
-pub(crate) use base::base_workspace_error_to_runtime;
+pub use base::base_workspace_error_to_runtime;
 pub use base::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
     BaseWorkspaceProjectionService, BaseWorkspaceReconciliation, BaseWorkspaceService,
