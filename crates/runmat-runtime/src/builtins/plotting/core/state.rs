@@ -68,8 +68,8 @@ pub use clear_axes::clear_axes_target;
 pub use clear_axes::clear_current_axes;
 use graphics_receiver::issue_graphics_receiver;
 pub use graphics_receiver::{
-    axes_graphics_receiver, figure_graphics_receiver, graphics_receiver_object,
-    graphics_receiver_valid, GraphicsReceiverIssueError,
+    axes_graphics_receiver, axes_graphics_receiver_for_scene, figure_graphics_receiver,
+    graphics_receiver_object, graphics_receiver_valid, GraphicsReceiverIssueError,
 };
 #[path = "state/axes_modes.rs"]
 mod axes_modes;

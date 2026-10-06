@@ -89,6 +89,42 @@ pub fn axes_graphics_receiver(
     Ok(Some(receiver))
 }
 
+/// Resolve an axes object hit-tested against an immutable presented Figure.
+/// The pinned scene lease and Figure receiver must both still be selected by
+/// the same registry entry; a numeric revision or axes index alone cannot
+/// retarget a callback after mutation, close, or handle reuse.
+pub fn axes_graphics_receiver_for_scene(
+    figure_receiver: &GraphicsReceiverRef,
+    scene_lease: &GraphicsSceneLease,
+    index: usize,
+) -> Result<Option<GraphicsReceiverRef>, GraphicsReceiverIssueError> {
+    let GraphicsReceiverKind::Figure { figure } = figure_receiver.kind() else {
+        return Ok(None);
+    };
+    if scene_lease.figure() != figure {
+        return Ok(None);
+    }
+    let mut reg = registry();
+    let Some(state) = reg.figures.get_mut(&FigureHandle::from(figure)) else {
+        return Ok(None);
+    };
+    if !state.scene_lease.shares_lease(scene_lease)
+        || !state
+            .figure_receiver
+            .as_ref()
+            .is_some_and(|owned| owned.shares_lease(figure_receiver))
+        || index >= axes_count(state)
+    {
+        return Ok(None);
+    }
+    if let Some(receiver) = state.axes_receivers.get(&index) {
+        return Ok(Some(receiver.clone()));
+    }
+    let receiver = issue_graphics_receiver(GraphicsReceiverKind::Axes { figure, index })?;
+    state.axes_receivers.insert(index, receiver.clone());
+    Ok(Some(receiver))
+}
+
 /// Construct the canonical handle-object receiver for a selected live lease.
 /// The returned Value owns only the lease; future operations revalidate it.
 pub fn graphics_receiver_object(
@@ -153,6 +189,42 @@ mod tests {
         assert!(graphics_receiver_valid(&replacement));
         reset_plot_state();
         assert!(!graphics_receiver_valid(&replacement));
+    }
+
+    #[test]
+    fn pinned_scene_hit_test_rejects_mutation_and_numeric_handle_reuse() {
+        let _guard = setup();
+        let handle = FigureHandle::from(27);
+        select_figure(handle);
+        let receiver = figure_graphics_receiver(handle)
+            .expect("issue receiver")
+            .expect("selected figure");
+        let snapshot = capture_figure_persistence_snapshot(&[handle], 1, usize::MAX)
+            .expect("pin selected scene");
+        let scene = &snapshot.entries[0].scene_lease;
+        assert!(axes_graphics_receiver_for_scene(&receiver, scene, 0)
+            .expect("issue axes")
+            .is_some());
+
+        set_figure_name(handle, "changed".into()).expect("mutate figure");
+        assert!(axes_graphics_receiver_for_scene(&receiver, scene, 0)
+            .expect("stale scene checked")
+            .is_none());
+        let current =
+            capture_figure_persistence_snapshot(&[handle], 1, usize::MAX).expect("pin successor");
+        assert!(
+            axes_graphics_receiver_for_scene(&receiver, &current.entries[0].scene_lease, 0)
+                .expect("current scene checked")
+                .is_some()
+        );
+
+        close_figure(Some(handle)).expect("close figure");
+        select_figure(handle);
+        assert!(
+            axes_graphics_receiver_for_scene(&receiver, &current.entries[0].scene_lease, 0)
+                .expect("reused numeric handle checked")
+                .is_none()
+        );
     }
 
     #[test]
