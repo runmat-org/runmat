@@ -298,16 +298,26 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "name": name,
             "source": "method",
         }),
-        Value::BoundFunctionHandle { name, function } => json!({
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            source_role,
+            source_file,
+            ..
+        } => json!({
             "kind": "function",
             "name": name,
             "source": "bound",
             "functionId": function,
+            "sourceRole": source_role,
+            "sourceFile": source_file,
         }),
         Value::Closure(closure) => json!({
             "kind": "closure",
             "functionName": closure.function_name,
             "captureCount": closure.captures.len(),
+            "sourceRole": closure.source_role,
+            "sourceFile": closure.source_file,
         }),
         Value::ClassRef(name) => json!({
             "kind": "class-ref",

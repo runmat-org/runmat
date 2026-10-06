@@ -869,6 +869,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 42,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(42),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -886,6 +889,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.decay".into(),
                 function: 43,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(43),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -913,6 +919,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 45,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(45),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -929,6 +938,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 145,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(145),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -947,6 +959,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.decay".into(),
                 function: 46,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(46),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -965,6 +980,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.decay".into(),
                 function: 146,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(146),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -982,6 +1000,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 47,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(47),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -999,6 +1020,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "decay".into(),
                 function: 147,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(147),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -1011,7 +1035,9 @@ mod tests {
             })));
         let raw = Value::Closure(Closure {
             function_name: "decay".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);
@@ -1019,7 +1045,9 @@ mod tests {
             canonical,
             Value::Closure(Closure {
                 function_name: "decay".into(),
-                bound_function: Some(48),
+                binding: Some(runmat_value::BoundFunctionBinding::unavailable(48)),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -1029,7 +1057,9 @@ mod tests {
     fn callback_handle_canonicalizer_keeps_name_only_closure_without_resolver() {
         let raw = Value::Closure(Closure {
             function_name: "decay".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);

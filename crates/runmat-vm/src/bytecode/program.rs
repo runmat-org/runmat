@@ -21,6 +21,11 @@ use super::{
     region::BytecodeRegion,
 };
 
+#[path = "program/definition_dependencies.rs"]
+mod definition_dependencies;
+#[path = "program/source_facts.rs"]
+mod source_facts;
+
 #[derive(Debug, Clone)]
 pub struct CallFrame {
     pub function_name: String,
@@ -51,15 +56,34 @@ impl Default for ExecutionContext {
     }
 }
 
+fn fresh_definition_owner() -> std::sync::Arc<runmat_value::FunctionDefinitionOwner> {
+    std::sync::Arc::new(runmat_value::FunctionDefinitionOwner::default())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionBytecode {
     pub function: FunctionId,
+    /// Process-local identity of this immutable definition. Serialized
+    /// artifacts hydrate a fresh owner; they never import a local lease.
+    #[serde(skip, default = "fresh_definition_owner")]
+    pub definition_owner: std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
     pub display_name: String,
     pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     #[serde(default)]
     pub private_owner_scope: String,
     #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
+    /// Original display file attached by the publishing source-map owner.
+    /// Retired callable values never reconstruct it from a reused SourceId.
+    #[serde(default)]
+    pub source_file: Option<String>,
+    #[serde(default)]
+    pub source_role: runmat_types::FunctionSourceRole,
+    /// Compiler ordinal before Core assigns a session-local function ID.
+    pub portable_function: runmat_types::ProgramFunctionId,
+    /// Immutable origin set by the publishing owner before session-ID remap.
+    /// None is a legacy or unpublished function, never portable binding proof.
+    pub binding_origin: Option<runmat_execution::FunctionBindingOrigin>,
     /// Whole-function semantic requirements, including reachable static
     /// callees, captured by MIR analysis before bytecode serialization.
     #[serde(default)]
@@ -109,10 +133,15 @@ impl Default for FunctionBytecode {
     fn default() -> Self {
         Self {
             function: FunctionId(0),
+            definition_owner: fresh_definition_owner(),
             display_name: String::new(),
             class_method_owner: None,
             private_owner_scope: String::new(),
             source_id: None,
+            source_file: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            portable_function: runmat_types::ProgramFunctionId(0),
+            binding_origin: None,
             capabilities: Default::default(),
             instructions: Vec::new(),
             catch_scopes: Vec::new(),
@@ -164,7 +193,9 @@ impl FunctionBytecode {
         bytecode.spmd_regions = self.spmd_regions.clone();
         bytecode.distributed_values = self.distributed_values.clone();
         bytecode.collective_contracts = self.collective_contracts.clone();
-        bytecode.bound_functions = registry.functions.clone();
+        // The authoritative registry below is already a shared immutable
+        // execution snapshot. Duplicating every body into the legacy fallback
+        // map on each call makes invocation scale with the whole program.
         bytecode.function_registry = registry.clone();
         bytecode
     }
@@ -228,18 +259,79 @@ pub struct FunctionArgumentValidation {
     pub default_value: Option<FunctionArgDefaultValue>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Cheap immutable execution snapshots; authoring mutations copy on write.
+/// The serialized representation remains the prior registry record, not an
+/// Arc or a process-local owner token.
+#[derive(Debug, Clone, Default)]
 pub struct FunctionRegistry {
+    data: std::sync::Arc<FunctionRegistryData>,
+    static_overlay: Option<std::sync::Arc<StaticDefinitionOverlay>>,
+}
+
+/// Exact bodies reachable through a retained bound value. Dynamic name calls
+/// use the published registry, never these old definitions.
+#[derive(Debug, Clone)]
+struct StaticDefinitionOverlay {
+    authority: runmat_value::BoundFunctionAuthority,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FunctionRegistryData {
     pub functions: HashMap<FunctionId, FunctionBytecode>,
     #[serde(default)]
     pub names: HashMap<String, FunctionId>,
     #[serde(default)]
     pub source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>>,
+    /// Session-only old bodies that have live callable leases. They are never
+    /// name-resolvable or serialized into a portable executable artifact.
+    #[serde(skip)]
+    retired: HashMap<FunctionId, Vec<FunctionBytecode>>,
     #[serde(skip)]
     execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
 }
 
+impl std::ops::Deref for FunctionRegistry {
+    type Target = FunctionRegistryData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for FunctionRegistry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.static_overlay = None;
+        let data = std::sync::Arc::make_mut(&mut self.data);
+        data.execution_stacks.take();
+        data
+    }
+}
+
+impl Serialize for FunctionRegistry {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.data.as_ref().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FunctionRegistry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        FunctionRegistryData::deserialize(deserializer).map(|data| Self {
+            data: std::sync::Arc::new(data),
+            static_overlay: None,
+        })
+    }
+}
+
 impl FunctionRegistry {
+    /// Consume the authoring registry at publication boundaries. Executing
+    /// snapshots retain their own immutable Arc; only shared publication
+    /// inputs require a copy of the map here.
+    pub fn into_functions(self) -> HashMap<FunctionId, FunctionBytecode> {
+        std::sync::Arc::try_unwrap(self.data)
+            .unwrap_or_else(|data| (*data).clone())
+            .functions
+    }
+
     pub fn new(functions: HashMap<FunctionId, FunctionBytecode>) -> Self {
         let mut names = HashMap::new();
         let mut source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>> = HashMap::new();
@@ -254,15 +346,192 @@ impl FunctionRegistry {
             }
         }
         Self {
-            functions,
-            names,
-            source_functions,
-            execution_stacks: OnceLock::new(),
+            data: std::sync::Arc::new(FunctionRegistryData {
+                functions,
+                names,
+                source_functions,
+                retired: HashMap::new(),
+                execution_stacks: OnceLock::new(),
+            }),
+            static_overlay: None,
         }
     }
 
     pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
+        if let Some(overlay) = &self.static_overlay {
+            let lease = overlay.authority.local_lease(function.0)?;
+            return self.get_owned(function, lease);
+        }
         self.functions.get(&function)
+    }
+
+    /// The currently published body, regardless of a retained static call
+    /// graph. Name-based and workspace calls must use this lookup.
+    pub fn get_current(&self, function: FunctionId) -> Option<&FunctionBytecode> {
+        self.functions.get(&function)
+    }
+
+    pub fn current_view(&self) -> Self {
+        Self {
+            data: std::sync::Arc::clone(&self.data),
+            static_overlay: None,
+        }
+    }
+
+    /// A compiler-bound static edge in a retained body selects its exact
+    /// leased callee. Ordinary current static calls remain numeric because
+    /// their current published bytecode already selects the current body.
+    pub fn static_binding(
+        &self,
+        function: FunctionId,
+    ) -> Option<runmat_value::BoundFunctionBinding> {
+        let overlay = self.static_overlay.as_ref()?;
+        if overlay.authority.local_lease(function.0).is_none() {
+            // A stale or malformed static edge in an old body must not fall
+            // through to the new numeric body at that same ID.
+            return Some(runmat_value::BoundFunctionBinding::unavailable(function.0));
+        }
+        Some(runmat_value::BoundFunctionBinding {
+            function: function.0,
+            authority: overlay.authority.clone(),
+        })
+    }
+
+    /// A bound value carries the exact definition lease. Numeric IDs only
+    /// narrow the lookup; they never authorize a replacement body.
+    pub fn get_owned(
+        &self,
+        function: FunctionId,
+        lease: &runmat_value::FunctionDefinitionLease,
+    ) -> Option<&FunctionBytecode> {
+        if lease.function() != function.0 {
+            return None;
+        }
+        if let Some(current) = self.functions.get(&function) {
+            if lease.matches(&current.definition_owner) {
+                return Some(current);
+            }
+        }
+        // A reused session number is not authority for the new body. The
+        // bound lease selects its retained immutable body; owned_view also
+        // overlays every leased static callee before that body runs.
+        self.retired
+            .get(&function)?
+            .iter()
+            .find(|body| lease.matches(&body.definition_owner))
+    }
+
+    /// Build the executable view for an authorized local callable. Retired
+    /// dependencies become executable by their original IDs in this view but
+    /// remain absent from name and source lookup.
+    pub fn owned_view(
+        &self,
+        function: FunctionId,
+        authority: &runmat_value::BoundFunctionAuthority,
+    ) -> Option<Self> {
+        if self
+            .static_overlay
+            .as_ref()
+            .is_some_and(|overlay| overlay.authority.shares_local_graph(authority))
+        {
+            self.get_owned(function, authority.local_lease(function.0)?)?;
+            return Some(self.clone());
+        }
+        let runmat_value::BoundFunctionAuthority::Local {
+            definition,
+            dependencies,
+            ..
+        } = authority
+        else {
+            return None;
+        };
+        for lease in std::iter::once(definition).chain(dependencies.iter()) {
+            let id = FunctionId(lease.function());
+            self.get_owned(id, lease)?;
+        }
+        if authority.local_lease(function.0).is_none() {
+            return None;
+        }
+        Some(Self {
+            data: std::sync::Arc::clone(&self.data),
+            static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
+                authority: authority.clone(),
+            })),
+        })
+    }
+
+    /// Retain the complete statically bound call/closure graph behind a
+    /// function handle. An unresolved static edge makes issuance unavailable.
+    pub fn definition_dependency_owners(
+        &self,
+        function: FunctionId,
+    ) -> Option<
+        Vec<(
+            FunctionId,
+            std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
+        )>,
+    > {
+        if let Some(overlay) = &self.static_overlay {
+            let runmat_value::BoundFunctionAuthority::Local {
+                definition,
+                dependencies,
+                ..
+            } = &overlay.authority
+            else {
+                return None;
+            };
+            let selected = overlay.authority.local_lease(function.0)?;
+            let body = self.get_owned(function, selected)?;
+            let mut owners = vec![(function, std::sync::Arc::clone(&body.definition_owner))];
+            for lease in std::iter::once(definition).chain(dependencies.iter()) {
+                if lease.function() == function.0 {
+                    continue;
+                }
+                let id = FunctionId(lease.function());
+                let body = self.get_owned(id, lease)?;
+                owners.push((id, std::sync::Arc::clone(&body.definition_owner)));
+            }
+            return Some(owners);
+        }
+        definition_dependencies::owners(self, function)
+    }
+
+    /// Enumerate only definitions selected by the current execution owner.
+    /// A retained overlay never falls back to later published source members.
+    pub fn execution_source_group(&self, source: runmat_hir::SourceId) -> Vec<&FunctionBytecode> {
+        let mut bodies = Vec::new();
+        if let Some(overlay) = &self.static_overlay {
+            if let runmat_value::BoundFunctionAuthority::Local {
+                definition,
+                dependencies,
+                ..
+            } = &overlay.authority
+            {
+                for lease in std::iter::once(definition).chain(dependencies.iter()) {
+                    if let Some(body) = self.get_owned(FunctionId(lease.function()), lease) {
+                        if body.source_id == Some(source) {
+                            bodies.push(body);
+                        }
+                    }
+                }
+            }
+        } else {
+            for id in self.functions_for_source(source) {
+                if let Some(body) = self.get_current(*id) {
+                    bodies.push(body);
+                }
+            }
+        }
+        bodies.sort_by_key(|body| body.function);
+        bodies.dedup_by_key(|body| body.function);
+        bodies
+    }
+
+    fn prune_retired(&mut self) {
+        self.retired.retain(|_, bodies| {
+            bodies.retain(|body| body.definition_owner.has_handles());
+            !bodies.is_empty()
+        });
     }
 
     pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
@@ -281,17 +550,30 @@ impl FunctionRegistry {
         self.names.get(&scoped_name).copied()
     }
 
-    pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
+    pub fn insert_replacing_name(&mut self, mut function: FunctionBytecode) {
         self.execution_stacks.take();
+        self.prune_retired();
         if let Some(previous) = self.resolve_name(&function.display_name) {
             if previous != function.function {
                 self.remove(previous);
             }
         }
         let function_id = function.function;
+        if let Some(previous) = self.functions.get(&function_id) {
+            if previous.binding_origin.is_some()
+                && previous.binding_origin == function.binding_origin
+            {
+                // Identical immutable publication keeps value leases valid.
+                function.definition_owner = std::sync::Arc::clone(&previous.definition_owner);
+            }
+        }
         // Refreshing an existing identity does not retire its live aliases,
         // but its previous source membership must still be detached.
-        self.detach_definition(function_id);
+        if let Some(old) = self.detach_definition(function_id) {
+            if old.definition_owner.has_handles() {
+                self.retired.entry(function_id).or_default().push(old);
+            }
+        }
         self.names
             .insert(function.display_name.clone(), function_id);
         if let Some(source_id) = function.source_id {
@@ -305,8 +587,15 @@ impl FunctionRegistry {
 
     pub fn remove(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
         self.execution_stacks.take();
+        self.prune_retired();
         let removed = self.detach_definition(function)?;
         self.names.retain(|_, target| *target != function);
+        if removed.definition_owner.has_handles() {
+            self.retired
+                .entry(function)
+                .or_default()
+                .push(removed.clone());
+        }
         Some(removed)
     }
 
@@ -344,6 +633,12 @@ impl FunctionRegistry {
 
     /// Returns the stack required by this function and its reachable callees.
     pub fn execution_stack(&self, function: FunctionId) -> runmat_types::ExecutionStackRequirement {
+        if self.static_overlay.is_some() {
+            // The cached published-body graph does not describe retained old
+            // definitions. Until an overlay-specific analysis is available,
+            // choose the conservative native process-stack route.
+            return runmat_types::ExecutionStackRequirement::Process;
+        }
         *self
             .execution_stacks
             .get_or_init(|| {
@@ -1174,10 +1469,15 @@ mod function_registry_tests {
     fn test_function(id: usize, display_name: &str, private_owner_scope: &str) -> FunctionBytecode {
         FunctionBytecode {
             function: FunctionId(id),
+            definition_owner: fresh_definition_owner(),
             display_name: display_name.into(),
             class_method_owner: None,
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
+            source_file: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            portable_function: runmat_types::ProgramFunctionId(0),
+            binding_origin: None,
             capabilities: Default::default(),
             instructions: vec![Instr::Return],
             catch_scopes: vec![None],
@@ -1202,6 +1502,24 @@ mod function_registry_tests {
             distributed_values: Vec::new(),
             collective_contracts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn session_rebinding_preserves_immutable_function_origin() {
+        let origin = runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("original program"),
+            function: runmat_types::ProgramFunctionId(3),
+        };
+        let mut function = test_function(3, "f", "");
+        function.portable_function = origin.function;
+        function.binding_origin = Some(origin);
+        function.rebind_identity(FunctionId(77), runmat_types::ProgramFunctionId(77));
+        assert_eq!(function.function, FunctionId(77));
+        assert_eq!(
+            function.portable_function,
+            runmat_types::ProgramFunctionId(3)
+        );
+        assert_eq!(function.binding_origin, Some(origin));
     }
 
     #[test]

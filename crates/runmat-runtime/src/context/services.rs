@@ -20,6 +20,7 @@ pub type RuntimeServiceFuture<T> = Pin<Box<dyn Future<Output = T> + 'static>>;
 #[derive(Debug, Clone)]
 pub struct RuntimeCallRequest {
     pub identity: CallableIdentity,
+    pub binding: Option<runmat_value::BoundFunctionBinding>,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
 }
@@ -71,6 +72,18 @@ impl RuntimeCallService for RuntimeCallRouter {
             _ => CallableFallbackPolicy::None,
         };
         Box::pin(async move {
+            if let Some(binding) = request.binding {
+                return crate::call::descriptor::execute_callable_descriptor_in_context(
+                    &runtime,
+                    crate::call::descriptor::CallableDescriptor::bound(
+                        binding,
+                        request.arguments,
+                        request.requested_outputs,
+                        crate::call::descriptor::CallableCallKind::Direct,
+                    ),
+                )
+                .await;
+            }
             crate::call::descriptor::execute_callable_descriptor_in_context(
                 &runtime,
                 crate::call::descriptor::CallableDescriptor::resolved(

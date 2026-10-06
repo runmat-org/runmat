@@ -196,7 +196,9 @@ fn root_traversal_scans_nested_trace_variants() {
         });
         let closure = Value::Closure(Closure {
             function_name: "callback".into(),
-            bound_function: None,
+            binding: None,
+            source_role: Default::default(),
+            source_file: None,
             captures: vec![Value::OutputList(vec![handle, listener])],
         });
 

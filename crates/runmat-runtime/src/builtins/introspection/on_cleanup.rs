@@ -475,14 +475,17 @@ mod tests {
     #[test]
     fn on_cleanup_accepts_function_handles_and_runs_once_on_delete() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
-        let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".into(),
-            function: 7,
-        }))
+        let cleanup = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanup", binding),
+        ))
         .expect("create cleanup");
 
         block_on(run_on_cleanup_value(&cleanup)).expect("first cleanup");
@@ -495,14 +498,17 @@ mod tests {
     #[test]
     fn delete_method_invalidates_cleanup_handle() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
-        let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".into(),
-            function: 7,
-        }))
+        let cleanup = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanup", binding),
+        ))
         .expect("create cleanup");
         let Value::HandleObject(handle) = cleanup.clone() else {
             panic!("expected cleanup handle");
@@ -521,14 +527,17 @@ mod tests {
     #[test]
     fn cancel_prevents_later_cleanup() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
-        let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".into(),
-            function: 7,
-        }))
+        let cleanup = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanup", binding),
+        ))
         .expect("create cleanup");
 
         cancel_on_cleanup_value(&cleanup).expect("cancel cleanup");
@@ -556,14 +565,17 @@ mod tests {
     #[test]
     fn workspace_cleanup_walks_cells() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
-        let cleanup = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanup".into(),
-            function: 7,
-        }))
+        let cleanup = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanup", binding),
+        ))
         .expect("create cleanup");
         let cell = Value::Cell(CellArray::new(vec![cleanup], 1, 1).expect("cell"));
 
@@ -576,24 +588,31 @@ mod tests {
     #[test]
     fn workspace_cleanup_walks_structs_objects_and_output_lists() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let a = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let b = crate::user_functions::test_support::exact_local_binding(&runtime, 8);
+        let c = crate::user_functions::test_support::exact_local_binding(&runtime, 9);
+        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+            a.clone(),
+            b.clone(),
+            c.clone(),
+        ]);
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
         ));
-        let cleanup_a = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanupA".into(),
-            function: 7,
-        }))
+        let cleanup_a = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanupA", a),
+        ))
         .expect("create cleanup a");
-        let cleanup_b = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanupB".into(),
-            function: 8,
-        }))
+        let cleanup_b = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanupB", b),
+        ))
         .expect("create cleanup b");
-        let cleanup_c = block_on(on_cleanup_builtin(Value::BoundFunctionHandle {
-            name: "cleanupC".into(),
-            function: 9,
-        }))
+        let cleanup_c = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanupC", c),
+        ))
         .expect("create cleanup c");
 
         let mut struct_value = runmat_value::StructValue::new();

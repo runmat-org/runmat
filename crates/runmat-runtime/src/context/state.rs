@@ -126,6 +126,7 @@ pub(crate) struct CallState {
     pub callsites: Vec<CallsiteInfo>,
     pub function_input_callsites: Vec<CallsiteInfo>,
     pub semantic_invoker: Option<std::rc::Rc<crate::user_functions::FunctionInvoker>>,
+    pub bound_invoker: Option<std::rc::Rc<crate::user_functions::BoundFunctionInvoker>>,
     pub external_invoker: Option<std::rc::Rc<crate::user_functions::ExternalFunctionInvoker>>,
     pub lexical_invoker: Option<std::rc::Rc<crate::user_functions::LexicalFunctionInvoker>>,
     pub semantic_resolver: Option<std::sync::Arc<crate::user_functions::FunctionResolver>>,
@@ -133,6 +134,8 @@ pub(crate) struct CallState {
     pub dynamic_clearer: Option<std::rc::Rc<crate::user_functions::DynamicFunctionClearer>>,
     pub dynamic_refresher: Option<std::rc::Rc<crate::user_functions::DynamicFunctionRefresher>>,
     pub source_functions: Option<std::sync::Arc<Vec<crate::user_functions::SourceFunctionInfo>>>,
+    pub execution_source_resolver:
+        Option<std::rc::Rc<crate::user_functions::ExecutionSourceResolver>>,
     pub active_functions: Vec<usize>,
     pub class_access: Option<runmat_types::ClassIdentity>,
 }
@@ -156,6 +159,10 @@ impl std::fmt::Debug for CallState {
             .field(
                 "source_functions",
                 &self.source_functions.as_ref().map(|catalog| catalog.len()),
+            )
+            .field(
+                "execution_source_resolver",
+                &self.execution_source_resolver.is_some(),
             )
             .field("active_functions", &self.active_functions)
             .field("class_access", &self.class_access)

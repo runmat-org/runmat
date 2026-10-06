@@ -363,6 +363,7 @@ pub(crate) async fn dispatch_object_external_member(
         runmat_types::CallableFallbackPolicy::ExternalBoundary,
         args,
         requested_outputs,
+        None,
     )
     .await
 }
@@ -403,6 +404,7 @@ pub(crate) async fn dispatch_callable_with_policy(
         fallback_policy,
         args,
         requested_outputs,
+        None,
     )
     .await
 }
@@ -413,13 +415,15 @@ async fn dispatch_callable_with_policy_in_runtime(
     fallback_policy: runmat_types::CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> BuiltinResult<Value> {
     let request = crate::user_functions::CallableRequest::resolved(
         identity.clone(),
         fallback_policy,
         args.clone(),
         requested_outputs,
-    );
+    )
+    .with_function_input_callsite(input_callsite);
     if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
         return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
     }
@@ -442,7 +446,14 @@ pub async fn call_feval_async_with_outputs(
     runmat_value::validate_output_count(requested_outputs)
         .map_err(crate::sequence::sequence_error_to_runtime)?;
     let _guard = crate::output_count::push_output_count(Some(requested_outputs));
-    feval_builtin_in_runtime(None, Some(requested_outputs), func_value, args.to_vec()).await
+    feval_builtin_in_runtime(
+        None,
+        Some(requested_outputs),
+        func_value,
+        args.to_vec(),
+        None,
+    )
+    .await
 }
 
 pub async fn call_feval_async_with_outputs_in_context(
@@ -450,6 +461,23 @@ pub async fn call_feval_async_with_outputs_in_context(
     func_value: Value,
     args: &[Value],
     requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    call_feval_async_with_outputs_and_callsite_in_context(
+        runtime,
+        func_value,
+        args,
+        requested_outputs,
+        None,
+    )
+    .await
+}
+
+pub async fn call_feval_async_with_outputs_and_callsite_in_context(
+    runtime: &crate::context::RuntimeContext,
+    func_value: Value,
+    args: &[Value],
+    requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<Value, RuntimeError> {
     runmat_value::validate_output_count(requested_outputs)
         .map_err(crate::sequence::sequence_error_to_runtime)?;
@@ -461,6 +489,7 @@ pub async fn call_feval_async_with_outputs_in_context(
                 Some(requested_outputs),
                 func_value,
                 args.to_vec(),
+                input_callsite,
             )
             .await
         })
@@ -643,7 +672,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
     fn resolve_text_handle(text: &str) -> Option<Value> {
         let name = normalize_handle_name(text)?;
         let function = crate::user_functions::resolve_semantic_function_by_name(&name)?;
-        Some(Value::BoundFunctionHandle { name, function })
+        Some(crate::user_functions::bound_function_handle(name, function))
     }
 
     match callback {
@@ -674,7 +703,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                Value::BoundFunctionHandle { name, function }
+                crate::user_functions::bound_function_handle(name, function)
             } else {
                 Value::FunctionHandle(name)
             }
@@ -684,7 +713,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
                 if let Some(function) =
                     crate::user_functions::resolve_semantic_function_by_name(&name)
                 {
-                    return Value::BoundFunctionHandle { name, function };
+                    return crate::user_functions::bound_function_handle(name, function);
                 }
             }
             Value::ExternalFunctionHandle(name)
@@ -692,17 +721,23 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::MethodFunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                Value::BoundFunctionHandle { name, function }
+                crate::user_functions::bound_function_handle(name, function)
             } else {
                 Value::MethodFunctionHandle(name)
             }
         }
         Value::Closure(mut closure) => {
-            if closure.bound_function.is_none() {
+            if closure.binding.is_none() {
                 if let Some(function) =
                     crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
                 {
-                    closure.bound_function = Some(function);
+                    closure.binding =
+                        Some(crate::user_functions::bound_function_binding_for(function));
+                    closure.source_file = crate::user_functions::source_file_for(function);
+                    if closure.source_role == runmat_types::FunctionSourceRole::Unknown {
+                        closure.source_role = crate::user_functions::source_function_for(function)
+                            .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role);
+                    }
                 }
             }
             Value::Closure(closure)
@@ -1459,6 +1494,7 @@ async fn feval_builtin_in_runtime(
     invocation_outputs: Option<usize>,
     f: Value,
     rest: Vec<Value>,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> crate::BuiltinResult<Value> {
     fn normalize_feval_handle_name(name: &str) -> Option<String> {
         let trimmed = name.trim();
@@ -1471,6 +1507,7 @@ async fn feval_builtin_in_runtime(
         fallback_policy: runmat_types::CallableFallbackPolicy,
         args: &[Value],
         requested_outputs: usize,
+        input_callsite: Option<crate::callsite::CallsiteInfo>,
     ) -> crate::BuiltinResult<Value> {
         dispatch_callable_with_policy_in_runtime(
             runtime,
@@ -1478,6 +1515,7 @@ async fn feval_builtin_in_runtime(
             fallback_policy,
             args.to_vec(),
             requested_outputs,
+            input_callsite,
         )
         .await
     }
@@ -1487,11 +1525,20 @@ async fn feval_builtin_in_runtime(
         name: &str,
         args: &[Value],
         requested_outputs: usize,
+        input_callsite: Option<crate::callsite::CallsiteInfo>,
     ) -> crate::BuiltinResult<Value> {
         let normalized = normalize_feval_handle_name(name)
             .ok_or_else(|| runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID))?;
         let (identity, fallback_policy) = callable_identity_for_handle_name(&normalized);
-        call_by_identity(runtime, identity, fallback_policy, args, requested_outputs).await
+        call_by_identity(
+            runtime,
+            identity,
+            fallback_policy,
+            args,
+            requested_outputs,
+            input_callsite,
+        )
+        .await
     }
 
     crate::call::admission::admit_feval_target(&f)?;
@@ -1505,7 +1552,7 @@ async fn feval_builtin_in_runtime(
             let name = crate::call::admission::text_target_name(&s).ok_or_else(|| {
                 runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
             })?;
-            call_by_name(runtime, name, &rest, requested_outputs).await
+            call_by_name(runtime, name, &rest, requested_outputs, input_callsite).await
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
@@ -1513,7 +1560,7 @@ async fn feval_builtin_in_runtime(
                 let name = crate::call::admission::text_target_name(&s).ok_or_else(|| {
                     runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
                 })?;
-                call_by_name(runtime, name, &rest, requested_outputs).await
+                call_by_name(runtime, name, &rest, requested_outputs, input_callsite).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1528,7 +1575,7 @@ async fn feval_builtin_in_runtime(
                 let name = crate::call::admission::text_target_name(s).ok_or_else(|| {
                     runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
                 })?;
-                call_by_name(runtime, name, &rest, requested_outputs).await
+                call_by_name(runtime, name, &rest, requested_outputs, input_callsite).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1537,9 +1584,11 @@ async fn feval_builtin_in_runtime(
                 ))
             }
         }
-        Value::FunctionHandle(name) => call_by_name(runtime, &name, &rest, requested_outputs).await,
+        Value::FunctionHandle(name) => {
+            call_by_name(runtime, &name, &rest, requested_outputs, input_callsite).await
+        }
         Value::ExternalFunctionHandle(name) => {
-            call_by_name(runtime, &name, &rest, requested_outputs).await
+            call_by_name(runtime, &name, &rest, requested_outputs, input_callsite).await
         }
         Value::MethodFunctionHandle(name) => {
             let method_name = name.trim().to_string();
@@ -1555,15 +1604,25 @@ async fn feval_builtin_in_runtime(
                 runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
                 rest,
                 requested_outputs,
+                input_callsite,
             )
             .await
         }
-        Value::BoundFunctionHandle { name, function } => {
-            let request = crate::user_functions::CallableRequest::semantic(
-                function,
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            authority,
+            ..
+        } => {
+            let request = crate::user_functions::CallableRequest::bound(
+                runmat_value::BoundFunctionBinding {
+                    function,
+                    authority,
+                },
                 rest.clone(),
                 requested_outputs,
-            );
+            )
+            .with_function_input_callsite(input_callsite);
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
@@ -1575,14 +1634,16 @@ async fn feval_builtin_in_runtime(
             ))
         }
         Value::Closure(c) => {
-            if let Some(function) = c.bound_function {
+            if let Some(binding) = c.binding {
+                let function = binding.function;
                 let mut args = c.captures.clone();
                 args.extend(rest);
-                let request = crate::user_functions::CallableRequest::semantic(
-                    function,
+                let request = crate::user_functions::CallableRequest::bound(
+                    binding,
                     args.clone(),
                     requested_outputs,
-                );
+                )
+                .with_function_input_callsite(input_callsite.clone());
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
                 {
@@ -1631,14 +1692,22 @@ async fn feval_builtin_in_runtime(
                     function,
                     args.clone(),
                     requested_outputs,
-                );
+                )
+                .with_function_input_callsite(input_callsite.clone());
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
                 {
                     return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
                 }
             }
-            call_by_name(runtime, &c.function_name, &args, requested_outputs).await
+            call_by_name(
+                runtime,
+                &c.function_name,
+                &args,
+                requested_outputs,
+                input_callsite,
+            )
+            .await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let path = crate::object::indexing::ObjectSubscriptPath::single(
@@ -1799,6 +1868,10 @@ mod tests {
 
     #[test]
     fn feval_closure_uses_semantic_function_identity() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 42);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 42);
@@ -1809,7 +1882,9 @@ mod tests {
         )));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".into(),
-            bound_function: Some(42),
+            binding: Some(binding),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: Vec::new(),
         });
 
@@ -1820,6 +1895,10 @@ mod tests {
 
     #[test]
     fn feval_semantic_function_handle_uses_semantic_identity() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 43);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 43);
@@ -1828,10 +1907,8 @@ mod tests {
                 Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
             },
         )));
-        let handle = Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 43,
-        };
+        let handle =
+            crate::user_functions::test_support::exact_local_value("function_target", binding);
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
             .expect("semantic function handle feval succeeds");
@@ -1844,6 +1921,9 @@ mod tests {
         let handle = Value::BoundFunctionHandle {
             name: "function_target".into(),
             function: 9043,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(9043),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
 
         let err = block_on(feval_builtin(handle, vec![Value::Num(3.0)])).expect_err(
@@ -1931,7 +2011,9 @@ mod tests {
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "resolved_target".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(9.0)],
         });
 
@@ -1950,7 +2032,9 @@ mod tests {
 
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "sin".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: Vec::new(),
         });
 
@@ -2143,6 +2227,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "resolved_target".into(),
                 function: 145,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(145),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -2261,6 +2348,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "resolved_target".into(),
                 function: 445,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(445),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -2328,6 +2418,9 @@ mod tests {
             Value::BoundFunctionHandle {
                 name: "pkg.resolved_target".into(),
                 function: 446,
+                authority: runmat_value::BoundFunctionAuthority::unavailable(446),
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             }
         );
     }
@@ -2559,6 +2652,9 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "local_fn".into(),
                     function: 44,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(44),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 }
             )
             .expect("func2str"),
@@ -2568,7 +2664,9 @@ mod tests {
             crate::builtins::introspection::function_handle_text::dispatch_func2str(
                 Value::Closure(runmat_value::Closure {
                     function_name: "captured_fn".into(),
-                    bound_function: None,
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                     captures: Vec::new(),
                 })
             )
@@ -2956,7 +3054,9 @@ mod tests {
         ));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![
                 base.clone(),
                 Value::String("deal".to_string()),
@@ -2988,7 +3088,9 @@ mod tests {
         ));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![
                 base.clone(),
                 Value::String("  deal  ".to_string()),
@@ -3016,7 +3118,9 @@ mod tests {
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![
                 Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                 Value::Num(1.0),
@@ -3420,7 +3524,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 61
             ));
         });
@@ -3447,7 +3551,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "pkg.event_callback" && *function == 62
             ));
         });
@@ -3474,7 +3578,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 63
             ));
         });
@@ -3501,7 +3605,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 64
             ));
         });
@@ -3531,7 +3635,7 @@ mod tests {
             let callback = runmat_gc::gc_clone_value(&listener.callback).expect("callback value");
             assert!(matches!(
                 &callback,
-                Value::BoundFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function, .. }
                     if name == "event_callback" && *function == 66
             ));
         });
@@ -3548,7 +3652,9 @@ mod tests {
                 .expect("handle target");
             let callback = Value::Closure(runmat_value::Closure {
                 function_name: "event_callback".into(),
-                bound_function: None,
+                binding: None,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: vec![Value::Num(9.0)],
             });
             let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
@@ -3561,8 +3667,10 @@ mod tests {
                 &callback,
                 Value::Closure(runmat_value::Closure {
                     function_name,
-                    bound_function: Some(65),
+                    binding: Some(runmat_value::BoundFunctionBinding::unavailable(65)),
+                    source_role: _,
                     captures,
+                    ..
                 }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
             ));
         });
@@ -3571,6 +3679,11 @@ mod tests {
     #[test]
     fn notify_semantic_function_handle_uses_semantic_identity() {
         listener_gc_test(|| {
+            let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+            let _entry = runtime.enter();
+            let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 44);
+            let _bound =
+                crate::user_functions::test_support::install_bound_forwarder(binding.clone());
             let calls = Arc::new(AtomicUsize::new(0));
             let seen_calls = Arc::clone(&calls);
             let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -3585,10 +3698,8 @@ mod tests {
             )));
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
-            let callback = Value::BoundFunctionHandle {
-                name: "event_callback".into(),
-                function: 44,
-            };
+            let callback =
+                crate::user_functions::test_support::exact_local_value("event_callback", binding);
 
             block_on(addlistener_builtin(
                 target.clone(),
@@ -3647,6 +3758,10 @@ mod tests {
 
     #[test]
     fn feval_semantic_handle_honors_zero_requested_outputs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 46);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 46);
@@ -3656,10 +3771,8 @@ mod tests {
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(0));
-        let handle = Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 46,
-        };
+        let handle =
+            crate::user_functions::test_support::exact_local_value("function_target", binding);
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(5.0)]))
             .expect("semantic function handle feval succeeds");
@@ -3668,6 +3781,10 @@ mod tests {
 
     #[test]
     fn feval_semantic_handle_honors_multi_requested_outputs() {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 47);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 47);
@@ -3683,10 +3800,8 @@ mod tests {
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(2));
-        let handle = Value::BoundFunctionHandle {
-            name: "function_target".into(),
-            function: 47,
-        };
+        let handle =
+            crate::user_functions::test_support::exact_local_value("function_target", binding);
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(6.0)]))
             .expect("semantic function handle feval succeeds");
@@ -3701,7 +3816,9 @@ mod tests {
         let _guard = crate::user_functions::clear_semantic_function_invoker();
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "function_target".into(),
-            bound_function: Some(9044),
+            binding: Some(runmat_value::BoundFunctionBinding::unavailable(9044)),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(1.0)],
         });
 

@@ -812,13 +812,22 @@ impl RunMatSession {
         self.active_source_fullpath_name = previous_source_fullpath_name;
         self.pending_companion_source_discovery = previous_pending;
 
-        let prepared = result?;
+        let mut prepared = result?;
         let source_map = self.executable_source_map(&source);
         let revision = crate::ExecutableRevision::derive(
             &source,
             program_revision,
             crate::program_environment(self.compat_mode),
         );
+        prepared
+            .attach_function_origins(&revision.program_revision, &source_map)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
         crate::ExecutableUnit::new(
             source,
             revision,
@@ -1076,6 +1085,7 @@ impl RunMatSession {
             analysis,
             bytecode,
             function_registry_after_success,
+            current_function_ids: function_id_remap.values().copied().collect(),
             next_semantic_function_id_after_success,
         })
     }
@@ -1189,7 +1199,7 @@ impl RunMatSession {
             session_registry.remove_source(source_id);
         }
 
-        for (old_id, function) in current_registry.functions {
+        for (old_id, function) in current_registry.into_functions() {
             let Some(new_id) = remap.get(&old_id).copied() else {
                 continue;
             };
@@ -1358,7 +1368,12 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
     for instr in &mut bytecode.instructions {
         if let runmat_vm::Instr::CreateFunctionHandle(name) = instr {
             if let Some(function) = registry.resolve_name(name) {
-                *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
+                let role = registry
+                    .get(function)
+                    .map_or(runmat_types::FunctionSourceRole::Unknown, |definition| {
+                        definition.source_role
+                    });
+                *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone(), role);
             }
         }
     }
@@ -1451,8 +1466,13 @@ fn bind_semantic_callback_literals(
     }
 
     for (producer, function, display_name) in replacements {
+        let role = registry
+            .get(function)
+            .map_or(runmat_types::FunctionSourceRole::Unknown, |definition| {
+                definition.source_role
+            });
         bytecode.instructions[producer] =
-            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name);
+            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name, role);
     }
 }
 

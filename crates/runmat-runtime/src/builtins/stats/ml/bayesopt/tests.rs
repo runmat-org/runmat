@@ -262,6 +262,9 @@ fn table_string_arg(args: &[Value], name: &str) -> String {
 
 #[test]
 fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
+    let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+        crate::user_functions::test_support::exact_portable_binding(1, "bayesopt fixture"),
+    ]);
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, args, requested_outputs| {
             assert_eq!(requested_outputs, 1);
@@ -278,6 +281,13 @@ fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 1,
+            authority: crate::user_functions::test_support::exact_portable_binding(
+                1,
+                "bayesopt fixture",
+            )
+            .authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable_cell(vec![
             variable("x", vec![-1.0, 1.0], None),
@@ -318,6 +328,10 @@ fn bayesopt_rejects_parallel_option_explicitly() {
 
 #[test]
 fn bayesopt_honors_x_constraint_function() {
+    let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+        crate::user_functions::test_support::exact_portable_binding(1, "bayesopt fixture"),
+        crate::user_functions::test_support::exact_portable_binding(2, "bayesopt fixture"),
+    ]);
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, _requested_outputs| {
             let x = table_scalar_arg(args, "x");
@@ -334,6 +348,13 @@ fn bayesopt_honors_x_constraint_function() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 1,
+            authority: crate::user_functions::test_support::exact_portable_binding(
+                1,
+                "bayesopt fixture",
+            )
+            .authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable("x", vec![-1.0, 1.0], None),
         vec![
@@ -343,6 +364,13 @@ fn bayesopt_honors_x_constraint_function() {
             Value::BoundFunctionHandle {
                 name: "constraint".into(),
                 function: 2,
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    2,
+                    "bayesopt fixture",
+                )
+                .authority,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
         ],
     ))
@@ -358,6 +386,9 @@ fn bayesopt_honors_x_constraint_function() {
 
 #[test]
 fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
+    let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+        crate::user_functions::test_support::exact_portable_binding(3, "bayesopt fixture"),
+    ]);
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, args, _requested_outputs| {
             let n = table_scalar_arg(args, "n");
@@ -375,6 +406,13 @@ fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 3,
+            authority: crate::user_functions::test_support::exact_portable_binding(
+                3,
+                "bayesopt fixture",
+            )
+            .authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable_cell(vec![
             variable("n", vec![1.0, 3.0], Some("integer")),
@@ -403,6 +441,10 @@ fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
 
 #[test]
 fn bayesopt_reads_typed_integer_storage_exactly() {
+    let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+        crate::user_functions::test_support::exact_portable_binding(10, "bayesopt fixture"),
+        crate::user_functions::test_support::exact_portable_binding(11, "bayesopt fixture"),
+    ]);
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, _requested_outputs| {
             let x = table_scalar_arg(args, "x");
@@ -424,6 +466,13 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
         Value::BoundFunctionHandle {
             name: "objective".into(),
             function: 10,
+            authority: crate::user_functions::test_support::exact_portable_binding(
+                10,
+                "bayesopt fixture",
+            )
+            .authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         },
         variable_with_range(
             "x",
@@ -443,6 +492,13 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
             Value::BoundFunctionHandle {
                 name: "constraint".into(),
                 function: 11,
+                authority: crate::user_functions::test_support::exact_portable_binding(
+                    11,
+                    "bayesopt fixture",
+                )
+                .authority,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
             },
         ],
     ))

@@ -416,9 +416,30 @@ mod tests {
 
     #[test]
     fn callable_captures_round_trip_and_failures_name_the_local_path() {
+        let origin = |function: usize| runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("portable callable fixture"),
+            function: runmat_types::ProgramFunctionId(function as u32),
+        };
+        let _catalog =
+            crate::user_functions::install_source_function_catalog(Some(std::sync::Arc::new(
+                [7usize, 9, 11]
+                    .into_iter()
+                    .map(|function| crate::user_functions::SourceFunctionInfo {
+                        source_id: runmat_types::SourceId(function),
+                        name: format!("function_{function}"),
+                        function,
+                        role: runmat_types::FunctionSourceRole::Unknown,
+                        binding_origin: Some(origin(function)),
+                        source_file: None,
+                        definition_owners: None,
+                    })
+                    .collect(),
+            )));
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
-            bound_function: Some(7),
+            binding: Some(runmat_value::BoundFunctionBinding::portable(7, origin(7))),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::Num(2.0)],
         });
         assert_eq!(
@@ -434,6 +455,58 @@ mod tests {
         };
         callable.qualified_name = "other_worker".into();
         assert!(decode_inline_value(&tampered).is_err());
+
+        let empty_anonymous = Value::Closure(runmat_value::Closure {
+            function_name: "display_is_not_authority".into(),
+            binding: Some(runmat_value::BoundFunctionBinding::portable(9, origin(9))),
+            source_role: runmat_types::FunctionSourceRole::Anonymous,
+            source_file: Some("/origin/worker.m".into()),
+            captures: Vec::new(),
+        });
+        assert_eq!(
+            decode_inline_value(&encode_inline_value(&empty_anonymous).unwrap()).unwrap(),
+            empty_anonymous,
+            "zero-capture closures must not become plain function handles"
+        );
+        let mut tampered_role = encode_inline_value(&empty_anonymous).unwrap();
+        let ValuePayload::Inline(ref mut inline) = tampered_role else {
+            unreachable!("runtime encoding is inline");
+        };
+        let InlineValue::Callable(callable) = inline.as_mut() else {
+            unreachable!("closure encoding is callable");
+        };
+        callable.source_role = runmat_types::FunctionSourceRole::Local;
+        assert!(decode_inline_value(&tampered_role).is_err());
+        let mut tampered_file = encode_inline_value(&empty_anonymous).unwrap();
+        let ValuePayload::Inline(ref mut inline) = tampered_file else {
+            unreachable!("runtime encoding is inline");
+        };
+        let InlineValue::Callable(callable) = inline.as_mut() else {
+            unreachable!("closure encoding is callable");
+        };
+        callable.source_file = Some("/destination/unrelated.m".into());
+        assert!(decode_inline_value(&tampered_file).is_err());
+        let mut tampered_form = encode_inline_value(&empty_anonymous).unwrap();
+        let ValuePayload::Inline(ref mut inline) = tampered_form else {
+            unreachable!("runtime encoding is inline");
+        };
+        let InlineValue::Callable(callable) = inline.as_mut() else {
+            unreachable!("closure encoding is callable");
+        };
+        callable.form = runmat_execution::value::CallableForm::Handle;
+        assert!(decode_inline_value(&tampered_form).is_err());
+        let local_handle = Value::BoundFunctionHandle {
+            name: "local_display".into(),
+            function: 11,
+            authority: runmat_value::BoundFunctionAuthority::portable(origin(11)),
+            source_role: runmat_types::FunctionSourceRole::Local,
+            source_file: Some("/origin/local.m".into()),
+        };
+        assert_eq!(
+            decode_inline_value(&encode_inline_value(&local_handle).unwrap()).unwrap(),
+            local_handle,
+            "bound-handle role must not be re-derived from the destination catalog"
+        );
 
         let mut structure = StructValue::new();
         let service = super::super::RuntimeExecutionService::new();

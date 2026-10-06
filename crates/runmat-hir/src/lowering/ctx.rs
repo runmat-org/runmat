@@ -264,7 +264,11 @@ impl LoweringCtx {
             id: ctx.module,
             name: QualifiedName(vec![SymbolName("main".into())]),
             source_id: SourceId(0),
-            source_unit: SourceUnitKind::ScriptFile,
+            source_unit: if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
+                SourceUnitKind::FunctionFile
+            } else {
+                SourceUnitKind::ScriptFile
+            },
             imports: Vec::new(),
             top_level_functions: Vec::new(),
             classes: Vec::new(),

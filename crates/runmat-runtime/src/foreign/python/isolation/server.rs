@@ -274,6 +274,12 @@ impl HostCallbackRouter {
         &self,
         request: RuntimeCallRequest,
     ) -> Result<runmat_value::ValueSequence, PythonWireError> {
+        if request.binding.is_some() {
+            return Err(wire_error(
+                "RunMat:Python:CallbackProtocol",
+                "isolated Python host cannot invoke a local bound callable by driver callback ID",
+            ));
+        }
         let callback_id = callback_id(&request.identity).ok_or_else(|| {
             wire_error(
                 "RunMat:Python:CallbackProtocol",

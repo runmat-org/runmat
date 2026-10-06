@@ -62,9 +62,7 @@ pub(crate) fn resolved_builtin_catalog_identity(
 fn callable_name(callable: &Value) -> Option<String> {
     let text = match callable {
         Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => name.clone(),
-        Value::Closure(closure) if closure.bound_function.is_none() => {
-            closure.function_name.clone()
-        }
+        Value::Closure(closure) if closure.binding.is_none() => closure.function_name.clone(),
         Value::String(text) => text.clone(),
         Value::StringArray(array) if array.data.len() == 1 => array.data.first()?.clone(),
         Value::CharArray(array) if array.rows == 1 => array.data.iter().collect(),

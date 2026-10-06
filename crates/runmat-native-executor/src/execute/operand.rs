@@ -391,12 +391,20 @@ pub(super) fn evaluate_operand(
                         Value::BoundFunctionHandle {
                             name,
                             function: function.0 as usize,
+                            authority: runmat_runtime::user_functions::bound_function_authority_for(
+                                function.0 as usize,
+                            ),
+                            source_role: target.source_role,
+                            source_file: runmat_runtime::user_functions::source_file_for(
+                                function.0 as usize,
+                            ),
                         }
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(
                             runmat_types::FunctionId(function.0 as usize),
                             name,
                             captures.into_iter().map(|capture| capture.value).collect(),
+                            target.source_role,
                         )
                     };
                     return Ok(state.arena.insert(value));

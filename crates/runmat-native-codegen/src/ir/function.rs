@@ -73,6 +73,7 @@ pub struct NativeFunction {
     pub id: ProgramFunctionId,
     pub source: ProgramSourceId,
     pub name: String,
+    pub source_role: runmat_types::FunctionSourceRole,
     pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     /// Whole-function requirements derived by canonical MIR analysis. Native
     /// executors use this contract when a function becomes an async target;

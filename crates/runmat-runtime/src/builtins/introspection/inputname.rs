@@ -1,101 +1,12 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, INPUTNAME_ERROR_ARGUMENT_EXCEEDS_INPUTS,
+    INPUTNAME_ERROR_ARGUMENT_INVALID, INPUTNAME_ERROR_NOT_ENOUGH_INPUTS,
+    INPUTNAME_ERROR_TOO_MANY_INPUTS,
 };
 use runmat_value::CharArray;
 use runmat_value::Value;
 
 use crate::builtins::common::tensor;
-
-const INPUTNAME_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Caller argument variable name, or empty text when unavailable.",
-}];
-
-const INPUTNAME_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "argNumber",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "One-based caller argument index.",
-}];
-
-const INPUTNAME_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "name = inputname(argNumber)",
-    inputs: &INPUTNAME_INPUTS,
-    outputs: &INPUTNAME_OUTPUT,
-}];
-
-pub const INPUTNAME_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTNAME.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:NotEnoughInputs"),
-    when: "No argument index is provided.",
-    message: "inputname: not enough input arguments",
-};
-
-pub const INPUTNAME_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTNAME.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:TooManyInputs"),
-    when: "More than one argument index is provided.",
-    message: "inputname: too many input arguments",
-};
-
-pub const INPUTNAME_ERROR_ARGUMENT_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INPUTNAME.ARGUMENT_INVALID",
-    identifier: Some("RunMat:InputnameArgumentInvalid"),
-    when: "The argument index is not a positive integer scalar.",
-    message: "inputname: argument index must be a positive integer scalar",
-};
-
-pub const INPUTNAME_ERROR_ARGUMENT_EXCEEDS_INPUTS: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.INPUTNAME.ARGUMENT_EXCEEDS_INPUTS",
-        identifier: Some("RunMat:InputnameArgumentExceedsInputs"),
-        when: "The requested argument number exceeds the caller's input count or no function-input callsite exists.",
-        message: "inputname: argument number exceeds number of function inputs",
-    };
-
-pub const INPUTNAME_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    INPUTNAME_ERROR_NOT_ENOUGH_INPUTS,
-    INPUTNAME_ERROR_TOO_MANY_INPUTS,
-    INPUTNAME_ERROR_ARGUMENT_INVALID,
-    INPUTNAME_ERROR_ARGUMENT_EXCEEDS_INPUTS,
-];
-
-const INPUTNAME_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "argNumber",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes, single, and double are documented for the scalar real positive integer-valued caller-argument index; logical is not admitted.",
-    }];
-pub const INPUTNAME_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "s = inputname(integer_argNumber)",
-        inputs: &INPUTNAME_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The index is read exactly before caller-frame lookup. The result is a character row vector for a named argument and an empty character array for an unnamed expression.",
-    }];
-
-pub const INPUTNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INPUTNAME_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INPUTNAME_ERRORS,
-};
 
 fn descriptor_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
     crate::runtime_descriptor_error("inputname", error)
@@ -249,10 +160,7 @@ pub(crate) fn dispatch_inputname(args: Vec<Value>) -> crate::BuiltinResult<Value
 
 #[runmat_macros::runtime_builtin(
     name = "inputname",
-    category = "introspection",
-    summary = "Return the caller argument variable name for a function input.",
-    integer_capabilities(self::INPUTNAME_INTEGER_CAPABILITIES),
-    descriptor(self::INPUTNAME_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::inputname"
 )]
 pub fn inputname_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -31,6 +31,7 @@ fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
         id: ProgramFunctionId(0),
         source: ProgramSourceId(0),
         name: "snapshot".into(),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
         class_method_owner: None,
         capabilities: Default::default(),
         abi: NativeFunctionAbi {

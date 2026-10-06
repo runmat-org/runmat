@@ -23,6 +23,7 @@ pub fn create_semantic_closure(
     function: runmat_hir::FunctionId,
     display_name: String,
     capture_count: usize,
+    source_role: runmat_types::FunctionSourceRole,
 ) -> Result<(), RuntimeError> {
     let mut captures = Vec::with_capacity(capture_count);
     for _ in 0..capture_count {
@@ -33,6 +34,7 @@ pub fn create_semantic_closure(
         function,
         display_name,
         captures,
+        source_role,
     ));
     Ok(())
 }

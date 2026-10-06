@@ -21,6 +21,10 @@ fn arrayfun_basic_sin() {
 
 #[test]
 fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 78);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 78);
@@ -35,10 +39,7 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
-    let handle = Value::BoundFunctionHandle {
-        name: "arrayfun_target".into(),
-        function: 78,
-    };
+    let handle = crate::user_functions::test_support::exact_local_value("arrayfun_target", binding);
 
     let result = call(handle, vec![Value::Tensor(tensor)]).expect("semantic arrayfun");
     match result {

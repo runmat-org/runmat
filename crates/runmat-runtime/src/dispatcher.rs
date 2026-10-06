@@ -1616,7 +1616,9 @@ mod tests {
     fn value_contains_gpu_detects_nested_closure_captures() {
         let value = Value::Closure(Closure {
             function_name: "worker".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
         });
         assert!(value_contains_gpu(&value));
@@ -1650,7 +1652,9 @@ mod tests {
         let _provider_guard = ThreadProviderGuard::set(None);
         let value = Value::Closure(Closure {
             function_name: "worker".into(),
-            bound_function: None,
+            binding: None,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
             captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
         });
         let err = futures::executor::block_on(gather_if_needed_async(&value))

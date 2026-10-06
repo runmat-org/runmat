@@ -1068,8 +1068,8 @@ fn eval_function_id_remap(
 
 fn remap_eval_local_function_instr(instr: &mut Instr, remap: &HashMap<FunctionId, FunctionId>) {
     match instr {
-        Instr::CreateSemanticClosure(function, _, _)
-        | Instr::CreateBoundFunctionHandle(function, _)
+        Instr::CreateSemanticClosure(function, _, _, _)
+        | Instr::CreateBoundFunctionHandle(function, _, _)
         | Instr::CreateSemanticFuture(function, _, _)
         | Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
         | Instr::CallSemanticFunctionMulti(function, _, _)

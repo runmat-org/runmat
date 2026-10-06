@@ -5,9 +5,15 @@ use std::sync::Arc;
 
 #[test]
 fn bound_callback_uses_semantic_identity() {
-    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-        |function, arguments, outputs| {
-            assert_eq!(function, 417);
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 417);
+    let expected = binding.clone();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+        move |actual, arguments, outputs| {
+            assert_eq!(actual, expected);
             assert_eq!(outputs, 1);
             let [Value::Num(seed), Value::Num(value)] = arguments else {
                 panic!("unexpected callback arguments: {arguments:?}");
@@ -15,16 +21,19 @@ fn bound_callback_uses_semantic_identity() {
             let result = seed + value;
             Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(result)) })
         },
-    )));
+    ));
+    drop(entry);
     let callback = Value::Closure(Closure {
         function_name: "cellfun_bound_fixture".into(),
-        bound_function: Some(417),
+        binding: Some(binding),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
         captures: vec![Value::Num(10.0)],
     });
-    let result = call(
+    let result = futures::executor::block_on(runtime.scope(super::cellfun_builtin(
         callback,
         vec![cell(vec![Value::Num(1.0), Value::Num(2.0)], &[1, 2])],
-    )
+    )))
     .unwrap();
     assert_eq!(tensor_values(result), vec![11.0, 12.0]);
 }
@@ -55,6 +64,10 @@ fn name_callback_resolves_to_semantic_function() {
 
 #[test]
 fn error_handler_receives_callback_failure() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 419);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             assert_eq!(function, 419);
@@ -68,7 +81,9 @@ fn error_handler_receives_callback_failure() {
     )));
     let handler = Value::Closure(Closure {
         function_name: "cellfun_handler_fixture".into(),
-        bound_function: Some(419),
+        binding: Some(binding),
+        source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
         captures: vec![Value::Num(7.0)],
     });
     let result = call(
@@ -102,6 +117,10 @@ fn unresolved_qualified_callback_reports_typed_external_identity() {
 fn requested_output_count_is_forwarded_and_collected_independently() {
     use std::sync::Arc;
     for requested in [0, 2] {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 191);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observed = calls.clone();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -123,10 +142,7 @@ fn requested_output_count_is_forwarded_and_collected_independently() {
         )));
         let _outputs = crate::output_count::push_output_count(Some(requested));
         let result = call(
-            Value::BoundFunctionHandle {
-                name: "multiple".into(),
-                function: 191,
-            },
+            crate::user_functions::test_support::exact_local_value("multiple", binding),
             vec![cell(vec![Value::Num(1.), Value::Num(2.)], &[1, 2])],
         )
         .unwrap();

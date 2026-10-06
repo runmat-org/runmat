@@ -404,6 +404,9 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "cleanup".into(),
                     function: 11,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(11),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 },
             ),
         )
@@ -413,6 +416,9 @@ mod tests {
                 Value::BoundFunctionHandle {
                     name: "cleanup".into(),
                     function: 12,
+                    authority: runmat_value::BoundFunctionAuthority::unavailable(12),
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
                 },
             ),
         )

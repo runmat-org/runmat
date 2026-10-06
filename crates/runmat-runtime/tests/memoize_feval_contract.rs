@@ -21,8 +21,15 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let calls = Arc::new(Mutex::new(0));
     let observed = calls.clone();
-    let _invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
-        Arc::new(move |_, args, requested| {
+    let origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("memoize exact fixture"),
+        function: runmat_types::ProgramFunctionId(42),
+    };
+    let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
+    let expected_binding = binding.clone();
+    let _invoker = runmat_runtime::user_functions::install_local_bound_function_invoker(
+        std::rc::Rc::new(move |actual, args, requested| {
+            assert_eq!(actual, expected_binding, "wrong portable callback binding");
             let observed = observed.clone();
             let first = args.first().cloned().unwrap();
             Box::pin(async move {
@@ -38,12 +45,15 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
                 }
             })
         }),
-    ));
+    );
     let memoized = block_on(call_builtin_async_with_outputs(
         "memoize",
         &[Value::BoundFunctionHandle {
             name: "fixture".into(),
             function: 42,
+            authority: binding.authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         }],
         1,
     ))

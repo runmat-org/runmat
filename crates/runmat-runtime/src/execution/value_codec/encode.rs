@@ -1,9 +1,9 @@
 use super::path::{field_path, index_path};
 use super::ValueCodecError;
 use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionCallFrame, ExceptionFailureOrigin,
-    ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue, InlineValue, RegisteredData,
-    RegisteredField, SparseValue, StructField, ValuePayload,
+    CallableForm, CallableOwner, CallableValue, DenseValue, ElementType, ExceptionCallFrame,
+    ExceptionFailureOrigin, ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue,
+    InlineValue, RegisteredData, RegisteredField, SparseValue, StructField, ValuePayload,
 };
 use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tensor, Value};
 
@@ -174,12 +174,50 @@ fn encode(
             ))
         }
         Value::OutputList(_) => return Err(ValueCodecError::transient_not_portable(path)),
-        Value::FunctionHandle(name) => callable("workspace", name, Vec::new()),
-        Value::ExternalFunctionHandle(name) => callable("external", name, Vec::new()),
-        Value::MethodFunctionHandle(name) => callable("method", name, Vec::new()),
-        Value::BoundFunctionHandle { name, function } => {
-            callable(&format!("bound:{function}"), name, Vec::new())
-        }
+        Value::FunctionHandle(name) => callable(
+            CallableOwner::Workspace,
+            name,
+            CallableForm::Handle,
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+            Vec::new(),
+        ),
+        Value::ExternalFunctionHandle(name) => callable(
+            CallableOwner::External,
+            name,
+            CallableForm::Handle,
+            runmat_types::FunctionSourceRole::Unknown,
+            None,
+            Vec::new(),
+        ),
+        Value::MethodFunctionHandle(name) => callable(
+            CallableOwner::Method,
+            name,
+            CallableForm::Handle,
+            runmat_types::FunctionSourceRole::Method,
+            None,
+            Vec::new(),
+        ),
+        Value::BoundFunctionHandle {
+            name,
+            function,
+            authority,
+            source_role,
+            source_file,
+        } => callable(
+            CallableOwner::Bound(
+                authority
+                    .export_origin(&crate::user_functions::current_session_lease())
+                    .ok_or_else(|| {
+                        ValueCodecError::unsupported(path, "bound callable has no portable origin")
+                    })?,
+            ),
+            name,
+            CallableForm::Handle,
+            *source_role,
+            source_file.as_deref(),
+            Vec::new(),
+        ),
         Value::Closure(closure) => {
             let captures = closure
                 .captures
@@ -187,11 +225,25 @@ fn encode(
                 .enumerate()
                 .map(|(index, value)| encode(value, &format!("{path}.capture[{index}]"), purpose))
                 .collect::<Result<_, _>>()?;
-            let owner = closure
-                .bound_function
-                .map(|function| format!("bound:{function}"))
-                .unwrap_or_else(|| "workspace".into());
-            callable(&owner, &closure.function_name, captures)
+            let owner = match &closure.binding {
+                Some(binding) => CallableOwner::Bound(
+                    binding
+                        .authority
+                        .export_origin(&crate::user_functions::current_session_lease())
+                        .ok_or_else(|| {
+                            ValueCodecError::unsupported(path, "closure has no portable origin")
+                        })?,
+                ),
+                None => CallableOwner::Workspace,
+            };
+            callable(
+                owner,
+                &closure.function_name,
+                CallableForm::Closure,
+                closure.source_role,
+                closure.source_file.as_deref(),
+                captures,
+            )
         }
         Value::ClassRef(_) => {
             return Err(ValueCodecError::unsupported(
@@ -427,14 +479,26 @@ fn le_bytes<T: Copy, const N: usize>(values: &[T], encode: fn(T) -> [u8; N]) -> 
 }
 
 fn callable(
-    owner_identity: &str,
+    owner: CallableOwner,
     qualified_name: &str,
+    form: CallableForm,
+    source_role: runmat_types::FunctionSourceRole,
+    source_file: Option<&str>,
     captures: Vec<ValuePayload>,
 ) -> InlineValue {
     InlineValue::Callable(CallableValue {
-        owner_identity: owner_identity.into(),
+        owner,
         qualified_name: qualified_name.into(),
-        callable_digest: CallableValue::identity_digest(owner_identity, qualified_name),
+        callable_digest: CallableValue::identity_digest(
+            owner,
+            qualified_name,
+            form,
+            source_role,
+            source_file,
+        ),
+        form,
+        source_role,
+        source_file: source_file.map(ToString::to_string),
         captures,
     })
 }

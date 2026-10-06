@@ -37,6 +37,10 @@ fn registered_fzero_preserves_invocation_cancellation_before_solver_effects() {
 
 #[test]
 fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7_711);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     use std::future::Future;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Context, Poll};
@@ -64,10 +68,7 @@ fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
         },
     )));
     let mut call = Box::pin(fzero_builtin(
-        Value::BoundFunctionHandle {
-            name: "pending_callback".into(),
-            function: 7_711,
-        },
+        crate::user_functions::test_support::exact_local_value("pending_callback", binding),
         Value::Num(0.0),
         Vec::new(),
     ));
@@ -132,6 +133,10 @@ fn fzero_single_interval_returns_single_numerical_outputs() {
 
 #[test]
 fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7_709);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_calls = calls.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -158,10 +163,7 @@ fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
         Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
             .unwrap();
     let root = block_on(fzero_builtin(
-        Value::BoundFunctionHandle {
-            name: "single_root".into(),
-            function: 7_709,
-        },
+        crate::user_functions::test_support::exact_local_value("single_root", binding),
         Value::Tensor(bracket),
         Vec::new(),
     ))
@@ -174,6 +176,10 @@ fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
 
 #[test]
 fn fzero_single_callback_result_selects_single_default_tolerance() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7_710);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, args, _requested_outputs| {
             assert!(matches!(args[0], Value::Num(_)));
@@ -196,10 +202,7 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
     let options = FzeroOptions::from_struct(None).unwrap();
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
     let bracket = block_on(bracket_from_endpoints(
-        &Value::BoundFunctionHandle {
-            name: "single_result".into(),
-            function: 7_710,
-        },
+        &crate::user_functions::test_support::exact_local_value("single_result", binding),
         0.0,
         2.0,
         false,
@@ -308,6 +311,10 @@ fn scalar_expansion_near_both_finite_extremes_never_calls_nonfinite_abscissa() {
 
 #[test]
 fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 42);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let calls = Arc::new(AtomicUsize::new(0));
@@ -320,10 +327,8 @@ fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
             Box::pin(async { crate::sequence::single_value_sequence(Value::Num(1.0)) })
         },
     )));
-    let function = Value::BoundFunctionHandle {
-        name: "constant_positive".into(),
-        function: 42,
-    };
+    let function =
+        crate::user_functions::test_support::exact_local_value("constant_positive", binding);
     let mut options = FzeroOptions::from_struct(None).unwrap();
     options.max_fun_evals = 3;
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
@@ -358,6 +363,10 @@ fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
 }
 #[test]
 fn fzero_accepts_semantic_function_handle_callback() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 42);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 42);
@@ -371,10 +380,7 @@ fn fzero_accepts_semantic_function_handle_callback() {
     )));
 
     let root = block_on(fzero_builtin(
-        Value::BoundFunctionHandle {
-            name: "root_function".into(),
-            function: 42,
-        },
+        crate::user_functions::test_support::exact_local_value("root_function", binding),
         Value::Num(0.0),
         Vec::new(),
     ))

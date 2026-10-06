@@ -54,6 +54,7 @@ async fn load_dynamic_function(
     args: Vec<Value>,
     requested_outputs: usize,
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
+    input_callsite: Option<runmat_runtime::callsite::CallsiteInfo>,
     environment: DynamicFunctionEnvironment,
 ) -> Option<Result<runmat_value::ValueSequence, RuntimeError>> {
     #[cfg(target_arch = "wasm32")]
@@ -284,11 +285,14 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionNameMismatch")
                     .build()
                 })?;
-            runmat_vm::invoke_semantic_function_value(
-                function.0,
-                &args,
-                requested_outputs,
-                registry.as_ref(),
+            runmat_runtime::callsite::with_function_input_callsite(
+                input_callsite,
+                runmat_vm::invoke_semantic_function_value(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                    registry.as_ref(),
+                ),
             )
             .await
         }
@@ -324,17 +328,20 @@ impl RunMatSession {
             mex_runtime: std::rc::Rc::clone(&self.mex_runtime),
         };
         let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
-            std::rc::Rc::new(move |runtime, name, args, requested_outputs, phase| {
-                let environment = dynamic_environment.clone();
-                Box::pin(load_dynamic_function(
-                    runtime,
-                    name,
-                    args,
-                    requested_outputs,
-                    phase,
-                    environment,
-                ))
-            });
+            std::rc::Rc::new(
+                move |runtime, name, args, requested_outputs, phase, input_callsite| {
+                    let environment = dynamic_environment.clone();
+                    Box::pin(load_dynamic_function(
+                        runtime,
+                        name,
+                        args,
+                        requested_outputs,
+                        phase,
+                        input_callsite,
+                        environment,
+                    ))
+                },
+            );
         self.runtime_context
             .set_dynamic_function_loader(Some(loader));
 
@@ -720,6 +727,27 @@ impl RunMatSession {
             Some(input),
         );
 
+        let mut prepared = self.compile_input(input)?;
+        let source = crate::ExecutableSource::new(
+            format!("interactive:{}", self.abi_workspace_handle.0),
+            self.current_source_name(),
+            input,
+        );
+        let revision = crate::ExecutableRevision::derive(
+            &source,
+            self.runtime_context.program_revision().cloned(),
+            crate::program_environment(self.compat_mode),
+        );
+        let source_map = self.executable_source_map(&source);
+        prepared
+            .attach_function_origins(&revision.program_revision, &source_map)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
         let PreparedExecution {
             ast,
             lowering,
@@ -727,24 +755,15 @@ impl RunMatSession {
             analysis,
             bytecode,
             function_registry_after_success,
+            current_function_ids: _,
             next_semantic_function_id_after_success,
-        } = self.compile_input(input)?;
+        } = prepared;
         #[cfg(not(target_arch = "wasm32"))]
         let interactive_unit = {
-            let source = crate::ExecutableSource::new(
-                format!("interactive:{}", self.abi_workspace_handle.0),
-                self.current_source_name(),
-                input,
-            );
-            let revision = crate::ExecutableRevision::derive(
-                &source,
-                self.runtime_context.program_revision().cloned(),
-                crate::program_environment(self.compat_mode),
-            );
             crate::ExecutableUnit::new(
                 source.clone(),
                 revision,
-                self.executable_source_map(&source),
+                source_map,
                 mir,
                 analysis,
                 bytecode,

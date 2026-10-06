@@ -725,14 +725,21 @@ mod tests {
     }
 
     fn callable(name: &str) -> ValuePayload {
-        let owner = "builtin";
+        let owner = runmat_execution::value::CallableOwner::Workspace;
         ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Callable(
             runmat_execution::value::CallableValue {
-                owner_identity: owner.into(),
+                owner,
                 qualified_name: name.into(),
                 callable_digest: runmat_execution::value::CallableValue::identity_digest(
-                    owner, name,
+                    owner,
+                    name,
+                    runmat_execution::value::CallableForm::Handle,
+                    runmat_types::FunctionSourceRole::Unknown,
+                    None,
                 ),
+                form: runmat_execution::value::CallableForm::Handle,
+                source_role: runmat_types::FunctionSourceRole::Unknown,
+                source_file: None,
                 captures: Vec::new(),
             },
         )))

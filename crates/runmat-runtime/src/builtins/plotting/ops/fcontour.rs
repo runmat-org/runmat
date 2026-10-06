@@ -1110,9 +1110,15 @@ mod tests {
 
     fn with_test_function(
         f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    ) -> crate::user_functions::FunctionInvokerGuard {
+    ) -> (
+        crate::user_functions::FunctionInvokerGuard,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
         let f = Arc::new(f);
-        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        let bound = crate::user_functions::test_support::install_bound_forwarder(
+            crate::user_functions::test_support::exact_portable_binding(1, "fcontour fixture"),
+        );
+        let numeric = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, args, _requested_outputs| {
                 let f = Arc::clone(&f);
                 let x = match &args[0] {
@@ -1125,7 +1131,15 @@ mod tests {
                 };
                 Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(x, y))) })
             },
-        )))
+        )));
+        (numeric, bound)
+    }
+
+    fn test_bound(name: &str) -> Value {
+        crate::user_functions::test_support::exact_local_value(
+            name,
+            crate::user_functions::test_support::exact_portable_binding(1, "fcontour fixture"),
+        )
     }
 
     #[test]
@@ -1148,10 +1162,7 @@ mod tests {
         let _invoker = with_test_function(|x, y| x * x + y);
 
         let handle = block_on(fcontour_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            test_bound("surface"),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(5.0),
@@ -1202,10 +1213,7 @@ mod tests {
 
         let handle = block_on(fcontour_builtin(vec![
             Value::Num(ax),
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            test_bound("surface"),
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, -1.0, 1.0], vec![1, 4]).unwrap(),
             ),
@@ -1229,10 +1237,7 @@ mod tests {
         let _invoker = with_test_function(|x, y| x + y);
 
         let handle = block_on(fcontour_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            test_bound("surface"),
             Value::String("MeshDensity".into()),
             Value::Int(IntValue::U8(3)),
             Value::String("Fill".into()),
@@ -1257,10 +1262,7 @@ mod tests {
         ensure_plot_test_env();
         let _invoker = with_test_function(|x, y| x + y);
         let err = block_on(fcontour_builtin(vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
+            test_bound("surface"),
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
         ]))
@@ -1348,13 +1350,7 @@ mod tests {
 
     #[test]
     fn fcontour_positional_integer_levels_require_runmat_extension_mode() {
-        let args = vec![
-            Value::BoundFunctionHandle {
-                name: "surface".into(),
-                function: 1,
-            },
-            Value::Int(IntValue::U8(5)),
-        ];
+        let args = vec![test_bound("surface"), Value::Int(IntValue::U8(5))];
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = parse_fcontour_args(args.clone())

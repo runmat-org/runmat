@@ -3,6 +3,10 @@ use std::sync::Arc;
 
 #[test]
 fn discarded_outputs_still_invoke_each_callback_once() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 92);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = calls.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -17,10 +21,7 @@ fn discarded_outputs_still_invoke_each_callback_once() {
     )));
     let _outputs = crate::output_count::push_output_count(Some(0));
     let result = call(
-        Value::BoundFunctionHandle {
-            name: "effect_only".into(),
-            function: 92,
-        },
+        crate::user_functions::test_support::exact_local_value("effect_only", binding),
         numbers(),
         Vec::new(),
     )
@@ -31,6 +32,10 @@ fn discarded_outputs_still_invoke_each_callback_once() {
 
 #[test]
 fn passes_requested_output_count_to_bound_callbacks() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 91);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_, arguments, outputs| {
             assert_eq!(outputs, 2);
@@ -48,10 +53,7 @@ fn passes_requested_output_count_to_bound_callbacks() {
     )));
     let _outputs = crate::output_count::push_output_count(Some(2));
     let result = call(
-        Value::BoundFunctionHandle {
-            name: "two_outputs".into(),
-            function: 91,
-        },
+        crate::user_functions::test_support::exact_local_value("two_outputs", binding),
         numbers(),
         Vec::new(),
     )
@@ -88,6 +90,14 @@ fn callback_errors_are_wrapped_without_text_rewriting() {
 
 #[test]
 fn error_handler_receives_the_original_callback_identity() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let failing = crate::user_functions::test_support::exact_local_binding(&runtime, 101);
+    let recovery = crate::user_functions::test_support::exact_local_binding(&runtime, 102);
+    let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
+        failing.clone(),
+        recovery.clone(),
+    ]);
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             let context = arguments.first().cloned();
@@ -118,17 +128,11 @@ fn error_handler_receives_the_original_callback_identity() {
     let mut structure = StructValue::new();
     structure.insert("a", Value::Num(1.0));
     let result = call(
-        Value::BoundFunctionHandle {
-            name: "fails".into(),
-            function: 101,
-        },
+        crate::user_functions::test_support::exact_local_value("fails", failing),
         structure,
         vec![
             Value::String("ErrorHandler".into()),
-            Value::BoundFunctionHandle {
-                name: "recovers".into(),
-                function: 102,
-            },
+            crate::user_functions::test_support::exact_local_value("recovers", recovery),
         ],
     )
     .unwrap();

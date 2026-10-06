@@ -55,6 +55,10 @@ fn bsxfun_does_not_logicalize_shadowed_callback_names() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, args, _requested_outputs| {
             let args = args.to_vec();
@@ -74,10 +78,7 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
     let column = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let row = Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap();
     let result = call(
-        Value::BoundFunctionHandle {
-            name: "scaled_add".into(),
-            function: 7,
-        },
+        crate::user_functions::test_support::exact_local_value("scaled_add", binding),
         Value::Tensor(column),
         Value::Tensor(row),
     )
@@ -96,6 +97,10 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn bsxfun_rejects_non_scalar_callback_output() {
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _entry = runtime.enter();
+    let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 9);
+    let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, _args, _requested_outputs| {
             crate::sequence::single_value_future(async move {
@@ -106,10 +111,7 @@ fn bsxfun_rejects_non_scalar_callback_output() {
         },
     )));
     let err = call(
-        Value::BoundFunctionHandle {
-            name: "bad".into(),
-            function: 9,
-        },
+        crate::user_functions::test_support::exact_local_value("bad", binding),
         Value::Num(1.0),
         Value::Num(2.0),
     )

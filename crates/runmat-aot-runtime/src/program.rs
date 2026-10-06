@@ -52,6 +52,7 @@ struct ProgramInvocationGuards {
     _lexical: runmat_runtime::user_functions::LexicalFunctionInvokerGuard,
     _resolver: runmat_runtime::user_functions::FunctionResolverGuard,
     _catalog: runmat_runtime::user_functions::SourceFunctionCatalogGuard,
+    _execution_source: runmat_runtime::user_functions::ExecutionSourceResolverGuard,
 }
 
 impl ProgramInvocationGuards {
@@ -175,6 +176,16 @@ impl ProgramInvocationGuards {
                     source_id: runmat_types::SourceId(function.source.0 as usize),
                     name: function.name.clone(),
                     function: function.function.0 as usize,
+                    role: function.role,
+                    // AOT callable inventory has a source ordinal but no
+                    // file path. Never invent a path from that ordinal.
+                    source_file: None,
+                    binding_origin: runmat_execution::FunctionBindingOrigin::from_revision(
+                        &program.executable.program,
+                        function.function,
+                    )
+                    .ok(),
+                    definition_owners: None,
                 },
             )
             .collect::<Vec<_>>();
@@ -182,11 +193,14 @@ impl ProgramInvocationGuards {
         let catalog = runmat_runtime::user_functions::install_source_function_catalog(Some(
             Arc::new(functions),
         ));
+        let execution_source =
+            runmat_runtime::user_functions::install_execution_source_resolver(None);
         Self {
             _semantic: semantic,
             _lexical: lexical,
             _resolver: resolver,
             _catalog: catalog,
+            _execution_source: execution_source,
         }
     }
 }

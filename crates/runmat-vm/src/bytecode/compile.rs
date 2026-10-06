@@ -824,6 +824,9 @@ fn compile_semantic_functions(
             function.id,
             FunctionBytecode {
                 function: function.id,
+                definition_owner: std::sync::Arc::new(
+                    runmat_value::FunctionDefinitionOwner::default(),
+                ),
                 display_name: function_layout.display_name.clone(),
                 class_method_owner: mir
                     .functions
@@ -838,6 +841,13 @@ fn compile_semantic_functions(
                     .clone(),
                 private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
+                source_file: None,
+                source_role: hir.function_source_role(function),
+                portable_function: runmat_types::ProgramFunctionId(
+                    u32::try_from(function.id.0)
+                        .map_err(|_| CompileError::new("portable function identity overflow"))?,
+                ),
+                binding_origin: None,
                 capabilities: u32::try_from(function.id.0)
                     .ok()
                     .map(runmat_types::ProgramFunctionId)
@@ -7085,7 +7095,7 @@ y = x^[1 2; 3 4];\n",
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name)
+            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name, _)
                 if name == "remote_inc"
         )));
 

@@ -1,47 +1,5 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamDescriptor, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS;
 use runmat_value::{CellArray, Value};
-
-const LOCALFUNCTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "handles",
-    ty: runmat_builtins::BuiltinParamType::Any,
-    arity: runmat_builtins::BuiltinParamArity::Required,
-    default: None,
-    description: "Cell array of visible local function handles.",
-}];
-
-const LOCALFUNCTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "handles = localfunctions()",
-    inputs: &[],
-    outputs: &LOCALFUNCTIONS_OUTPUT,
-}];
-
-pub const LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.LOCALFUNCTIONS.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:TooManyInputs"),
-    when: "Any input argument is provided.",
-    message: "localfunctions: too many input arguments",
-};
-
-pub const LOCALFUNCTIONS_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS];
-
-pub const LOCALFUNCTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &LOCALFUNCTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOCALFUNCTIONS_ERRORS,
-};
-
-fn is_supported_local_function_name(name: &str) -> bool {
-    let trimmed = name.trim();
-    !trimmed.is_empty()
-        && !trimmed.starts_with("@anon")
-        && !trimmed.starts_with("anonymous#")
-        && !trimmed.contains('.')
-}
 
 pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
@@ -50,9 +8,13 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
             &LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS,
         ));
     }
-    let Some(source_id) =
-        crate::source_context::current_source_info().and_then(|info| info.source_id)
-    else {
+    let source_id = match crate::user_functions::current_active_semantic_function() {
+        Some(function) => {
+            crate::user_functions::source_function_for(function).map(|info| info.source_id)
+        }
+        None => crate::source_context::current_source_info().and_then(|info| info.source_id),
+    };
+    let Some(source_id) = source_id else {
         return Ok(Value::Cell(CellArray::new(Vec::new(), 1, 0).map_err(
             |err| {
                 crate::build_runtime_error(format!("localfunctions: {err}"))
@@ -63,11 +25,8 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
     };
     let handles = crate::user_functions::source_functions_for(source_id)
         .into_iter()
-        .filter(|info| is_supported_local_function_name(&info.name))
-        .map(|info| Value::BoundFunctionHandle {
-            name: info.name,
-            function: info.function,
-        })
+        .filter(|info| info.role == runmat_types::FunctionSourceRole::Local)
+        .map(crate::user_functions::bound_function_handle_from_source_info)
         .collect::<Vec<_>>();
     let len = handles.len();
     Ok(Value::Cell(CellArray::new(handles, 1, len).map_err(
@@ -81,9 +40,7 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
 
 #[runmat_macros::runtime_builtin(
     name = "localfunctions",
-    category = "introspection",
-    summary = "Return handles for named local functions visible in the current source.",
-    descriptor(self::LOCALFUNCTIONS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::localfunctions"
 )]
 pub fn localfunctions_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -97,29 +54,63 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn localfunctions_without_source_is_exact_empty_cell_row() {
+        let _current_guard = crate::source_context::replace_current_source_id(None);
+        let value = dispatch_localfunctions(Vec::new()).expect("empty source result");
+        let Value::Cell(cell) = value else {
+            panic!("expected cell array");
+        };
+        assert_eq!(cell.rows, 1);
+        assert_eq!(cell.cols, 0);
+        assert!(cell.data.is_empty());
+    }
+
+    #[test]
     fn localfunctions_returns_current_source_bound_handles() {
         let _source_guard = crate::source_context::replace_source_catalog(vec![(
             SourceId(3),
             "/tmp/localfunctions.m".to_string(),
             "handles = localfunctions();".to_string(),
         )]);
-        let _current_guard = crate::source_context::replace_current_source_id(Some(SourceId(3)));
+        let _current_guard = crate::source_context::replace_current_source_id(Some(SourceId(99)));
+        let _active = crate::user_functions::push_active_semantic_function(10);
         let _catalog_guard =
             crate::user_functions::install_source_function_catalog(Some(Arc::new(vec![
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(3),
+                    name: "main".into(),
+                    function: 9,
+                    role: runmat_types::FunctionSourceRole::Primary,
+                    binding_origin: None,
+                    source_file: None,
+                    definition_owners: None,
+                },
+                crate::user_functions::SourceFunctionInfo {
+                    source_id: SourceId(3),
                     name: "first".into(),
                     function: 10,
+                    role: runmat_types::FunctionSourceRole::Local,
+                    binding_origin: None,
+                    source_file: None,
+                    definition_owners: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(3),
                     name: "@anon0".into(),
                     function: 11,
+                    role: runmat_types::FunctionSourceRole::Anonymous,
+                    binding_origin: None,
+                    source_file: None,
+                    definition_owners: None,
                 },
                 crate::user_functions::SourceFunctionInfo {
                     source_id: SourceId(4),
                     name: "other".into(),
                     function: 12,
+                    role: runmat_types::FunctionSourceRole::Local,
+                    binding_origin: None,
+                    source_file: None,
+                    definition_owners: None,
                 },
             ])));
 
@@ -130,7 +121,83 @@ mod tests {
         assert_eq!(cell.data.len(), 1);
         assert!(matches!(
             &cell.data[0],
-            Value::BoundFunctionHandle { name, function } if name == "first" && *function == 10
+            Value::BoundFunctionHandle { name, function, source_role, .. }
+                if name == "first"
+                    && *function == 10
+                    && *source_role == runmat_types::FunctionSourceRole::Local
         ));
+    }
+
+    #[test]
+    fn retained_execution_group_excludes_primary_and_new_published_replacement() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _entry = runtime.enter();
+        let _current_guard = crate::source_context::replace_current_source_id(Some(SourceId(3)));
+        let owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+        let owners = Arc::new(vec![(10, Arc::clone(&owner))]);
+        let local = crate::user_functions::SourceFunctionInfo {
+            source_id: SourceId(3),
+            name: "old_local".into(),
+            function: 10,
+            role: runmat_types::FunctionSourceRole::Local,
+            binding_origin: None,
+            source_file: Some("/old/file.m".into()),
+            definition_owners: Some(owners),
+        };
+        let primary = crate::user_functions::SourceFunctionInfo {
+            source_id: SourceId(3),
+            name: "old_primary".into(),
+            function: 9,
+            role: runmat_types::FunctionSourceRole::Primary,
+            binding_origin: None,
+            source_file: Some("/old/file.m".into()),
+            definition_owners: None,
+        };
+        let _published =
+            crate::user_functions::install_source_function_catalog(Some(Arc::new(vec![
+                crate::user_functions::SourceFunctionInfo {
+                    source_id: SourceId(3),
+                    name: "replacement".into(),
+                    function: 10,
+                    role: runmat_types::FunctionSourceRole::Local,
+                    binding_origin: None,
+                    source_file: Some("/new/file.m".into()),
+                    definition_owners: None,
+                },
+            ])));
+        let selected_local = local.clone();
+        let selected_group = vec![primary, local];
+        let _selected = crate::user_functions::install_execution_source_resolver(Some(
+            std::rc::Rc::new(crate::user_functions::ExecutionSourceFacts::new(
+                std::rc::Rc::new(move |function| (function == 10).then(|| selected_local.clone())),
+                std::rc::Rc::new(move |source| {
+                    (source == SourceId(3))
+                        .then(|| selected_group.clone())
+                        .unwrap_or_default()
+                }),
+                std::rc::Rc::new(|_| None),
+            )),
+        ));
+        let Value::Cell(cell) = dispatch_localfunctions(Vec::new()).expect("retained locals")
+        else {
+            panic!("cell result");
+        };
+        assert_eq!(cell.data.len(), 1);
+        let Value::BoundFunctionHandle {
+            name,
+            function,
+            source_file,
+            authority,
+            ..
+        } = &cell.data[0]
+        else {
+            panic!("bound local");
+        };
+        assert_eq!(name, "old_local");
+        assert_eq!(*function, 10);
+        assert_eq!(source_file.as_deref(), Some("/old/file.m"));
+        assert!(authority.admits_local(&runtime.session_lease()));
     }
 }

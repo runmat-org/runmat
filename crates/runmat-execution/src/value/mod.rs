@@ -6,6 +6,8 @@ use crate::ContractError;
 mod identity;
 mod validation;
 mod durable_aggregate;
+#[cfg(test)]
+mod callable_tests;
 pub use durable_aggregate::{
     DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
     DurableStructArrayField,
@@ -278,23 +280,98 @@ pub struct ExceptionRuntimeMetadata {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CallableValue {
-    pub owner_identity: String,
+    pub owner: CallableOwner,
     pub qualified_name: String,
     pub callable_digest: Digest,
+    /// Required callable identity fields. Historical payloads cannot be
+    /// restored with invented function provenance.
+    pub form: CallableForm,
+    pub source_role: runmat_types::FunctionSourceRole,
+    /// Original registered display path, if the callable was created from a file-backed source.
+    #[serde(deserialize_with = "deserialize_required_source_file")]
+    pub source_file: Option<String>,
     pub captures: Vec<ValuePayload>,
 }
 
+/// Portable callable resolution never interprets a destination-local number
+/// or display spelling as a semantic function identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "binding")]
+pub enum CallableOwner {
+    Workspace,
+    External,
+    Method,
+    Bound(crate::FunctionBindingOrigin),
+}
+
+// Custom field deserialization makes a missing Option field an error while
+// retaining explicit null for callables without file-backed provenance.
+fn deserialize_required_source_file<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallableForm {
+    Handle,
+    Closure,
+}
+
 impl CallableValue {
-    pub fn identity_digest(owner_identity: &str, qualified_name: &str) -> Digest {
-        let mut identity = b"runmat-callable-v1\0".to_vec();
-        identity.extend_from_slice(owner_identity.as_bytes());
+    pub fn identity_digest(
+        owner: CallableOwner,
+        qualified_name: &str,
+        form: CallableForm,
+        source_role: runmat_types::FunctionSourceRole,
+        source_file: Option<&str>,
+    ) -> Digest {
+        let mut identity = b"runmat-callable-v4\0".to_vec();
+        match owner {
+            CallableOwner::Workspace => identity.push(0),
+            CallableOwner::External => identity.push(1),
+            CallableOwner::Method => identity.push(2),
+            CallableOwner::Bound(origin) => {
+                identity.push(3);
+                identity.extend_from_slice(origin.program.bytes());
+                identity.extend_from_slice(&origin.function.0.to_be_bytes());
+            }
+        }
         identity.push(0);
         identity.extend_from_slice(qualified_name.as_bytes());
+        identity.push(0);
+        identity.push(match form {
+            CallableForm::Handle => 0,
+            CallableForm::Closure => 1,
+        });
+        identity.push(source_role as u8);
+        match source_file {
+            Some(file) => {
+                identity.push(1);
+                identity.extend_from_slice(&(file.len() as u64).to_be_bytes());
+                identity.extend_from_slice(file.as_bytes());
+            }
+            None => identity.push(0),
+        }
         Digest::sha256(identity)
     }
 
     pub fn validate_identity(&self) -> Result<(), ContractError> {
-        if self.callable_digest != Self::identity_digest(&self.owner_identity, &self.qualified_name)
+        if self.form == CallableForm::Handle && !self.captures.is_empty() {
+            return Err(ContractError::invalid(
+                "callable value",
+                "plain function handles cannot carry closure captures",
+            ));
+        }
+        if self.callable_digest
+            != Self::identity_digest(
+                self.owner,
+                &self.qualified_name,
+                self.form,
+                self.source_role,
+                self.source_file.as_deref(),
+            )
         {
             return Err(ContractError::invalid(
                 "callable value",

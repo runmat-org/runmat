@@ -1274,8 +1274,14 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateSemanticClosure(function, display_name, capture_count) => {
-            handle_create_semantic_closure(stack, *function, display_name.clone(), *capture_count)?;
+        Instr::CreateSemanticClosure(function, display_name, capture_count, source_role) => {
+            handle_create_semantic_closure(
+                stack,
+                *function,
+                display_name.clone(),
+                *capture_count,
+                *source_role,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1298,11 +1304,14 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateBoundFunctionHandle(function, name)
-        | Instr::CreateExternalBoundFunctionHandle(function, name) => {
+        Instr::CreateBoundFunctionHandle(function, name, source_role)
+        | Instr::CreateExternalBoundFunctionHandle(function, name, source_role) => {
             stack.push(Value::BoundFunctionHandle {
                 name: name.clone(),
                 function: function.0,
+                authority: runmat_runtime::user_functions::bound_function_authority_for(function.0),
+                source_role: *source_role,
+                source_file: runmat_runtime::user_functions::source_file_for(function.0),
             });
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

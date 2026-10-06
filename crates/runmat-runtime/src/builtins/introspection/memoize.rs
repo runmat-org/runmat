@@ -1031,15 +1031,23 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
             Value::BoundFunctionHandle {
                 name: an,
                 function: af,
+                authority: aa,
+                source_role: ar,
+                source_file: ap,
             },
             Value::BoundFunctionHandle {
                 name: bn,
                 function: bf,
+                authority: ba,
+                source_role: br,
+                source_file: bp,
             },
-        ) => an == bn && af == bf,
+        ) => an == bn && af == bf && aa == ba && ar == br && ap == bp,
         (Value::Closure(a), Value::Closure(b)) => {
             a.function_name == b.function_name
-                && a.bound_function == b.bound_function
+                && a.binding == b.binding
+                && a.source_role == b.source_role
+                && a.source_file == b.source_file
                 && values_equal_for_cache(&a.captures, &b.captures)
         }
         (Value::MException(a), Value::MException(b)) => a == b,
@@ -1170,11 +1178,11 @@ fn function_key(function: &Value) -> String {
         Value::FunctionHandle(name) => format!("fh:{name}"),
         Value::ExternalFunctionHandle(name) => format!("external:{name}"),
         Value::MethodFunctionHandle(name) => format!("method:{name}"),
-        Value::BoundFunctionHandle { name, function } => format!("bound:{function}:{name}"),
+        Value::BoundFunctionHandle { name, function, .. } => format!("bound:{function}:{name}"),
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
-            closure.bound_function,
+            closure.bound_function(),
             values_fingerprint(&closure.captures)
         ),
         other => format!("other:{other:?}"),
@@ -1271,7 +1279,7 @@ fn value_fingerprint(value: &Value) -> String {
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
-            closure.bound_function,
+            closure.bound_function(),
             values_fingerprint(&closure.captures)
         ),
         other => format!("{other:?}"),
@@ -1374,12 +1382,30 @@ mod tests {
         })
     }
 
-    fn memoized() -> Value {
-        block_on(memoize_builtin(Value::BoundFunctionHandle {
+    fn memoized() -> (Value, crate::user_functions::BoundFunctionInvokerGuard) {
+        let origin = runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("memoize exact unit fixture"),
+            function: runmat_types::ProgramFunctionId(42),
+        };
+        let binding = runmat_value::BoundFunctionBinding::portable(42, origin);
+        let expected = binding.clone();
+        let guard = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+            move |actual, arguments, outputs| {
+                assert_eq!(actual, expected, "wrong memoized callback binding");
+                let invoker = crate::user_functions::current_semantic_function_invoker()
+                    .expect("numeric unit callback fixture");
+                invoker(actual.function, arguments, outputs)
+            },
+        ));
+        let value = block_on(memoize_builtin(Value::BoundFunctionHandle {
             name: "step".into(),
             function: 42,
+            authority: binding.authority,
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         }))
-        .expect("memoized function")
+        .expect("memoized function");
+        (value, guard)
     }
 
     #[test]
@@ -1416,6 +1442,9 @@ mod tests {
         let function = Value::BoundFunctionHandle {
             name: "step".into(),
             function: 42,
+            authority: runmat_value::BoundFunctionAuthority::unavailable(42),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            source_file: None,
         };
         let enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");
@@ -1588,8 +1617,8 @@ mod tests {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
 
-        let first = memoized();
-        let second = memoized();
+        let (first, _first_bound) = memoized();
+        let (second, _second_bound) = memoized();
 
         let (Value::HandleObject(first), Value::HandleObject(second)) = (first, second) else {
             panic!("expected handle objects");
@@ -1608,7 +1637,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
 
         let first = block_on(crate::call_feval_async_with_outputs(
             f.clone(),
@@ -1639,7 +1668,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
 
         let _ = block_on(crate::call_feval_async_with_outputs(
             f.clone(),
@@ -1667,7 +1696,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
         let _caller = crate::output_count::push_output_count(Some(7));
 
         for _ in 0..2 {
@@ -1698,7 +1727,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
         let _caller = crate::output_count::push_output_count(Some(7));
         let invalid = block_on(crate::call_feval_async_with_outputs(
             f.clone(),
@@ -1768,7 +1797,7 @@ mod tests {
                 })
             },
         )));
-        let f = memoized();
+        let (f, _bound) = memoized();
         let _caller = crate::output_count::push_output_count(Some(7));
         let args = [Value::Num(2.0)];
         let mut future = Box::pin(crate::call_feval_async_with_outputs(f.clone(), &args, 2));
@@ -1804,7 +1833,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
@@ -1841,7 +1870,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
@@ -1882,7 +1911,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
         ));
-        let f = memoized();
+        let (f, _bound) = memoized();
 
         {
             let _outputs = crate::output_count::push_output_count(Some(1));
@@ -1937,7 +1966,7 @@ mod tests {
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
-        let f = memoized();
+        let (f, _bound) = memoized();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
@@ -1972,7 +2001,7 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
-        let f = memoized();
+        let (f, _bound) = memoized();
 
         let enabled = block_on(memoized_subsref_builtin(
             f.clone(),
@@ -1997,7 +2026,7 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
-        let f = memoized();
+        let (f, _bound) = memoized();
 
         let err = block_on(memoized_subsref_builtin(
             f,
@@ -2015,7 +2044,7 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
-        let f = memoized();
+        let (f, _bound) = memoized();
         let Value::HandleObject(handle) = &f else {
             panic!("expected handle")
         };
@@ -2035,7 +2064,7 @@ mod tests {
         reset_memoize_registry_for_test();
         let _guard =
             crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()));
-        let f = memoized();
+        let (f, _bound) = memoized();
         let payload_target = runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(
             "PayloadHandle".to_string(),
         )))

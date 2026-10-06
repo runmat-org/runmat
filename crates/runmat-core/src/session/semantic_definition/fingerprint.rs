@@ -9,10 +9,17 @@ pub(crate) fn fingerprint(
     // HashSet iteration order is not stable, so canonicalize those fields explicitly.
     let runmat_vm::FunctionBytecode {
         function,
+        definition_owner: _,
         display_name,
         class_method_owner,
         private_owner_scope,
         source_id,
+        // Derived display provenance is assigned after unchanged-definition
+        // matching; source_id already carries the source-pool identity here.
+        source_file: _,
+        source_role,
+        portable_function: _,
+        binding_origin: _,
         capabilities,
         instructions,
         catch_scopes,
@@ -53,6 +60,7 @@ pub(crate) fn fingerprint(
     append!(class_method_owner);
     append!(private_owner_scope);
     append!(source_id);
+    append!(source_role);
     append!(capabilities);
     append!(instructions);
     append!(catch_scopes);

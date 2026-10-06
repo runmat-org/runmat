@@ -1,6 +1,7 @@
 use runmat_mir::{MirCall, MirCallArg, MirCallee, MirExpansionSource, MirSequenceLocalId};
 use runmat_runtime::call::arguments::{MaterializedArgument, MaterializedExpansionSource};
 use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
+use runmat_runtime::callsite::CallsiteInfo;
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
@@ -37,6 +38,10 @@ fn evaluate_inner(
         return Ok(outputs);
     }
     let mut arguments = materialize_arguments(state, &call.args)?;
+    let input_callsite = CallsiteInfo {
+        source_id: Some(runmat_types::SourceId(state.function.source.0 as usize)),
+        arg_spans: call.arg_spans.clone(),
+    };
     if matches!(
         call.syntax,
         runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
@@ -99,12 +104,15 @@ fn evaluate_inner(
                     let runtime = state.runtime.clone();
                     let result = super::sync::complete(
                         &runtime,
-                        invoker(runmat_runtime::call::lexical::LexicalCall {
-                            function: function.0 as usize,
-                            captures,
-                            arguments,
-                            requested_outputs,
-                        }),
+                        runmat_runtime::callsite::with_function_input_callsite(
+                            Some(input_callsite.clone()),
+                            invoker(runmat_runtime::call::lexical::LexicalCall {
+                                function: function.0 as usize,
+                                captures,
+                                arguments,
+                                requested_outputs,
+                            }),
+                        ),
                         "nested lexical call",
                     )
                     .finish(state)?;
@@ -118,7 +126,8 @@ fn evaluate_inner(
                 requested_outputs,
                 call.fallback_policy,
                 CallableCallKind::Direct,
-            );
+            )
+            .with_function_input_callsite(input_callsite);
             let runtime = state.runtime.clone();
             complete_call(
                 state,
@@ -137,11 +146,12 @@ fn evaluate_inner(
             let runtime = state.runtime.clone();
             let value = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::call_feval_async_with_outputs_in_context(
+                runmat_runtime::call_feval_async_with_outputs_and_callsite_in_context(
                     &runtime,
                     target,
                     &arguments,
                     requested_outputs,
+                    Some(input_callsite),
                 ),
                 "dynamic call",
             )

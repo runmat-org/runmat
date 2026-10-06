@@ -10,6 +10,7 @@ use runmat_value::{Value, ValueSequence};
 #[derive(Debug, Clone)]
 pub struct ForeignCallbackRequest {
     pub callable: CallableIdentity,
+    pub binding: Option<runmat_value::BoundFunctionBinding>,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
 }
@@ -24,21 +25,39 @@ pub fn foreign_callback_request(
 ) -> Result<ForeignCallbackRequest, RuntimeError> {
     use runmat_types::{FunctionId, MethodId};
 
-    let callable = match callback {
-        Value::FunctionHandle(name) => crate::callable_identity_for_handle_name(name).0,
-        Value::ExternalFunctionHandle(name) => crate::external_callable_identity_for_name(name),
-        Value::MethodFunctionHandle(name) => CallableIdentity::Method(MethodId(name.clone())),
-        Value::BoundFunctionHandle { function, .. } => {
-            CallableIdentity::BoundFunction(FunctionId(*function))
+    let (callable, binding) = match callback {
+        Value::FunctionHandle(name) => (crate::callable_identity_for_handle_name(name).0, None),
+        Value::ExternalFunctionHandle(name) => {
+            (crate::external_callable_identity_for_name(name), None)
         }
+        Value::MethodFunctionHandle(name) => {
+            (CallableIdentity::Method(MethodId(name.clone())), None)
+        }
+        Value::BoundFunctionHandle {
+            function,
+            authority,
+            ..
+        } => (
+            CallableIdentity::BoundFunction(FunctionId(*function)),
+            Some(runmat_value::BoundFunctionBinding {
+                function: *function,
+                authority: authority.clone(),
+            }),
+        ),
         Value::Closure(closure) => {
             let mut captured = closure.captures.clone();
             captured.append(&mut arguments);
             arguments = captured;
-            closure.bound_function.map_or_else(
-                || crate::callable_identity_for_handle_name(&closure.function_name).0,
-                |function| CallableIdentity::AnonymousFunction(FunctionId(function)),
-            )
+            match &closure.binding {
+                Some(binding) => (
+                    CallableIdentity::AnonymousFunction(FunctionId(binding.function)),
+                    Some(binding.clone()),
+                ),
+                None => (
+                    crate::callable_identity_for_handle_name(&closure.function_name).0,
+                    None,
+                ),
+            }
         }
         _ => {
             return Err(foreign_error(
@@ -49,6 +68,7 @@ pub fn foreign_callback_request(
     };
     Ok(ForeignCallbackRequest {
         callable,
+        binding,
         arguments,
         requested_outputs,
     })
@@ -75,6 +95,7 @@ pub fn invoke_foreign_callback(
                 context.clone(),
                 RuntimeCallRequest {
                     identity: request.callable,
+                    binding: request.binding,
                     arguments: request.arguments,
                     requested_outputs: request.requested_outputs,
                 },
@@ -125,6 +146,7 @@ mod tests {
             context,
             ForeignCallbackRequest {
                 callable: CallableIdentity::DynamicName(SymbolName("callback".into())),
+                binding: None,
                 arguments: vec![Value::Num(7.0)],
                 requested_outputs: 1,
             },
@@ -150,6 +172,7 @@ mod tests {
             context,
             ForeignCallbackRequest {
                 callable: CallableIdentity::DynamicName(SymbolName("callback".into())),
+                binding: None,
                 arguments: Vec::new(),
                 requested_outputs: 0,
             },
@@ -158,5 +181,25 @@ mod tests {
 
         assert_eq!(error.identifier(), Some("RunMat:Foreign:CallbackFailed"));
         assert!(service.requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn bound_callback_retains_exact_authority_and_prepends_captures_once() {
+        let binding = runmat_value::BoundFunctionBinding::unavailable(77);
+        let callback = Value::Closure(runmat_value::Closure {
+            function_name: "display_is_not_authority".into(),
+            binding: Some(binding.clone()),
+            source_role: runmat_types::FunctionSourceRole::Anonymous,
+            source_file: None,
+            captures: vec![Value::Num(3.0)],
+        });
+        let request = foreign_callback_request(&callback, vec![Value::Num(4.0)], 1)
+            .expect("callback normalization");
+        assert_eq!(request.binding, Some(binding));
+        assert_eq!(request.arguments, vec![Value::Num(3.0), Value::Num(4.0)]);
+        assert_eq!(
+            request.callable,
+            CallableIdentity::AnonymousFunction(runmat_types::FunctionId(77))
+        );
     }
 }

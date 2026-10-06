@@ -9059,11 +9059,11 @@ roots = ["."]
                 if name == "summarize" || name.ends_with(".summarize")
         ) || matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name)
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _)
                 if name == "summarize" || name.ends_with(".summarize")
         ) || matches!(
             instr,
-            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name)
+            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name, _)
                 if name == "summarize" || name.ends_with(".summarize")
         )),
         "wildcard dependency-alias function handle should lower to exact alias-qualified external function-handle bytecode"
@@ -12603,7 +12603,7 @@ fn feval_string_local_function_uses_semantic_handle() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "local feval string callee should lower to a semantic function handle"
     );
@@ -12687,14 +12687,14 @@ fn local_function_handle_uses_semantic_handle() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "local function handles should lower to semantic function handles"
     );
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0, _) if name == "inc"
         )),
         "zero-capture local function handles should not lower as closures"
     );
@@ -13066,7 +13066,7 @@ fn cellfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "local string callback should be bound to a semantic function handle"
     );
@@ -13087,7 +13087,7 @@ fn cellfun_runtime_string_callback_uses_semantic_resolver() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "runtime string callback variables should not be compile-time literal rewrites"
     );
@@ -13142,7 +13142,7 @@ fn cellfun_session_function_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "session string callback should be bound to a semantic function handle"
     );
@@ -13164,7 +13164,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "local arrayfun string callback should be bound to a semantic function handle"
     );
@@ -13191,7 +13191,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "session arrayfun string callback should be bound to a semantic function handle"
     );
@@ -13213,7 +13213,7 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "runtime arrayfun string callback variables should not be compile-time literal rewrites"
     );
@@ -13726,7 +13726,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateExternalBoundFunctionHandle(_, name, _) if name == "inc"
         )),
         "session function handles should carry semantic identity"
     );
@@ -13922,7 +13922,7 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
         )),
         "session feval string callee should carry semantic identity"
     );
@@ -13989,7 +13989,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "add2"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "add2"
         )),
         "session feval string expansion callee should carry semantic identity"
     );
@@ -14057,7 +14057,7 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
         )),
         "session feval string expansion multi-output callee should carry semantic identity"
     );
@@ -16409,6 +16409,87 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
     .expect("native expansion execution");
     assert_eq!(native, established);
     assert_single_output(&native, runmat_value::Value::Num(60.0));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
+    let source = ExecutableSource::new(
+        "core-native-inputname@1",
+        "nativeInputname.m",
+        "function [first, second, third, fourth, fifth, sixth] = nativeInputname(alpha)\nfirst = probe(alpha);\nsecond = probe(alpha + 1);\nh = @probe;\nthird = h(alpha);\nfourth = h(alpha + 1);\nfifth = feval(@probe, alpha);\nsixth = feval(@probe, alpha + 1);\nend\nfunction out = probe(value)\nout = inputname(1);\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile native caller inputname unit");
+    let result = block_on(session.invoke_executable(
+        &unit,
+        ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeInputname".into()),
+            arguments: vec![runmat_value::Value::Num(7.0)],
+            requested_outputs: 6,
+        },
+        &InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native caller inputname execution");
+    assert_output_values(
+        &result,
+        &[
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+            ),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+            ),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+            runmat_value::Value::CharArray(
+                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+            ),
+        ],
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_native_caller_preserves_inputname_through_cold_and_warm_file_load() {
+    let _guard = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let _cwd = push_cwd(temp.path());
+    std::fs::write(
+        temp.path().join("externalProbe.m"),
+        "function out = externalProbe(value)\nout = inputname(1);\nend\n",
+    )
+    .expect("write external function");
+    let source = ExecutableSource::new(
+        "core-native-cold-inputname@1",
+        temp.path().join("nativeColdInputname.m").to_string_lossy(),
+        "function [first, second] = nativeColdInputname(alpha)\nfirst = externalProbe(alpha);\nsecond = externalProbe(alpha + 1);\nend\n",
+    );
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(source, None))
+        .expect("compile cold-load native caller");
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("nativeColdInputname".into()),
+        arguments: vec![runmat_value::Value::Num(7.0)],
+        requested_outputs: 2,
+    };
+    let expected = [
+        runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
+        runmat_value::Value::CharArray(
+            runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+        ),
+    ];
+    for _ in 0..2 {
+        let actual = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native cold/warm file invocation");
+        assert_output_values(&actual, &expected);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
