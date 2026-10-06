@@ -18,8 +18,8 @@ impl RuntimeBuiltinService for Override {
 }
 fn replacement(_: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
-        Ok(runmat_value::ValueSequence::single(Value::Num(99.))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
+        runmat_value::ValueSequence::single(Value::Num(99.))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
     })
 }
 

@@ -35,8 +35,8 @@ fn effects() -> Vec<&'static str> {
 fn fallback(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("fallback");
-        Ok(ValueSequence::single(Value::Num(17.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
+        ValueSequence::single(Value::Num(17.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
     })
 }
 
@@ -64,8 +64,8 @@ fn untyped_failure(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 fn successful_override(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("override");
-        Ok(ValueSequence::single(Value::Num(29.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
+        ValueSequence::single(Value::Num(29.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
     })
 }
 
@@ -102,8 +102,8 @@ fn observe_invocation(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
                 .borrow_mut()
                 .push((context.local_identity(), outputs))
         });
-        Ok(ValueSequence::single(Value::Num(1.0))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
+        ValueSequence::single(Value::Num(1.0))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
     })
 }
 
@@ -242,8 +242,8 @@ fn requested_gather_adapts_only_the_selected_implementation() {
                 )
             } else {
                 record("host-effect");
-                Ok(ValueSequence::single(Value::Num(31.0))
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?)
+                ValueSequence::single(Value::Num(31.0))
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
             }
         })
     }
