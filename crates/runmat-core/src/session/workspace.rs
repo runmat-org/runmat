@@ -142,7 +142,7 @@ impl RunMatSession {
         let global_names = self.session_global_binding_names()?;
         let mut values = base
             .iter()
-            .filter(|(name, _)| !global_names.contains(name))
+            .filter(|(name, _)| !global_names.contains(*name))
             .map(|(name, value)| (name.to_string(), value.clone()))
             .collect::<std::collections::BTreeMap<_, _>>();
         for name in global_names {

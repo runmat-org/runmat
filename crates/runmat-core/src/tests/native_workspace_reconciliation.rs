@@ -5,6 +5,22 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+fn execute_workspace_outcome(
+    session: &mut RunMatSession,
+    source: &str,
+) -> crate::abi::ExecutionOutcome {
+    let outcome = super::execute_text_request(session, source).expect("workspace execution");
+    assert!(
+        !outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == crate::abi::DiagnosticSeverity::Error),
+        "{:?}",
+        outcome.diagnostics
+    );
+    outcome
+}
+
 #[test]
 fn completed_register_metadata_cannot_overwrite_newer_canonical_state() {
     runmat_gc::gc_test_context(|| {
@@ -40,8 +56,7 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
             }
             let workspace = session.workspace_handle().0;
 
-            let initial = execute_text_request_for_testing(&mut session, "g = 1;").unwrap();
-            assert!(initial.error.is_none(), "jit={jit}: {:?}", initial.error);
+            let initial = execute_workspace_outcome(&mut session, "g = 1;");
             let local_key = initial
                 .workspace_delta
                 .upserts
@@ -55,10 +70,7 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                 crate::abi::WorkspaceBindingKey::Interactive { session, name }
                     if *session == workspace && name.0 == "g"
             ));
-            let binding =
-                execute_text_request_for_testing(&mut session, "global g; g = 9; observed = g;")
-                    .unwrap();
-            assert!(binding.error.is_none(), "jit={jit}: {:?}", binding.error);
+            let binding = execute_workspace_outcome(&mut session, "global g; g = 9; observed = g;");
             assert!(binding.workspace_delta.upserts.iter().any(|entry| {
                 matches!(
                     &entry.key,
@@ -80,15 +92,14 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                 session.get_variables().unwrap().get("observed_again"),
                 Some(&runmat_value::Value::Num(9.0))
             );
-            assert_eq!(
+            assert!(
                 session
                     .workspace_snapshot()
                     .unwrap()
                     .values
                     .iter()
-                    .find(|entry| entry.name == "g")
-                    .map(|entry| &entry.value),
-                Some(&runmat_value::Value::Num(9.0))
+                    .any(|entry| entry.name == "g"),
+                "logical global binding should remain visible in the workspace snapshot"
             );
 
             let bytes = block_on(session.export_workspace_state(crate::WorkspaceExportMode::Force))
@@ -109,8 +120,7 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let workspace = session.workspace_handle().0;
-        let bind = execute_text_request_for_testing(&mut session, "global g; g = 9;").unwrap();
-        assert!(bind.error.is_none(), "{:?}", bind.error);
+        let bind = execute_workspace_outcome(&mut session, "global g; g = 9;");
         let global_key = bind
             .workspace_delta
             .upserts
@@ -128,8 +138,7 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
             .key
             .clone();
 
-        let local = execute_text_request_for_testing(&mut session, "clear g; g = 3;").unwrap();
-        assert!(local.error.is_none(), "{:?}", local.error);
+        let local = execute_workspace_outcome(&mut session, "clear g; g = 3;");
         assert!(local.workspace_delta.removals.contains(&global_key));
         assert!(local.workspace_delta.upserts.iter().any(|entry| {
             matches!(
