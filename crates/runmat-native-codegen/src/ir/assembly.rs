@@ -23,6 +23,11 @@ pub struct NativeAssembly {
     pub native_cache_key: Digest,
     pub target: NativeTarget,
     pub requirements: NativeRequirements,
+    /// Compiler/session identity selected for this product. Portable artifact
+    /// identity remains in `executable_identity.entrypoint_function`.
+    pub selected_entrypoint: runmat_types::ProgramFunctionId,
+    pub selected_portable_entrypoint: runmat_types::ProgramFunctionId,
+    pub selected_entrypoint_body: Digest,
     pub entrypoints: Vec<runmat_types::ProgramFunctionId>,
     pub functions: Vec<NativeFunction>,
 }

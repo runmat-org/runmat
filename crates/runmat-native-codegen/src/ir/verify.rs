@@ -20,8 +20,20 @@ impl NativeAssembly {
                 "assembly and executable identities name different programs",
             ));
         }
+        if self.selected_portable_entrypoint != self.executable_identity.entrypoint_function {
+            return Err(NativeCodegenError::new(
+                "native.ir.entrypoint_binding",
+                "selected portable entrypoint differs from the executable identity",
+            ));
+        }
         self.target.validate()?;
-        if self.native_cache_key != self.target.cache_key(&self.executable_cache_key)? {
+        if self.native_cache_key
+            != self.target.cache_key(
+                &self.executable_cache_key,
+                self.selected_entrypoint,
+                &self.selected_entrypoint_body,
+            )?
+        {
             return Err(NativeCodegenError::new(
                 "native.ir.cache_key",
                 "native cache key does not bind the executable, target, schema, and ABI",
@@ -78,15 +90,19 @@ impl NativeAssembly {
             .iter()
             .map(|function| (function.id, function))
             .collect::<BTreeMap<_, _>>();
-        if self.entrypoints.windows(2).any(|pair| pair[0] >= pair[1])
+        ensure_sorted_unique_by("native.ir.entrypoints", &self.entrypoints, |entrypoint| {
+            *entrypoint
+        })?;
+        if self.entrypoints.is_empty()
             || self
                 .entrypoints
                 .iter()
                 .any(|entrypoint| !functions.contains_key(entrypoint))
+            || !self.entrypoints.contains(&self.selected_entrypoint)
         {
             return Err(NativeCodegenError::new(
                 "native.ir.entrypoints",
-                "entrypoints must be sorted, unique, and name retained functions",
+                "Native IR entrypoints must exist and contain the selected compiled entrypoint",
             ));
         }
         for function in &self.functions {

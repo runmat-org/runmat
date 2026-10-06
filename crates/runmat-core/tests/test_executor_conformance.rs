@@ -312,6 +312,12 @@ async fn executable_unit_retains_exact_program_point_analysis() {
                 mir: unit.mir(),
                 analysis: unit.analysis(),
                 manifest: &envelope.manifest,
+                entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+                    unit.mir(),
+                    *unit.mir().entrypoints.first().expect("fixture entrypoint"),
+                    envelope.manifest.identity.entrypoint_function,
+                )
+                .unwrap(),
                 binding_names: Some(&binding_names),
                 target: runmat_native_codegen::NativeTarget::current(),
             })

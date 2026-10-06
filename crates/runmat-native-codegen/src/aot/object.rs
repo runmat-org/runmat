@@ -39,7 +39,7 @@ pub fn emit_relocatable_object_for_runtime(
 ) -> NativeCodegenResult<RelocatableNativeObject> {
     assembly.verify()?;
     assembly.target.validate()?;
-    let entrypoint = assembly.executable_identity.entrypoint_function;
+    let entrypoint = assembly.selected_entrypoint;
     if !assembly
         .functions
         .iter()

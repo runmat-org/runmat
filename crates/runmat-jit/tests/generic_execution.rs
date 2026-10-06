@@ -2023,6 +2023,12 @@ fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })
@@ -2161,6 +2167,12 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })
@@ -2556,6 +2568,12 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })
@@ -2678,6 +2696,12 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })
@@ -3409,6 +3433,12 @@ fn lower_body_with_inputs(
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: Some(
             &fixed_inputs
                 .iter()
@@ -3510,6 +3540,12 @@ fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembl
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: Some(&binding_names),
         target: NativeTarget::current(),
     })
@@ -3611,6 +3647,12 @@ fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembl
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: Some(&binding_names),
         target: NativeTarget::current(),
     })
@@ -3706,6 +3748,12 @@ fn workspace_binding_fixture(
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: Some(&binding_names),
         target: NativeTarget::current(),
     })
@@ -3801,6 +3849,12 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: Some(&binding_names),
         target: NativeTarget::current(),
     })
@@ -4375,6 +4429,12 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })
@@ -4571,6 +4631,12 @@ fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })

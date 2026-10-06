@@ -103,12 +103,16 @@ impl NativeTarget {
     pub fn cache_key(
         &self,
         executable_cache_key: &runmat_execution::Digest,
+        selected_entrypoint: runmat_types::ProgramFunctionId,
+        selected_entrypoint_body: &runmat_execution::Digest,
     ) -> NativeCodegenResult<runmat_execution::Digest> {
         self.validate()?;
         Ok(runmat_execution::Digest::sha256(format!(
-            "runmat-native-ir-v{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+            "runmat-native-ir-v{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
             crate::NATIVE_IR_SCHEMA_VERSION,
             executable_cache_key,
+            selected_entrypoint.0,
+            selected_entrypoint_body,
             self.architecture,
             self.operating_system,
             self.pointer_width,

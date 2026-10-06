@@ -209,6 +209,12 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            &mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )
+        .unwrap(),
         binding_names: None,
         target: NativeTarget::current(),
     })

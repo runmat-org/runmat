@@ -3,6 +3,9 @@ use super::ExecutableUnit;
 pub(super) struct PortableEntrypoint {
     pub(super) name: String,
     pub(super) function: runmat_types::ProgramFunctionId,
+    /// Session/compiler identity of the same body. This is intentionally not
+    /// serialized into the portable executable identity.
+    pub(super) compiled_function: runmat_hir::FunctionId,
     pub(super) kind: runmat_execution::ExecutableEntrypointKind,
 }
 
@@ -39,6 +42,7 @@ fn function_entrypoint(
     Ok(PortableEntrypoint {
         name: name.to_string(),
         function: body.portable_function,
+        compiled_function: function,
         kind: runmat_execution::ExecutableEntrypointKind::Function,
     })
 }
@@ -94,6 +98,7 @@ fn script_entrypoint(unit: &ExecutableUnit) -> Result<PortableEntrypoint, String
     Ok(PortableEntrypoint {
         name: "script".into(),
         function: portable,
+        compiled_function: function,
         kind: runmat_execution::ExecutableEntrypointKind::Script,
     })
 }

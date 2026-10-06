@@ -507,6 +507,11 @@ fn lower_with_bindings(
         mir,
         analysis,
         manifest,
+        entrypoint: runmat_native_codegen::NativeEntrypointBinding::new(
+            mir,
+            *mir.entrypoints.first().expect("fixture entrypoint"),
+            manifest.identity.entrypoint_function,
+        )?,
         binding_names,
         target: NativeTarget::current(),
     })
@@ -571,6 +576,31 @@ fn bound_locals_require_and_retain_canonical_semantic_names() {
             .unwrap_err()
             .code,
         "native.ir.mir_locals"
+    );
+}
+
+#[test]
+fn selected_entrypoint_preserves_the_complete_mir_entrypoint_inventory() {
+    let mut mir = function(vec![assignment(1)]);
+    let mut second_body = mir.bodies[&FunctionId(0)].clone();
+    second_body.function = FunctionId(1);
+    let mut second_metadata = mir.functions[&FunctionId(0)].clone();
+    second_metadata.name = FunctionName("second".into());
+    mir.bodies.insert(FunctionId(1), second_body);
+    mir.functions.insert(FunctionId(1), second_metadata);
+    mir.entrypoints.push(FunctionId(1));
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+
+    let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
+    assert_eq!(
+        assembly.entrypoints,
+        vec![ProgramFunctionId(0), ProgramFunctionId(1)]
+    );
+    assert_eq!(assembly.selected_entrypoint, ProgramFunctionId(0));
+    assert_eq!(
+        assembly.selected_portable_entrypoint,
+        manifest.identity.entrypoint_function
     );
 }
 
@@ -1036,6 +1066,14 @@ fn native_cache_identity_binds_target_and_abi() {
     let mut tampered = assembly.clone();
     tampered.native_cache_key = Digest::sha256(b"wrong-native-key");
     assert_eq!(tampered.verify().unwrap_err().code, "native.ir.cache_key");
+    let mut wrong_selected = assembly.clone();
+    wrong_selected.selected_entrypoint =
+        ProgramFunctionId(wrong_selected.selected_entrypoint.0.saturating_add(1));
+    assert_eq!(
+        wrong_selected.verify().unwrap_err().code,
+        "native.ir.cache_key",
+        "the native cache key must bind the selected compiled entrypoint"
+    );
 
     let mut cross_target = assembly.target;
     cross_target.architecture = "not-the-current-architecture".into();
@@ -1054,7 +1092,11 @@ fn executable_manifest_binding_rejects_a_coordinated_cache_key_substitution() {
     assembly.executable_cache_key = Digest::sha256(b"substituted-executable");
     assembly.native_cache_key = assembly
         .target
-        .cache_key(&assembly.executable_cache_key)
+        .cache_key(
+            &assembly.executable_cache_key,
+            assembly.selected_entrypoint,
+            &assembly.selected_entrypoint_body,
+        )
         .unwrap();
     assembly.verify().unwrap();
     assert_eq!(

@@ -18,6 +18,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
             .map_err(|error| format!("standalone program manifest is invalid: {error}"))?;
     if program.executable != assembly.executable_identity
         || program.native_ir_digest != runmat_execution::Digest::sha256(&input.native_ir)
+        || assembly.selected_entrypoint != program.entrypoint
     {
         return Err("standalone program manifest does not match its Native IR".into());
     }
@@ -57,7 +58,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     if resume_points.len() != resume_point_count {
         return Err("standalone resume-point map contains duplicate identities".into());
     }
-    let entrypoint = assembly.executable_identity.entrypoint_function;
+    let entrypoint = program.entrypoint;
     let function = assembly
         .functions
         .iter()

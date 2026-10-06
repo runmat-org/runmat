@@ -81,7 +81,7 @@ impl NativeExecutor {
             ));
         }
         let regions = assembly.requirements.regions.clone();
-        let profiled_function = assembly.executable_identity.entrypoint_function;
+        let profiled_function = assembly.selected_entrypoint;
         let optimized_regions = if options.entry_profile.is_some() {
             crate::region::derive_plans(&assembly.functions, &regions)
         } else {

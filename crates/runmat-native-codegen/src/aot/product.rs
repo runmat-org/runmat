@@ -3,8 +3,8 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 6;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 5;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 7;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 6;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -56,6 +56,9 @@ impl AotBuiltinBinding {
 pub struct AotProgramManifest {
     pub schema_version: u16,
     pub executable: ExecutableIdentity,
+    /// Compiler/native identity selected for this product. The executable
+    /// identity independently retains its immutable portable function ordinal.
+    pub entrypoint: ProgramFunctionId,
     pub native_ir_digest: Digest,
     pub source_map: runmat_execution::ExecutableSourceMapV2,
     pub functions: Vec<AotProgramFunction>,
@@ -85,6 +88,7 @@ impl AotProgramManifest {
         runtime_binding_mode: AotRuntimeBindingMode,
         mut builtin_bindings: Vec<AotBuiltinBinding>,
     ) -> Result<Self, crate::NativeCodegenError> {
+        assembly.verify()?;
         let mut functions = assembly
             .functions
             .iter()
@@ -101,6 +105,7 @@ impl AotProgramManifest {
         let manifest = Self {
             schema_version: AOT_PROGRAM_MANIFEST_SCHEMA_VERSION,
             executable: assembly.executable_identity.clone(),
+            entrypoint: assembly.selected_entrypoint,
             native_ir_digest,
             source_map,
             functions,
@@ -138,7 +143,7 @@ impl AotProgramManifest {
             || !self
                 .functions
                 .iter()
-                .any(|function| function.function == self.executable.entrypoint_function)
+                .any(|function| function.function == self.entrypoint)
             || self.functions.iter().any(|function| {
                 function.name.is_empty()
                     || function.name.len() > 512
@@ -252,6 +257,16 @@ mod admission_tests {
             "actual 1, expected {}",
             super::AOT_PROGRAM_MANIFEST_SCHEMA_VERSION
         )));
+    }
+
+    #[test]
+    fn schema_five_program_manifest_is_rejected_before_selected_entrypoint_decode() {
+        let error = AotProgramManifest::from_canonical_bytes(
+            br#"{"schema_version":5,"functions":"old selected-entrypoint semantics"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "native.aot.program.schema");
+        assert!(error.message.contains("actual 5, expected 6"));
     }
 
     #[test]

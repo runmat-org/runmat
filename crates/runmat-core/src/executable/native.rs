@@ -13,7 +13,7 @@ pub struct NativeCompilationInput {
     manifest: runmat_execution::ExecutableUnitManifest,
     source_map: runmat_execution::ExecutableSourceMapV2,
     binding_names: BTreeMap<runmat_types::BindingId, String>,
-    entrypoint: runmat_types::ProgramFunctionId,
+    entrypoint: runmat_native_codegen::NativeEntrypointBinding,
     program_capture: Vec<u8>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     coverage_sites: BTreeMap<runmat_types::ProgramPointId, Vec<u64>>,
@@ -30,7 +30,7 @@ pub struct AotObjectDataOptions {
 
 impl NativeCompilationInput {
     pub fn entrypoint(&self) -> runmat_types::ProgramFunctionId {
-        self.entrypoint
+        self.entrypoint.compiled()
     }
 
     pub fn lower(
@@ -38,13 +38,50 @@ impl NativeCompilationInput {
         target: runmat_native_codegen::NativeTarget,
     ) -> Result<runmat_native_codegen::NativeAssembly, runmat_native_codegen::NativeCodegenError>
     {
+        self.validate_entrypoint().map_err(|error| {
+            runmat_native_codegen::NativeCodegenError::new(
+                "native.lowering.entrypoint_binding",
+                error.to_string(),
+            )
+        })?;
         runmat_native_codegen::lower_executable(runmat_native_codegen::NativeLoweringInput {
             mir: &self.mir,
             analysis: &self.analysis,
             manifest: &self.manifest,
+            entrypoint: self.entrypoint.clone(),
             binding_names: Some(&self.binding_names),
             target,
         })
+    }
+
+    fn validate_entrypoint(&self) -> Result<(), runmat_runtime::RuntimeError> {
+        if self.manifest.identity.entrypoint_kind
+            == runmat_execution::ExecutableEntrypointKind::Script
+        {
+            return Ok(());
+        }
+        let registry = runmat_vm::decode_interpreter_program_v2(&self.program_capture)
+            .map_err(|error| native_product_error(error.to_string()))?;
+        let function = runmat_hir::FunctionId(
+            usize::try_from(self.entrypoint.compiled().0)
+                .map_err(|_| native_product_error("native entrypoint exceeds this host".into()))?,
+        );
+        let body = registry.get(function).ok_or_else(|| {
+            native_product_error("selected native function is absent from its capture".into())
+        })?;
+        let expected = runmat_execution::FunctionBindingOrigin::from_revision(
+            &self.manifest.identity.program,
+            self.entrypoint.portable(),
+        )
+        .map_err(|error| native_product_error(error.to_string()))?;
+        if body.portable_function != self.entrypoint.portable()
+            || body.binding_origin != Some(expected)
+        {
+            return Err(native_product_error(
+                "selected native function differs from its admitted portable origin".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn program_capture(&self) -> &[u8] {
@@ -63,7 +100,7 @@ impl NativeCompilationInput {
         mut self,
         retained: &std::collections::BTreeSet<runmat_types::ProgramFunctionId>,
     ) -> Result<Self, runmat_runtime::RuntimeError> {
-        if !retained.contains(&self.entrypoint) {
+        if !retained.contains(&self.entrypoint.compiled()) {
             return Err(native_product_error(
                 "native retention set omits the executable entrypoint".into(),
             ));
@@ -149,12 +186,22 @@ impl NativeCompilationInput {
         Vec<runmat_native_codegen::aot::NativeObjectData>,
         runmat_native_codegen::NativeCodegenError,
     > {
-        if assembly.executable_identity != self.manifest.identity {
+        self.validate_entrypoint().map_err(|error| {
+            runmat_native_codegen::NativeCodegenError::new(
+                "native.object.entrypoint_binding",
+                error.to_string(),
+            )
+        })?;
+        if assembly.executable_identity != self.manifest.identity
+            || assembly.selected_entrypoint != self.entrypoint.compiled()
+            || assembly.selected_portable_entrypoint != self.entrypoint.portable()
+        {
             return Err(runmat_native_codegen::NativeCodegenError::new(
                 "native.object.executable_identity",
-                "AOT embedded data does not belong to the supplied native assembly",
+                "AOT embedded data does not belong to the selected native assembly",
             ));
         }
+        runmat_native_codegen::verify_against_mir(assembly, &self.mir, Some(&self.binding_names))?;
         let native_ir = serde_json::to_vec(assembly).map_err(|error| {
             runmat_native_codegen::NativeCodegenError::new(
                 "native.object.native_ir",
@@ -249,8 +296,51 @@ impl ExecutableUnit {
         let envelope = self
             .portable_envelope_for_with_interop(preferred_function, interop)
             .map_err(native_product_error)?;
-        let program_capture =
-            runmat_vm::encode_interpreter_program_v2(self.functions()).map_err(|error| {
+        let selected = super::portable_entrypoint::resolve(self, preferred_function)
+            .map_err(native_product_error)?;
+        if selected.kind == runmat_execution::ExecutableEntrypointKind::Function {
+            let body = self
+                .functions()
+                .get(selected.compiled_function)
+                .ok_or_else(|| {
+                    native_product_error(
+                        "native entrypoint has no exact selected function body".into(),
+                    )
+                })?;
+            let expected = runmat_execution::FunctionBindingOrigin::from_revision(
+                &envelope.manifest.identity.program,
+                selected.function,
+            )
+            .map_err(|error| native_product_error(error.to_string()))?;
+            if body.portable_function != selected.function
+                || body.binding_origin.is_some_and(|origin| origin != expected)
+            {
+                return Err(native_product_error(
+                    "native entrypoint lies outside its portable executable origin".into(),
+                ));
+            }
+        }
+        let compiled_entrypoint = selected.compiled_function;
+        let entrypoint = runmat_native_codegen::NativeEntrypointBinding::new(
+            self.mir(),
+            compiled_entrypoint,
+            selected.function,
+        )
+        .map_err(|error| native_product_error(error.to_string()))?;
+        let mut captured_functions = self.functions().clone();
+        for body in captured_functions.functions.values_mut() {
+            if body.binding_origin.is_none() {
+                body.binding_origin = Some(
+                    runmat_execution::FunctionBindingOrigin::from_revision(
+                        &envelope.manifest.identity.program,
+                        body.portable_function,
+                    )
+                    .map_err(|error| native_product_error(error.to_string()))?,
+                );
+            }
+        }
+        let program_capture = runmat_vm::encode_interpreter_program_v2(&captured_functions)
+            .map_err(|error| {
                 native_product_error(format!("failed to capture native program: {error}"))
             })?;
         let mut interpreter_resume_points = self
@@ -292,10 +382,12 @@ impl ExecutableUnit {
                 }
             }
         }
-        if let Some(layout) = self.vm_layout().functions.values().find(|layout| {
-            u32::try_from(layout.function.0).ok()
-                == Some(envelope.manifest.identity.entrypoint_function.0)
-        }) {
+        if let Some(layout) = self
+            .vm_layout()
+            .functions
+            .values()
+            .find(|layout| layout.function == compiled_entrypoint)
+        {
             for (point, pc) in &layout.resume_points {
                 if let Some(sites) = self
                     .bytecode()
@@ -317,7 +409,7 @@ impl ExecutableUnit {
         Ok(NativeCompilationInput {
             mir: self.mir().clone(),
             analysis: self.analysis().clone(),
-            entrypoint: envelope.manifest.identity.entrypoint_function,
+            entrypoint,
             manifest: envelope.manifest,
             source_map: self
                 .source_map()
@@ -344,7 +436,80 @@ mod tests {
     use futures::executor::block_on;
 
     use super::AotObjectDataOptions;
-    use crate::{ExecutableSource, RunMatSession};
+    use crate::{execute_text_request, ExecutableSource, RunMatSession};
+
+    #[test]
+    fn native_entrypoint_projects_compiler_identity_without_rewriting_portable_origin() {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        execute_text_request(
+            &mut session,
+            "seed = 0;\nfunction y = nativeIdentitySeed(x)\ny = x;\nend",
+        )
+        .expect("publish preceding session definition");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-identity@1",
+                "nativeIdentityProbe.m",
+                "function y = nativeIdentityProbe(x)\ny = x + 1;\nend\nfunction y = nativeIdentityDecoy(x)\ny = x - 1;\nend",
+            ),
+            None,
+        ))
+        .expect("compile remapped native fixture");
+        let compiled = unit
+            .functions()
+            .resolve_name("nativeIdentityProbe")
+            .expect("compiled function identity");
+        let portable = unit
+            .functions()
+            .get(compiled)
+            .expect("compiled function body")
+            .portable_function;
+        let compiled = runmat_types::ProgramFunctionId(
+            u32::try_from(compiled.0).expect("compiled identity fits native schema"),
+        );
+        assert_ne!(compiled, portable, "fixture must exercise remapping");
+
+        let input = unit
+            .prepare_native_compilation_for(Some("nativeIdentityProbe"))
+            .expect("prepare native input");
+        assert_eq!(input.entrypoint(), compiled);
+        assert_eq!(input.manifest.identity.entrypoint_function, portable);
+        let assembly = input
+            .lower(runmat_native_codegen::NativeTarget::current())
+            .expect("lower remapped native entrypoint");
+        assert!(assembly.entrypoints.contains(&compiled));
+        assert_eq!(assembly.selected_entrypoint, compiled);
+        assert_eq!(assembly.selected_portable_entrypoint, portable);
+        assert_eq!(assembly.executable_identity.entrypoint_function, portable);
+
+        let program = runmat_native_codegen::aot::AotProgramManifest::from_assembly(
+            &assembly,
+            runmat_execution::Digest::sha256(b"native identity fixture"),
+            unit.source_map()
+                .portable_v2()
+                .expect("portable source map"),
+            runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
+            Vec::new(),
+        )
+        .expect("project AOT program identity");
+        assert_eq!(program.entrypoint, compiled);
+        assert_eq!(program.executable.entrypoint_function, portable);
+
+        let decoy = unit
+            .functions()
+            .resolve_name("nativeIdentityDecoy")
+            .expect("decoy compiled identity");
+        let mut wrong = unit
+            .prepare_native_compilation_for(Some("nativeIdentityProbe"))
+            .expect("prepare adversarial native input");
+        wrong.entrypoint =
+            runmat_native_codegen::NativeEntrypointBinding::new(&wrong.mir, decoy, portable)
+                .expect("construct mismatched retained selector");
+        let error = wrong
+            .lower(runmat_native_codegen::NativeTarget::current())
+            .expect_err("wrong retained selector must fail before native lowering");
+        assert_eq!(error.code, "native.lowering.entrypoint_binding");
+    }
 
     #[test]
     fn native_capture_retention_preserves_nonfinite_literals_before_pruning() {
