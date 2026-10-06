@@ -187,6 +187,7 @@ fn admitted_native_write_remains_publishable_after_execution_state_drops() {
     let (function, input) = fixture(Value::Num(1.0));
     let state =
         NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical)).unwrap();
+    assert!(!projection.has_pending_changes().unwrap());
     state.synchronize_local(0, Value::Num(42.0)).unwrap();
     drop(state);
 
@@ -211,4 +212,65 @@ fn retained_native_workspace_service_rejects_effects_after_executor_drop() {
     }
     assert!(service.try_snapshot().is_err());
     assert_eq!(service.lookup("missing"), None);
+}
+
+#[test]
+fn active_native_checked_reads_preserve_authority_and_borrow_failures() {
+    let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let canonical: std::rc::Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> =
+        std::rc::Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
+        ));
+    let (function, input) = fixture(Value::Num(1.0));
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical)).unwrap();
+    let service = state.service();
+
+    {
+        let _borrow = state.values.borrow_mut();
+        let error = service.try_lookup("missing").unwrap_err();
+        assert_eq!(error.identifier(), Some("NativeWorkspaceBorrow"));
+        let error = service.try_snapshot().unwrap_err();
+        assert_eq!(error.identifier(), Some("NativeWorkspaceBorrow"));
+    }
+
+    owner.close().unwrap();
+    for error in [
+        service.try_lookup("missing").unwrap_err(),
+        service.try_snapshot().unwrap_err(),
+        service.try_global_names().unwrap_err(),
+    ] {
+        assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+    }
+}
+
+#[test]
+fn internal_native_stores_check_authority_for_global_and_function_frames() {
+    let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let canonical: std::rc::Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> =
+        std::rc::Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
+        ));
+    let (function, input) = fixture(Value::Num(1.0));
+    let aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
+    aliases.declare_named(0, "missing".into());
+    let state =
+        NativeWorkspaceState::new(&function, input, aliases, Some(canonical.clone())).unwrap();
+    let function_state =
+        NativeWorkspaceState::function_frame(&function, Default::default(), Some(canonical));
+    owner.close().unwrap();
+
+    for error in [
+        state.synchronize_local(0, Value::Num(2.0)).unwrap_err(),
+        function_state
+            .synchronize_local(0, Value::Num(3.0))
+            .unwrap_err(),
+    ] {
+        let crate::NativeExecutorError::Runtime(error) = error else {
+            panic!("expected typed Runtime workspace rejection")
+        };
+        assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+    }
+    assert_eq!(state.initial_value(0), Some(Value::Num(1.0)));
+    assert_eq!(function_state.initial_value(0), None);
 }

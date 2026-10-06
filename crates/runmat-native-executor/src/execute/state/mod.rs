@@ -189,6 +189,7 @@ impl HostState {
             super::workspace::NativeWorkspaceState::function_frame(
                 &function,
                 global_bindings.clone(),
+                canonical_workspace,
             )
         };
         let ports = runtime
@@ -256,7 +257,7 @@ impl HostState {
             }
             let reference = *local;
             if !reference.is_null() {
-                workspace.synchronize_local(slot, arena.get(reference)?.clone())?;
+                workspace.initialize_local(slot, arena.get(reference)?.clone())?;
             }
         }
         let roots = locals

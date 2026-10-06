@@ -60,15 +60,18 @@ impl HostState {
         captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     ) -> NativeExecutorResult<()> {
         for capture in captures {
-            let local = self
+            let slot = self
                 .function
                 .locals
                 .iter()
                 .find(|local| local.binding == Some(capture.binding))
                 .ok_or_else(|| {
                     NativeExecutorError::Host("returned lexical binding is not visible".into())
-                })?;
-            self.locals[local.id.0 as usize] = self.arena.insert(capture.value);
+                })?
+                .id
+                .0 as usize;
+            let value = self.arena.insert(capture.value);
+            self.set_local(slot, value)?;
         }
         Ok(())
     }

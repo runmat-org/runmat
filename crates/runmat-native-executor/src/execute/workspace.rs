@@ -139,6 +139,7 @@ impl NativeWorkspaceState {
     pub(super) fn function_frame(
         function: &runmat_native_codegen::NativeFunction,
         global_aliases: FrameGlobalBindings,
+        canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
     ) -> Self {
         let local_names = function
             .locals
@@ -152,7 +153,7 @@ impl NativeWorkspaceState {
             local_names,
             publish: false,
             global_aliases,
-            canonical: None,
+            canonical,
             canonical_revision: Rc::new(Cell::new(None)),
             active: Rc::new(Cell::new(true)),
         }
@@ -187,6 +188,21 @@ impl NativeWorkspaceState {
         })
     }
 
+    pub(super) fn initialize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
+        let Some(name) = self.local_names.get(&slot) else {
+            return Ok(());
+        };
+        let rooted = RootedWorkspaceValue::new(value).map_err(NativeExecutorError::Runtime)?;
+        let mut values = self
+            .values
+            .try_borrow_mut()
+            .map_err(workspace_borrow_error)?;
+        let previous = values.insert(name.clone(), rooted);
+        drop(values);
+        drop(previous);
+        Ok(())
+    }
+
     pub(super) fn synchronize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
         if let Some(name) = self.local_names.get(&slot) {
             let rooted =
@@ -195,10 +211,14 @@ impl NativeWorkspaceState {
                 .try_borrow_mut()
                 .map(drop)
                 .map_err(workspace_borrow_error)?;
-            if self.publish && !self.global_aliases.is_bound(slot, name) {
-                if let Some(canonical) = self.canonical.as_ref() {
+            if let Some(canonical) = self.canonical.as_ref() {
+                if self.publish && !self.global_aliases.is_bound(slot, name) {
                     canonical
                         .assign(name, value.clone())
+                        .map_err(NativeExecutorError::Runtime)?;
+                } else {
+                    canonical
+                        .ensure_effect_authority()
                         .map_err(NativeExecutorError::Runtime)?;
                 }
             }
@@ -314,17 +334,28 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn try_lookup(&self, name: &str) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
-        self.ensure_active()?;
-        Ok(self.lookup(name))
+        self.ensure_effect_authority()?;
+        let values = self
+            .values
+            .try_borrow()
+            .map_err(workspace_read_borrow_error)?;
+        Ok(values.get(name).map(|entry| entry.value.clone()))
     }
 
     fn try_snapshot(&self) -> Result<Vec<(String, Value)>, runmat_runtime::RuntimeError> {
-        self.ensure_active()?;
-        Ok(self.snapshot())
+        self.ensure_effect_authority()?;
+        let values = self
+            .values
+            .try_borrow()
+            .map_err(workspace_read_borrow_error)?;
+        Ok(values
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.value.clone()))
+            .collect())
     }
 
     fn try_global_names(&self) -> Result<Vec<String>, runmat_runtime::RuntimeError> {
-        self.ensure_active()?;
+        self.ensure_effect_authority()?;
         Ok(runmat_runtime::workspace::session::global_names())
     }
 

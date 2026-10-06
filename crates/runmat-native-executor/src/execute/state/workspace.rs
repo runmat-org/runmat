@@ -46,10 +46,10 @@ impl HostState {
     ) -> NativeExecutorResult<NativeValueRef> {
         let value = value.unwrap_or_else(empty_workspace_value);
         let refreshed = self.arena.insert(value);
-        self.locals[slot] = refreshed;
         if let Some(workspace) = &self.workspace {
             workspace.synchronize_local(slot, self.arena.get(refreshed)?.clone())?;
         }
+        self.locals[slot] = refreshed;
         self.record_local_initialization(slot, refreshed);
         self.global_seen_revision.insert(slot, revision);
         Ok(refreshed)
@@ -90,18 +90,19 @@ impl HostState {
     }
 
     pub fn set_local(&mut self, slot: usize, value: NativeValueRef) -> NativeExecutorResult<()> {
-        let local = self
-            .locals
-            .get_mut(slot)
-            .ok_or_else(|| NativeExecutorError::Host("native local is out of bounds".into()))?;
-        *local = value;
-        if value.is_null() {
-            self.global_seen_revision.remove(&slot);
+        if self.locals.get(slot).is_none() {
+            return Err(NativeExecutorError::Host(
+                "native local is out of bounds".into(),
+            ));
         }
         if !value.is_null() {
             if let Some(workspace) = &self.workspace {
                 workspace.synchronize_local(slot, self.arena.get(value)?.clone())?;
             }
+        }
+        self.locals[slot] = value;
+        if value.is_null() {
+            self.global_seen_revision.remove(&slot);
         }
         self.record_local_initialization(slot, value);
         self.synchronize_session_binding(slot, value)
