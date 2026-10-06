@@ -55,6 +55,15 @@ fn feval_rethrow_inherits_native_lexical_catch() {
 }
 
 #[test]
+fn feval_rethrow_after_inner_catch_uses_outer_native_exception() {
+    runmat_gc::gc_test_context(|| {
+        const SOURCE: &str = "function native_exception()\ntry\n error('RunMat:OuterIndirect', 'outer boom');\ncatch\n try\n  error('RunMat:InnerIndirect', 'inner boom');\n catch\n end\n feval('rethrow');\nend\nend\n";
+        let error = forced_native_failure("native-lexical-feval-nested@1", SOURCE);
+        assert_origin(&error, SOURCE, "RunMat:OuterIndirect", "outer boom");
+    });
+}
+
+#[test]
 fn function_handle_rethrow_inherits_native_lexical_catch() {
     runmat_gc::gc_test_context(|| {
         const SOURCE: &str = "function native_exception()\ntry\n error('RunMat:HandleOrigin', 'handle boom');\ncatch\n callback = @rethrow;\n callback();\nend\nend\n";
@@ -83,5 +92,15 @@ fn exited_native_catch_cannot_supply_stale_rethrow_authority() {
         let error = forced_native_failure("native-lexical-stale@1", SOURCE);
         assert_eq!(error.identifier(), Some("RunMat:rethrow:NoActiveCatch"));
         assert_ne!(error.identifier(), Some("RunMat:PriorOrigin"));
+    });
+}
+
+#[test]
+fn feval_after_native_catch_cannot_supply_stale_rethrow_authority() {
+    runmat_gc::gc_test_context(|| {
+        const SOURCE: &str = "function native_exception()\ntry\n error('RunMat:PriorIndirect', 'prior boom');\ncatch\nend\nfeval('rethrow');\nend\n";
+        let error = forced_native_failure("native-lexical-feval-stale@1", SOURCE);
+        assert_eq!(error.identifier(), Some("RunMat:rethrow:NoActiveCatch"));
+        assert_ne!(error.identifier(), Some("RunMat:PriorIndirect"));
     });
 }

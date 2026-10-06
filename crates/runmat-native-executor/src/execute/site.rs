@@ -83,7 +83,7 @@ fn execute_inner(
         })?;
     if request.phase == NativeSitePhase::TERMINATOR {
         ensure_site(&block.terminator, request)?;
-        enter_site(
+        let _catch_guard = enter_site(
             state,
             call,
             &block.terminator.site,
@@ -137,7 +137,7 @@ fn execute_inner(
             .ok_or_else(|| {
                 NativeExecutorError::Host("native instruction site is unavailable".into())
             })?;
-        enter_site(
+        let _catch_guard = enter_site(
             state,
             call,
             &instruction.site,
@@ -221,7 +221,7 @@ fn enter_site(
     source: &runmat_native_codegen::NativeSourceLocation,
     side_effect_epoch: u32,
     request: NativeSiteRequest,
-) -> NativeExecutorResult<()> {
+) -> NativeExecutorResult<runmat_runtime::context::ActiveCatchGuard> {
     state.hit_coverage(site);
     state.current_source = runtime_source(source);
     state.current_request = Some(request);
@@ -245,7 +245,13 @@ fn enter_site(
     resume.local_count = state.locals.len() as u32;
     resume.side_effect_epoch = u64::from(side_effect_epoch);
     resume.source = state.current_source;
-    refresh_frame_roots(state, call)
+    refresh_frame_roots(state, call)?;
+    // The machine entry began before this MIR block was selected. Scope every
+    // synchronous semantic operation at the site to its actual lexical catch,
+    // including dynamic calls that do not enter call_suspension.
+    Ok(state
+        .runtime
+        .enter_active_catch_shared(state.active_catch_exception()))
 }
 
 fn refresh_frame_roots(state: &mut HostState, call: &mut NativeCall) -> NativeExecutorResult<()> {
