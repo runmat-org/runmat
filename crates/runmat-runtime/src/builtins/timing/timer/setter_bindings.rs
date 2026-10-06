@@ -4,11 +4,7 @@ use super::*;
 
 macro_rules! timer_setter_builtin {
     ($fn_name:ident, $builtin_name:literal, $property:expr) => {
-        #[runtime_builtin(
-                                    name = $builtin_name,
-                                    binding_variant = "default",
-                                    builtin_path = "crate::builtins::timing::timer"
-                                )]
+        #[runtime_builtin(name = $builtin_name, binding_variant = "default", builtin_path = "crate::builtins::timing::timer")]
         pub async fn $fn_name(obj: Value, value: Value) -> BuiltinResult<Value> {
             set_timer_property_object(obj, $property, value).await
         }
