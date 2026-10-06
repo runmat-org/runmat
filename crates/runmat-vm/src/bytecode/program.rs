@@ -282,6 +282,7 @@ pub struct FunctionRegistry {
 #[derive(Debug, Clone)]
 struct StaticDefinitionOverlay {
     authority: runmat_value::BoundFunctionAuthority,
+    execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -540,6 +541,7 @@ impl FunctionRegistry {
             data: std::sync::Arc::clone(&self.data),
             static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
                 authority: authority.clone(),
+                execution_stacks: OnceLock::new(),
             })),
         })
     }
@@ -767,11 +769,31 @@ impl FunctionRegistry {
 
     /// Returns the stack required by this function and its reachable callees.
     pub fn execution_stack(&self, function: FunctionId) -> runmat_types::ExecutionStackRequirement {
-        if self.static_overlay.is_some() {
-            // The cached published-body graph does not describe retained old
-            // definitions. Until an overlay-specific analysis is available,
-            // choose the conservative native process-stack route.
-            return runmat_types::ExecutionStackRequirement::Process;
+        if let Some(overlay) = &self.static_overlay {
+            return *overlay
+                .execution_stacks
+                .get_or_init(|| {
+                    let runmat_value::BoundFunctionAuthority::Local {
+                        definition,
+                        dependencies,
+                        ..
+                    } = &overlay.authority
+                    else {
+                        return HashMap::new();
+                    };
+                    std::iter::once(definition)
+                        .chain(dependencies.iter())
+                        .map(|lease| FunctionId(lease.function()))
+                        .map(|function| {
+                            (
+                                function,
+                                self.execution_stack_inner(function, &mut HashSet::new()),
+                            )
+                        })
+                        .collect()
+                })
+                .get(&function)
+                .unwrap_or(&runmat_types::ExecutionStackRequirement::Process);
         }
         *self
             .execution_stacks
@@ -800,8 +822,7 @@ impl FunctionRegistry {
             return runmat_types::ExecutionStackRequirement::Any;
         }
         let required = self
-            .functions
-            .get(&function)
+            .get(function)
             .map(|bytecode| {
                 bytecode
                     .instructions
@@ -900,6 +921,11 @@ impl FunctionRegistry {
         if !instruction_has_dynamic_dispatch(instruction) {
             return runmat_types::ExecutionStackRequirement::Any;
         }
+        if self.static_overlay.is_some() {
+            // Class registration and ordinary name lookup describe the
+            // published graph. They cannot authorize an old retained target.
+            return runmat_types::ExecutionStackRequirement::Process;
+        }
         let mut targets = HashSet::new();
         for function in self.functions.values() {
             for candidate in &function.instructions {
@@ -922,6 +948,9 @@ impl FunctionRegistry {
         requested_name: &runmat_types::MethodName,
         visiting: &mut HashSet<FunctionId>,
     ) -> Option<runmat_types::ExecutionStackRequirement> {
+        if self.static_overlay.is_some() {
+            return Some(runmat_types::ExecutionStackRequirement::Process);
+        }
         let mut targets = HashSet::new();
         for function in self.functions.values() {
             for candidate in &function.instructions {
@@ -943,6 +972,9 @@ impl FunctionRegistry {
         requested_name: &str,
         visiting: &mut HashSet<FunctionId>,
     ) -> Option<runmat_types::ExecutionStackRequirement> {
+        if self.static_overlay.is_some() {
+            return Some(runmat_types::ExecutionStackRequirement::Process);
+        }
         if let Some(requirement) = self.registered_named_method_execution_stack(
             &runmat_types::MethodName::from(requested_name),
             visiting,

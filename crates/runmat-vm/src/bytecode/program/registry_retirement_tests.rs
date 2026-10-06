@@ -51,6 +51,26 @@ fn registry() -> FunctionRegistry {
     ]))
 }
 
+fn local_authority(
+    registry: &FunctionRegistry,
+    function: FunctionId,
+) -> (runmat_value::BoundFunctionAuthority, std::sync::Arc<()>) {
+    let owners = registry
+        .definition_dependency_owners(function)
+        .expect("complete retained definition graph");
+    let issuer = std::sync::Arc::new(());
+    let authority = runmat_value::BoundFunctionAuthority::local(
+        std::sync::Arc::downgrade(&issuer),
+        runmat_value::FunctionDefinitionOwner::issue(&owners[0].1, owners[0].0 .0),
+        owners[1..]
+            .iter()
+            .map(|(id, owner)| runmat_value::FunctionDefinitionOwner::issue(owner, id.0))
+            .collect(),
+        runmat_value::LocalExport::Ephemeral,
+    );
+    (authority, issuer)
+}
+
 #[test]
 fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomically() {
     let mut registry = registry();
@@ -502,4 +522,176 @@ fn reused_id_static_edge_and_dynamic_name_have_distinct_owners() {
         ""
     );
     assert!(view.static_binding(FunctionId(2)).is_some());
+}
+
+#[test]
+fn retained_execution_stack_uses_exact_old_bodies_in_both_directions() {
+    let mut retained_registry = registry();
+    retained_registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)];
+    let (authority, _issuer) = local_authority(&retained_registry, FunctionId(1));
+
+    let mut replacement_entry = function(1, "first", 7);
+    replacement_entry.instructions =
+        vec![super::Instr::CallBuiltinMulti("javaObject".into(), 1, 1)];
+    retained_registry.insert_replacing_name(replacement_entry);
+    retained_registry.insert_replacing_name(function(2, "second", 7));
+
+    let retained = retained_registry
+        .owned_view(FunctionId(1), &authority)
+        .unwrap();
+    assert_eq!(
+        retained.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Any
+    );
+    assert_eq!(
+        retained_registry.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Process
+    );
+
+    let mut inverse = registry();
+    inverse
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallBuiltinMulti("javaObject".into(), 1, 1)];
+    let (foreign_authority, _foreign_issuer) = local_authority(&inverse, FunctionId(1));
+    inverse.insert_replacing_name(function(1, "first", 8));
+    let retained_foreign = inverse
+        .owned_view(FunctionId(1), &foreign_authority)
+        .unwrap();
+    assert_eq!(
+        retained_foreign.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Process
+    );
+    assert_eq!(
+        inverse.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Any
+    );
+}
+
+#[test]
+fn retained_execution_stack_terminates_cycles_and_rejects_missing_targets() {
+    let mut cyclic = registry();
+    cyclic
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)];
+    cyclic
+        .functions
+        .get_mut(&FunctionId(2))
+        .unwrap()
+        .instructions = vec![super::Instr::CallSemanticFunctionMulti(FunctionId(1), 0, 1)];
+    let (cycle_authority, _cycle_issuer) = local_authority(&cyclic, FunctionId(1));
+    cyclic.insert_replacing_name(function(1, "first", 7));
+    cyclic.insert_replacing_name(function(2, "second", 7));
+    let cycle = cyclic.owned_view(FunctionId(1), &cycle_authority).unwrap();
+    assert_eq!(
+        cycle.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Any
+    );
+
+    let mut missing = registry();
+    missing
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallSemanticFunctionMulti(
+        FunctionId(99),
+        0,
+        1,
+    )];
+    let owner = std::sync::Arc::clone(&missing.functions[&FunctionId(1)].definition_owner);
+    let issuer = std::sync::Arc::new(());
+    let authority = runmat_value::BoundFunctionAuthority::local(
+        std::sync::Arc::downgrade(&issuer),
+        runmat_value::FunctionDefinitionOwner::issue(&owner, 1),
+        Vec::new(),
+        runmat_value::LocalExport::Ephemeral,
+    );
+    missing.insert_replacing_name(function(1, "first", 7));
+    let missing = missing.owned_view(FunctionId(1), &authority).unwrap();
+    assert_eq!(
+        missing.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Process
+    );
+}
+
+#[test]
+fn retained_execution_stack_cache_is_owned_by_the_exact_overlay() {
+    let mut registry = registry();
+    let (authority, _issuer) = local_authority(&registry, FunctionId(1));
+    registry.insert_replacing_name(function(1, "first", 7));
+    let retained = registry.owned_view(FunctionId(1), &authority).unwrap();
+    assert_eq!(
+        retained.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Any
+    );
+
+    let retained_clone = retained.clone();
+    assert!(std::sync::Arc::ptr_eq(
+        retained.static_overlay.as_ref().unwrap(),
+        retained_clone.static_overlay.as_ref().unwrap()
+    ));
+    let mut current = retained.current_view();
+    let mut foreign = function(1, "first", 8);
+    foreign.instructions = vec![super::Instr::CallBuiltinMulti("javaObject".into(), 1, 1)];
+    current.insert_replacing_name(foreign);
+    assert_eq!(
+        current.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Process
+    );
+    assert_eq!(
+        retained_clone.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Any
+    );
+}
+
+#[test]
+fn retained_execution_stack_does_not_borrow_published_method_targets() {
+    let mut registry = registry();
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .unwrap()
+        .instructions = vec![super::Instr::CallFunctionMulti {
+        identity: runmat_types::CallableIdentity::Method(runmat_types::MethodId(
+            "Example.pure".into(),
+        )),
+        fallback_policy: runmat_types::CallableFallbackPolicy::ObjectDispatch,
+        arg_count: 0,
+        out_count: 0,
+    }];
+    let (authority, _issuer) = local_authority(&registry, FunctionId(1));
+
+    let mut published_registration = function(1, "first", 7);
+    published_registration.instructions = vec![super::Instr::RegisterClass {
+        name: "Example".into(),
+        super_class: None,
+        is_sealed: false,
+        is_abstract: false,
+        properties: Vec::new(),
+        methods: vec![crate::bytecode::instr::BytecodeClassMethod {
+            name: "pure".into(),
+            function_name: "Example.pure".into(),
+            is_static: false,
+            is_abstract: false,
+            is_sealed: false,
+            access: runmat_types::MemberAccess::Public,
+        }],
+        enumerations: Vec::new(),
+    }];
+    registry.insert_replacing_name(published_registration);
+    registry.insert_replacing_name(function(2, "Example.pure", 7));
+
+    let retained = registry.owned_view(FunctionId(1), &authority).unwrap();
+    assert_eq!(
+        retained.execution_stack(FunctionId(1)),
+        runmat_types::ExecutionStackRequirement::Process,
+        "published method metadata must not certify a retained dynamic target"
+    );
 }
