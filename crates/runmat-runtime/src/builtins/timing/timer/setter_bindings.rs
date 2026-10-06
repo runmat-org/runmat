@@ -74,8 +74,8 @@ pub(super) async fn set_timer_property_object(
     property: TimerProperty,
     value: Value,
 ) -> BuiltinResult<Value> {
-    let _roots =
-        crate::execution::RootedValueHandles::for_values([&obj, &value]).map_err(|error| {
+    let _roots = crate::execution::RootedValueHandles::for_values([&obj, &value].into_iter())
+        .map_err(|error| {
             crate::build_runtime_error("cannot retain timer setter arguments")
                 .with_source(error)
                 .build()

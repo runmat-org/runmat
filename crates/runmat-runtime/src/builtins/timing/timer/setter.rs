@@ -13,8 +13,8 @@ pub(super) async fn set_timer_property(
     };
     let runtime = timer_runtime(runtime)?;
     admit_handle(&runtime, handle, property)?;
-    let _roots =
-        crate::execution::RootedValueHandles::for_values([&receiver, &value]).map_err(|error| {
+    let _roots = crate::execution::RootedValueHandles::for_values([&receiver, &value].into_iter())
+        .map_err(|error| {
             crate::build_runtime_error("cannot retain timer setter arguments")
                 .with_source(error)
                 .build()
