@@ -11,11 +11,13 @@ mod subsref;
 mod superclasses;
 mod functions;
 mod inputname;
+mod localfunctions;
 
 pub use self::function_dispatch::*;
 pub use self::functions::*;
 pub use self::get_p::*;
 pub use self::inputname::*;
+pub use self::localfunctions::*;
 pub use self::num_arguments_from_subscript::*;
 pub use self::set_p::*;
 pub use self::subsasgn::*;
@@ -32,4 +34,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(superclasses::ENTRIES.iter().copied());
     values.extend(functions::ENTRIES.iter().copied());
     values.extend(inputname::ENTRIES.iter().copied());
+    values.extend(localfunctions::ENTRIES.iter().copied());
 }

@@ -363,7 +363,6 @@ pub(crate) async fn dispatch_object_external_member(
         runmat_types::CallableFallbackPolicy::ExternalBoundary,
         args,
         requested_outputs,
-        None,
     )
     .await
 }
