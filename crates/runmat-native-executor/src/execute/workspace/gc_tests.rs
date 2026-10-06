@@ -92,6 +92,72 @@ fn assigned_unmapped_value_survives_suspension_and_state_drop_releases_roots() {
 }
 
 #[test]
+fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
+    runmat_gc::gc_test_context(|| {
+        let allocation = runmat_gc::gc_allocate_rooted(Value::String("canonical".into())).unwrap();
+        let handle = allocation.handle();
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
+        initial
+            .assign("canonical_only", handle_value(handle))
+            .unwrap();
+        owner.apply(initial).unwrap();
+        let projection = Rc::new(
+            runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+                owner.begin_projection().unwrap(),
+            ),
+        );
+        let canonical: Rc<dyn RuntimeWorkspaceService> = projection.clone();
+        let function = NativeFunction {
+            id: ProgramFunctionId(0),
+            source: ProgramSourceId(0),
+            name: "gc_workspace".into(),
+            source_role: runmat_types::FunctionSourceRole::Unknown,
+            class_method_owner: None,
+            capabilities: Default::default(),
+            abi: NativeFunctionAbi {
+                fixed_inputs: vec![],
+                varargin: None,
+                fixed_outputs: vec![],
+                varargout: None,
+                implicit_nargin: None,
+                implicit_nargout: None,
+            },
+            argument_validations: vec![],
+            locals: vec![],
+            entry: NativeBlockId(0),
+            blocks: vec![],
+            expected_sites: vec![],
+        };
+        let state = NativeWorkspaceState::new(
+            &function,
+            NativeWorkspaceInput::default(),
+            FrameGlobalBindings::default(),
+            Some(canonical.clone()),
+        )
+        .unwrap();
+        let service = state.service();
+        drop(canonical);
+        drop(projection);
+        drop(owner);
+        allocation.unroot().unwrap();
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+
+        drop(state);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&handle).is_err(),
+            "a stale native service must not retain its canonical projection"
+        );
+        assert_eq!(
+            service.try_snapshot().unwrap_err().identifier(),
+            Some("RunMat:Workspace:FrameClosed")
+        );
+    });
+}
+
+#[test]
 fn input_snapshot_aliases_remove_clear_and_replacement_have_exact_root_lifetimes() {
     runmat_gc::gc_test_context(|| {
         let allocation = runmat_gc::gc_allocate_rooted(Value::String("aliased".into())).unwrap();

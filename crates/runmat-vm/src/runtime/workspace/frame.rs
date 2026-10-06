@@ -10,14 +10,16 @@ pub(crate) enum WorkspaceFrameLifecycle {
     Closed,
 }
 
-pub(super) struct PendingServiceFrame {
+pub(crate) struct PendingServiceFrame {
     pub(super) id: WorkspaceFrameId,
     pub(super) lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
+    pub(super) delegate:
+        Rc<RefCell<Option<Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
 }
 
 pub(crate) fn reserve_workspace_service_frame(
     runtime: runmat_runtime::context::RuntimeContextLocalId,
-) -> (WorkspaceFrameId, Rc<Cell<WorkspaceFrameLifecycle>>) {
+) -> PendingServiceFrame {
     let id = NEXT_WORKSPACE_FRAME_ID.with(|next| {
         let id = next.get();
         next.set(
@@ -27,6 +29,7 @@ pub(crate) fn reserve_workspace_service_frame(
         WorkspaceFrameId(id)
     });
     let lifecycle = Rc::new(Cell::new(WorkspaceFrameLifecycle::Pending));
+    let delegate = Rc::new(RefCell::new(None));
     PENDING_SERVICE_FRAMES.with(|frames| {
         frames
             .borrow_mut()
@@ -35,9 +38,14 @@ pub(crate) fn reserve_workspace_service_frame(
             .push(PendingServiceFrame {
                 id,
                 lifecycle: lifecycle.clone(),
+                delegate: delegate.clone(),
             });
     });
-    (id, lifecycle)
+    PendingServiceFrame {
+        id,
+        lifecycle,
+        delegate,
+    }
 }
 
 pub(crate) fn release_pending_workspace_service_frame(
@@ -59,7 +67,10 @@ pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
         })
         .unwrap_or_else(|| {
             let (id, lifecycle) = match owner {
-                WorkspaceOwner::Runtime(runtime) => reserve_workspace_service_frame(runtime),
+                WorkspaceOwner::Runtime(runtime) => {
+                    let pending = reserve_workspace_service_frame(runtime);
+                    (pending.id, pending.lifecycle)
+                }
                 WorkspaceOwner::Ambient => {
                     let id = NEXT_WORKSPACE_FRAME_ID.with(|next| {
                         let id = next.get();
@@ -73,7 +84,11 @@ pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
                 }
             };
             release_pending_workspace_service_frame_for_owner(owner, id);
-            PendingServiceFrame { id, lifecycle }
+            PendingServiceFrame {
+                id,
+                lifecycle,
+                delegate: Rc::new(RefCell::new(None)),
+            }
         })
 }
 

@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use runmat_runtime::context::RuntimeWorkspaceService;
@@ -17,7 +17,7 @@ use super::workspace::{
 /// Top-level frames delegate admitted mutations to the Runtime projection;
 /// procedure and transactional dynamic-eval frames remain isolated.
 pub(crate) struct VmWorkspaceService {
-    delegate: Option<Rc<dyn RuntimeWorkspaceService>>,
+    delegate: Rc<RefCell<Option<Rc<dyn RuntimeWorkspaceService>>>>,
     runtime: runmat_runtime::context::RuntimeContextLocalId,
     frame: WorkspaceFrameId,
     lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
@@ -39,12 +39,13 @@ impl VmWorkspaceService {
     ) {
         let delegate = runtime.service_ports().workspace().cloned();
         let runtime_id = runtime.local_identity();
-        let (frame, lifecycle) = reserve_workspace_service_frame(runtime_id);
+        let pending = reserve_workspace_service_frame(runtime_id);
+        *pending.delegate.borrow_mut() = delegate;
         let service = Rc::new(Self {
-            delegate,
+            delegate: pending.delegate,
             runtime: runtime_id,
-            frame,
-            lifecycle,
+            frame: pending.id,
+            lifecycle: pending.lifecycle,
             delegate_revision: Cell::new(None),
         });
         let port: Rc<dyn RuntimeWorkspaceService> = service.clone();
@@ -73,6 +74,10 @@ impl VmWorkspaceService {
             )),
         }
     }
+
+    fn delegate(&self) -> Option<Rc<dyn RuntimeWorkspaceService>> {
+        self.delegate.borrow().clone()
+    }
 }
 
 impl Drop for VmWorkspaceService {
@@ -80,6 +85,7 @@ impl Drop for VmWorkspaceService {
         if self.lifecycle.get() == WorkspaceFrameLifecycle::Pending {
             release_pending_workspace_service_frame(self.runtime, self.frame);
             self.lifecycle.set(WorkspaceFrameLifecycle::Closed);
+            self.delegate.borrow_mut().take();
         }
     }
 }
@@ -88,8 +94,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         if self.is_pending() {
             return self
-                .delegate
-                .as_ref()
+                .delegate()
                 .and_then(|delegate| delegate.visit_retained_values(visitor));
         }
         let snapshot = workspace_frame_snapshot(self.frame)?;
@@ -101,7 +106,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
 
     fn lookup(&self, name: &str) -> Option<Value> {
         match self.lifecycle.get() {
-            WorkspaceFrameLifecycle::Pending => self.delegate.as_ref()?.lookup(name),
+            WorkspaceFrameLifecycle::Pending => self.delegate()?.lookup(name),
             WorkspaceFrameLifecycle::Active => workspace_frame_lookup(self.frame, name),
             WorkspaceFrameLifecycle::Closed => None,
         }
@@ -110,8 +115,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     fn snapshot(&self) -> Vec<(String, Value)> {
         match self.lifecycle.get() {
             WorkspaceFrameLifecycle::Pending => self
-                .delegate
-                .as_ref()
+                .delegate()
                 .map(|delegate| delegate.snapshot())
                 .unwrap_or_default(),
             WorkspaceFrameLifecycle::Active => {
@@ -124,8 +128,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     fn global_names(&self) -> Vec<String> {
         match self.lifecycle.get() {
             WorkspaceFrameLifecycle::Pending => self
-                .delegate
-                .as_ref()
+                .delegate()
                 .map(|delegate| delegate.global_names())
                 .unwrap_or_default(),
             WorkspaceFrameLifecycle::Active => workspace_global_names(),
@@ -139,8 +142,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
             self.ensure_effect_authority()?;
             return Ok(workspace_frame_lookup(self.frame, name));
         }
-        self.delegate
-            .as_ref()
+        self.delegate()
             .map(|delegate| delegate.try_lookup(name))
             .unwrap_or(Ok(None))
     }
@@ -148,8 +150,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     fn try_snapshot(&self) -> Result<Vec<(String, Value)>, RuntimeError> {
         if self.is_pending() {
             return self
-                .delegate
-                .as_ref()
+                .delegate()
                 .map(|delegate| delegate.try_snapshot())
                 .unwrap_or_else(|| Ok(Vec::new()));
         }
@@ -163,15 +164,14 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         if !self.is_pending() {
             self.ensure_effect_authority()?;
         }
-        self.delegate
-            .as_ref()
+        self.delegate()
             .map(|delegate| delegate.try_global_names())
             .unwrap_or_else(|| Ok(workspace_global_names()))
     }
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
         self.ensure_frame_active()?;
-        if let Some(delegate) = self.delegate.as_ref() {
+        if let Some(delegate) = self.delegate() {
             delegate.ensure_effect_authority()?;
             if self.should_publish() {
                 let revision = delegate.workspace_revision()?;
@@ -196,7 +196,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
 
     fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
         self.ensure_frame_active()?;
-        if let Some(delegate) = self.delegate.as_ref() {
+        if let Some(delegate) = self.delegate() {
             delegate.ensure_mutation_authority()?;
         }
         Ok(())
@@ -208,7 +208,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
         {
-            if let Some(delegate) = self.delegate.as_ref() {
+            if let Some(delegate) = self.delegate() {
                 delegate.assign(name, value.clone())?;
             }
         }
@@ -226,7 +226,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
         {
-            if let Some(delegate) = self.delegate.as_ref() {
+            if let Some(delegate) = self.delegate() {
                 delegate.assign(name, value.clone())?;
             }
         }
@@ -237,7 +237,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     fn clear(&self) -> Result<(), RuntimeError> {
         self.ensure_effect_authority()?;
         if self.should_publish() {
-            if let Some(delegate) = self.delegate.as_ref() {
+            if let Some(delegate) = self.delegate() {
                 delegate.clear()?;
             }
         }
@@ -249,7 +249,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
         {
-            if let Some(delegate) = self.delegate.as_ref() {
+            if let Some(delegate) = self.delegate() {
                 delegate.remove(name)?;
             }
         }
@@ -566,5 +566,67 @@ mod tests {
             );
             drop(guard);
         }));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn closed_frame_releases_its_canonical_delegate_while_service_is_retained() {
+        runmat_gc::gc_test_context(|| {
+            let allocation =
+                runmat_gc::gc_allocate_rooted(Value::String("canonical".into())).unwrap();
+            let handle = allocation.handle();
+            let retained = Value::HandleObject(runmat_value::HandleRef {
+                class_name: "VmWorkspaceGcFixture".into(),
+                target: handle,
+                valid: true,
+            });
+            let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+            let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
+            initial.assign("canonical_only", retained).unwrap();
+            owner.apply(initial).unwrap();
+            let projection = Rc::new(
+                runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+                    owner.begin_projection().unwrap(),
+                ),
+            );
+            let canonical: Rc<dyn RuntimeWorkspaceService> = projection.clone();
+            let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ));
+            let runtime = runtime.with_service_ports(
+                runtime
+                    .service_ports()
+                    .clone()
+                    .with_workspace(canonical.clone()),
+            );
+            let (runtime, service) = VmWorkspaceService::prepare(runtime);
+            drop(canonical);
+            drop(projection);
+            drop(owner);
+            allocation.unroot().unwrap();
+
+            futures::executor::block_on(runtime.scope(async {
+                let mut values = Vec::new();
+                let guard = super::super::workspace::set_workspace_state(
+                    HashMap::new(),
+                    HashSet::new(),
+                    &mut values,
+                    FrameGlobalBindings::default(),
+                );
+                runmat_gc::gc_collect_major().unwrap();
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+
+                drop(guard);
+                runmat_gc::gc_collect_major().unwrap();
+                assert!(
+                    runmat_gc::gc_clone_value(&handle).is_err(),
+                    "a closed VM frame must release its canonical delegate"
+                );
+                assert_eq!(
+                    service.try_snapshot().unwrap_err().identifier(),
+                    Some("RunMat:Workspace:FrameClosed")
+                );
+            }));
+        });
     }
 }

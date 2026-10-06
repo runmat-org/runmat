@@ -467,6 +467,39 @@ fn projection_clear_releases_its_capture_without_whole_workspace_reroot() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn projection_service_publication_effect_releases_replaced_and_cleared_captures() {
+    runmat_gc::gc_test_context(|| {
+        let workspace = BaseWorkspaceOwner::new();
+        let service = BaseWorkspaceProjectionService::new(workspace.begin_projection().unwrap());
+
+        let (first_root, first_handle, first_value) = rooted_handle("published-first");
+        service.assign("held", first_value).unwrap();
+        service.publish().unwrap();
+        first_root.unroot().unwrap();
+
+        let (second_root, second_handle, second_value) = rooted_handle("published-second");
+        service.assign("held", second_value).unwrap();
+        service.publish().unwrap();
+        second_root.unroot().unwrap();
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&first_handle).is_err(),
+            "coalescing a later publication releases the replaced receipt root"
+        );
+        assert!(runmat_gc::gc_clone_value(&second_handle).is_ok());
+
+        service.clear().unwrap();
+        service.publish().unwrap();
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&second_handle).is_err(),
+            "a published clear releases the coalesced receipt root"
+        );
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn outstanding_snapshot_retains_only_its_immutable_entry_lifetime() {
     runmat_gc::gc_test_context(|| {
         let (initial, handle, value) = rooted_handle("snapshot");

@@ -59,6 +59,7 @@ struct WorkspaceState {
 struct WorkspaceFrame {
     id: WorkspaceFrameId,
     lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
+    delegate: Rc<RefCell<Option<Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
     state: WorkspaceState,
     global_aliases: FrameGlobalBindings,
     publish_on_drop: bool,
@@ -212,6 +213,7 @@ impl Drop for WorkspaceStateGuard {
         with_stack_mut(self.owner, |stack| {
             if let Some(frame) = stack.pop() {
                 frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
+                frame.delegate.borrow_mut().take();
                 if !frame.publish_on_drop {
                     return;
                 }
@@ -349,6 +351,7 @@ fn set_workspace_state_with_publish(
         stack.push(WorkspaceFrame {
             id: service_frame.id,
             lifecycle: service_frame.lifecycle,
+            delegate: service_frame.delegate,
             global_aliases,
             state: WorkspaceState {
                 names,
@@ -904,7 +907,7 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
         let runtime_id = runtime.local_identity();
-        let (_reserved, _lifecycle) = reserve_workspace_service_frame(runtime_id);
+        let _reserved = reserve_workspace_service_frame(runtime_id);
         futures::executor::block_on(runtime.scope(async {
             let mut vars = vec![Value::Num(1.0), Value::Num(2.0)];
             let guard = set_workspace_state(
@@ -933,7 +936,7 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
         let runtime_id = runtime.local_identity();
-        let (_reserved, _lifecycle) = reserve_workspace_service_frame(runtime_id);
+        let _reserved = reserve_workspace_service_frame(runtime_id);
         futures::executor::block_on(runtime.scope(async {
             let mut vars = vec![Value::Num(1.0)];
             let guard = set_workspace_state(

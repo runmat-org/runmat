@@ -21,8 +21,13 @@ use super::{
 /// session's close authority or replacing canonical state from a snapshot.
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceProjectionService {
-    projection: Rc<RefCell<BaseWorkspaceProjection>>,
-    published_effect: Rc<RefCell<PublishedWorkspaceEffect>>,
+    state: Rc<RefCell<ProjectionServiceState>>,
+}
+
+#[derive(Debug)]
+struct ProjectionServiceState {
+    projection: BaseWorkspaceProjection,
+    published_effect: PublishedWorkspaceEffect,
 }
 
 #[derive(Debug, Default)]
@@ -32,20 +37,26 @@ struct PublishedWorkspaceEffect {
 }
 
 impl PublishedWorkspaceEffect {
-    fn observe(&mut self, delta: &WorkspaceDelta) {
+    fn observe(&mut self, delta: &WorkspaceDelta) -> Vec<WorkspaceChange> {
+        let mut retired = Vec::new();
         for change in delta.changes() {
             match change.kind() {
                 super::WorkspaceChangeKind::Clear => {
                     self.cleared = true;
-                    self.changes.clear();
+                    retired.extend(std::mem::take(&mut self.changes).into_values());
                 }
                 super::WorkspaceChangeKind::Assign | super::WorkspaceChangeKind::Remove => {
                     if let Some(name) = change.name() {
-                        self.changes.insert(name.to_string(), change.clone());
+                        if let Some(previous) =
+                            self.changes.insert(name.to_string(), change.clone())
+                        {
+                            retired.push(previous);
+                        }
                     }
                 }
             }
         }
+        retired
     }
 
     fn take(&mut self) -> WorkspaceDelta {
@@ -62,8 +73,10 @@ impl PublishedWorkspaceEffect {
 impl BaseWorkspaceProjectionService {
     pub fn new(projection: BaseWorkspaceProjection) -> Self {
         Self {
-            projection: Rc::new(RefCell::new(projection)),
-            published_effect: Rc::new(RefCell::new(PublishedWorkspaceEffect::default())),
+            state: Rc::new(RefCell::new(ProjectionServiceState {
+                projection,
+                published_effect: PublishedWorkspaceEffect::default(),
+            })),
         }
     }
 
@@ -102,26 +115,28 @@ impl BaseWorkspaceProjectionService {
 
     /// Publish all ordered mutations admitted since the preceding safepoint.
     pub fn publish(&self) -> Result<BaseWorkspaceCommit, RuntimeError> {
-        let mut published_effect = self
-            .published_effect
+        let mut state = self
+            .state
             .try_borrow_mut()
             .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
-        let commit = self
-            .borrow_mut()?
+        let commit = state
+            .projection
             .publish()
             .map_err(base_workspace_error_to_runtime)?;
-        published_effect.observe(commit.changes());
+        let retired = state.published_effect.observe(commit.changes());
+        drop(state);
+        drop(retired);
         Ok(commit)
     }
 
     /// Drain the canonical effects published by this invocation, including
     /// commits made at intermediate effect safepoints.
     pub fn take_published_changes(&self) -> Result<WorkspaceDelta, RuntimeError> {
-        let mut published_effect = self
-            .published_effect
+        let mut state = self
+            .state
             .try_borrow_mut()
             .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
-        Ok(published_effect.take())
+        Ok(state.published_effect.take())
     }
 
     /// Refresh a clean invocation projection from canonical session state.
@@ -149,14 +164,16 @@ impl BaseWorkspaceProjectionService {
     }
 
     fn borrow(&self) -> Result<Ref<'_, BaseWorkspaceProjection>, RuntimeError> {
-        self.projection
+        self.state
             .try_borrow()
+            .map(|state| Ref::map(state, |state| &state.projection))
             .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))
     }
 
     fn borrow_mut(&self) -> Result<RefMut<'_, BaseWorkspaceProjection>, RuntimeError> {
-        self.projection
+        self.state
             .try_borrow_mut()
+            .map(|state| RefMut::map(state, |state| &mut state.projection))
             .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))
     }
 
@@ -186,8 +203,8 @@ impl BaseWorkspaceProjectionService {
 
 impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
-        let projection = self.projection.try_borrow().ok()?;
-        for (_, value) in projection.iter() {
+        let state = self.state.try_borrow().ok()?;
+        for (_, value) in state.projection.iter() {
             visitor(value)?;
         }
         Some(())
@@ -196,14 +213,20 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
     // These infallible methods implement the compatibility surface. Exact
     // executor paths use the checked methods below and retain typed failures.
     fn lookup(&self, name: &str) -> Option<Value> {
-        self.projection.try_borrow().ok()?.lookup(name).cloned()
+        self.state
+            .try_borrow()
+            .ok()?
+            .projection
+            .lookup(name)
+            .cloned()
     }
 
     fn snapshot(&self) -> Vec<(String, Value)> {
-        self.projection
+        self.state
             .try_borrow()
-            .map(|projection| {
-                projection
+            .map(|state| {
+                state
+                    .projection
                     .iter()
                     .map(|(name, value)| (name.to_string(), value.clone()))
                     .collect()
