@@ -533,7 +533,7 @@ fn running_is_on(object: &ObjectInstance) -> bool {
 }
 
 fn is_timer_handle(handle: &HandleRef) -> bool {
-    handle.class_name == TIMER_CLASS
+    handle.class_name.is(TIMER_CLASS)
 }
 
 fn ensure_valid_timer(handle: &HandleRef) -> BuiltinResult<()> {
