@@ -1790,34 +1790,156 @@ mod tests {
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
+        let (runtime, base_activation) =
+            crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
+        let base_frame = base_activation.frame();
+        let child = Bytecode::with_instructions(
+            vec![
+                Instr::LoadString("child_local = 13;".to_string()),
+                Instr::CallBuiltinMulti("eval".to_string(), 1, 0),
+                Instr::LoadString("caller".to_string()),
+                Instr::LoadString("caller_mark".to_string()),
+                Instr::LoadConst(17.0),
+                Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
+                Instr::LoadString("base".to_string()),
+                Instr::LoadString("base_mark".to_string()),
+                Instr::LoadConst(19.0),
+                Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
+                Instr::Return,
+            ],
+            0,
+        );
+
+        block_on(base_activation.scope(runtime.scope(async {
+            let mut base = vec![Value::Num(5.0)];
+            let _base_guard = crate::runtime::workspace::set_transient_workspace_state(
+                std::collections::HashMap::from([("base_value".to_string(), 0)]),
+                std::collections::HashSet::from(["base_value".to_string()]),
+                &mut base,
+                runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
+            );
+
+            let (outer_runtime, outer_activation) =
+                crate::runtime::workspace_service::VmWorkspaceService::install(
+                    runtime.clone(),
+                    None,
+                );
+            let outer_frame = outer_activation.frame();
+            outer_activation
+                .scope(outer_runtime.scope(async {
+                    let mut outer = vec![Value::Num(7.0)];
+                    let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
+                        std::collections::HashMap::from([("outer_value".to_string(), 0)]),
+                        std::collections::HashSet::from(["outer_value".to_string()]),
+                        &mut outer,
+                        runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
+                    );
+                    let result = interpret_function_with_counts_in_context(
+                        &child,
+                        Vec::new(),
+                        "zero_variable_workspace_test",
+                        0,
+                        0,
+                        std::collections::HashSet::new(),
+                        outer_runtime.clone(),
+                    )
+                    .await
+                    .expect("zero-variable nested interpreter should own an exact child frame");
+                    assert!(result.is_empty());
+                    assert_eq!(
+                        crate::runtime::workspace::workspace_lookup("child_local"),
+                        None
+                    );
+                    assert_eq!(
+                        crate::runtime::workspace::workspace_lookup("caller_mark"),
+                        Some(Value::Num(17.0))
+                    );
+                    let base = crate::runtime::workspace::workspace_target_snapshot(
+                        crate::runtime::workspace::WorkspaceTarget::Base,
+                    )
+                    .expect("nested child should retain its inherited base lineage");
+                    assert_eq!(
+                        base.names
+                            .get("base_mark")
+                            .and_then(|slot| base.vars.get(*slot)),
+                        Some(&Value::Num(19.0))
+                    );
+                }))
+                .await;
+            let _ = crate::runtime::workspace::take_workspace_completion(outer_frame);
+
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("caller_mark"),
+                None
+            );
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("base_mark"),
+                Some(Value::Num(19.0))
+            );
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("base_value"),
+                Some(Value::Num(5.0))
+            );
+        })));
+        let _ = crate::runtime::workspace::take_workspace_completion(base_frame);
+    }
+
+    #[test]
+    fn failing_zero_variable_nested_function_retires_child_and_restores_parent() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
         let (runtime, activation) =
             crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
         let outer_frame = activation.frame();
-        let child = Bytecode::with_instructions(vec![Instr::Return], 0);
+        let child = Bytecode::with_instructions(
+            vec![
+                Instr::LoadString("child_ephemeral = 23;".to_string()),
+                Instr::CallBuiltinMulti("eval".to_string(), 1, 0),
+                Instr::LoadString("caller".to_string()),
+                Instr::LoadString("before_error".to_string()),
+                Instr::LoadConst(29.0),
+                Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
+                Instr::LoadString("nested failure".to_string()),
+                Instr::CallBuiltinMulti("error".to_string(), 1, 0),
+                Instr::Return,
+            ],
+            0,
+        );
 
         block_on(activation.scope(runtime.scope(async {
-            let mut outer = vec![Value::Num(7.0)];
+            let mut outer = vec![Value::Num(31.0)];
             let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
-                std::collections::HashMap::from([("outer".to_string(), 0)]),
-                std::collections::HashSet::from(["outer".to_string()]),
+                std::collections::HashMap::from([("outer_value".to_string(), 0)]),
+                std::collections::HashSet::from(["outer_value".to_string()]),
                 &mut outer,
                 runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
             );
-            let result = interpret_function_with_counts_in_context(
+            let error = interpret_function_with_counts_in_context(
                 &child,
                 Vec::new(),
-                "zero_variable_workspace_test",
+                "failing_zero_variable_workspace_test",
                 0,
                 0,
                 std::collections::HashSet::new(),
                 runtime.clone(),
             )
             .await
-            .expect("zero-variable nested interpreter should own an exact child frame");
-            assert!(result.is_empty());
+            .expect_err("nested error should leave through the exact child frame");
+            assert!(error.message().contains("nested failure"));
             assert_eq!(
-                crate::runtime::workspace::workspace_lookup("outer"),
-                Some(Value::Num(7.0))
+                crate::runtime::workspace::workspace_lookup("child_ephemeral"),
+                None
+            );
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("before_error"),
+                Some(Value::Num(29.0))
+            );
+            crate::runtime::workspace::workspace_assign("after_error", Value::Num(37.0))
+                .expect("restored parent frame should remain writable");
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("after_error"),
+                Some(Value::Num(37.0))
             );
         })));
         let _ = crate::runtime::workspace::take_workspace_completion(outer_frame);
