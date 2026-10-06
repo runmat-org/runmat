@@ -130,7 +130,8 @@ fn retained_definition_content_not_session_allocation_order_decides_portable_ide
             function.display_name == "retainedHelper"
                 && function.binding_origin == Some(helper_origin)
         }));
-        runmat_vm::retained_callable_origin_fingerprints(admitted.registry())
+        admitted
+            .retained_callable_origin_fingerprints()
             .expect("exact multi-origin registry");
         (bytes, unit.source_map().clone())
     }

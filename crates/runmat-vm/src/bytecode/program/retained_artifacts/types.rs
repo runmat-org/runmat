@@ -87,4 +87,6 @@ pub enum RetainedCallableStageError {
     FunctionIdentityExhausted,
     #[error("callable artifact function has no authenticated runtime source")]
     MissingRuntimeSource,
+    #[error("callable artifact function has no authenticated portable source")]
+    MissingPortableSource,
 }

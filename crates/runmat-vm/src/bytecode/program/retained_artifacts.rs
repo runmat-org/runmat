@@ -181,10 +181,11 @@ pub fn prepare_retained_callable_units(
 /// Canonical per-origin definition fingerprints used by an artifact owner to
 /// admit alternate packaging of the same immutable callable body without
 /// treating envelope bytes or destination-local IDs as semantic identity.
-pub fn retained_callable_origin_fingerprints(
+pub(crate) fn admitted_callable_origin_fingerprints(
     registry: &FunctionRegistry,
+    source_map: &runmat_execution::ExecutableSourceMapV2,
 ) -> Result<HashMap<FunctionBindingOrigin, String>, RetainedCallableStageError> {
-    fingerprints::normalized(registry)
+    fingerprints::normalized_admitted(registry, source_map)
 }
 
 fn owners_graph(owners: &[(FunctionId, Arc<FunctionDefinitionOwner>)]) -> DefinitionOwnerGraph {

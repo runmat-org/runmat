@@ -34,7 +34,8 @@ impl CallableArtifactIndex {
     ) -> Result<(), CallableArtifactIndexError> {
         let admitted = runmat_vm::admit_executable_unit(&bytes)
             .map_err(CallableArtifactIndexError::InvalidUnit)?;
-        let fingerprints = runmat_vm::retained_callable_origin_fingerprints(admitted.registry())
+        let fingerprints = admitted
+            .retained_callable_origin_fingerprints()
             .map_err(CallableArtifactIndexError::InvalidDefinitions)?;
         let bytes = Arc::<[u8]>::from(bytes);
         for (origin, fingerprint) in fingerprints {

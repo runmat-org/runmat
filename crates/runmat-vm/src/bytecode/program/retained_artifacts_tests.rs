@@ -1,7 +1,7 @@
 use super::*;
 use crate::{BytecodeSourceRef, Instr};
 use runmat_execution::{Digest, FunctionBindingOrigin};
-use runmat_types::{FunctionSourceRole, ProgramFunctionId};
+use runmat_types::{FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
 
 struct UnitFixture {
     unit: RuntimeBoundExecutableUnit,
@@ -295,6 +295,106 @@ fn fingerprints_allow_reused_portable_ordinals_across_exact_origins() {
         wider_fingerprints[&origin(b"root-program", 0)],
         "unrelated packaging must not alter a retained definition fingerprint"
     );
+}
+
+fn portable_source_map(
+    entries: impl IntoIterator<Item = (&'static str, &'static str, &'static str)>,
+) -> runmat_execution::ExecutableSourceMapV2 {
+    runmat_execution::ExecutableSourceMapV2::new(
+        entries
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, (owner_identity, relative_path, text))| {
+                runmat_execution::ExecutableSourceRecordV2 {
+                    source_id: ProgramSourceId(u32::try_from(ordinal).expect("source ordinal")),
+                    owner_identity: owner_identity.into(),
+                    relative_path: relative_path.into(),
+                    content_revision: Digest::sha256(text.as_bytes()),
+                    display_name: relative_path.into(),
+                    text: text.into(),
+                }
+            })
+            .collect(),
+    )
+    .expect("valid source map")
+}
+
+#[test]
+fn admitted_fingerprint_resolves_portable_source_position_to_exact_identity() {
+    let exact_origin = origin(b"retained-source-program", 4);
+    let body = |source| FunctionBytecode {
+        function: FunctionId(4),
+        display_name: "retainedSource".into(),
+        source_id: Some(BytecodeSourceRef::Program(source)),
+        source_file: Some("retained.m".into()),
+        portable_function: ProgramFunctionId(4),
+        binding_origin: Some(exact_origin),
+        instructions: vec![Instr::LoadInt(runmat_value::IntValue::I64(7))],
+        ..Default::default()
+    };
+    let primary_registry =
+        FunctionRegistry::new(HashMap::from([(FunctionId(4), body(ProgramSourceId(0)))]));
+    let companion_registry =
+        FunctionRegistry::new(HashMap::from([(FunctionId(4), body(ProgramSourceId(1)))]));
+    let primary = portable_source_map([("session", "retained.m", "retained source")]);
+    let companion = portable_source_map([
+        ("request", "unrelated.m", "unrelated source"),
+        ("session", "retained.m", "retained source"),
+    ]);
+
+    let primary = fingerprints::normalized_admitted(&primary_registry, &primary)
+        .expect("primary fingerprint");
+    let companion = fingerprints::normalized_admitted(&companion_registry, &companion)
+        .expect("companion fingerprint");
+    assert_eq!(primary[&exact_origin], companion[&exact_origin]);
+}
+
+#[test]
+fn admitted_fingerprint_binds_portable_source_owner_path_and_content() {
+    let exact_origin = origin(b"retained-source-program", 4);
+    let body = FunctionBytecode {
+        function: FunctionId(4),
+        display_name: "retainedSource".into(),
+        source_id: Some(BytecodeSourceRef::Program(ProgramSourceId(0))),
+        source_file: Some("retained.m".into()),
+        portable_function: ProgramFunctionId(4),
+        binding_origin: Some(exact_origin),
+        instructions: vec![Instr::LoadInt(runmat_value::IntValue::I64(7))],
+        ..Default::default()
+    };
+    let registry = FunctionRegistry::new(HashMap::from([(FunctionId(4), body)]));
+    let fingerprint = |owner, path, text| {
+        let map = portable_source_map([(owner, path, text)]);
+        fingerprints::normalized_admitted(&registry, &map).expect("admitted fingerprint")
+            [&exact_origin]
+            .clone()
+    };
+    let expected = fingerprint("session", "retained.m", "retained source");
+    assert_ne!(
+        expected,
+        fingerprint("foreign", "retained.m", "retained source")
+    );
+    assert_ne!(
+        expected,
+        fingerprint("session", "moved.m", "retained source")
+    );
+    assert_ne!(
+        expected,
+        fingerprint("session", "retained.m", "changed source")
+    );
+
+    let missing = FunctionRegistry::new(HashMap::from([(
+        FunctionId(4),
+        FunctionBytecode {
+            source_id: Some(BytecodeSourceRef::Program(ProgramSourceId(1))),
+            ..registry.functions[&FunctionId(4)].clone()
+        },
+    )]));
+    let map = portable_source_map([("session", "retained.m", "retained source")]);
+    assert!(matches!(
+        fingerprints::normalized_admitted(&missing, &map),
+        Err(RetainedCallableStageError::MissingPortableSource)
+    ));
 }
 
 #[test]

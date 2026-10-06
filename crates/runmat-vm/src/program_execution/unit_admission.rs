@@ -37,6 +37,21 @@ impl AdmittedExecutableUnit {
         &self.registry
     }
 
+    /// Canonical per-origin definition fingerprints for this admitted unit.
+    /// Portable source positions are resolved through this unit's validated
+    /// source map and cannot be confused with immutable source identity.
+    pub fn retained_callable_origin_fingerprints(
+        &self,
+    ) -> Result<
+        std::collections::HashMap<runmat_execution::FunctionBindingOrigin, String>,
+        crate::RetainedCallableStageError,
+    > {
+        crate::bytecode::program::retained_artifacts::admitted_callable_origin_fingerprints(
+            &self.registry,
+            &self.source_map,
+        )
+    }
+
     /// Resolve the manifest entrypoint to the exact immutable definition
     /// origin admitted with this unit. A display name or a matching numeric
     /// ordinal alone is not executable authority.
