@@ -880,27 +880,13 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = feaCapabilities)]
     pub fn fea_capabilities_js(&self) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
-        let payload = FeaCapabilitiesPayload {
-            supported_document_extensions: vec![".fea".to_string()],
-            supported_geometry_extensions: vec![
-                ".stl".to_string(),
-                ".step".to_string(),
-                ".stp".to_string(),
-                ".obj".to_string(),
-                ".ply".to_string(),
-                ".gltf".to_string(),
-                ".glb".to_string(),
-            ],
-            supports_check: true,
-            supports_run: false,
-            supports_results: true,
-            supports_live_progress: false,
-            visualization_backend: "runmat-plot".to_string(),
-            authoring_workflow: runmat_runtime::analysis::analysis_authoring_workflow(),
-            procedure_ids: runmat_runtime::analysis::analysis_procedure_ids(),
-            output_operation_ids: runmat_runtime::analysis::analysis_output_operation_ids(),
-            language_reference_paths: runmat_runtime::analysis::analysis_language_reference_paths(),
-        };
+        let payload = FeaCapabilitiesPayload::for_runtime(
+            runmat_runtime::analysis::AnalysisExecutionCapability::CheckOnly,
+            [".stl", ".step", ".stp", ".obj", ".ply", ".gltf", ".glb"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        );
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA capabilities: {err}")))
     }

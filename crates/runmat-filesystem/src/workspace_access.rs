@@ -5,6 +5,7 @@ use crate::workspace::{
     WorkspaceSnapshot,
 };
 use crate::{AtomicCreateResult, DirEntry, FileHandle, FsMetadata};
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use resource::exceeded as resource_error;
 pub use resource::{resource_limit, WorkspaceResourceLimit};
 use std::{io, path::Path};

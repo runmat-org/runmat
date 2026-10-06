@@ -25,6 +25,14 @@ source nor proves that arbitrary imported bytecode implements that source.
 - Functions are selected by their original semantic function identity. A display
   name does not replace that identity.
 - Core does not create another scheduler or artifact transport owner.
+- The low-level VM request executor rejects complete V3 units. Native assessment
+  and signal adapters, and browser artifact execution, enter the core session host.
+  They do not reconstruct only bytecode and registry state.
+- Program context is installed on native and WASM targets. Its active-unit scope
+  restores the previous callable authority after nested invocation and expires
+  when invocation ends.
+- Browser in-process execution inherits the existing browser execution service.
+  This does not establish nested worker allocation or console/project transport.
 
 ## Script outputs
 
@@ -36,6 +44,18 @@ results. Scripts reject multiple output ordinals.
 The portable interpreter uses the VM's existing assignment inventory. Native script
 tiering currently has a zero-output contract; forcing native execution while
 requesting an `ans` output is rejected explicitly.
+
+## Nested interpreter dispatch
+
+Indexing, arithmetic and instruction families choose typed handlers before
+constructing their async work. Nested calls retain the selected handler rather
+than a dispatcher future containing unrelated operation families. Shared stack,
+assignment, class-access and exception owners remain authoritative.
+
+The public WASM artifact tests cover original nonprimary functions, bound handles,
+anonymous captures that call helpers, zero/one/two output ordinals, and assigned
+versus absent script `ans`. These run under the existing stack limit; they do not
+establish arbitrary recursion depth or whole-task resource qualification.
 
 ## Qualification boundary
 

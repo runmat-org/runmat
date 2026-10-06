@@ -1,5 +1,6 @@
 mod host;
 mod model;
+pub(crate) mod program;
 mod resources;
 mod service;
 mod state;

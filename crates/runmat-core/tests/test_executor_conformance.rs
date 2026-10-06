@@ -35,38 +35,41 @@ fn result_for<'a>(
 async fn execute_portable_envelope(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
 ) -> runmat_execution_artifact::ProgramExecutionResponse {
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
-    let recipe = runmat_execution_artifact::ProgramBuildRecipe {
-        schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: function.to_string(),
-        outputs: runmat_execution::OutputContract {
-            requested_outputs: 1,
-        },
-        execution_mode: "interpreter".into(),
-        target: runmat_execution_artifact::ProgramTarget::portable(
-            "portable-executable-unit-v3-test",
-        ),
-        features: Default::default(),
-        compile_options: Default::default(),
-        source_objects: Vec::new(),
-        expected_artifact_id: None,
-    };
-    let artifact = runmat_execution_artifact::ProgramArtifact::materialize(
-        &recipe,
-        runmat_execution_artifact::ExecutableForm::ExecutableUnitV3,
-        envelope.canonical_bytes().unwrap(),
-    )
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let mode: runmat_core::CompatMode = serde_json::from_value(serde_json::Value::String(
+        envelope
+            .manifest
+            .identity
+            .program
+            .environment()
+            .compatibility_mode
+            .clone(),
+    ))
     .unwrap();
-    runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
-        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-        recipe,
-        artifact,
-        function,
-        arguments: Vec::new(),
-        requested_outputs: 1,
-    })
-    .await
+    session.set_compat_mode(mode);
+    match session
+        .invoke_portable_unit(
+            envelope,
+            Vec::new(),
+            1,
+            &runmat_core::InvocationControl::default(),
+        )
+        .await
+    {
+        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_outputs(&value, 1)
+        {
+            Ok(outputs) => {
+                runmat_execution_artifact::ProgramExecutionResponse::from_success_outputs(
+                    outputs,
+                    vec![],
+                )
+            }
+            Err(error) => runmat_execution_artifact::ProgramExecutionResponse::Failure {
+                message: error.to_string(),
+            },
+        },
+        Err(message) => runmat_execution_artifact::ProgramExecutionResponse::Failure { message },
+    }
 }
 
 fn conformance_snapshot() -> FrozenTestRunSnapshot {
@@ -389,23 +392,41 @@ async fn executable_unit_retains_exact_program_point_analysis() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
 async fn complete_portable_script_executes_after_component_reconstruction() {
-    let mut session = RunMatSession::with_options(false, false).unwrap();
-    let unit = session
-        .compile_executable_unit(
-            ExecutableSource::new("path:portable-script", "script.m", "answer = 42;\n"),
-            None,
-        )
-        .await
-        .unwrap();
-    let envelope = unit.portable_envelope().unwrap();
-    assert_eq!(
-        envelope.manifest.identity.entrypoint_kind,
-        runmat_execution::ExecutableEntrypointKind::Script
-    );
-    assert!(matches!(
-        execute_portable_envelope(&envelope).await,
-        runmat_execution_artifact::ProgramExecutionResponse::Success { .. }
-    ));
+    for (text, expected) in [
+        (
+            "ans = 42; unrelated = 999;\n",
+            Some(runmat_value::Value::Num(42.0)),
+        ),
+        ("answer = 42;\n", None),
+        ("if false; ans = 42; end; unrelated = 999;\n", None),
+    ] {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let unit = session
+            .compile_executable_unit(
+                ExecutableSource::new("path:portable-script", "script.m", text),
+                None,
+            )
+            .await
+            .unwrap();
+        let envelope = unit.portable_envelope().unwrap();
+        assert_eq!(
+            envelope.manifest.identity.entrypoint_kind,
+            runmat_execution::ExecutableEntrypointKind::Script
+        );
+        match (execute_portable_envelope(&envelope).await, expected) {
+            (
+                runmat_execution_artifact::ProgramExecutionResponse::Success { value },
+                Some(expected),
+            ) => {
+                assert_eq!(
+                    runmat_runtime::execution::value_codec::decode_inline_value(&value).unwrap(),
+                    expected
+                );
+            }
+            (runmat_execution_artifact::ProgramExecutionResponse::Failure { .. }, None) => {}
+            other => panic!("original script assignment/output mismatch: {other:?}"),
+        }
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

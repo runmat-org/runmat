@@ -172,7 +172,7 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
     for input in &prepared {
         let mut outputs = Vec::new();
         for chunk in &input.program().chunks {
-            let response = runmat_vm::execute_program_request(chunk.request.clone()).await;
+            let response = crate::execute_host_program_request(chunk.request.clone()).await;
             response.validate_against(&chunk.request).unwrap();
             let ProgramExecutionResponse::Success { value } = response else {
                 panic!("named thermal function failed: {response:?}")

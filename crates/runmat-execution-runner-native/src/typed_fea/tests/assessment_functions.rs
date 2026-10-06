@@ -62,14 +62,10 @@ async fn frozen_imported_assessment_executes_portable_boolean_contract() {
         .unwrap();
     let report = checked.check_result();
     if report.status != runmat_runtime::analysis::FeaCheckStatus::Valid {
-        let imported = super::callable::compile_imported_function(
-            &checked,
-            "project/src/verify.m",
-            "verify",
-            None,
-        )
-        .await
-        .unwrap();
+        let imported =
+            super::callable::compile_imported_function(&checked, "src/verify.m", "verify", None)
+                .await
+                .unwrap();
         panic!(
             "assessment diagnostics: {:?}; actual callable facts: {:#?}",
             report.diagnostics, imported.function
@@ -137,7 +133,7 @@ async fn frozen_imported_assessment_executes_portable_boolean_contract() {
                     imported.function
                 )
             });
-        let response = runmat_vm::execute_program_request(prepared.request().clone()).await;
+        let response = crate::execute_host_program_request(prepared.request().clone()).await;
         response.validate_against(prepared.request()).unwrap();
         let ProgramExecutionResponse::Success { value } = response else {
             panic!("assessment execution failed: {response:?}")

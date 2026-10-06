@@ -20,344 +20,56 @@ async fn call_right_operator_method_ordered(
         .await
 }
 
-pub async fn dispatch_arithmetic(
+mod operations;
+
+use futures::{
+    future::LocalBoxFuture,
+    future::{ready, Either, Ready},
+};
+
+type ArithmeticDispatch<'a> =
+    Either<Ready<Result<bool, RuntimeError>>, LocalBoxFuture<'a, Result<bool, RuntimeError>>>;
+
+// Choose the operation before constructing its future. Unrelated instruction
+// families need neither an arithmetic frame nor an allocation.
+pub fn dispatch_arithmetic<'a>(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
-) -> Result<bool, RuntimeError> {
+    stack: &'a mut Vec<Value>,
+) -> ArithmeticDispatch<'a> {
     match instr {
-        crate::bytecode::Instr::Add => {
-            arithmetic_ops::add(
-                stack,
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::call_builtin_async("plus", &[a_acc, b_acc]).await
-                },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Sub => {
-            arithmetic_ops::sub(
-                stack,
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::call_builtin_async("minus", &[a_acc, b_acc]).await
-                },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Mul => {
-            arithmetic_ops::mul(
-                stack,
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
-                    runmat_runtime::value_matmul(&a_acc, &b_acc).await
-                },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::ElemMul => {
-            arithmetic_ops::binary_method_ordered(
-                stack,
-                "times",
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::call_builtin_async("times", &[a_acc, b_acc]).await
-                },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::ElemDiv => {
-            arithmetic_ops::binary_method_ordered(
-                stack,
-                "rdivide",
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::call_builtin_async("rdivide", &[a_acc, b_acc]).await
-                },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::ElemPow => {
-            arithmetic_ops::power(
-                stack,
-                |obj, _method, arg| async move {
-                    runmat_runtime::call_builtin_async("power", &[obj, arg]).await
-                },
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::call_builtin_async("power", &[a_acc, b_acc]).await
-                },
-            )
-            .await?;
-            Ok(true)
-        }
+        crate::bytecode::Instr::Add => Either::Right(Box::pin(operations::add(stack))),
+        crate::bytecode::Instr::Sub => Either::Right(Box::pin(operations::sub(stack))),
+        crate::bytecode::Instr::Mul => Either::Right(Box::pin(operations::mul(stack))),
+        crate::bytecode::Instr::ElemMul => Either::Right(Box::pin(operations::elem_mul(stack))),
+        crate::bytecode::Instr::ElemDiv => Either::Right(Box::pin(operations::elem_div(stack))),
+        crate::bytecode::Instr::ElemPow => Either::Right(Box::pin(operations::elem_pow(stack))),
         crate::bytecode::Instr::ElemLeftDiv => {
-            arithmetic_ops::binary_method_ordered(
-                stack,
-                "ldivide",
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    let (b_acc, a_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
-                    runmat_runtime::call_builtin_async("rdivide", &[b_acc, a_acc]).await
-                },
-            )
-            .await?;
-            Ok(true)
+            Either::Right(Box::pin(operations::elem_left_div(stack)))
         }
-        crate::bytecode::Instr::RightDiv => {
-            arithmetic_ops::binary_fallback(stack, |a, b| async move {
-                arithmetic_ops::execute_right_division(
-                    &a,
-                    &b,
-                    call_operator_method,
-                    call_right_operator_method_ordered,
-                    |lhs, rhs| async move {
-                        let (lhs_acc, rhs_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &lhs, &rhs).await?;
-                        runmat_runtime::call_builtin_async("rdivide", &[lhs_acc, rhs_acc]).await
-                    },
-                    |lhs, rhs| async move {
-                        runmat_runtime::call_builtin_async("mrdivide", &[lhs, rhs]).await
-                    },
-                )
-                .await
-            })
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::LeftDiv => {
-            arithmetic_ops::binary_fallback(stack, |a, b| async move {
-                arithmetic_ops::execute_left_division(
-                    &a,
-                    &b,
-                    call_operator_method,
-                    call_right_operator_method_ordered,
-                    |lhs, rhs| async move {
-                        let (rhs_acc, lhs_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &rhs, &lhs).await?;
-                        runmat_runtime::call_builtin_async("rdivide", &[rhs_acc, lhs_acc]).await
-                    },
-                    |lhs, rhs| async move {
-                        runmat_runtime::call_builtin_async("mldivide", &[lhs, rhs]).await
-                    },
-                )
-                .await
-            })
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Neg => {
-            arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                match &value {
-                    Value::Object(obj) => {
-                        let args = vec![Value::Object(obj.clone())];
-                        match runmat_runtime::call_builtin_async("uminus", &args).await {
-                            Ok(v) => Ok(v),
-                            Err(_) => {
-                                runmat_runtime::call_builtin_async(
-                                    "times",
-                                    &[value.clone(), Value::Num(-1.0)],
-                                )
-                                .await
-                            }
-                        }
-                    }
-                    _ => {
-                        runmat_runtime::call_builtin_async(
-                            "times",
-                            &[value.clone(), Value::Num(-1.0)],
-                        )
-                        .await
-                    }
-                }
-            })
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Pow => {
-            arithmetic_ops::power(
-                stack,
-                call_operator_method,
-                call_right_operator_method_ordered,
-                |a, b| async move {
-                    if matches!(
-                        (&a, &b),
-                        (Value::Symbolic(_), _)
-                            | (_, Value::Symbolic(_))
-                            | (Value::SymbolicArray(_), _)
-                            | (_, Value::SymbolicArray(_))
-                    ) {
-                        let args = [a, b];
-                        return runmat_runtime::call_builtin_async("power", &args).await;
-                    }
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
-                },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::UPlus => {
-            arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                match &value {
-                    Value::Object(obj) => {
-                        let args = vec![Value::Object(obj.clone())];
-                        match runmat_runtime::call_builtin_async("uplus", &args).await {
-                            Ok(v) => Ok(v),
-                            Err(_) => Ok(value),
-                        }
-                    }
-                    _ => Ok(value),
-                }
-            })
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Transpose => {
-            arithmetic_ops::unary(stack, |value| async move {
-                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                runmat_runtime::call_builtin_async("transpose", &[promoted]).await
-            })
-            .await?;
-            Ok(true)
-        }
+        crate::bytecode::Instr::RightDiv => Either::Right(Box::pin(operations::right_div(stack))),
+        crate::bytecode::Instr::LeftDiv => Either::Right(Box::pin(operations::left_div(stack))),
+        crate::bytecode::Instr::Neg => Either::Right(Box::pin(operations::neg(stack))),
+        crate::bytecode::Instr::Pow => Either::Right(Box::pin(operations::pow(stack))),
+        crate::bytecode::Instr::UPlus => Either::Right(Box::pin(operations::u_plus(stack))),
+        crate::bytecode::Instr::Transpose => Either::Right(Box::pin(operations::transpose(stack))),
         crate::bytecode::Instr::ConjugateTranspose => {
-            arithmetic_ops::unary(stack, |value| async move {
-                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                runmat_runtime::call_builtin_async("ctranspose", &[promoted]).await
-            })
-            .await?;
-            Ok(true)
+            Either::Right(Box::pin(operations::conjugate_transpose(stack)))
         }
-        crate::bytecode::Instr::LessEqual => {
-            comparison_ops::relation_inverted(
-                stack,
-                comparison_ops::RelationInvertedSpec {
-                    name: "le",
-                    inverse_name: "gt",
-                    right_name: "ge",
-                    right_inverse_name: "lt",
-                    predicate: |aa, bb| aa <= bb,
-                },
-                call_operator_method,
-                |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
-                |v, label| async move { logical_truth_from_value(&v, &label).await },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Less => {
-            comparison_ops::relation(
-                stack,
-                "lt",
-                "gt",
-                |aa, bb| aa < bb,
-                call_operator_method,
-                |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::Greater => {
-            comparison_ops::relation(
-                stack,
-                "gt",
-                "lt",
-                |aa, bb| aa > bb,
-                call_operator_method,
-                |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
-            )
-            .await?;
-            Ok(true)
-        }
+        crate::bytecode::Instr::LessEqual => Either::Right(Box::pin(operations::less_equal(stack))),
+        crate::bytecode::Instr::Less => Either::Right(Box::pin(operations::less(stack))),
+        crate::bytecode::Instr::Greater => Either::Right(Box::pin(operations::greater(stack))),
         crate::bytecode::Instr::GreaterEqual => {
-            comparison_ops::relation_inverted(
-                stack,
-                comparison_ops::RelationInvertedSpec {
-                    name: "ge",
-                    inverse_name: "lt",
-                    right_name: "le",
-                    right_inverse_name: "gt",
-                    predicate: |aa, bb| aa >= bb,
-                },
-                call_operator_method,
-                |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
-                |v, label| async move { logical_truth_from_value(&v, &label).await },
-            )
-            .await?;
-            Ok(true)
+            Either::Right(Box::pin(operations::greater_equal(stack)))
         }
-        crate::bytecode::Instr::Equal => {
-            comparison_ops::equal(
-                stack,
-                call_operator_method,
-                |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
-                |_v, _label| async move { Ok(false) },
-            )
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::NotEqual => {
-            comparison_ops::not_equal(
-                stack,
-                call_operator_method,
-                |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
-                |v, label| async move { logical_truth_from_value(&v, &label).await },
-            )
-            .await?;
-            Ok(true)
-        }
+        crate::bytecode::Instr::Equal => Either::Right(Box::pin(operations::equal(stack))),
+        crate::bytecode::Instr::NotEqual => Either::Right(Box::pin(operations::not_equal(stack))),
         crate::bytecode::Instr::LogicalNot => {
-            let value = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?;
-            stack.push(runmat_runtime::call_builtin_async("not", &[value]).await?);
-            Ok(true)
+            Either::Right(Box::pin(operations::logical_not(stack)))
         }
         crate::bytecode::Instr::LogicalAnd => {
-            let rhs = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?;
-            let lhs = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?;
-            stack.push(runmat_runtime::call_builtin_async("and", &[lhs, rhs]).await?);
-            Ok(true)
+            Either::Right(Box::pin(operations::logical_and(stack)))
         }
-        crate::bytecode::Instr::LogicalOr => {
-            let rhs = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?;
-            let lhs = stack.pop().ok_or_else(|| {
-                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
-            })?;
-            stack.push(runmat_runtime::call_builtin_async("or", &[lhs, rhs]).await?);
-            Ok(true)
-        }
-        _ => Ok(false),
+        crate::bytecode::Instr::LogicalOr => Either::Right(Box::pin(operations::logical_or(stack))),
+        _ => Either::Left(ready(Ok(false))),
     }
 }

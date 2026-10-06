@@ -184,7 +184,8 @@ impl SignalFixture {
         for chunk in &self.prepared.program.chunks {
             outputs.push(response_output(
                 chunk.plan.identity,
-                runmat_vm::execute_program_request(chunk.request.clone()).await,
+                runmat_execution_runner_native::execute_host_program_request(chunk.request.clone())
+                    .await,
             ));
         }
         self.canonicalize(outputs)

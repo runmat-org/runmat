@@ -850,10 +850,6 @@ async fn run_interpreter_inner(
             Instr::StoreLocal(_) => Some(global_aliases.clone()),
             _ => None,
         };
-        let mut clear_value_residency = |value: &Value| {
-            #[cfg(feature = "native-accel")]
-            clear_residency(value);
-        };
         let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
             if let Some(ref aliases) = store_var_global_aliases {
@@ -901,7 +897,6 @@ async fn run_interpreter_inner(
                 pc: &mut pc,
             },
             interp_dispatch::DispatchHooks {
-                clear_value_residency: &mut clear_value_residency,
                 store_var_before_overwrite: &mut store_var_before_overwrite,
                 store_var_after_store: &mut store_var_after_store,
                 store_local_before_local_overwrite: &mut store_local_before_local_overwrite,

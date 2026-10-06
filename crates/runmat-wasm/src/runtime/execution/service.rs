@@ -183,7 +183,10 @@ impl BrowserExecutionService {
                     )
                     .await
                 }
-                None => Ok(runmat_vm::execute_program_request(program).await),
+                None => match weak.upgrade() {
+                    Some(service) => Ok(super::program::execute(program, Some(service)).await),
+                    None => Err("browser execution authority ended before invocation".into()),
+                },
             };
             if let Some(service) = weak.upgrade() {
                 let wall_millis = (js_sys::Date::now() - started_millis).max(1.0) as u64;

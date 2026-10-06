@@ -86,3 +86,6 @@ fn program_error(message: impl Into<String>) -> runmat_runtime::RuntimeError {
         .with_identifier("RunMat:ProgramProduct")
         .build()
 }
+
+#[cfg(test)]
+mod tests;

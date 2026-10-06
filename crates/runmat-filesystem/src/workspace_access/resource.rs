@@ -17,6 +17,7 @@ impl fmt::Display for WorkspaceResourceLimit {
 }
 impl std::error::Error for WorkspaceResourceLimit {}
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn exceeded(required_bytes: u64, maximum_bytes: u64) -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,

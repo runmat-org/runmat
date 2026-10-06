@@ -266,7 +266,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
         );
         let mut outputs = Vec::new();
         for chunk in &resolved.program().chunks {
-            let response = runmat_vm::execute_program_request(chunk.request.clone()).await;
+            let response = crate::execute_host_program_request(chunk.request.clone()).await;
             response.validate_against(&chunk.request).unwrap();
             let runmat_execution_artifact::ProgramExecutionResponse::Success { value } = response
             else {

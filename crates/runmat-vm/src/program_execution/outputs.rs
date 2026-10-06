@@ -6,21 +6,21 @@ use runmat_value::Value;
 #[test]
 fn scripts_preserve_empty_outputs_and_never_fabricate_ans() {
     let empty = || Bytecode::with_instructions(vec![Instr::Return], 0);
-    let response = futures::executor::block_on(execute_unit_script(empty(), 0));
+    let response = futures::executor::block_on(execute_script_bytecode(empty(), 0));
     assert_eq!(
         response,
         ProgramExecutionResponse::from_success_outputs(vec![], vec![])
     );
     for requested in [1, 2] {
         assert!(matches!(
-            futures::executor::block_on(execute_unit_script(empty(), requested)),
+            futures::executor::block_on(execute_script_bytecode(empty(), requested)),
             ProgramExecutionResponse::Failure { .. }
         ));
     }
     let mut unassigned = Bytecode::with_instructions(vec![Instr::Return], 1);
     unassigned.var_names.insert(0, "ans".into());
     assert!(matches!(
-        futures::executor::block_on(execute_unit_script(unassigned, 1)),
+        futures::executor::block_on(execute_script_bytecode(unassigned, 1)),
         ProgramExecutionResponse::Failure { .. }
     ));
     let mut bytecode = Bytecode::with_instructions(
@@ -29,7 +29,7 @@ fn scripts_preserve_empty_outputs_and_never_fabricate_ans() {
     );
     bytecode.var_names.insert(0, "ans".into());
     let ProgramExecutionResponse::Success { value } =
-        futures::executor::block_on(execute_unit_script(bytecode, 1))
+        futures::executor::block_on(execute_script_bytecode(bytecode, 1))
     else {
         panic!("actual ans must survive");
     };

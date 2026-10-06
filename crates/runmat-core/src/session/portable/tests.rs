@@ -171,3 +171,11 @@ fn original_environment_and_cancellation_are_enforced_before_execution() {
         ProgramExecutionResponse::Failure { .. }
     ));
 }
+
+#[test]
+fn complete_units_reject_partial_vm_execution_and_succeed_through_session_owner() {
+    let original = request("ans = 42;", None, 1);
+    let rejected = block_on(runmat_vm::execute_program_request(original.clone()));
+    assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
+    assert_eq!(values(invoke(&original)), vec![Value::Num(42.0)]);
+}

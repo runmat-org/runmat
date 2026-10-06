@@ -67,7 +67,6 @@ pub use fea_workspace::{
 mod init;
 mod pinned;
 mod portable;
-#[cfg(not(target_arch = "wasm32"))]
 mod program;
 mod project;
 mod run;
@@ -114,7 +113,6 @@ pub struct RunMatSession {
     interrupt_flag: Arc<AtomicBool>,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
-    #[cfg(not(target_arch = "wasm32"))]
     program_service: std::rc::Rc<program::SessionProgramService>,
     /// Typed handle retained alongside the executor-neutral runtime port so a
     /// host may explicitly persist or restore this session's bounded profile.
