@@ -4,19 +4,12 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
-use runmat_builtins::BuiltinIntegerAuditKind;
 use runmat_builtins::{
     FIGURE_PERSISTENCE_ERROR_IMPORT as ERROR_IMPORT,
     FIGURE_PERSISTENCE_ERROR_INTERNAL as ERROR_INTERNAL,
     FIGURE_PERSISTENCE_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
     FIGURE_PERSISTENCE_ERROR_IO as ERROR_IO, FIGURE_PERSISTENCE_ERROR_RENDER as ERROR_RENDER,
     FIGURE_PERSISTENCE_ERROR_UNSUPPORTED_FORMAT as ERROR_UNSUPPORTED_FORMAT,
-};
-pub use runmat_builtins::{
-    HGLOAD_DESCRIPTOR, HGLOAD_INTEGER_AUDIT, HGSAVE_DESCRIPTOR, HGSAVE_INTEGER_AUDIT,
-    OPENFIG_DESCRIPTOR, OPENFIG_INTEGER_AUDIT, SAVEAS_DESCRIPTOR, SAVEAS_INTEGER_AUDIT,
-    SAVEFIG_DESCRIPTOR, SAVEFIG_INTEGER_AUDIT,
 };
 use runmat_value::{CellArray, StructValue, Tensor, Value};
 
@@ -95,11 +88,16 @@ mod openfig;
 mod saveas;
 mod savefig;
 
-pub use hgload::hgload_builtin;
-pub use hgsave::hgsave_builtin;
-pub use openfig::openfig_builtin;
-pub use saveas::saveas_builtin;
-pub use savefig::savefig_builtin;
+#[cfg(test)]
+use hgload::hgload_builtin;
+#[cfg(test)]
+use hgsave::hgsave_builtin;
+#[cfg(test)]
+use openfig::openfig_builtin;
+#[cfg(test)]
+use saveas::saveas_builtin;
+#[cfg(test)]
+use savefig::savefig_builtin;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use hgload::__runmat_wasm_register_builtin_hgload_builtin_registered as __runmat_wasm_register_builtin_hgload_builtin;

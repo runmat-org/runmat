@@ -16,6 +16,7 @@ pub async fn hgload_builtin_registered(
     super::execute_hgload(runtime, args).await
 }
 
+#[cfg(test)]
 pub async fn hgload_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     super::execute_hgload(crate::context::legacy::active(), args).await
 }

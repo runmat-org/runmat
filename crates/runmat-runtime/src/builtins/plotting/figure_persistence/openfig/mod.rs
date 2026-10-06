@@ -16,6 +16,7 @@ pub async fn openfig_builtin_registered(
     super::execute_openfig(runtime, args).await
 }
 
+#[cfg(test)]
 pub async fn openfig_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     super::execute_openfig(crate::context::legacy::active(), args).await
 }

@@ -16,6 +16,7 @@ pub async fn hgsave_builtin_registered(
     super::execute_hgsave(runtime, args).await
 }
 
+#[cfg(test)]
 pub async fn hgsave_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     super::execute_hgsave(crate::context::legacy::active(), args).await
 }

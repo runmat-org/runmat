@@ -16,6 +16,7 @@ pub async fn saveas_builtin_registered(
     super::execute_saveas(runtime, args).await
 }
 
+#[cfg(test)]
 pub async fn saveas_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     super::execute_saveas(crate::context::legacy::active(), args).await
 }

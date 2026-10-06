@@ -1,4 +1,8 @@
 use super::*;
+use runmat_builtins::{
+    BuiltinIntegerAuditKind, HGLOAD_INTEGER_AUDIT, HGSAVE_INTEGER_AUDIT, OPENFIG_INTEGER_AUDIT,
+    SAVEAS_DESCRIPTOR,
+};
 
 #[test]
 fn saveas_descriptor_covers_core_forms() {

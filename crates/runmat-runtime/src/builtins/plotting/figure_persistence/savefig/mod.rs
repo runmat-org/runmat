@@ -16,6 +16,7 @@ pub async fn savefig_builtin_registered(
     super::execute_savefig(runtime, args).await
 }
 
+#[cfg(test)]
 pub async fn savefig_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     super::execute_savefig(crate::context::legacy::active(), args).await
 }
