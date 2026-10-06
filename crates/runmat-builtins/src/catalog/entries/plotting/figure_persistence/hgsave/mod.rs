@@ -91,6 +91,6 @@ pub const HGSAVE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
     integer_capabilities: &[],
-    integer_audit: Some(HGSAVE_INTEGER_AUDIT),
+    integer_audit: Some(&HGSAVE_INTEGER_AUDIT),
     suppress_auto_output: true,
 };
