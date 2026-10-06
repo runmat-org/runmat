@@ -19,8 +19,11 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[path = "pending/fixtures.rs"]
 mod fixtures;
+#[path = "pending/publication.rs"]
 mod publication;
+#[path = "pending/resident.rs"]
 mod resident;
 
 use fixtures::{await_operation_start, PausedDownloadProvider, PausedProvider, RevocableLease};
