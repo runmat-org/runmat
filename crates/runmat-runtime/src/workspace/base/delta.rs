@@ -1,46 +1,95 @@
 use runmat_value::Value;
 
-use crate::execution::RootedValueHandles;
-
+use super::values::RootedWorkspaceEntry;
 use super::BaseWorkspaceError;
 
-pub const MAX_WORKSPACE_DELTA_CHANGES: usize = u16::MAX as usize;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum WorkspaceChange {
-    Assign { name: String, value: Value },
-    Remove { name: String },
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkspaceChangeKind {
+    Assign,
+    Remove,
     Clear,
 }
 
 #[derive(Clone, Debug)]
-pub struct WorkspaceDelta {
-    changes: Vec<WorkspaceChange>,
-    _roots: Option<RootedValueHandles>,
+pub(super) enum WorkspaceChangeData {
+    Assign {
+        name: String,
+        entry: RootedWorkspaceEntry,
+    },
+    Remove {
+        name: String,
+    },
+    Clear,
 }
 
-impl Default for WorkspaceDelta {
-    fn default() -> Self {
-        Self::new()
+/// One checked workspace mutation. Its representation is private so an
+/// assigning change cannot carry an unrooted or transient value.
+#[derive(Clone, Debug)]
+pub struct WorkspaceChange(WorkspaceChangeData);
+
+impl WorkspaceChange {
+    pub fn assign(name: impl Into<String>, value: Value) -> Result<Self, BaseWorkspaceError> {
+        Ok(Self::assign_entry(
+            name.into(),
+            RootedWorkspaceEntry::new(value)?,
+        ))
     }
+
+    pub fn remove(name: impl Into<String>) -> Self {
+        Self(WorkspaceChangeData::Remove { name: name.into() })
+    }
+
+    pub const fn clear() -> Self {
+        Self(WorkspaceChangeData::Clear)
+    }
+
+    pub fn kind(&self) -> WorkspaceChangeKind {
+        match &self.0 {
+            WorkspaceChangeData::Assign { .. } => WorkspaceChangeKind::Assign,
+            WorkspaceChangeData::Remove { .. } => WorkspaceChangeKind::Remove,
+            WorkspaceChangeData::Clear => WorkspaceChangeKind::Clear,
+        }
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        match &self.0 {
+            WorkspaceChangeData::Assign { name, .. } | WorkspaceChangeData::Remove { name } => {
+                Some(name)
+            }
+            WorkspaceChangeData::Clear => None,
+        }
+    }
+
+    pub fn value(&self) -> Option<&Value> {
+        match &self.0 {
+            WorkspaceChangeData::Assign { entry, .. } => Some(entry.value()),
+            WorkspaceChangeData::Remove { .. } | WorkspaceChangeData::Clear => None,
+        }
+    }
+
+    pub(super) fn assign_entry(name: String, entry: RootedWorkspaceEntry) -> Self {
+        Self(WorkspaceChangeData::Assign { name, entry })
+    }
+
+    pub(super) fn data(&self) -> &WorkspaceChangeData {
+        &self.0
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct WorkspaceDelta {
+    changes: Vec<WorkspaceChange>,
 }
 
 impl WorkspaceDelta {
     pub const fn new() -> Self {
         Self {
             changes: Vec::new(),
-            _roots: None,
         }
     }
 
-    pub fn from_changes(changes: Vec<WorkspaceChange>) -> Result<Self, BaseWorkspaceError> {
-        validate_change_count(changes.len())?;
-        validate_changes(&changes)?;
-        let roots = roots_for_changes(&changes)?;
-        Ok(Self {
-            changes,
-            _roots: roots,
-        })
+    pub fn from_changes(changes: Vec<WorkspaceChange>) -> Self {
+        Self { changes }
     }
 
     pub fn assign(
@@ -48,25 +97,16 @@ impl WorkspaceDelta {
         name: impl Into<String>,
         value: Value,
     ) -> Result<(), BaseWorkspaceError> {
-        runmat_value::validate_no_transient_sequence(&value)?;
-        validate_change_count(self.changes.len().saturating_add(1))?;
-        let mut changes = self.changes.clone();
-        changes.push(WorkspaceChange::Assign {
-            name: name.into(),
-            value,
-        });
-        let roots = roots_for_changes(&changes)?;
-        self.changes = changes;
-        self._roots = roots;
+        self.changes.push(WorkspaceChange::assign(name, value)?);
         Ok(())
     }
 
-    pub fn remove(&mut self, name: impl Into<String>) -> Result<(), BaseWorkspaceError> {
-        self.push_unrooted(WorkspaceChange::Remove { name: name.into() })
+    pub fn remove(&mut self, name: impl Into<String>) {
+        self.changes.push(WorkspaceChange::remove(name));
     }
 
-    pub fn clear(&mut self) -> Result<(), BaseWorkspaceError> {
-        self.push_unrooted(WorkspaceChange::Clear)
+    pub fn clear(&mut self) {
+        self.changes.push(WorkspaceChange::clear());
     }
 
     pub fn is_empty(&self) -> bool {
@@ -81,42 +121,8 @@ impl WorkspaceDelta {
         &self.changes
     }
 
-    fn push_unrooted(&mut self, change: WorkspaceChange) -> Result<(), BaseWorkspaceError> {
-        validate_change_count(self.changes.len().saturating_add(1))?;
-        self.changes.push(change);
-        Ok(())
+    pub(super) fn push_assign_entry(&mut self, name: String, entry: RootedWorkspaceEntry) {
+        self.changes
+            .push(WorkspaceChange::assign_entry(name, entry));
     }
-}
-
-pub(super) fn validate_change_count(count: usize) -> Result<(), BaseWorkspaceError> {
-    if count > MAX_WORKSPACE_DELTA_CHANGES {
-        return Err(BaseWorkspaceError::DeltaTooLarge {
-            actual: count,
-            maximum: MAX_WORKSPACE_DELTA_CHANGES,
-        });
-    }
-    Ok(())
-}
-
-fn validate_changes(changes: &[WorkspaceChange]) -> Result<(), BaseWorkspaceError> {
-    for change in changes {
-        if let WorkspaceChange::Assign { value, .. } = change {
-            runmat_value::validate_no_transient_sequence(value)?;
-        }
-    }
-    Ok(())
-}
-
-fn roots_for_changes(
-    changes: &[WorkspaceChange],
-) -> Result<Option<RootedValueHandles>, BaseWorkspaceError> {
-    let values = changes.iter().filter_map(|change| match change {
-        WorkspaceChange::Assign { value, .. } => Some(value),
-        WorkspaceChange::Remove { .. } | WorkspaceChange::Clear => None,
-    });
-    let values = values.collect::<Vec<_>>();
-    if values.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(RootedValueHandles::for_values(values.into_iter())?))
 }

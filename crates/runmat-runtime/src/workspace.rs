@@ -6,8 +6,8 @@ pub mod bindings;
 
 pub use base::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
-    BaseWorkspaceReconciliation, BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceDelta,
-    WorkspaceRevision, MAX_BASE_WORKSPACE_ENTRIES, MAX_WORKSPACE_DELTA_CHANGES,
+    BaseWorkspaceReconciliation, BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceChangeKind,
+    WorkspaceDelta, WorkspaceRevision,
 };
 
 #[cfg(test)]

@@ -1,30 +1,34 @@
-use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 
 use runmat_value::Value;
 
+use super::delta::WorkspaceChangeData;
 use super::owner::BaseWorkspaceState;
-use super::values::RootedWorkspaceValues;
+use super::values::{RootedWorkspaceEntries, RootedWorkspaceEntry};
 use super::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceReconciliation,
-    BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceDelta, WorkspaceRevision,
+    WorkspaceDelta, WorkspaceRevision,
 };
 
 #[derive(Debug)]
 pub struct BaseWorkspaceProjection {
     owner: Weak<std::cell::RefCell<BaseWorkspaceState>>,
     revision: WorkspaceRevision,
-    values: RootedWorkspaceValues,
+    entries: RootedWorkspaceEntries,
     pending: WorkspaceDelta,
 }
 
 impl BaseWorkspaceProjection {
     pub(super) fn new(owner: &BaseWorkspaceOwner) -> Result<Self, BaseWorkspaceError> {
-        let snapshot = owner.snapshot()?;
+        let state = owner
+            .state
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()?;
         Ok(Self {
             owner: Rc::downgrade(&owner.state),
-            revision: snapshot.revision(),
-            values: RootedWorkspaceValues::new(snapshot.values().clone())?,
+            revision: state.revision,
+            entries: state.entries.clone(),
             pending: WorkspaceDelta::new(),
         })
     }
@@ -33,12 +37,22 @@ impl BaseWorkspaceProjection {
         self.revision
     }
 
-    pub fn values(&self) -> &BTreeMap<String, Value> {
-        self.values.values()
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.entries
+            .iter()
+            .map(|(name, entry)| (name.as_str(), entry.value()))
     }
 
     pub fn lookup(&self, name: &str) -> Option<&Value> {
-        self.values.values().get(name)
+        self.entries.get(name).map(|entry| entry.value())
     }
 
     pub fn has_pending_changes(&self) -> bool {
@@ -51,25 +65,20 @@ impl BaseWorkspaceProjection {
         value: Value,
     ) -> Result<(), BaseWorkspaceError> {
         let name = name.into();
-        let mut candidate = self.values.values().clone();
-        candidate.insert(name.clone(), value.clone());
-        super::owner::validate_entry_count(candidate.len())?;
-        let candidate = RootedWorkspaceValues::new(candidate)?;
-        self.pending.assign(name, value)?;
-        self.values = candidate;
+        let entry = RootedWorkspaceEntry::new(value)?;
+        self.pending.push_assign_entry(name.clone(), entry.clone());
+        self.entries.insert(name, entry);
         Ok(())
     }
 
-    pub fn remove(&mut self, name: &str) -> Result<(), BaseWorkspaceError> {
-        self.pending.remove(name.to_string())?;
-        self.values.remove(name);
-        Ok(())
+    pub fn remove(&mut self, name: &str) {
+        self.pending.remove(name.to_string());
+        self.entries.remove(name);
     }
 
-    pub fn clear(&mut self) -> Result<(), BaseWorkspaceError> {
-        self.pending.clear()?;
-        self.values.clear();
-        Ok(())
+    pub fn clear(&mut self) {
+        self.pending.clear();
+        self.entries.clear();
     }
 
     /// Publish this projection's ordered mutations over the latest canonical
@@ -77,14 +86,21 @@ impl BaseWorkspaceProjection {
     /// absent from this delta are never overwritten.
     pub fn publish(&mut self) -> Result<BaseWorkspaceCommit, BaseWorkspaceError> {
         let owner = self.owner.upgrade().ok_or(BaseWorkspaceError::Closed)?;
-        let delta = self.pending.clone();
-        let commit = {
+        let (commit, reconciliation) = {
             let mut state = owner
                 .try_borrow_mut()
                 .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
-            state.commit(self.revision, delta)?
+            let revision = state.preflight_commit(self.revision, &self.pending)?;
+            let base_revision = self.revision;
+            let delta = std::mem::take(&mut self.pending);
+            let commit = state.commit_preflighted(base_revision, revision, delta);
+            let reconciliation =
+                state
+                    .journal
+                    .reconcile_known(base_revision, state.revision, &state.entries);
+            (commit, reconciliation)
         };
-        self.adopt(commit.snapshot())?;
+        self.apply_reconciliation(&reconciliation);
         Ok(commit)
     }
 
@@ -100,43 +116,37 @@ impl BaseWorkspaceProjection {
             .try_borrow()
             .map_err(|_| BaseWorkspaceError::BorrowConflict)?
             .reconcile(self.revision)?;
-        self.apply_reconciliation(&reconciliation)?;
+        self.apply_reconciliation(&reconciliation);
         Ok(reconciliation)
     }
 
-    fn apply_reconciliation(
-        &mut self,
-        reconciliation: &BaseWorkspaceReconciliation,
-    ) -> Result<(), BaseWorkspaceError> {
+    fn apply_reconciliation(&mut self, reconciliation: &BaseWorkspaceReconciliation) {
         match reconciliation {
             BaseWorkspaceReconciliation::UpToDate { revision } => {
                 self.revision = *revision;
             }
             BaseWorkspaceReconciliation::Delta { to, changes, .. } => {
-                let mut values = self.values.values().clone();
-                for change in changes.changes() {
-                    match change {
-                        WorkspaceChange::Assign { name, value } => {
-                            values.insert(name.clone(), value.clone());
-                        }
-                        WorkspaceChange::Remove { name } => {
-                            values.remove(name);
-                        }
-                        WorkspaceChange::Clear => values.clear(),
-                    }
-                }
-                self.values = RootedWorkspaceValues::new(values)?;
+                apply_delta(&mut self.entries, changes);
                 self.revision = *to;
             }
-            BaseWorkspaceReconciliation::Reset(snapshot) => self.adopt(snapshot)?,
+            BaseWorkspaceReconciliation::Reset(snapshot) => {
+                self.entries = snapshot.entries.clone();
+                self.revision = snapshot.revision();
+            }
         }
-        Ok(())
     }
+}
 
-    fn adopt(&mut self, snapshot: &BaseWorkspaceSnapshot) -> Result<(), BaseWorkspaceError> {
-        self.values = RootedWorkspaceValues::new(snapshot.values().clone())?;
-        self.revision = snapshot.revision();
-        self.pending = WorkspaceDelta::new();
-        Ok(())
+fn apply_delta(entries: &mut RootedWorkspaceEntries, delta: &WorkspaceDelta) {
+    for change in delta.changes() {
+        match change.data() {
+            WorkspaceChangeData::Assign { name, entry } => {
+                entries.insert(name.clone(), entry.clone());
+            }
+            WorkspaceChangeData::Remove { name } => {
+                entries.remove(name);
+            }
+            WorkspaceChangeData::Clear => entries.clear(),
+        }
     }
 }
