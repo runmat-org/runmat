@@ -109,6 +109,7 @@ impl SourcePool {
         Ok(reference)
     }
 
+    #[cfg(test)]
     pub(crate) fn entries(&self) -> impl Iterator<Item = (SourceId, &SourceText)> {
         self.sources
             .iter()

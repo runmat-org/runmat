@@ -113,11 +113,11 @@ impl RunMatSession {
         let retired = self
             .workspace_bindings
             .iter()
-            .filter_map(|(name, binding)| {
-                (matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
-                    && !global_names.contains(name))
-                .then(|| (name.clone(), binding.slot))
+            .filter(|(name, binding)| {
+                matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
+                    && !global_names.contains(*name)
             })
+            .map(|(name, binding)| (name.clone(), binding.slot))
             .collect::<Vec<_>>();
         for (name, slot) in retired {
             if self

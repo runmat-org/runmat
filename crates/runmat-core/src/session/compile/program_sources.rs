@@ -1,6 +1,6 @@
-use super::{
-    source_context_function_names_in_statements, CompanionSourceDiscovery, SourceContextData,
-};
+#[cfg(test)]
+use super::source_context_function_names_in_statements;
+use super::{CompanionSourceDiscovery, SourceContextData};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -42,6 +42,7 @@ pub(in crate::session) struct ProgramSourceTable {
     primary_source: ProgramSourceId,
     pub(in crate::session) source_map: crate::ExecutableSourceMap,
     pub(in crate::session) statement_sources: Vec<ProgramSourceId>,
+    #[cfg(test)]
     pub(in crate::session) function_sources: HashMap<String, ProgramSourceId>,
     pub retained_runtime_sources:
         HashMap<runmat_runtime::source_context::RuntimeSourceRef, ProgramSourceId>,
@@ -348,16 +349,11 @@ impl ProgramSourceTable {
                 relative_path.clone(),
                 context.text.clone(),
             );
-            if !companions.contains_key(&key) {
-                companions.insert(
-                    key,
-                    CompanionSource {
-                        context: Arc::clone(context),
-                        owner_identity,
-                        relative_path,
-                    },
-                );
-            }
+            companions.entry(key).or_insert_with(|| CompanionSource {
+                context: Arc::clone(context),
+                owner_identity,
+                relative_path,
+            });
         }
 
         let primary_key = SourceKey::new(
@@ -427,6 +423,7 @@ impl ProgramSourceTable {
         }
 
         let mut statement_sources = vec![primary_source; primary_statement_count];
+        #[cfg(test)]
         let mut function_sources = HashMap::new();
         for discovered in &discovery.statements {
             let context = discovered
@@ -440,6 +437,7 @@ impl ProgramSourceTable {
                     "companion source is absent from the admitted source table".to_string()
                 })?;
             statement_sources.push(source_id);
+            #[cfg(test)]
             for name in source_context_function_names_in_statements(std::slice::from_ref(
                 &discovered.statement,
             )) {
@@ -454,6 +452,7 @@ impl ProgramSourceTable {
             primary_source,
             source_map: crate::ExecutableSourceMap::new(entries),
             statement_sources,
+            #[cfg(test)]
             function_sources,
             retained_runtime_sources,
         })

@@ -5,7 +5,13 @@ use std::collections::BTreeMap;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) enum TieredInteractiveInvocation {
     Cold,
-    Native(std::result::Result<crate::generic_native::NativeExecution, RuntimeError>),
+    Native(std::result::Result<Box<crate::generic_native::NativeExecution>, Box<RuntimeError>>),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeProcedureTarget<'a> {
+    function: runmat_hir::FunctionId,
+    name: &'a str,
 }
 
 impl RunMatSession {
@@ -215,7 +221,9 @@ impl RunMatSession {
                 .vectorized_native_regions
                 .saturating_add(execution.vectorized_regions);
         }
-        Ok(TieredInteractiveInvocation::Native(execution))
+        Ok(TieredInteractiveInvocation::Native(
+            execution.map(Box::new).map_err(Box::new),
+        ))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -334,11 +342,11 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
-        function: runmat_hir::FunctionId,
-        name: &str,
+        target: NativeProcedureTarget<'_>,
         arguments: Vec<Value>,
         requested_outputs: usize,
     ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
+        let NativeProcedureTarget { function, name } = target;
         if !self.native_tiering_enabled {
             return self
                 .invoke_procedure_interpreted(
@@ -594,8 +602,10 @@ impl RunMatSession {
                         unit,
                         runtime,
                         runtime_bytecode,
-                        function,
-                        &name,
+                        NativeProcedureTarget {
+                            function,
+                            name: &name,
+                        },
                         invocation.arguments,
                         invocation.requested_outputs,
                     )

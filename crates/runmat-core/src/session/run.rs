@@ -576,12 +576,10 @@ impl RunMatSession {
         let (binding_removals, removed_names) =
             self.abi_workspace_removals(previous_workspace_bindings, workspace_full)?;
         outcome.workspace_delta.removals = binding_removals;
-        if workspace_full {
-            if removed_names {
-                outcome.effects.push(crate::abi::ObservedEffect::Workspace(
-                    crate::abi::WorkspaceEffectKind::Clear,
-                ));
-            }
+        if workspace_full && removed_names {
+            outcome.effects.push(crate::abi::ObservedEffect::Workspace(
+                crate::abi::WorkspaceEffectKind::Clear,
+            ));
         }
         Ok(execution.outcome)
     }
@@ -1205,7 +1203,7 @@ impl RunMatSession {
                 Ok(super::executable::TieredInteractiveInvocation::Native(Err(native_error))) => {
                     used_jit = true;
                     execution_completed = true;
-                    error = Some(native_error);
+                    error = Some(*native_error);
                 }
                 Err(admission_error) => {
                     execution_completed = true;
@@ -1817,7 +1815,7 @@ impl RunMatSession {
         let mut removed = previous_workspace_bindings
             .into_iter()
             .filter(|(name, previous_key)| {
-                if workspace.get(name).is_none() {
+                if !workspace.contains_key(name) {
                     removed_names |= include_missing_names;
                     return include_missing_names;
                 }
