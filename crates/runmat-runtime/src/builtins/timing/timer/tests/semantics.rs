@@ -224,6 +224,7 @@ fn timer_dependent_setters_validate_post_construction_values() {
     };
     let object = runmat_gc::gc_clone_value(&handle.target).expect("timer object");
     let err = block_on(set_timer_property_object(
+        None,
         object.clone(),
         TimerProperty::Period,
         Value::Num(0.0),
@@ -235,6 +236,7 @@ fn timer_dependent_setters_validate_post_construction_values() {
     );
 
     let updated = block_on(set_timer_property_object(
+        None,
         object,
         TimerProperty::Tag,
         Value::CharArray(CharArray::new_row("batch")),

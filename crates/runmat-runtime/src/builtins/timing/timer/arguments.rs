@@ -3,6 +3,31 @@
 use super::*;
 use crate::builtins::common::gpu_helpers::gather_value_async;
 
+/// Materialization uses the selected invocation's existing cancellation budget.
+/// Provider errors remain intact; cancellation is checked before publication.
+async fn gather_timer_value(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<Value> {
+    let Some(runtime) = runtime else {
+        return gather_value_async(value).await;
+    };
+    let mut budget = runtime.cpu_cooperation();
+    budget
+        .checkpoint(0)
+        .await
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    let result = budget
+        .await_cancellable(gather_value_async(value))
+        .await
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    budget
+        .checkpoint(0)
+        .await
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    result
+}
+
 pub(super) struct PreparedTimerPair {
     pub(super) property: TimerProperty,
     pub(super) value: Value,
@@ -12,6 +37,7 @@ pub(super) struct PreparedTimerPair {
 /// typed through resident admission and assignment instead of rebuilding a
 /// name/value pair and parsing the spelling a second time.
 pub(super) async fn prepare_timer_setter_value(
+    runtime: Option<&RuntimeContext>,
     property: TimerProperty,
     value: Value,
 ) -> BuiltinResult<PreparedTimerPair> {
@@ -33,7 +59,7 @@ pub(super) async fn prepare_timer_setter_value(
         }
         Ok(PreparedTimerPair {
             property,
-            value: gather_value_async(&value).await?,
+            value: gather_timer_value(runtime, &value).await?,
         })
     } else {
         normalize_property_value(property, value.clone())?;
@@ -42,6 +68,7 @@ pub(super) async fn prepare_timer_setter_value(
 }
 
 pub(super) async fn prepare_timer_property_pairs(
+    runtime: Option<&RuntimeContext>,
     args: &[Value],
     finding: bool,
 ) -> BuiltinResult<Vec<PreparedTimerPair>> {
@@ -89,7 +116,7 @@ pub(super) async fn prepare_timer_property_pairs(
     for (property, input) in admitted {
         let value = if property.is_numeric() {
             // Retain the provider's identifier, retry policy, source and span.
-            gather_value_async(input).await?
+            gather_timer_value(runtime, input).await?
         } else {
             input.clone()
         };
@@ -133,6 +160,7 @@ mod tests {
     #[test]
     fn name_value_admission_keeps_typed_identity_through_assignment() {
         let pairs = futures::executor::block_on(prepare_timer_property_pairs(
+            None,
             &[
                 Value::String(" eXeCuTiOnMoDe ".into()),
                 Value::String("FIXEDSPACING".into()),
@@ -156,6 +184,7 @@ mod tests {
     #[test]
     fn late_invalid_property_is_rejected_before_numeric_materialization() {
         let error = futures::executor::block_on(prepare_timer_property_pairs(
+            None,
             &[
                 Value::String("Period".into()),
                 Value::Num(0.25),
@@ -169,6 +198,7 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
 
         let error = futures::executor::block_on(prepare_timer_property_pairs(
+            None,
             &[
                 Value::String("Period".into()),
                 Value::Num(0.25),

@@ -9,7 +9,7 @@ pub(super) async fn set_timer_property(
     value: Value,
 ) -> BuiltinResult<Value> {
     let Value::HandleObject(handle) = &receiver else {
-        return set_timer_property_object(receiver, property, value).await;
+        return set_timer_property_object(runtime, receiver, property, value).await;
     };
     let runtime = timer_runtime(runtime)?;
     admit_handle(&runtime, handle, property)?;
@@ -19,7 +19,7 @@ pub(super) async fn set_timer_property(
                 .with_source(error)
                 .build()
         })?;
-    let prepared = arguments::prepare_timer_setter_value(property, value).await?;
+    let prepared = arguments::prepare_timer_setter_value(Some(&runtime), property, value).await?;
     let normalized = normalize_property_value(property, prepared.value)?;
     // Preparation may suspend or reenter the host. Validate the live handle
     // and its current running policy before publishing only this property.
@@ -47,6 +47,7 @@ pub(super) async fn set_timer_property(
 }
 
 pub(super) async fn set_timer_property_object(
+    runtime: Option<RuntimeContext>,
     obj: Value,
     property: TimerProperty,
     value: Value,
@@ -85,7 +86,7 @@ pub(super) async fn set_timer_property_object(
             ),
         ));
     }
-    let prepared = arguments::prepare_timer_setter_value(property, value).await?;
+    let prepared = arguments::prepare_timer_setter_value(runtime.as_ref(), property, value).await?;
     apply_name_value_pairs(&mut object, &[prepared], false)?;
     Ok(Value::Object(object))
 }
