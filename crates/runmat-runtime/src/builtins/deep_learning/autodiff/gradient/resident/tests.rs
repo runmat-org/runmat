@@ -413,7 +413,8 @@ fn canonical_dlgradient_uses_explicit_output_count_and_cancellation() {
             crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
         ))
         .unwrap();
-        assert!(matches!(result, Value::Object(_)));
+        assert_eq!(result.kind(), runmat_value::ValueSequenceKind::Single);
+        assert!(matches!(result.as_slice(), [Value::Object(_)]));
 
         let source = CancellationSource::new();
         source.cancel(CancellationReason::User);

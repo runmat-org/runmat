@@ -3,6 +3,7 @@ use crate::context::{
     GraphicsCallbackReceipt, GraphicsFlushReceipt, RuntimeGraphicsFlushOperation,
     RuntimeGraphicsPresentationService, RuntimeLanguageMode, RuntimeServicePorts,
 };
+use crate::RuntimeError;
 use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;

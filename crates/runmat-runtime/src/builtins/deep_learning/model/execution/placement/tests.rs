@@ -254,9 +254,11 @@ fn registered_predict_uses_explicit_context_and_output_count_for_placement() {
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
     ))
     .expect("canonical predict must use the invoking context and requested outputs");
-    let Value::OutputList(values) = output else {
-        panic!("canonical one-output invocation must use the output-list carrier")
-    };
+    assert_eq!(
+        output.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    let values = output.as_slice();
     assert_eq!(values.len(), 1);
     assert_half_score(&values[0]);
     let feedback = service.feedback.borrow();
@@ -269,7 +271,11 @@ fn registered_predict_uses_explicit_context_and_output_count_for_placement() {
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(2)),
     ))
     .expect("dlnetwork prediction can publish its state as the second output");
-    assert!(matches!(state_output, Value::OutputList(values) if values.len() == 2));
+    assert_eq!(
+        state_output.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    assert_eq!(state_output.len(), 2);
     let feedback = service.feedback.borrow();
     assert_eq!(feedback.len(), 2);
     assert_ne!(

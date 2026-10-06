@@ -1154,12 +1154,17 @@ fn canonical_forward_uses_invocation_outputs_and_cancellation() {
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(2)),
     ))
     .unwrap();
-    assert!(matches!(output, Value::OutputList(values) if values.len() == 2));
+    assert_eq!(
+        output.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    assert_eq!(output.len(), 2);
     let output = block_on((bindings[0].implementation)(
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
     ))
     .unwrap();
-    assert!(!matches!(output, Value::OutputList(_)));
+    assert_eq!(output.kind(), runmat_value::ValueSequenceKind::Single);
+    assert_eq!(output.len(), 1);
 
     runtime.set_error_namespace("Invocation");
     let source = CancellationSource::new();

@@ -6,10 +6,6 @@ use crate::builtins::plotting::{
     clear_figure, close_figure, figure_handles, reset_hold_state_for_run, reset_plot_state,
 };
 use futures::executor::block_on;
-use runmat_builtins::{
-    BuiltinIntegerAuditKind, HGLOAD_INTEGER_AUDIT, HGSAVE_INTEGER_AUDIT, OPENFIG_INTEGER_AUDIT,
-    SAVEAS_DESCRIPTOR,
-};
 
 fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
     let guard = lock_plot_registry();

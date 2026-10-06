@@ -135,10 +135,12 @@ fn registered_predict_preserves_statistical_output_overloads_without_ambient_ari
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
     ))
     .unwrap();
-    let Value::OutputList(predicted) = predicted else {
-        panic!("one canonical statistical output expected")
-    };
-    let values = tensor(&predicted[0]);
+    assert_eq!(
+        predicted.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    assert_eq!(predicted.len(), 1);
+    let values = tensor(&predicted.as_slice()[0]);
     assert_eq!(values.shape, vec![2, 1]);
     assert!((values.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
 
@@ -146,7 +148,11 @@ fn registered_predict_preserves_statistical_output_overloads_without_ambient_ari
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime), Some(2)),
     ))
     .unwrap();
-    assert!(matches!(predicted, Value::OutputList(values) if values.len() == 2));
+    assert_eq!(
+        predicted.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    assert_eq!(predicted.len(), 2);
 }
 
 #[test]

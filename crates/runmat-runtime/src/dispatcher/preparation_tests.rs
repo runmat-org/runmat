@@ -50,7 +50,10 @@ impl crate::context::RuntimeBuiltinService for Override {
             |invocation| {
                 let value = invocation.args[0].clone();
                 assert!(matches!(value, Value::Tensor(_)));
-                Box::pin(async { Ok(value) })
+                Box::pin(async {
+                    runmat_value::ValueSequence::single(value)
+                        .map_err(crate::sequence::sequence_error_to_runtime)
+                })
             },
         )]
     }
