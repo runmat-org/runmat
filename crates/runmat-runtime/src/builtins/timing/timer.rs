@@ -20,9 +20,9 @@ use runmat_types::MemberAccess;
 use runmat_value::NumericScalar;
 use std::collections::HashMap;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use once_cell::sync::Lazy;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use std::sync::Mutex;
 
 use runmat_builtins::{
@@ -51,7 +51,7 @@ const TIMER_CALLABLE_DELETE: &str = "__runmat_timer_delete";
 
 const CALLBACK_PROPS: [&str; 4] = ["TimerFcn", "StartFcn", "StopFcn", "ErrorFcn"];
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 static TIMER_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 const TIMER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -1355,7 +1355,7 @@ fn timer_runtime(runtime: Option<RuntimeContext>) -> BuiltinResult<RuntimeContex
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::context::{
