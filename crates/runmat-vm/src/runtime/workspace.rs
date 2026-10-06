@@ -18,9 +18,9 @@ pub use admission::{
 pub(crate) use frame::{
     reconcile_workspace_frame, release_pending_workspace_service_frame,
     reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
-    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_lookup,
-    workspace_frame_name_is_global, workspace_frame_publishes, workspace_frame_remove,
-    workspace_frame_snapshot, WorkspaceFrameId, WorkspaceFrameLifecycle,
+    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_for_service,
+    workspace_frame_lookup, workspace_frame_name_is_global, workspace_frame_publishes,
+    workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId, WorkspaceFrameLifecycle,
 };
 use frame::{take_service_frame, PendingServiceFrame};
 
