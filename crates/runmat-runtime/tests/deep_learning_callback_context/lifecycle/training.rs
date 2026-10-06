@@ -24,9 +24,13 @@ fn supervised_initializers_suspend_and_resume_once_per_caller() {
             "{name} initializer suspended"
         );
         assert_eq!(calls(), vec![(id, Some(1))], "{name} selected one callback");
-        let Poll::Ready(Ok(Value::OutputList(outputs))) = poll_once(&mut future) else {
+        let Poll::Ready(Ok(outputs)) = poll_once(&mut future) else {
             panic!("{name} should publish its trained network after callback completion");
         };
+        assert_eq!(
+            outputs.kind(),
+            runmat_value::ValueSequenceKind::CommaSeparated
+        );
         assert!(matches!(outputs.as_slice(), [Value::Object(_)]));
         assert_eq!(
             calls(),

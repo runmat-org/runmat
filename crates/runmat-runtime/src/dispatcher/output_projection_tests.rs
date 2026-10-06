@@ -5,7 +5,7 @@ use crate::execution::RuntimeExecutionService;
 use futures::channel::oneshot;
 use futures::task::noop_waker_ref;
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity};
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::future::Future;
@@ -58,7 +58,9 @@ fn pending_output_fixture(
             Some(control.presentation_outputs)
         );
         control.completed.set(control.completed.get() + 1);
-        Ok(Value::Num(requested_outputs.unwrap_or(0) as f64))
+        Ok(ValueSequence::single(Value::Num(
+            requested_outputs.unwrap_or(0) as f64,
+        ))?)
     })
 }
 

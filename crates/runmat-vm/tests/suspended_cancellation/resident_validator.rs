@@ -12,7 +12,7 @@ use runmat_runtime::builtin::{
     RuntimeBuiltinBinding, RuntimeBuiltinFuture, RuntimeBuiltinInvocation,
 };
 use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 use std::{
     cell::RefCell,
     future::Future,
@@ -112,7 +112,7 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
             })
             .expect("valid resident validator fixture allocation");
         state.borrow_mut().probe = Some(allocation.probe);
-        Ok(Value::GpuTensor(allocation.handle))
+        Ok(ValueSequence::single(Value::GpuTensor(allocation.handle))?)
     })
 }
 

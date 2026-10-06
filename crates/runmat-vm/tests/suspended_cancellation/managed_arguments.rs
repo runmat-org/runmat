@@ -8,7 +8,7 @@ use runmat_runtime::builtin::{
     RuntimeBuiltinBinding, RuntimeBuiltinFuture, RuntimeBuiltinInvocation,
 };
 use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
-use runmat_value::{HandleRef, Value};
+use runmat_value::{HandleRef, Value, ValueSequence};
 use std::{
     cell::RefCell,
     future::Future,
@@ -52,11 +52,12 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         state.target = Some(target);
         state.probe = Some(allocation.probe);
         root.unroot().unwrap();
-        Ok(if state.cell_output {
+        let value = if state.cell_output {
             Value::Cell(runmat_value::CellArray::new(vec![value], 1, 1).unwrap())
         } else {
             value
-        })
+        };
+        Ok(ValueSequence::single(value)?)
     })
 }
 
@@ -69,7 +70,7 @@ fn consume(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         .expect("single invocation");
     Box::pin(async move {
         if receiver.await.expect("test sender") {
-            Ok(argument)
+            Ok(ValueSequence::single(argument)?)
         } else {
             Err(runmat_runtime::RuntimeError::new(
                 "expected managed argument failure",

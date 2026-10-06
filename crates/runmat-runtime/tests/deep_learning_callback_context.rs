@@ -4,7 +4,7 @@ use runmat_runtime::{
     call_builtin_async, call_builtin_async_with_outputs_in_context,
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
 };
-use runmat_value::{CellArray, StructArray, StructValue, Tensor, Value};
+use runmat_value::{CellArray, StructArray, StructValue, Tensor, Value, ValueSequence};
 use std::{cell::RefCell, rc::Rc};
 
 #[path = "deep_learning_callback_context/lifecycle.rs"]
@@ -31,14 +31,15 @@ fn selected_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
                 .map(|size| size as usize)
                 .collect();
             let count = dimensions.iter().product();
-            return Ok(Value::Tensor(
+            return Ok(ValueSequence::single(Value::Tensor(
                 Tensor::new(vec![0.25; count], dimensions).expect("fixture initializer shape"),
-            ));
+            ))?);
         }
-        Ok(match outputs {
-            Some(2) => Value::OutputList(vec![Value::Num(23.0), Value::Num(29.0)]),
-            _ => Value::Num(23.0),
-        })
+        match outputs {
+            Some(2) => ValueSequence::comma_separated(vec![Value::Num(23.0), Value::Num(29.0)])
+                .map_err(Into::into),
+            _ => ValueSequence::single(Value::Num(23.0)).map_err(Into::into),
+        }
     })
 }
 
@@ -110,9 +111,10 @@ fn dlfeval_callback_uses_invoking_runtime_and_structural_output_count() {
         2,
     ))
     .expect("selected callback");
+    assert_eq!(output.as_slice(), [Value::Num(23.0), Value::Num(29.0)]);
     assert_eq!(
-        output,
-        Value::OutputList(vec![Value::Num(23.0), Value::Num(29.0)])
+        output.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
     );
     CALLBACKS.with(|calls| {
         assert_eq!(

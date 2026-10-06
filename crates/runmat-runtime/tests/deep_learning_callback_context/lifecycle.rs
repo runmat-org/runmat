@@ -38,7 +38,7 @@ struct SuspendedCallback {
 }
 
 impl Future for SuspendedCallback {
-    type Output = Result<Value, RuntimeError>;
+    type Output = Result<ValueSequence, RuntimeError>;
 
     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         assert_eq!(self.runtime.local_identity(), self.origin);
@@ -51,7 +51,10 @@ impl Future for SuspendedCallback {
         match self.outcome {
             Outcome::Hold => Poll::Pending,
             Outcome::Error => Poll::Ready(Err(RuntimeError::new("selected callback error"))),
-            Outcome::Identity => Poll::Ready(Ok(self.input.take().expect("callback input"))),
+            Outcome::Identity => Poll::Ready(
+                ValueSequence::single(self.input.take().expect("callback input"))
+                    .map_err(Into::into),
+            ),
             Outcome::Initializer => {
                 let Value::Tensor(shape) = self.input.take().expect("shape argument") else {
                     panic!("initializer receives a shape tensor");
@@ -63,9 +66,12 @@ impl Future for SuspendedCallback {
                     .map(|size| size as usize)
                     .collect();
                 let count = dimensions.iter().product();
-                Poll::Ready(Ok(Value::Tensor(
-                    Tensor::new(vec![0.25; count], dimensions).expect("fixture shape"),
-                )))
+                Poll::Ready(
+                    ValueSequence::single(Value::Tensor(
+                        Tensor::new(vec![0.25; count], dimensions).expect("fixture shape"),
+                    ))
+                    .map_err(Into::into),
+                )
             }
         }
     }
@@ -128,7 +134,7 @@ fn invoke(name: &str, runtime: RuntimeContext, args: &[Value]) -> RuntimeBuiltin
     (binding.implementation)(RuntimeBuiltinInvocation::new(args, Some(runtime), Some(1)))
 }
 
-fn poll_once(future: &mut RuntimeBuiltinFuture) -> Poll<Result<Value, RuntimeError>> {
+fn poll_once(future: &mut RuntimeBuiltinFuture) -> Poll<Result<ValueSequence, RuntimeError>> {
     let waker = noop_waker();
     let mut context = Context::from_waker(&waker);
     future.as_mut().poll(&mut context)
@@ -199,7 +205,11 @@ fn pending_dlfeval_resume_publishes_once_and_error_retains_cause() {
         assert!(poll_once(&mut future).is_pending());
         let finished = poll_once(&mut future);
         match outcome {
-            Outcome::Identity => assert!(matches!(finished, Poll::Ready(Ok(Value::Num(7.0))))),
+            Outcome::Identity => assert!(matches!(
+                finished,
+                Poll::Ready(Ok(sequence)) if sequence.as_slice() == [Value::Num(7.0)]
+                    && sequence.kind() == runmat_value::ValueSequenceKind::Single
+            )),
             Outcome::Error => assert!(
                 matches!(finished, Poll::Ready(Err(error)) if error.to_string().contains("selected callback error"))
             ),
@@ -253,8 +263,12 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
             .validate_live()
             .unwrap();
         assert_eq!(retirement.retirements(), 0);
-        let Poll::Ready(Ok(Value::GpuTensor(output))) = poll_once(&mut future) else {
+        let Poll::Ready(Ok(sequence)) = poll_once(&mut future) else {
             panic!("callback must publish the resident alias");
+        };
+        assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
+        let [Value::GpuTensor(output)] = sequence.into_values().try_into().unwrap() else {
+            panic!("callback must publish one resident alias");
         };
         assert_eq!(calls(), vec![(id, Some(1))]);
         // Publication may create a provenance view. The physical lease, not
@@ -288,9 +302,11 @@ fn pending_initializer_resumes_once_and_network_publishes_only_after_success() {
     let mut future = invoke("dlnetwork", runtime.clone(), &args);
     assert!(poll_once(&mut future).is_pending());
     assert_eq!(calls(), vec![(id, Some(1))]);
-    let Poll::Ready(Ok(Value::Object(_))) = poll_once(&mut future) else {
+    let Poll::Ready(Ok(sequence)) = poll_once(&mut future) else {
         panic!("network should publish after one callback completion");
     };
+    assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
+    assert!(matches!(sequence.as_slice(), [Value::Object(_)]));
     assert_eq!(calls(), vec![(id, Some(1))]);
     drop(runtime);
     drop(service);

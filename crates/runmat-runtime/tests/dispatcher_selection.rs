@@ -10,7 +10,7 @@ use runmat_runtime::{
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
     GpuGatherRetry, RuntimeError,
 };
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 use std::{cell::RefCell, error::Error, io, rc::Rc};
 
 #[path = "dispatcher_selection/legacy.rs"]
@@ -35,7 +35,7 @@ fn effects() -> Vec<&'static str> {
 fn fallback(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("fallback");
-        Ok(Value::Num(17.0))
+        Ok(ValueSequence::single(Value::Num(17.0))?)
     })
 }
 
@@ -63,7 +63,22 @@ fn untyped_failure(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 fn successful_override(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         record("override");
-        Ok(Value::Num(29.0))
+        Ok(ValueSequence::single(Value::Num(29.0))?)
+    })
+}
+
+fn sequence_override(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
+    let requested_outputs = invocation.requested_outputs;
+    Box::pin(async move {
+        match requested_outputs {
+            None => ValueSequence::single(Value::Num(7.0)).map_err(Into::into),
+            Some(0) => Ok(ValueSequence::empty()),
+            Some(1) => ValueSequence::comma_separated(vec![Value::Num(11.0)]).map_err(Into::into),
+            Some(count) => ValueSequence::comma_separated(
+                (0..count).map(|index| Value::Num(index as f64)).collect(),
+            )
+            .map_err(Into::into),
+        }
     })
 }
 
@@ -83,7 +98,7 @@ fn observe_invocation(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
                 .borrow_mut()
                 .push((context.local_identity(), outputs))
         });
-        Ok(Value::Num(1.0))
+        Ok(ValueSequence::single(Value::Num(1.0))?)
     })
 }
 
@@ -222,7 +237,7 @@ fn requested_gather_adapts_only_the_selected_implementation() {
                 )
             } else {
                 record("host-effect");
-                Ok(Value::Num(31.0))
+                Ok(ValueSequence::single(Value::Num(31.0))?)
             }
         })
     }
@@ -274,4 +289,30 @@ fn explicit_session_identity_and_output_request_reach_the_same_binding() {
             ]
         );
     });
+}
+
+#[test]
+fn canonical_binding_preserves_typed_default_empty_single_and_many_sequences() {
+    let runtime = context(&[sequence_override]);
+    let binding = RuntimeBuiltinBinding::new(
+        BuiltinBindingIdentity {
+            builtin: BuiltinCatalogIdentity { name: "full" },
+            variant: "default",
+        },
+        sequence_override,
+    );
+    let cases = [
+        (None, runmat_value::ValueSequenceKind::Single, 1),
+        (Some(0), runmat_value::ValueSequenceKind::CommaSeparated, 0),
+        (Some(1), runmat_value::ValueSequenceKind::CommaSeparated, 1),
+        (Some(3), runmat_value::ValueSequenceKind::CommaSeparated, 3),
+    ];
+    for (requested_outputs, kind, length) in cases {
+        let sequence = futures::executor::block_on((binding.implementation)(
+            RuntimeBuiltinInvocation::new(&[], Some(runtime.clone()), requested_outputs),
+        ))
+        .expect("typed fixture sequence");
+        assert_eq!(sequence.kind(), kind);
+        assert_eq!(sequence.len(), length);
+    }
 }
