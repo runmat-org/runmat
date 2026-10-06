@@ -116,19 +116,3 @@ impl SourcePool {
             .map(|(index, source)| (SourceId(index), source))
     }
 }
-
-pub(crate) fn line_col_from_offset(source: &str, offset: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut line_start = 0;
-    for (idx, ch) in source.char_indices() {
-        if idx >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            line_start = idx + 1;
-        }
-    }
-    let col = offset.saturating_sub(line_start) + 1;
-    (line, col)
-}
