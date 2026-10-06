@@ -54,6 +54,8 @@ export type BuiltinFilesystemFixture = {
 export type BuiltinExampleFixture =
   | "None"
   | { Filesystem: BuiltinFilesystemFixture }
+  | { ApplicationSettings: { id: BuiltinExampleFixtureId } }
+  | { MailOutbox: { id: BuiltinExampleFixtureId; expected_message: string } }
   | {
       Loopback: {
         id: BuiltinExampleFixtureId;
@@ -182,6 +184,7 @@ export type BuiltinExampleRequirements = {
     | "JavaVirtualMachine"
     | "Python"
     | "NumPy"
+    | "PlotCore"
   >;
   toolchain: Array<
     | "CCompiler"
