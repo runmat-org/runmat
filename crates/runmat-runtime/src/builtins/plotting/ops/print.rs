@@ -673,6 +673,7 @@ mod tests {
     #[test]
     fn print_adds_png_extension_and_writes_png() {
         let _guard = setup();
+        let _fs = runmat_filesystem::provider_override_lock();
         block_on(plot_builtin(vec![
             Value::Tensor(tensor(&[0.0, 1.0, 2.0, 3.0])),
             Value::Tensor(tensor(&[0.0, 1.0, 4.0, 9.0])),
