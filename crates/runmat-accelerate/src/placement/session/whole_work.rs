@@ -240,7 +240,7 @@ impl PlacementSession {
     ) -> Result<SelectionDraft, PlacementPlanError> {
         request.validate().map_err(invalid_request)?;
         let operation =
-            PlacementOperationId::new(&request.signature.operation).map_err(invalid_request)?;
+            PlacementOperationId::new(request.signature.operation).map_err(invalid_request)?;
         if request.resources.cancellation_requested {
             return Err(PlacementPlanError {
                 code: "RunMat:Placement:Cancelled",
