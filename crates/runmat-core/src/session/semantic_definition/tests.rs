@@ -67,6 +67,129 @@ fn group(base: usize) -> FunctionRegistry {
     ]))
 }
 
+fn binding_origin(
+    label: &str,
+    function: runmat_types::ProgramFunctionId,
+) -> runmat_execution::FunctionBindingOrigin {
+    let source =
+        crate::ExecutableSource::new(label, format!("{label}.m"), "function y = f(x); y = x; end");
+    let revision = crate::ExecutableRevision::derive(
+        &source,
+        None,
+        crate::program_environment(crate::CompatMode::RunMat),
+    );
+    runmat_execution::FunctionBindingOrigin::from_revision(&revision.program_revision, function)
+        .expect("test binding origin")
+}
+
+#[test]
+fn finalized_publication_uses_exact_decorated_body_and_registry_owners() {
+    let function = FunctionId(41);
+    let mut prepared = definition(function.0, "published", function.0);
+    prepared.portable_function = runmat_types::ProgramFunctionId(3);
+    prepared.binding_origin = Some(binding_origin("published-v1", prepared.portable_function));
+    let owner = std::sync::Arc::clone(&prepared.definition_owner);
+    let mut publication = FunctionRegistry::new(HashMap::from([(function, prepared.clone())]));
+    publication.names.insert("published_alias".into(), function);
+
+    let mut decorated = prepared;
+    let point = runmat_types::ProgramPointId {
+        function: decorated.portable_function,
+        block: 0,
+        position: 0,
+    };
+    decorated.regions.push(runmat_vm::BytecodeRegion {
+        id: runmat_types::RegionId {
+            function: decorated.portable_function,
+            ordinal: 0,
+        },
+        entry: runmat_vm::BytecodeRegionBoundary { point, pc: 0 },
+        exits: vec![runmat_vm::BytecodeRegionBoundary { point, pc: 4 }],
+    });
+    let mut executable = FunctionRegistry::new(HashMap::from([(function, decorated.clone())]));
+    executable.names.insert("published_alias".into(), function);
+
+    super::finalize_current_definitions(&mut publication, &HashSet::from([function]), &executable)
+        .expect("finalize exact body");
+
+    let finalized = publication.get(function).expect("published body");
+    assert_eq!(finalized.regions, decorated.regions);
+    assert!(std::sync::Arc::ptr_eq(&finalized.definition_owner, &owner));
+    assert_eq!(publication.resolve_name("published_alias"), Some(function));
+    let source = finalized.source_id.expect("source");
+    assert_eq!(publication.source_functions[&source], vec![function]);
+}
+
+#[test]
+fn finalized_publication_validates_every_owner_before_mutation() {
+    let first = FunctionId(51);
+    let second = FunctionId(52);
+    let mut first_body = definition(first.0, "first-published", first.0);
+    first_body.binding_origin = Some(binding_origin("first-v1", first_body.portable_function));
+    let mut second_body = definition(second.0, "second-published", second.0);
+    second_body.binding_origin = Some(binding_origin("second-v1", second_body.portable_function));
+    let first_owner = std::sync::Arc::clone(&first_body.definition_owner);
+    let before_source = first_body.source_id.expect("source");
+    let mut publication = FunctionRegistry::new(HashMap::from([
+        (first, first_body.clone()),
+        (second, second_body.clone()),
+    ]));
+
+    let mut first_decorated = first_body;
+    first_decorated.instructions.push(Instr::LoadConst(17.0));
+    let mut second_conflict = second_body;
+    second_conflict.binding_origin = Some(binding_origin(
+        "second-conflict",
+        second_conflict.portable_function,
+    ));
+    let executable = FunctionRegistry::new(HashMap::from([
+        (first, first_decorated),
+        (second, second_conflict),
+    ]));
+
+    let error = super::finalize_current_definitions(
+        &mut publication,
+        &HashSet::from([first, second]),
+        &executable,
+    )
+    .expect_err("conflicting origin must fail before replacement");
+    assert!(error.contains("binding origin"));
+    assert_eq!(publication.get(first).unwrap().instructions.len(), 1);
+    assert!(std::sync::Arc::ptr_eq(
+        &publication.get(first).unwrap().definition_owner,
+        &first_owner,
+    ));
+    assert_eq!(
+        publication.source_functions[&before_source],
+        vec![first, second]
+    );
+}
+
+#[test]
+fn finalized_publication_does_not_publish_execution_only_companions() {
+    let public = FunctionId(61);
+    let private = FunctionId(62);
+    let mut public_body = definition(public.0, "public", public.0);
+    public_body.binding_origin = Some(binding_origin("public-v1", public_body.portable_function));
+    let mut private_body = definition(private.0, "private", private.0);
+    private_body.binding_origin =
+        Some(binding_origin("private-v1", private_body.portable_function));
+    let mut publication = FunctionRegistry::new(HashMap::from([(public, public_body.clone())]));
+    let executable = FunctionRegistry::new(HashMap::from([
+        (public, public_body),
+        (private, private_body),
+    ]));
+
+    super::finalize_current_definitions(
+        &mut publication,
+        &HashSet::from([public, private]),
+        &executable,
+    )
+    .expect("private companion remains execution-only");
+    assert!(publication.get(private).is_none());
+    assert!(publication.resolve_name("private").is_none());
+}
+
 #[test]
 fn complete_mutual_group_reuses_normalized_identities() {
     let incoming = group(1);

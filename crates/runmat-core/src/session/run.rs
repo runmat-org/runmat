@@ -536,7 +536,7 @@ impl RunMatSession {
             analysis,
             bytecode,
             portable_source_map: _,
-            function_registry_after_success,
+            mut function_registry_after_success,
             current_function_ids,
             next_semantic_function_id_after_success,
         } = prepared;
@@ -580,6 +580,18 @@ impl RunMatSession {
                 )
             })?;
         let active_registry = bytecode.function_registry();
+        super::semantic_definition::finalize_current_definitions(
+            &mut function_registry_after_success,
+            &current_function_ids,
+            &active_registry,
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableFunctionIdentity")
+                    .build(),
+            )
+        })?;
         // Only this compilation's definitions need a new artifact. Inherited
         // session definitions already retain their own indexed envelopes.
         let has_current_artifact_origin = current_function_ids.iter().any(|function| {
