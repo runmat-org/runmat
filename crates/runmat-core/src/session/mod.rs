@@ -202,6 +202,7 @@ pub(crate) struct PreparedExecution {
     mir: runmat_mir::MirAssembly,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
+    portable_source_map: Option<crate::ExecutableSourceMap>,
     function_registry_after_success: runmat_vm::FunctionRegistry,
     current_function_ids: std::collections::HashSet<runmat_hir::FunctionId>,
     next_semantic_function_id_after_success: usize,

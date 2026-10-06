@@ -2,6 +2,10 @@ use super::*;
 use crate::fusion::FusionPlannerMetadata;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+#[path = "compile/program_sources.rs"]
+mod program_sources;
 
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
@@ -245,14 +249,18 @@ fn qualify_private_companion_functions(
 
 #[derive(Default)]
 pub(super) struct CompanionSourceDiscovery {
-    pub statements: Vec<runmat_parser::Stmt>,
+    pub statements: Vec<DiscoveredSourceStatement>,
     pub source_catalog: Option<runmat_package::DiscoveredSourceSymbols>,
     pub project_symbol_aliases: HashMap<String, String>,
     pub private_function_names: HashSet<String>,
     pub private_function_owners: HashMap<String, String>,
     pub private_function_aliases: HashMap<String, HashMap<String, String>>,
-    pub function_source_contexts: HashMap<String, SourceContextData>,
-    private_statement_flags: Vec<bool>,
+}
+
+pub(super) struct DiscoveredSourceStatement {
+    pub statement: runmat_parser::Stmt,
+    pub is_private: bool,
+    pub source: Option<Arc<SourceContextData>>,
 }
 
 pub(super) struct ProjectCompilationContext {
@@ -329,12 +337,7 @@ impl CompanionSourceDiscovery {
         private_aliases: HashMap<String, String>,
         source_context: Option<SourceContextData>,
     ) {
-        if let Some(source_context) = source_context {
-            for function_name in source_context_function_names_in_statements(&body) {
-                self.function_source_contexts
-                    .insert(function_name, source_context.clone());
-            }
-        }
+        let source_context = source_context.map(Arc::new);
         let is_private = private_owner_scope.is_some();
         if is_private {
             let owner_scope = private_owner_scope.unwrap_or_default();
@@ -352,8 +355,11 @@ impl CompanionSourceDiscovery {
             }
         }
         for stmt in body {
-            self.statements.push(stmt);
-            self.private_statement_flags.push(is_private);
+            self.statements.push(DiscoveredSourceStatement {
+                statement: stmt,
+                is_private,
+                source: source_context.clone(),
+            });
         }
     }
 
@@ -361,12 +367,11 @@ impl CompanionSourceDiscovery {
         let discovered_private_function_names: HashSet<String> = self
             .statements
             .iter()
-            .zip(self.private_statement_flags.iter())
-            .filter_map(|(stmt, is_private)| {
-                if !*is_private {
+            .filter_map(|discovered| {
+                if !discovered.is_private {
                     return None;
                 }
-                if let runmat_parser::Stmt::Function { name, .. } = stmt {
+                if let runmat_parser::Stmt::Function { name, .. } = &discovered.statement {
                     Some(name.clone())
                 } else {
                     None
@@ -375,27 +380,24 @@ impl CompanionSourceDiscovery {
             .collect();
 
         let old_statements = std::mem::take(&mut self.statements);
-        let old_private_flags = std::mem::take(&mut self.private_statement_flags);
         self.private_function_names.clear();
         self.private_function_owners.clear();
         self.private_function_aliases.clear();
 
-        for (stmt, is_private) in old_statements.into_iter().zip(old_private_flags) {
-            let keep = match &stmt {
+        for discovered in old_statements {
+            let keep = match &discovered.statement {
                 runmat_parser::Stmt::Function { name, .. } => {
                     !primary_function_names.contains(name)
-                        && (is_private || !discovered_private_function_names.contains(name))
+                        && (discovered.is_private
+                            || !discovered_private_function_names.contains(name))
                 }
                 _ => true,
             };
             if !keep {
-                if let runmat_parser::Stmt::Function { name, .. } = &stmt {
-                    self.function_source_contexts.remove(name);
-                }
                 continue;
             }
-            if is_private {
-                if let runmat_parser::Stmt::Function { name, .. } = &stmt {
+            if discovered.is_private {
+                if let runmat_parser::Stmt::Function { name, .. } = &discovered.statement {
                     self.private_function_names.insert(name.clone());
                     let owner_scope = function_owner_scope_from_qualified_name(name);
                     let owner_scope = if let Some((owner, _)) = name.split_once(".__private__.") {
@@ -411,8 +413,7 @@ impl CompanionSourceDiscovery {
                         .insert(function_leaf_name(name).to_string(), name.clone());
                 }
             }
-            self.statements.push(stmt);
-            self.private_statement_flags.push(is_private);
+            self.statements.push(discovered);
         }
     }
 }
@@ -799,7 +800,7 @@ impl RunMatSession {
         let result = match companion_result {
             Ok(companion) => {
                 self.pending_companion_source_discovery = Some(companion);
-                self.compile_input(&source.text)
+                self.compile_input_with_portable_source(&source.text, Some(&source))
             }
             Err(error) => Err(RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
@@ -813,7 +814,10 @@ impl RunMatSession {
         self.pending_companion_source_discovery = previous_pending;
 
         let mut prepared = result?;
-        let source_map = self.executable_source_map(&source);
+        let source_map = prepared
+            .portable_source_map
+            .take()
+            .expect("portable compilation must retain its source table");
         let revision = crate::ExecutableRevision::derive(
             &source,
             program_revision,
@@ -916,8 +920,22 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
+        self.compile_input_with_portable_source(input, None)
+    }
+
+    fn compile_input_with_portable_source(
+        &mut self,
+        input: &str,
+        portable_source: Option<&crate::ExecutableSource>,
+    ) -> std::result::Result<PreparedExecution, RunError> {
         let source_name = self.current_source_name().to_string();
         let source_fullpath_name = self.current_source_fullpath_name().map(ToString::to_string);
+        let interactive_source = crate::ExecutableSource::new(
+            format!("interactive:{}", self.abi_workspace_handle.0),
+            &source_name,
+            input,
+        );
+        let source_for_table = portable_source.unwrap_or(&interactive_source);
         let source_id = self.source_pool.intern_with_fullpath(
             &source_name,
             source_fullpath_name.as_deref(),
@@ -929,6 +947,7 @@ impl RunMatSession {
             private_companion_function_owners,
             private_companion_function_aliases,
             companion_function_source_ids,
+            source_table,
             source_catalog,
             project_symbol_aliases,
         ) = {
@@ -942,6 +961,20 @@ impl RunMatSession {
                 .take()
                 .unwrap_or_default();
             companion.apply_function_precedence(&primary_function_names);
+            let source_table = program_sources::ProgramSourceTable::build(
+                source_for_table,
+                source_fullpath_name.as_deref(),
+                &companion,
+                ast.body.len(),
+                self.project_handoff.as_ref(),
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
             let private_companion_function_names =
                 std::mem::take(&mut companion.private_function_names);
             let private_companion_function_owners =
@@ -950,22 +983,38 @@ impl RunMatSession {
                 std::mem::take(&mut companion.private_function_aliases);
             let source_catalog = companion.source_catalog.take();
             let project_symbol_aliases = std::mem::take(&mut companion.project_symbol_aliases);
-            let companion_function_source_ids =
-                std::mem::take(&mut companion.function_source_contexts)
-                    .into_iter()
-                    .map(|(function_name, source_context)| {
-                        (
-                            function_name,
-                            self.source_pool.intern_with_fullpath(
-                                &source_context.display_name,
-                                source_context.fullpath_name.as_deref(),
-                                &source_context.text,
-                            ),
-                        )
-                    })
-                    .collect::<HashMap<_, _>>();
+            let mut companion_function_source_ids = HashMap::new();
+            if portable_source.is_some() {
+                companion_function_source_ids.extend(
+                    source_table
+                        .function_sources
+                        .iter()
+                        .map(|(name, id)| (name.clone(), SourceId(id.0 as usize))),
+                );
+            } else {
+                for discovered in &companion.statements {
+                    let Some(source_context) = &discovered.source else {
+                        continue;
+                    };
+                    let source_id = self.source_pool.intern_with_fullpath(
+                        &source_context.display_name,
+                        source_context.fullpath_name.as_deref(),
+                        &source_context.text,
+                    );
+                    for function_name in source_context_function_names_in_statements(
+                        std::slice::from_ref(&discovered.statement),
+                    ) {
+                        companion_function_source_ids.insert(function_name, source_id);
+                    }
+                }
+            }
             if !companion.statements.is_empty() {
-                ast.body.append(&mut companion.statements);
+                ast.body.extend(
+                    companion
+                        .statements
+                        .drain(..)
+                        .map(|discovered| discovered.statement),
+                );
             }
             (
                 ast,
@@ -973,6 +1022,7 @@ impl RunMatSession {
                 private_companion_function_owners,
                 private_companion_function_aliases,
                 companion_function_source_ids,
+                source_table,
                 source_catalog,
                 project_symbol_aliases,
             )
@@ -998,6 +1048,7 @@ impl RunMatSession {
                     .with_function_output_arities(&function_output_arities)
                     .with_known_project_symbols(&known_project_symbols)
                     .with_project_symbol_aliases(&project_symbol_aliases)
+                    .with_top_level_sources(&source_table.statement_sources)
                     .with_private_functions(
                         &private_companion_function_owners,
                         &private_companion_function_aliases,
@@ -1040,12 +1091,17 @@ impl RunMatSession {
                 },
             )?);
         }
-        bytecode.source_id = Some(source_id);
+        let compiled_source_id = if portable_source.is_some() {
+            SourceId(0)
+        } else {
+            source_id
+        };
+        bytecode.source_id = Some(compiled_source_id);
         for function in bytecode.function_registry.functions.values_mut() {
             function.source_id = companion_function_source_ids
                 .get(&function.display_name)
                 .copied()
-                .or(Some(source_id));
+                .or(Some(compiled_source_id));
         }
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let (
@@ -1085,6 +1141,7 @@ impl RunMatSession {
             mir,
             analysis,
             bytecode,
+            portable_source_map: portable_source.map(|_| source_table.source_map),
             function_registry_after_success,
             current_function_ids: function_id_remap.values().copied().collect(),
             next_semantic_function_id_after_success,
@@ -1503,11 +1560,49 @@ mod source_discovery_tests {
         discovery
             .statements
             .iter()
-            .filter_map(|statement| match statement {
+            .filter_map(|discovered| match &discovered.statement {
                 runmat_parser::Stmt::Function { name, .. } => Some(name.clone()),
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn precedence_keeps_the_winning_statement_and_its_source_together() {
+        let mut discovery = CompanionSourceDiscovery::default();
+        let first = "function y = helper(); y = 1; end";
+        let private = "function y = helper(); y = 2; end";
+        discovery.extend_body(
+            runmat_parser::parse(first).unwrap().body,
+            None,
+            HashMap::new(),
+            Some(SourceContextData {
+                display_name: "ordinary/helper.m".into(),
+                fullpath_name: Some("/project/ordinary/helper.m".into()),
+                text: first.into(),
+            }),
+        );
+        discovery.extend_body(
+            runmat_parser::parse(private).unwrap().body,
+            Some("owner"),
+            HashMap::new(),
+            Some(SourceContextData {
+                display_name: "private/helper.m".into(),
+                fullpath_name: Some("/project/private/helper.m".into()),
+                text: private.into(),
+            }),
+        );
+        discovery.apply_function_precedence(&HashSet::new());
+        assert_eq!(discovery.statements.len(), 1);
+        assert!(discovery.statements[0].is_private);
+        assert_eq!(
+            discovery.statements[0]
+                .source
+                .as_ref()
+                .unwrap()
+                .display_name,
+            "private/helper.m"
+        );
     }
 
     #[test]

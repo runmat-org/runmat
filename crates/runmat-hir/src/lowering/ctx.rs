@@ -20,9 +20,9 @@ use crate::{
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use runmat_types::{
     FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
-    FunctionArgValidationLiteral, FunctionArgValidator,
+    FunctionArgValidationLiteral, FunctionArgValidator, ProgramSourceId,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 mod subscript_chain;
 mod static_member;
@@ -231,6 +231,46 @@ impl LoweringCtx {
         prog: &AstProgram,
         context: &LoweringContext<'_>,
     ) -> Result<(HirAssembly, HirIndex), HirError> {
+        if !context.top_level_sources.is_empty()
+            && context.top_level_sources.len() != prog.body.len()
+        {
+            return Err(HirError::new(
+                "top-level source provenance does not match the statement count",
+            ));
+        }
+        let source_for = |ordinal: usize| {
+            context
+                .top_level_sources
+                .get(ordinal)
+                .copied()
+                .unwrap_or(ProgramSourceId(0))
+        };
+        let mut source_units = BTreeMap::new();
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            let source = source_for(ordinal);
+            source_units.entry(source).or_insert_with(|| {
+                if source == ProgramSourceId(0) {
+                    if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
+                        SourceUnitKind::FunctionFile
+                    } else {
+                        SourceUnitKind::ScriptFile
+                    }
+                } else {
+                    match stmt {
+                        AstStmt::Function { .. } => SourceUnitKind::FunctionFile,
+                        AstStmt::ClassDef { .. } => SourceUnitKind::ClassFile,
+                        _ => SourceUnitKind::ScriptFile,
+                    }
+                }
+            });
+        }
+        source_units.entry(ProgramSourceId(0)).or_insert_with(|| {
+            if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
+                SourceUnitKind::FunctionFile
+            } else {
+                SourceUnitKind::ScriptFile
+            }
+        });
         let mut ctx = Self {
             assembly: HirAssembly::default(),
             hir_index: HirIndex::default(),
@@ -260,32 +300,38 @@ impl LoweringCtx {
             external_class_declarations: context.external_class_declarations.to_vec(),
         };
 
-        ctx.assembly.modules.push(HirModule {
-            id: ctx.module,
-            name: QualifiedName(vec![SymbolName("main".into())]),
-            source_id: SourceId(0),
-            source_unit: if matches!(prog.body.first(), Some(AstStmt::Function { .. })) {
-                SourceUnitKind::FunctionFile
-            } else {
-                SourceUnitKind::ScriptFile
-            },
-            imports: Vec::new(),
-            top_level_functions: Vec::new(),
-            classes: Vec::new(),
-            synthetic_entry_function: None,
-            script_sections: prog
-                .sections
-                .iter()
-                .map(|section| crate::HirScriptSection {
-                    ordinal: section.ordinal,
-                    title: section.title.clone(),
-                    marker_span: section.marker_span,
-                    body_span: section.body_span,
-                })
-                .collect(),
-        });
+        let mut modules_by_source = BTreeMap::new();
+        for (source, source_unit) in source_units {
+            let id = ModuleId(ctx.assembly.modules.len());
+            modules_by_source.insert(source, id);
+            ctx.assembly.modules.push(HirModule {
+                id,
+                name: QualifiedName(vec![SymbolName("main".into())]),
+                source_id: SourceId(source.0 as usize),
+                source_unit,
+                imports: Vec::new(),
+                top_level_functions: Vec::new(),
+                classes: Vec::new(),
+                synthetic_entry_function: None,
+                script_sections: if source.0 == 0 {
+                    prog.sections
+                        .iter()
+                        .map(|section| crate::HirScriptSection {
+                            ordinal: section.ordinal,
+                            title: section.title.clone(),
+                            marker_span: section.marker_span,
+                            body_span: section.body_span,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            });
+        }
+        let module_for = |ordinal: usize| modules_by_source[&source_for(ordinal)];
 
-        for stmt in &prog.body {
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            ctx.module = module_for(ordinal);
             if let AstStmt::Function { name, outputs, .. } = stmt {
                 let id = ctx.reserve_function_name_with_outputs(name, outputs);
                 ctx.assembly.modules[ctx.module.0]
@@ -310,7 +356,8 @@ impl LoweringCtx {
             }
         }
 
-        for stmt in &prog.body {
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            ctx.module = module_for(ordinal);
             if let AstStmt::Import { path, wildcard, .. } = stmt {
                 let import = HirImport {
                     path: qualified_name(path),
@@ -323,9 +370,12 @@ impl LoweringCtx {
                 ctx.assembly.modules[ctx.module.0].imports.push(import);
             }
         }
-        validate_semantic_imports(&ctx.assembly.modules[ctx.module.0].imports)?;
+        for module in &ctx.assembly.modules {
+            validate_semantic_imports(&module.imports)?;
+        }
 
-        for stmt in &prog.body {
+        for (ordinal, stmt) in prog.body.iter().enumerate() {
+            ctx.module = module_for(ordinal);
             match stmt {
                 AstStmt::Function {
                     name,
@@ -379,6 +429,7 @@ impl LoweringCtx {
             .filter(|stmt| !matches!(stmt, AstStmt::Function { .. } | AstStmt::ClassDef { .. }))
             .collect();
         if !executable.is_empty() {
+            ctx.module = modules_by_source[&ProgramSourceId(0)];
             let entry_function = ctx.take_function_id();
             ctx.assembly.modules[ctx.module.0].synthetic_entry_function = Some(entry_function);
             ctx.assembly.entrypoints.push(HirEntrypoint {
