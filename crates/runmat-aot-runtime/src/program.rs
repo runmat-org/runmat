@@ -6,6 +6,7 @@ use runmat_value::{Value, ValueSequence};
 
 #[cfg(test)]
 mod tests;
+mod bound;
 
 pub async fn invoke(
     executor: Rc<runmat_native_executor::NativeExecutor>,
@@ -51,6 +52,7 @@ pub async fn invoke_workspace(
 
 struct ProgramInvocationGuards {
     _semantic: runmat_runtime::user_functions::FunctionInvokerGuard,
+    _bound: runmat_runtime::user_functions::BoundFunctionInvokerGuard,
     _lexical: runmat_runtime::user_functions::LexicalFunctionInvokerGuard,
     _resolver: runmat_runtime::user_functions::FunctionResolverGuard,
     _catalog: runmat_runtime::user_functions::SourceFunctionCatalogGuard,
@@ -63,6 +65,10 @@ impl ProgramInvocationGuards {
         program: &runmat_native_codegen::aot::AotProgramManifest,
         runtime: &runmat_runtime::context::RuntimeContext,
     ) -> Result<Self, Box<runmat_runtime::RuntimeError>> {
+        program
+            .validate()
+            .map_err(|error| Box::new(native_error(error)))?;
+        let bound_functions = Arc::new(bound::AdmittedBoundFunctions::from_program(program)?);
         let mut functions = program
             .functions
             .iter()
@@ -91,11 +97,13 @@ impl ProgramInvocationGuards {
                         .entries
                         .get(source_ordinal)
                         .map(|source| source.relative_path.clone()),
-                    binding_origin: runmat_execution::FunctionBindingOrigin::from_revision(
-                        &program.executable.program,
-                        function.function,
-                    )
-                    .ok(),
+                    binding_origin: Some(
+                        runmat_execution::FunctionBindingOrigin::from_revision(
+                            &program.executable.program,
+                            function.function,
+                        )
+                        .map_err(native_error)?,
+                    ),
                     definition_owners: None,
                 })
             })
@@ -140,14 +148,40 @@ impl ProgramInvocationGuards {
                             function.0
                         )));
                     }
-                    let execution = executor
-                        .invoke_async(function, arguments, requested_outputs, runtime)
+                    invoke_native_values(&executor, function, arguments, requested_outputs, runtime)
                         .await
-                        .map_err(native_executor_error)?;
-                    normalize_outputs(execution.outputs, requested_outputs).map_err(|error| *error)
                 })
             }),
         );
+
+        let previous_bound = runmat_runtime::user_functions::current_bound_function_invoker();
+        let bound_executor = Rc::clone(&executor);
+        let bound = runmat_runtime::user_functions::install_local_bound_function_invoker(Rc::new(
+            move |runtime, binding, arguments, requested_outputs| {
+                let executor = Rc::clone(&bound_executor);
+                let functions = Arc::clone(&bound_functions);
+                let previous = previous_bound.clone();
+                Box::pin(async move {
+                    let Some(function) = functions.resolve(&binding)? else {
+                        if let Some(previous) = previous {
+                            return previous(runtime, binding, arguments, requested_outputs).await;
+                        }
+                        return Err(bound::unavailable(
+                            "bound function has no admitted execution owner",
+                        ));
+                    };
+                    let runtime = isolated_runtime(runtime);
+                    invoke_native_values(
+                        &executor,
+                        function,
+                        arguments.values().to_vec(),
+                        requested_outputs,
+                        runtime,
+                    )
+                    .await
+                })
+            },
+        ));
 
         let previous_lexical = runmat_runtime::user_functions::current_lexical_function_invoker();
         let lexical_executor = Rc::clone(&executor);
@@ -215,6 +249,7 @@ impl ProgramInvocationGuards {
             runmat_runtime::user_functions::install_execution_source_resolver(None);
         Ok(Self {
             _semantic: semantic,
+            _bound: bound,
             _lexical: lexical,
             _resolver: resolver,
             _catalog: catalog,
@@ -228,6 +263,23 @@ fn isolated_runtime(
 ) -> runmat_runtime::context::RuntimeContext {
     let ports = runtime.service_ports().clone().without_workspace();
     install_acceleration_services(runtime.with_service_ports(ports))
+}
+
+async fn invoke_native_values(
+    executor: &runmat_native_executor::NativeExecutor,
+    function: ProgramFunctionId,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<ValueSequence, runmat_runtime::RuntimeError> {
+    let (captures, arguments) = executor
+        .split_flattened_capture_arguments(function, arguments)
+        .map_err(native_executor_error)?;
+    let execution = executor
+        .invoke_async_with_captures(function, captures, arguments, requested_outputs, runtime)
+        .await
+        .map_err(native_executor_error)?;
+    normalize_outputs(execution.outputs, requested_outputs).map_err(|error| *error)
 }
 
 /// A standalone root owns the same existing placement session used by Core.

@@ -56,6 +56,22 @@ try {
     assert.equal(callbackResult.status, 0, `standalone callback failed:\n${callbackResult.stderr}`);
     assert.equal(callbackResult.stdout.trim(), "'aot_source_callback'", "local callback lost its owning file source");
 
+    const bound = compile("aot_bound_local_capture", [
+        "function result = aot_bound_local_capture()",
+        "  zeta = 50;",
+        "  alpha = 11;",
+        "  handle = @captured;",
+        "  result = feval(handle, 3);",
+        "  function value = captured(delta)",
+        "    value = zeta - alpha + delta;",
+        "  end",
+        "end",
+        ""
+    ].join("\n"));
+    const boundResult = invoke(bound);
+    assert.equal(boundResult.status, 0, `standalone bound local capture failed:\n${boundResult.stderr}`);
+    assert.equal(boundResult.stdout.trim(), "42", "linked feval lost or reordered its two local captures");
+
     const frame = compile("aot_native_frame", [
         "function name = aot_native_frame()",
         "  f = @local_frame;",

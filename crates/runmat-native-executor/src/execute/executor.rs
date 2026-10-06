@@ -10,6 +10,8 @@ use crate::{NativeExecutable, NativeExecutorError, NativeExecutorResult};
 use super::invocation::{NativeInvocation, NativeInvocationStep};
 use super::state::{HostState, HostStateInput};
 
+mod capture_arguments;
+
 pub struct NativeExecutor {
     functions: Arc<Vec<runmat_native_codegen::NativeFunction>>,
     compiled: NativeExecutable,
