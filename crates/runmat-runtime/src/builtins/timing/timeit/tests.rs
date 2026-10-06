@@ -152,7 +152,8 @@ fn timeit_uses_injected_monotonic_service_for_every_batch() {
 
 #[test]
 fn cancelled_pending_callback_is_dropped_without_replay() {
-    use runmat_execution::cancellation::{CancellationReason, CancellationSource};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
     use std::future::Future;
     use std::pin::Pin;
     use std::task::{Context, Poll};

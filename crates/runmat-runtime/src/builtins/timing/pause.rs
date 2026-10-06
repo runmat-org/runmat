@@ -150,6 +150,7 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
 async fn wait_for_key_press(runtime: &RuntimeContext) -> Result<(), RuntimeError> {
     #[cfg(test)]
     {
+        let _ = runtime;
         Ok(())
     }
     #[cfg(not(test))]

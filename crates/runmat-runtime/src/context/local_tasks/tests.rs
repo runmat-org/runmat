@@ -63,11 +63,11 @@ fn local_non_send_task_progresses_while_host_drives_idle_wait() {
 #[test]
 fn foreign_session_cannot_submit_to_a_cloned_port() {
     let supervisor = RuntimeLocalTaskSupervisor::new();
-    let owner = owner();
+    let owner_id = owner();
     let other = owner();
-    let port = supervisor.submission_port(owner);
+    let port = supervisor.submission_port(owner_id);
     assert!(port.spawn_local(other, Box::pin(async {})).is_err());
-    assert!(port.spawn_local(owner, Box::pin(async {})).is_ok());
+    assert!(port.spawn_local(owner_id, Box::pin(async {})).is_ok());
     supervisor.shutdown();
 }
 
