@@ -36,7 +36,7 @@ impl RootedValueSequence {
 /// retains them. This roots identities, not cloned payloads or device buffers.
 #[derive(Clone, Debug)]
 pub(crate) struct RootedValueHandles {
-    _roots: Rc<Vec<ExplicitRoot>>,
+    _roots: Option<Rc<Vec<ExplicitRoot>>>,
 }
 
 impl RootedValueHandles {
@@ -55,12 +55,15 @@ impl RootedValueHandles {
     }
 
     fn from_handles(collector: HandleCollector) -> Result<Self, GcError> {
+        if collector.handles.is_empty() {
+            return Ok(Self { _roots: None });
+        }
         let mut roots = Vec::with_capacity(collector.handles.len());
         for handle in collector.handles {
             roots.push(runmat_gc::gc_root(handle)?);
         }
         Ok(Self {
-            _roots: Rc::new(roots),
+            _roots: Some(Rc::new(roots)),
         })
     }
 }
@@ -83,6 +86,14 @@ impl Tracer for HandleCollector {
 mod tests {
     use super::*;
     use runmat_value::{HandleRef, Value};
+
+    #[test]
+    fn unmanaged_values_need_no_shared_root_owner() {
+        let values = [Value::Num(7.0), Value::Nothing];
+        let roots = RootedValueHandles::for_values(values.iter()).expect("no managed handles");
+        assert!(roots._roots.is_none());
+        assert!(roots.clone()._roots.is_none());
+    }
 
     #[test]
     fn completed_sequence_roots_nested_handle_values_until_discarded() {
