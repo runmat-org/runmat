@@ -1,6 +1,6 @@
 //! Checked immutable snapshots of the shared plot registry.
 
-use super::{registry, FigureHandle};
+use super::{registry, FigureHandle, GraphicsSceneLease};
 use runmat_plot::plots::Figure;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,6 +25,9 @@ pub enum FigureSnapshotScope {
 pub struct FigureSnapshotEntry {
     pub handle: FigureHandle,
     pub revision: u64,
+    /// Exact runtime-only scene authority captured under the same registry
+    /// guard as `figure`; `revision` remains only a presentation cache hint.
+    pub scene_lease: GraphicsSceneLease,
     pub figure: Arc<Figure>,
 }
 
@@ -72,14 +75,14 @@ pub fn capture_figure_persistence_snapshot(
             maximum_bytes,
         });
     }
-    let mut revisions = HashMap::<FigureHandle, u64>::new();
+    let mut selected = HashMap::<FigureHandle, (u64, GraphicsSceneLease)>::new();
 
     for handle in handles {
         let state = registry
             .figures
             .get(handle)
             .ok_or_else(|| FigurePersistenceSnapshotError::MissingFigure(handle.as_u32()))?;
-        if let std::collections::hash_map::Entry::Vacant(entry) = revisions.entry(*handle) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = selected.entry(*handle) {
             let figure_bytes = figure_arc_allocation_upper_bound(
                 state
                     .figure
@@ -96,12 +99,12 @@ pub fn capture_figure_persistence_snapshot(
                     maximum_bytes,
                 });
             }
-            entry.insert(state.revision);
+            entry.insert((state.revision, state.scene_lease.clone()));
         }
     }
 
-    let mut snapshots = HashMap::<FigureHandle, Arc<Figure>>::with_capacity(revisions.len());
-    for handle in revisions.keys() {
+    let mut snapshots = HashMap::<FigureHandle, Arc<Figure>>::with_capacity(selected.len());
+    for handle in selected.keys() {
         let state = registry
             .figures
             .get(handle)
@@ -110,9 +113,11 @@ pub fn capture_figure_persistence_snapshot(
     }
 
     for handle in handles {
+        let (revision, scene_lease) = &selected[handle];
         entries.push(FigureSnapshotEntry {
             handle: *handle,
-            revision: revisions[handle],
+            revision: *revision,
+            scene_lease: scene_lease.clone(),
             figure: snapshots[handle].clone(),
         });
     }
@@ -158,6 +163,10 @@ mod tests {
             &snapshot.entries[0].figure,
             &snapshot.entries[1].figure
         ));
+        assert!(snapshot.entries[0]
+            .scene_lease
+            .shares_lease(&snapshot.entries[1].scene_lease));
+        assert_eq!(snapshot.entries[0].scene_lease.figure(), handle.as_u32());
         assert_eq!(
             capture_figure_persistence_snapshot(
                 &[handle, handle],
@@ -173,6 +182,11 @@ mod tests {
 
         set_figure_name(handle, "after".into()).expect("mutate live figure");
         assert_eq!(snapshot.entries[0].figure.name.as_deref(), Some("before"));
+        let successor = capture_figure_persistence_snapshot(&[handle], 1, usize::MAX)
+            .expect("capture selected successor");
+        assert!(!snapshot.entries[0]
+            .scene_lease
+            .shares_lease(&successor.entries[0].scene_lease));
         assert_eq!(
             clone_figure(handle).expect("live figure").name.as_deref(),
             Some("after")
