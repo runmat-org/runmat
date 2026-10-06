@@ -9,7 +9,7 @@ pub(super) async fn set_timer_property(
     value: Value,
 ) -> BuiltinResult<Value> {
     let Value::HandleObject(handle) = &receiver else {
-        return setter_bindings::set_timer_property_object(receiver, property, value).await;
+        return set_timer_property_object(receiver, property, value).await;
     };
     let runtime = timer_runtime(runtime)?;
     admit_handle(&runtime, handle, property)?;
@@ -44,6 +44,50 @@ pub(super) async fn set_timer_property(
     // Destruction can reenter other owners; the managed borrow has ended.
     drop(old);
     Ok(receiver)
+}
+
+pub(super) async fn set_timer_property_object(
+    obj: Value,
+    property: TimerProperty,
+    value: Value,
+) -> BuiltinResult<Value> {
+    let _roots = crate::execution::RootedValueHandles::for_values([&obj, &value].into_iter())
+        .map_err(|error| {
+            crate::build_runtime_error("cannot retain timer setter arguments")
+                .with_source(error)
+                .build()
+        })?;
+    let Value::Object(mut object) = obj else {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_HANDLE,
+            format!(
+                "timer: set.{} requires timer object receiver",
+                property.name()
+            ),
+        ));
+    };
+    if !object.class_name.is(TIMER_CLASS) {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_HANDLE,
+            format!(
+                "timer: set.{} requires timer object receiver, got '{}'",
+                property.name(),
+                object.class_name
+            ),
+        ));
+    }
+    if running_is_on(&object) && property.frozen_while_running() {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            format!(
+                "timer: property '{}' cannot be changed while Running is on",
+                property.name()
+            ),
+        ));
+    }
+    let prepared = arguments::prepare_timer_setter_value(property, value).await?;
+    apply_name_value_pairs(&mut object, &[prepared], false)?;
+    Ok(Value::Object(object))
 }
 
 fn admit_handle(

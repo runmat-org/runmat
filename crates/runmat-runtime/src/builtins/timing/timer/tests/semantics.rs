@@ -1,4 +1,4 @@
-use super::super::setter_bindings::set_timer_property_object;
+use super::super::setter::set_timer_property_object;
 use super::*;
 #[test]
 fn text_callback_uses_executor_source_port_and_missing_port_rejects_before_running() {
