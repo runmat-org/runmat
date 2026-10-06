@@ -10,7 +10,7 @@ pub const COOL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     documentation: documentation::DOCUMENTATION,
     descriptor: &contract::DESCRIPTOR,
     contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Complete,
+        maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),
