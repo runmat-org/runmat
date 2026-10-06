@@ -87,6 +87,8 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 pub struct RuntimeContext {
     execution: Rc<dyn RuntimeExecutionServices>,
     program_revision: Option<runmat_execution::ProgramRevision>,
+    program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
+    source_current: Option<Rc<RefCell<Option<crate::source_context::SourceInfo>>>>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
@@ -123,6 +125,8 @@ impl RuntimeContext {
         let context = Self {
             execution,
             program_revision: None,
+            program_sources: None,
+            source_current: None,
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
@@ -242,6 +246,31 @@ impl RuntimeContext {
 
     pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
         self.program_revision.as_ref()
+    }
+
+    /// Issue session-local source leases for a complete immutable program.
+    /// No caller-provided numeric source identity is imported into the issuer.
+    pub fn with_program_sources(
+        mut self,
+        records: impl IntoIterator<Item = crate::source_context::ProgramSourceRecord>,
+    ) -> Result<Self, crate::source_context::ProgramSourceBindingError> {
+        let binding = crate::source_context::bind_program_sources(&self, records)?;
+        self.program_sources = Some(Rc::new(binding));
+        self.source_current = Some(Rc::new(RefCell::new(None)));
+        Ok(self)
+    }
+
+    pub(crate) fn source_current(
+        &self,
+    ) -> Option<&Rc<RefCell<Option<crate::source_context::SourceInfo>>>> {
+        self.source_current.as_ref()
+    }
+
+    pub fn program_source_id(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<runmat_types::SourceId> {
+        self.program_sources.as_ref()?.get(ordinal)
     }
 
     pub fn with_program_revision(

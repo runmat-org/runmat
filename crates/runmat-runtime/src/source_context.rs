@@ -52,7 +52,13 @@ impl Drop for LeaseInner {
         let Some(id) = self.info.source_id else {
             return;
         };
-        let mut sources = state.source.borrow_mut();
+        // A lease may be the last owner dropped while an outer catalog
+        // operation holds this RefCell. The weak row retains no source text;
+        // skip eager removal and let the next issue prune it instead of
+        // panicking from a destructor.
+        let Ok(mut sources) = state.source.try_borrow_mut() else {
+            return;
+        };
         if sources
             .leased_catalog
             .get(&id)
@@ -67,6 +73,80 @@ impl Drop for LeaseInner {
 /// this record, never an unrelated foreground catalog or later source.
 #[derive(Clone, Debug)]
 pub struct RuntimeSourceLease(Rc<LeaseInner>);
+
+/// The immutable ordinal-to-session projection owned for one invocation.
+/// Keeping the leases here prevents a pending call from losing its source text.
+#[derive(Debug)]
+pub(crate) struct ProgramSourceBinding {
+    sources: HashMap<runmat_types::ProgramSourceId, SourceId>,
+    _leases: Vec<RuntimeSourceLease>,
+}
+
+impl ProgramSourceBinding {
+    pub(crate) fn get(&self, ordinal: runmat_types::ProgramSourceId) -> Option<SourceId> {
+        self.sources.get(&ordinal).copied()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgramSourceRecord {
+    pub ordinal: runmat_types::ProgramSourceId,
+    pub name: Arc<str>,
+    pub fullpath_name: Option<Arc<str>>,
+    pub text: Arc<str>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProgramSourceBindingError {
+    DuplicateOrdinal(runmat_types::ProgramSourceId),
+    Exhausted,
+}
+
+impl std::fmt::Display for ProgramSourceBindingError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicateOrdinal(ordinal) => {
+                write!(formatter, "duplicate program source ordinal {}", ordinal.0)
+            }
+            Self::Exhausted => formatter.write_str("source identity space is exhausted"),
+        }
+    }
+}
+
+impl std::error::Error for ProgramSourceBindingError {}
+
+pub(crate) fn bind_program_sources(
+    runtime: &crate::context::RuntimeContext,
+    records: impl IntoIterator<Item = ProgramSourceRecord>,
+) -> Result<ProgramSourceBinding, ProgramSourceBindingError> {
+    let mut records = records.into_iter().collect::<Vec<_>>();
+    records.sort_by_key(|record| record.ordinal);
+    if let Some(duplicate) = records
+        .windows(2)
+        .find(|pair| pair[0].ordinal == pair[1].ordinal)
+    {
+        return Err(ProgramSourceBindingError::DuplicateOrdinal(
+            duplicate[0].ordinal,
+        ));
+    }
+    let mut sources = HashMap::with_capacity(records.len());
+    let mut leases = Vec::with_capacity(records.len());
+    for record in records {
+        let lease = lease_source_context_in_context(
+            runtime,
+            record.name,
+            record.fullpath_name,
+            record.text,
+        )
+        .map_err(|_| ProgramSourceBindingError::Exhausted)?;
+        sources.insert(record.ordinal, lease.source_id());
+        leases.push(lease);
+    }
+    Ok(ProgramSourceBinding {
+        sources,
+        _leases: leases,
+    })
+}
 
 impl RuntimeSourceLease {
     pub fn source_id(&self) -> SourceId {
@@ -100,6 +180,8 @@ impl std::error::Error for SourceIdExhausted {}
 
 impl crate::context::SourceState {
     fn issue_id(&mut self) -> Result<SourceId, SourceIdExhausted> {
+        self.leased_catalog
+            .retain(|_, entry| entry.owner.upgrade().is_some());
         loop {
             let next = self.next_issued_id.ok_or(SourceIdExhausted)?;
             self.next_issued_id = next.checked_add(1);
@@ -161,13 +243,16 @@ runmat_thread_local! {
 
 pub struct SourceContextGuard {
     prev: Option<SourceInfo>,
+    invocation_current: Option<Rc<RefCell<Option<SourceInfo>>>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
 impl Drop for SourceContextGuard {
     fn drop(&mut self) {
         let prev = self.prev.take();
-        if let Some(state) = &self.state {
+        if let Some(current) = &self.invocation_current {
+            *current.borrow_mut() = prev;
+        } else if let Some(state) = &self.state {
             state.source.borrow_mut().current = prev;
         } else {
             CURRENT_SOURCE.with(|slot| {
@@ -213,19 +298,40 @@ pub fn replace_current_source_context(
         fullpath_name: None,
         text: Arc::<str>::from(text),
     });
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(current) = runtime.source_current() {
+            let current = Rc::clone(current);
+            let prev = std::mem::replace(&mut *current.borrow_mut(), next);
+            return SourceContextGuard {
+                prev,
+                invocation_current: Some(current),
+                state: None,
+            };
+        }
+    }
     if let Some(state) = active_state() {
         let prev = std::mem::replace(&mut state.source.borrow_mut().current, next);
         SourceContextGuard {
             prev,
+            invocation_current: None,
             state: Some(state),
         }
     } else {
         let prev = CURRENT_SOURCE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next));
-        SourceContextGuard { prev, state: None }
+        SourceContextGuard {
+            prev,
+            invocation_current: None,
+            state: None,
+        }
     }
 }
 
 pub fn replace_current_source_id(source_id: Option<SourceId>) -> SourceContextGuard {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if runtime.source_current().is_some() {
+            return replace_current_source_id_in_context(&runtime, source_id);
+        }
+    }
     if let Some(state) = active_state() {
         let next = source_id.and_then(|id| {
             let source = state.source.borrow();
@@ -234,13 +340,42 @@ pub fn replace_current_source_id(source_id: Option<SourceId>) -> SourceContextGu
         let prev = std::mem::replace(&mut state.source.borrow_mut().current, next);
         SourceContextGuard {
             prev,
+            invocation_current: None,
             state: Some(state),
         }
     } else {
         let next = source_id
             .and_then(|id| SOURCE_CATALOG.with(|catalog| catalog.borrow().get(&id).cloned()));
         let prev = CURRENT_SOURCE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next));
-        SourceContextGuard { prev, state: None }
+        SourceContextGuard {
+            prev,
+            invocation_current: None,
+            state: None,
+        }
+    }
+}
+
+pub fn replace_current_source_id_in_context(
+    runtime: &crate::context::RuntimeContext,
+    source_id: Option<SourceId>,
+) -> SourceContextGuard {
+    let next = source_id.and_then(|source_id| source_info_in_context(runtime, source_id));
+    if let Some(current) = runtime.source_current() {
+        let current = Rc::clone(current);
+        let prev = std::mem::replace(&mut *current.borrow_mut(), next);
+        SourceContextGuard {
+            prev,
+            invocation_current: Some(current),
+            state: None,
+        }
+    } else {
+        let state = Rc::clone(runtime.state());
+        let prev = std::mem::replace(&mut state.source.borrow_mut().current, next);
+        SourceContextGuard {
+            prev,
+            invocation_current: None,
+            state: Some(state),
+        }
     }
 }
 
@@ -298,6 +433,14 @@ pub fn source_catalog_entries_with_fullpaths() -> Vec<(SourceId, String, Option<
 }
 
 pub fn current_source() -> Option<Arc<str>> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(current) = runtime.source_current() {
+            return current
+                .borrow()
+                .as_ref()
+                .map(|source| Arc::clone(&source.text));
+        }
+    }
     if let Some(state) = active_state() {
         return state
             .source
@@ -314,6 +457,11 @@ pub fn current_source() -> Option<Arc<str>> {
 }
 
 pub fn current_source_info() -> Option<SourceInfo> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        if let Some(current) = runtime.source_current() {
+            return current.borrow().clone();
+        }
+    }
     if let Some(state) = active_state() {
         return state.source.borrow().current.clone();
     }
@@ -379,6 +527,14 @@ mod lease_tests {
     use super::*;
     use crate::context::{RuntimeContext, RuntimeServicePorts};
     use crate::execution::RuntimeExecutionService;
+    use std::future::Future;
+    use std::task::{Context, Poll, Wake};
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
 
     fn runtime() -> RuntimeContext {
         RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
@@ -421,6 +577,109 @@ mod lease_tests {
             lease_source_context_in_context(&runtime, "extra", None, "no"),
             Err(SourceIdExhausted)
         ));
+    }
+
+    #[test]
+    fn program_binding_maps_ordinals_to_issued_ids_and_retains_pending_text() {
+        let runtime = runtime();
+        let unrelated =
+            lease_source_context_in_context(&runtime, "unrelated", None, "older").unwrap();
+        let selected = runtime
+            .clone()
+            .with_program_sources([
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(0),
+                    name: Arc::from("main.m"),
+                    fullpath_name: None,
+                    text: Arc::from("primary"),
+                },
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(1),
+                    name: Arc::from("helper.m"),
+                    fullpath_name: None,
+                    text: Arc::from("companion"),
+                },
+            ])
+            .unwrap();
+        let primary = selected
+            .program_source_id(runmat_types::ProgramSourceId(0))
+            .unwrap();
+        let companion = selected
+            .program_source_id(runmat_types::ProgramSourceId(1))
+            .unwrap();
+        assert_ne!(primary, unrelated.source_id());
+        assert_ne!(companion, unrelated.source_id());
+        drop(unrelated);
+        assert_eq!(
+            source_info_in_context(&runtime, companion)
+                .unwrap()
+                .text
+                .as_ref(),
+            "companion"
+        );
+        drop(selected);
+        assert!(source_info_in_context(&runtime, primary).is_none());
+        assert!(source_info_in_context(&runtime, companion).is_none());
+    }
+
+    #[test]
+    fn duplicate_program_ordinals_fail_before_issuing_any_source() {
+        let runtime = runtime();
+        let records = ["first", "second"].map(|text| ProgramSourceRecord {
+            ordinal: runmat_types::ProgramSourceId(0),
+            name: Arc::from("main.m"),
+            fullpath_name: None,
+            text: Arc::from(text),
+        });
+        assert!(matches!(
+            runtime.clone().with_program_sources(records),
+            Err(ProgramSourceBindingError::DuplicateOrdinal(_))
+        ));
+        let first = lease_source_context_in_context(&runtime, "later", None, "later").unwrap();
+        assert_eq!(first.source_id(), SourceId(0));
+    }
+
+    #[test]
+    fn alternating_pending_invocations_keep_distinct_current_sources() {
+        let session = runtime();
+        let bind = |name: &'static str| {
+            session
+                .clone()
+                .with_program_sources([ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(0),
+                    name: Arc::from(name),
+                    fullpath_name: None,
+                    text: Arc::from(name),
+                }])
+                .unwrap()
+        };
+        let first = bind("first");
+        let second = bind("second");
+        let pending = |runtime: RuntimeContext, expected: &'static str| {
+            let source_id = runtime
+                .program_source_id(runmat_types::ProgramSourceId(0))
+                .unwrap();
+            let scoped = runtime.clone();
+            runtime.scope(async move {
+                let _source = replace_current_source_id_in_context(&scoped, Some(source_id));
+                std::future::poll_fn(|_| {
+                    assert_eq!(current_source().as_deref(), Some(expected));
+                    Poll::<()>::Pending
+                })
+                .await;
+            })
+        };
+        let mut first_future = Box::pin(pending(first, "first"));
+        let mut second_future = Box::pin(pending(second, "second"));
+        let waker = std::task::Waker::from(Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        assert!(first_future.as_mut().poll(&mut cx).is_pending());
+        assert!(second_future.as_mut().poll(&mut cx).is_pending());
+        assert!(first_future.as_mut().poll(&mut cx).is_pending());
+        drop(first_future);
+        assert!(second_future.as_mut().poll(&mut cx).is_pending());
+        drop(second_future);
+        assert!(current_source().is_none());
     }
 
     #[test]
@@ -487,5 +746,24 @@ mod lease_tests {
         );
         let child_lease = lease_source_context_in_context(&child, "child", None, "new").unwrap();
         assert_ne!(child_lease.source_id(), id);
+    }
+
+    #[test]
+    fn last_lease_drop_under_catalog_borrow_is_nonpanicking_and_pruned() {
+        let runtime = runtime();
+        let lease = lease_source_context_in_context(&runtime, "held", None, "text").unwrap();
+        let retired = lease.source_id();
+        let borrow = runtime.state().source.borrow_mut();
+        drop(lease);
+        drop(borrow);
+        assert!(source_info_in_context(&runtime, retired).is_none());
+        let next = lease_source_context_in_context(&runtime, "next", None, "next").unwrap();
+        assert_ne!(next.source_id(), retired);
+        assert!(!runtime
+            .state()
+            .source
+            .borrow()
+            .leased_catalog
+            .contains_key(&retired));
     }
 }
