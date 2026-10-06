@@ -1,3 +1,4 @@
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_plot::plots::{LegendStyle, TextStyle};
 use runmat_value::NumericScalar;
 use runmat_value::Value;
@@ -60,7 +61,30 @@ pub fn map_figure_error(builtin: &'static str, err: FigureError) -> crate::Runti
     plotting_error_with_source(builtin, message, err)
 }
 
+pub fn annotation_error(
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: crate::RuntimeError,
+) -> crate::RuntimeError {
+    if source.identifier().is_some() {
+        return source;
+    }
+    let mut builder = crate::build_runtime_error(format!("{builtin}: {}", source.message))
+        .with_builtin(builtin)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<TextCommand> {
+    if args.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
+    }
     let (target, rest) = split_axes_target(builtin, args)?;
     if rest.is_empty() {
         return Err(plotting_error(
@@ -89,6 +113,12 @@ pub fn parse_numeric_text_command(
     builtin: &'static str,
     args: &[Value],
 ) -> BuiltinResult<TextCommand> {
+    if args.is_empty() {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
+    }
     let numeric_text_form = args.len() % 2 == 1
         && args
             .first()

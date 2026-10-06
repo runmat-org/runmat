@@ -1,193 +1,25 @@
+use runmat_builtins::XLABEL_INTEGER_AXES_EXTENSION;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    XLABEL_DESCRIPTOR, XLABEL_ERROR_INTERNAL, XLABEL_ERROR_INVALID_ARGUMENT,
+    XLABEL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use super::op_common::{map_figure_error, parse_numeric_text_command};
+use super::op_common::{annotation_error, map_figure_error, parse_numeric_text_command};
 use super::state::set_xlabel_for_axes;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-
-pub const XLABEL_INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "xlabel-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Allow typed-integer aliases for encoded axes handles",
-    error_identifier: Some("RunMat:compatibility:XlabelIntegerAxesHandleExtension"),
-};
-pub const XLABEL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [XLABEL_INTEGER_AXES_EXTENSION];
-
-const XLABEL_INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "txt",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes:
-            "A scalar integer label is formatted from its exact signed or unsigned decimal value.",
-    }];
-const XLABEL_INTEGER_FONT_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "FontSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "All eight integer classes are documented for FontSize; accepted values are positive finite practical renderer sizes.",
-    }];
-const XLABEL_INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ax",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer aliases for RunMat's encoded axes handles are separately gated.",
-    }];
-pub const XLABEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "h = xlabel(integer_txt)", inputs: &XLABEL_INTEGER_TEXT_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::ScalarOnly, notes: "The exact decimal spelling becomes the stored String property; the graphics handle is returned as a double scalar." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = xlabel(..., 'FontSize', integer_size)", inputs: &XLABEL_INTEGER_FONT_SIZE_INPUT, computation_domain: BuiltinIntegerComputationDomain::FloatingPoint, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "FontSize crosses the graphics scalar boundary after shared positive finite size validation." },
-    BuiltinIntegerCapabilityDescriptor { form: "h = xlabel(integer_ax, txt, ...)", inputs: &XLABEL_INTEGER_AXES_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Double, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat mode parses the gated scalar before resolving the encoded axes handle; strict mode rejects before graphics state access." },
-];
-
-const XLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created/updated xlabel object.",
-}];
-
-const XLABEL_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Label text (string/char/cellstr-like multiline forms).",
-}];
-
-const XLABEL_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-];
-
-const XLABEL_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const XLABEL_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "txt",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Label text (string/char/cellstr-like multiline forms).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
-    },
-];
-
-const XLABEL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = xlabel(txt)",
-        inputs: &XLABEL_INPUTS_TEXT,
-        outputs: &XLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = xlabel(ax, txt)",
-        inputs: &XLABEL_INPUTS_AX_TEXT,
-        outputs: &XLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = xlabel(txt, Name, Value, ...)",
-        inputs: &XLABEL_INPUTS_TEXT_PROPS,
-        outputs: &XLABEL_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = xlabel(ax, txt, Name, Value, ...)",
-        inputs: &XLABEL_INPUTS_AX_TEXT_PROPS,
-        outputs: &XLABEL_OUTPUT_HANDLE,
-    },
-];
-
-const XLABEL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XLABEL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:xlabel:InvalidArgument"),
-    when: "Axes handle, text payload, or property/value arguments are invalid.",
-    message: "xlabel: invalid argument",
-};
-
-const XLABEL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.XLABEL.INTERNAL",
-    identifier: Some("RunMat:xlabel:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "xlabel: internal operation failed",
-};
-
-const XLABEL_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [XLABEL_ERROR_INVALID_ARGUMENT, XLABEL_ERROR_INTERNAL];
-
-pub const XLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &XLABEL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &XLABEL_ERRORS,
-};
 
 #[runtime_builtin(
     name = "xlabel",
-    category = "plotting",
-    summary = "Set the current axes x-axis label.",
-    keywords = "xlabel,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::xlabel::XLABEL_DESCRIPTOR),
-    extensions(crate::builtins::plotting::xlabel::XLABEL_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::xlabel::XLABEL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::xlabel"
 )]
 pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &XLABEL_DESCRIPTOR,
+        &XLABEL_ERROR_TOO_MANY_OUTPUTS,
+        "xlabel",
+    )?;
     if args.len() >= 2
         && args.len().is_multiple_of(2)
         && args
@@ -199,14 +31,21 @@ pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "xlabel",
         )?;
     }
-    let command = parse_numeric_text_command("xlabel", &args)?;
+    let command = parse_numeric_text_command("xlabel", &args)
+        .map_err(|error| annotation_error("xlabel", &XLABEL_ERROR_INVALID_ARGUMENT, error))?;
     set_xlabel_for_axes(
         command.target.0,
         command.target.1,
         &command.text,
         command.style,
     )
-    .map_err(|err| map_figure_error("xlabel", err))
+    .map_err(|err| {
+        annotation_error(
+            "xlabel",
+            &XLABEL_ERROR_INTERNAL,
+            map_figure_error("xlabel", err),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -385,5 +224,20 @@ mod tests {
         assert_eq!(meta.y_label.as_deref(), Some("Amplitude\n(V)"));
         assert_eq!(meta.x_label_style.font_weight.as_deref(), Some("bold"));
         assert_eq!(meta.y_label_style.font_angle.as_deref(), Some("italic"));
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::xlabel_builtin(vec![]).expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:xlabel:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = super::xlabel_builtin(vec![]).expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:xlabel:TooManyOutputs"));
     }
 }

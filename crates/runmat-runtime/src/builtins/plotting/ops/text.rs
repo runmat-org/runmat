@@ -1,348 +1,17 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, EXPLICIT_GPU_INPUT_EXTENSION, INTEGER_AXES_EXTENSION,
+    TEXT_ERROR_INTERNAL, TEXT_ERROR_INVALID_ARGUMENT,
 };
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::{TEXT_DESCRIPTOR, TEXT_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericStorage, Tensor, Value};
 
 use super::op_common::{map_figure_error, value_as_text_string};
 use crate::builtins::plotting::properties::parse_text_style_pairs;
 use crate::builtins::plotting::state::add_text_annotation_for_axes_with_source;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "text";
-
-const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "text-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "text with a typed-integer numeric axes alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TextIntegerAxesHandleExtension"),
-};
-const EXPLICIT_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "text-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "text with explicit gpuArray coordinates is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:TextExplicitGpuInputExtension"),
-};
-pub const TEXT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [INTEGER_AXES_EXTENSION, EXPLICIT_GPU_INPUT_EXTENSION];
-
-const INTEGER_COORDINATE_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public Position property explicitly accepts all eight integer classes; native coordinate identity is retained before the renderer boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer y coordinates are documented graphics data and cross to f32 only in the derived render cache.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "z",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer z coordinates are documented graphics data and cross to f32 only in the derived render cache.",
-    },
-];
-const INTEGER_AXES_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "ax",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::RunMatOnly,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "MATLAB axes are graphics objects; typed-integer numeric aliases are a gated RunMat representation extension.",
-}];
-pub const TEXT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = text(integer_x, integer_y [, integer_z], label, ...)",
-        inputs: &INTEGER_COORDINATE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Documented native coordinates remain the semantic source while the plotting backend receives an explicitly derived f32 position.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = text(integer_ax, x, y [, z], label, ...)",
-        inputs: &INTEGER_AXES_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The axes-alias extension gate runs before target selection or graphics mutation.",
-    },
-];
-
-const TEXT_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created text annotation.",
-}];
-
-const TEXT_INPUTS_X_Y_LABEL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Annotation text.",
-    },
-];
-
-const TEXT_INPUTS_X_Y_Z_LABEL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "z",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Annotation text.",
-    },
-];
-
-const TEXT_INPUTS_X_Y_LABEL_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Annotation text.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style options.",
-    },
-];
-
-const TEXT_INPUTS_X_Y_Z_LABEL_PROPS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "z",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Annotation text.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style options.",
-    },
-];
-
-const TEXT_INPUTS_AX_X_Y_LABEL: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Annotation text.",
-    },
-];
-
-const TEXT_INPUTS_AX_X_Y_Z_LABEL: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "y",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "z",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z coordinate.",
-    },
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Annotation text.",
-    },
-];
-
-const TEXT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "h = text(x, y, label)",
-        inputs: &TEXT_INPUTS_X_Y_LABEL,
-        outputs: &TEXT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = text(x, y, label, Name, Value, ...)",
-        inputs: &TEXT_INPUTS_X_Y_LABEL_PROPS,
-        outputs: &TEXT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = text(x, y, z, label)",
-        inputs: &TEXT_INPUTS_X_Y_Z_LABEL,
-        outputs: &TEXT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = text(x, y, z, label, Name, Value, ...)",
-        inputs: &TEXT_INPUTS_X_Y_Z_LABEL_PROPS,
-        outputs: &TEXT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = text(ax, x, y, label)",
-        inputs: &TEXT_INPUTS_AX_X_Y_LABEL,
-        outputs: &TEXT_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = text(ax, x, y, z, label)",
-        inputs: &TEXT_INPUTS_AX_X_Y_Z_LABEL,
-        outputs: &TEXT_OUTPUT_HANDLE,
-    },
-];
-
-const TEXT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:text:InvalidArgument"),
-    when: "Coordinate, label, axes-target, or name/value text style arguments are invalid.",
-    message: "text: invalid argument",
-};
-
-const TEXT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT.INTERNAL",
-    identifier: Some("RunMat:text:Internal"),
-    when: "Internal plotting state update fails while creating annotation.",
-    message: "text: internal operation failed",
-};
-
-const TEXT_ERRORS: [BuiltinErrorDescriptor; 2] = [TEXT_ERROR_INVALID_ARGUMENT, TEXT_ERROR_INTERNAL];
-
-pub const TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TEXT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TEXT_ERRORS,
-};
 
 fn text_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -360,29 +29,46 @@ fn map_text_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    text_error_with_detail(&TEXT_ERROR_INVALID_ARGUMENT, err.message)
+    text_error_with_source(&TEXT_ERROR_INVALID_ARGUMENT, err)
 }
 
 fn map_text_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    text_error_with_detail(&TEXT_ERROR_INTERNAL, err.message)
+    text_error_with_source(&TEXT_ERROR_INTERNAL, err)
+}
+
+fn text_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, source.message))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "text",
-    category = "plotting",
-    summary = "Add text annotation at a 2-D or 3-D plot position.",
-    keywords = "text,annotation,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::text::TEXT_DESCRIPTOR),
-    extensions(crate::builtins::plotting::text::TEXT_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::text::TEXT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::text"
 )]
 pub fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &TEXT_DESCRIPTOR,
+        &TEXT_ERROR_TOO_MANY_OUTPUTS,
+        "text",
+    )?;
+    if args.len() < 3 {
+        return Err(text_error_with_detail(
+            &TEXT_ERROR_INVALID_ARGUMENT,
+            "expected text(x, y, label) or text(x, y, z, label)",
+        ));
+    }
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -693,5 +379,20 @@ mod tests {
         .unwrap();
         let fig = crate::builtins::plotting::clone_figure(current_figure_handle()).unwrap();
         assert!(fig.axes_text_annotations(0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod output_contract_tests {
+    #[test]
+    fn missing_required_input_uses_identity_diagnostic() {
+        let error = super::text_builtin(vec![]).expect_err("missing annotation input");
+        assert_eq!(error.identifier(), Some("RunMat:text:InvalidArgument"));
+    }
+    #[test]
+    fn excessive_outputs_reject_before_argument_or_graphics_effects() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = super::text_builtin(vec![]).expect_err("excess outputs");
+        assert_eq!(error.identifier(), Some("RunMat:text:TooManyOutputs"));
     }
 }
