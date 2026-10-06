@@ -692,6 +692,22 @@ pub(crate) mod tests {
             fn wall_time_since_epoch(&self) -> Duration {
                 Duration::ZERO
             }
+            fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
+                let utc = local.and_utc();
+                Some(Duration::new(
+                    u64::try_from(utc.timestamp()).ok()?,
+                    utc.timestamp_subsec_nanos(),
+                ))
+            }
+            fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
+                Some(
+                    chrono::DateTime::from_timestamp(
+                        i64::try_from(epoch.as_secs()).ok()?,
+                        epoch.subsec_nanos(),
+                    )?
+                    .naive_utc(),
+                )
+            }
             fn process_cpu_seconds(&self) -> Option<f64> {
                 Some(0.0)
             }

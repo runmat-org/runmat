@@ -1,5 +1,6 @@
 use super::RuntimeTimingService;
 use crate::context::RuntimeServiceFuture;
+use chrono::TimeZone;
 use runmat_time::Instant;
 use std::time::Duration;
 
@@ -24,6 +25,23 @@ impl RuntimeTimingService for PlatformTimingService {
 
     fn wall_time_since_epoch(&self) -> Duration {
         runmat_time::duration_since_epoch()
+    }
+
+    fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
+        let timestamp = chrono::Local.from_local_datetime(&local).single()?;
+        Some(Duration::new(
+            u64::try_from(timestamp.timestamp()).ok()?,
+            timestamp.timestamp_subsec_nanos(),
+        ))
+    }
+
+    fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
+        Some(
+            chrono::Local
+                .timestamp_opt(i64::try_from(epoch.as_secs()).ok()?, epoch.subsec_nanos())
+                .single()?
+                .naive_local(),
+        )
     }
 
     fn process_cpu_seconds(&self) -> Option<f64> {

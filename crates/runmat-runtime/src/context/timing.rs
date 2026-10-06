@@ -34,6 +34,15 @@ pub trait RuntimeTimingService {
     /// Scheduling must use `monotonic_elapsed`, never this adjustable clock.
     fn wall_time_since_epoch(&self) -> Duration;
 
+    /// Resolve a timezone-naive local calendar time against this session's
+    /// host timezone policy. Ambiguous, nonexistent, and pre-epoch times are
+    /// unavailable rather than silently mapped through ambient global state.
+    fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration>;
+
+    /// Interpret one captured wall instant under the same host-local calendar
+    /// policy used by `local_datetime_to_epoch`.
+    fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime>;
+
     /// Process CPU seconds; browser hosts must report unavailable, not wall time.
     fn process_cpu_seconds(&self) -> Option<f64>;
 
@@ -114,6 +123,24 @@ mod tests {
 
         fn wall_time_since_epoch(&self) -> Duration {
             Duration::from_secs(1_700_000_000) + self.0.get()
+        }
+
+        fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
+            let utc = local.and_utc();
+            Some(Duration::new(
+                u64::try_from(utc.timestamp()).ok()?,
+                utc.timestamp_subsec_nanos(),
+            ))
+        }
+
+        fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
+            Some(
+                chrono::DateTime::from_timestamp(
+                    i64::try_from(epoch.as_secs()).ok()?,
+                    epoch.subsec_nanos(),
+                )?
+                .naive_utc(),
+            )
         }
 
         fn process_cpu_seconds(&self) -> Option<f64> {
