@@ -629,10 +629,45 @@ fn runtime_with_bytecode_debug_frame(
     })
 }
 
-async fn run_interpreter(
+fn run_interpreter<'a>(
     state: Box<InterpreterState>,
-    initial_vars: &mut Vec<Value>,
-) -> VmResult<InterpreterOutcome> {
+    initial_vars: &'a mut Vec<Value>,
+) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> + 'a {
+    let mut state = Some(state);
+    let mut initial_vars = Some(initial_vars);
+    let mut active = None;
+    futures::future::poll_fn(move |cx| {
+        if active.is_none() {
+            let state = state
+                .take()
+                .expect("interpreter future polled after completion");
+            let vars = initial_vars
+                .take()
+                .expect("interpreter variables taken before first poll");
+            active = match prepare_run_interpreter(state, vars) {
+                Ok(future) => Some(future),
+                Err(error) => return std::task::Poll::Ready(Err(error)),
+            };
+        }
+        let result = std::future::Future::poll(
+            std::pin::Pin::new(active.as_mut().expect("interpreter future initialized")),
+            cx,
+        );
+        if result.is_ready() {
+            active.take();
+        }
+        result
+    })
+}
+
+// This constructor runs on the first poll, then returns before the inner
+// interpreter is polled. Its temporary unboxed state must not remain in every
+// recursive Process call's native poll frame.
+#[inline(never)]
+fn prepare_run_interpreter<'a>(
+    state: Box<InterpreterState>,
+    initial_vars: &'a mut Vec<Value>,
+) -> VmResult<impl std::future::Future<Output = VmResult<InterpreterOutcome>> + Unpin + 'a> {
     state
         .bytecode
         .validate_catch_scope_metadata()
@@ -644,9 +679,8 @@ async fn run_interpreter(
     let catch_runtime = state.context.runtime.clone();
     let inherited_catch = catch_runtime.active_catch_exception_shared();
     let state = *state;
-    catch_runtime
-        .scope_active_catch_shared(inherited_catch, run_interpreter_inner(state, initial_vars))
-        .await
+    Ok(catch_runtime
+        .scope_active_catch_shared(inherited_catch, run_interpreter_inner(state, initial_vars)))
 }
 
 async fn run_interpreter_inner(
@@ -1254,12 +1288,13 @@ mod process_dispatch_tests;
 mod tests {
     use super::{
         interpret_function_with_counts_in_context, interpret_resume_in_context,
-        interpret_with_vars, output_sequence, run_interpreter_inner,
+        interpret_with_vars, output_sequence, run_interpreter, run_interpreter_inner,
     };
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
     use crate::interpreter::api::{InterpreterResumeState, InterpreterState};
     use futures::executor::block_on;
+    use futures::task::noop_waker;
     use runmat_runtime::builtins::common::validation::{
         value_is_empty, value_is_greater_than, value_is_greater_than_or_equal, value_is_integer,
         value_is_less_than, value_is_less_than_or_equal, value_is_negative, value_is_nonnegative,
@@ -1268,6 +1303,8 @@ mod tests {
     };
     use runmat_runtime::context::RuntimeInvocationArity;
     use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
+    use std::future::Future;
+    use std::task::{Context, Poll};
     #[cfg(feature = "native-accel")]
     use {
         once_cell::sync::Lazy,
@@ -1305,6 +1342,62 @@ mod tests {
             sequence.into_values(),
             vec![Value::Num(1.0), Value::Num(2.0)]
         );
+    }
+
+    #[test]
+    fn interpreter_validation_remains_lazy_until_the_first_poll() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::EnterTry {
+                    scope: 7,
+                    catch_pc: 1,
+                    catch_var: None,
+                },
+                Instr::Return,
+            ],
+            0,
+        );
+        let mut vars = Vec::new();
+        let state = Box::new(InterpreterState::new_in_context(
+            bytecode,
+            &mut vars,
+            None,
+            RuntimeInvocationArity::Script,
+            runtime,
+        ));
+        let future = run_interpreter(state, &mut vars);
+        drop(future);
+        assert!(vars.is_empty(), "an unpolled interpreter has no effects");
+
+        let state = Box::new(InterpreterState::new_in_context(
+            Bytecode::with_instructions(
+                vec![
+                    Instr::EnterTry {
+                        scope: 7,
+                        catch_pc: 1,
+                        catch_var: None,
+                    },
+                    Instr::Return,
+                ],
+                0,
+            ),
+            &mut vars,
+            None,
+            RuntimeInvocationArity::Script,
+            runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            )),
+        ));
+        let mut future = std::pin::pin!(run_interpreter(state, &mut vars));
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let Poll::Ready(Err(error)) = Future::poll(future.as_mut(), &mut context) else {
+            panic!("invalid catch metadata must reject on first poll");
+        };
+        assert!(error.message().contains("lexical catch metadata"));
     }
 
     #[test]
