@@ -303,10 +303,10 @@ async fn parent() {
     let mixed_task = tasks.pop().unwrap();
     let second_task = tasks.pop().unwrap();
     let task = tasks.pop().unwrap();
-    let process_result = wait_for_native_task(task).await;
-    let second_result = wait_for_native_task(second_task).await;
-    let mixed_result = wait_for_native_task(mixed_task).await;
-    let explicit_result = wait_for_native_task(explicit_task).await;
+    let process_result = wait_for_native_task(&task).await;
+    let second_result = wait_for_native_task(&second_task).await;
+    let mixed_result = wait_for_native_task(&mixed_task).await;
+    let explicit_result = wait_for_native_task(&explicit_task).await;
     let process_payload = import_result(&store, success_response(&process_result), &host);
     assert_eq!(
         import_result(&store, success_response(&second_result), &second_host),
@@ -492,9 +492,17 @@ async fn parent() {
         panic!("one-millisecond structural sequence unexpectedly completed");
     };
     assert!(
-        cancellation
-            .to_string()
-            .contains("exceeded its wall-time limit after reaching quiescence"),
+        matches!(
+            cancellation,
+            NativeExecutionError::TaskCancelled {
+                cancellation: runmat_execution_runner::TaskCancellation {
+                    cause: runmat_execution_runner::TaskCancellationCause::WallTime { .. },
+                    ..
+                },
+                quiescence: runmat_execution_runner_native::NativeTaskQuiescence::Confirmed,
+                ..
+            }
+        ),
         "unexpected structural sequence cancellation error: {cancellation}"
     );
 
@@ -539,7 +547,7 @@ async fn parent() {
     signal::run().await;
 }
 
-async fn wait_for_native_task(task: NativeProgramTask) -> runmat_execution_runner::AttemptSuccess {
+async fn wait_for_native_task(task: &NativeProgramTask) -> runmat_execution_runner::AttemptSuccess {
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             if let Some(result) = task.try_result() {
@@ -608,29 +616,27 @@ fn assert_publication_semantics(
 
 async fn run_durable_driver() {
     let invocation = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap();
-    let job_directory = invocation.job_directory().to_path_buf();
     let runmat_execution_runner_native::supervisor::BatchDriverInvocation::Program {
         attempt,
         submission,
+        lease,
         ..
     } = invocation
     else {
         panic!("analysis conformance driver received a script job")
     };
-    let execution =
-        runmat_execution_runner_native::supervisor::execute_program_batch(attempt, *submission)
-            .await
-            .unwrap();
+    let execution = runmat_execution_runner_native::supervisor::execute_and_complete_program_batch(
+        *attempt,
+        *submission,
+        *lease,
+    )
+    .await
+    .unwrap();
     let succeeded = matches!(
         &execution.response,
         ProgramExecutionResponse::Success { .. }
             | ProgramExecutionResponse::ExternalizedSuccess { .. }
     );
-    runmat_execution_runner_native::supervisor::complete_batch_driver_with_response(
-        &job_directory,
-        execution,
-    )
-    .unwrap();
     if !succeeded {
         std::process::exit(1);
     }
@@ -646,17 +652,21 @@ async fn durable_conformance(
     explicit_resource_usage: PreparedResourceUsage,
 ) {
     let directory = tempfile::tempdir().unwrap();
-    let mut driver = publication_chain::DurableDriver::open(
-        runmat_execution_runner_native::supervisor::LocalSupervisorConfig {
-            executable: std::env::current_exe().unwrap(),
-            paths: runmat_execution_runner_native::supervisor::SupervisorPaths::new(
+    let mut driver = publication_chain::DurableDriver::open({
+        let mut execution = NativeExecutionConfig::for_current_executable().unwrap();
+        execution.worker_arguments = vec!["--child".into()];
+        execution.max_workers = 2;
+        execution.worker_capabilities.extend(capabilities());
+        execution.max_object_bytes = 64 * 1024 * 1024;
+        runmat_execution_runner_native::supervisor::LocalSupervisorConfig::new(
+            execution,
+            runmat_execution_runner_native::supervisor::SupervisorPaths::new(
                 directory.path().join("durable-analysis"),
             )
             .unwrap(),
-            max_stderr_bytes: 1024 * 1024,
-            max_object_bytes: 64 * 1024 * 1024,
-        },
-    );
+        )
+        .unwrap()
+    });
     thermal::run_driver(&mut driver, "durable-analysis", revision()).await;
     let (host, program, input_objects, resource_plan) = fixture(revision(), "durable-analysis");
     let solve = PreparedStructuralLinearProgram {

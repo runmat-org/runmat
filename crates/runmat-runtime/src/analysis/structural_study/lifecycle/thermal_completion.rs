@@ -26,7 +26,34 @@ pub(super) fn complete(
             message,
         )
     };
-    thermal_source.authenticate(&thermal).map_err(invalid)?;
+    {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &intent.context,
+                invalid,
+            )
+        })?;
+        let maximum = preparation
+            .staging
+            .source_replay_allowance(&thermal.catalog.objects)
+            .map_err(|error| {
+                crate::analysis::prepared_study_publication::publication_failure(
+                    error,
+                    &intent.context,
+                    invalid,
+                )
+            })?;
+        thermal_source
+            .authenticate_admitted(&thermal, maximum)
+            .map_err(|error| {
+                crate::analysis::prepared_study_publication::publication_failure(
+                    error,
+                    &intent.context,
+                    invalid,
+                )
+            })?;
+    }
     thermal_source
         .persist(&thermal, intent.authored_study_digest, &preparation.staging)
         .map_err(|error| {
@@ -96,15 +123,24 @@ pub(super) fn complete(
         ));
     };
     options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
-    let run = thermal_run::admit(
-        &thermal,
-        &thermal_source,
-        &mesh,
-        options,
-        &thermal_run_id,
-        &intent.context,
-    )
-    .map_err(invalid)?;
+    let run = {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &intent.context,
+                invalid,
+            )
+        })?;
+        thermal_run::admit(
+            &thermal,
+            &thermal_source,
+            &mesh,
+            options,
+            &thermal_run_id,
+            &intent.context,
+        )
+        .map_err(invalid)?
+    };
     workloads.remove(&thermal.workload.step_id);
     let prefix = super::super::publication::ThermalPrefixCompletion {
         completed: CompletedStudyStep {

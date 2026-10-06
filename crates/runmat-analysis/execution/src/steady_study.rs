@@ -1,14 +1,15 @@
 //! Shared placement-neutral terminal authority for fresh standalone physics studies.
 //! Solve adapters supply original authenticated sources; this engine never solves or recovers.
 use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
+use crate::AnalysisPhaseExecutionEvidence;
 use crate::{
     complete_result_publication_resource_usage, extend_resource_usage, import_accuracy,
     import_published_result, import_semantic_state_completion, prepare_accuracy,
     prepare_result_publication, prepare_semantic_state_publication, AccuracyPreparation,
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, AnalysisOutputPolicy,
-    ImportedAccuracy, ImportedPublishedResult, ImportedSemanticState, PlannedResourceUsageAttempt,
-    PlannedResourceUsageGraph, PreparedAccuracy, PreparedAnalysisObjects, PreparedResourceUsage,
-    PreparedResultPublication, PreparedSemanticStatePublication, ResultPublicationPreparation,
+    ImportedAccuracy, ImportedPublishedResult, ImportedSemanticState, PreparedAccuracy,
+    PreparedAnalysisObjects, PreparedResourceUsage, PreparedResultPublication,
+    PreparedSemanticStatePublication, ResultPublicationPreparation,
     SemanticStatePublicationPreparation,
 };
 use runmat_analysis_core::{FormulationRequirement, ProcedureStep};
@@ -19,7 +20,6 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 mod storage;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,7 +133,7 @@ impl SteadyStudyTail {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(SteadyStudyPhase::AwaitingAccuracy)?;
         let task = self.accuracy_task.as_ref().expect("awaited accuracy");
@@ -223,7 +223,7 @@ impl SteadyStudyTail {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(SteadyStudyPhase::AwaitingState {
             ordinal: self.states.len(),
@@ -293,7 +293,7 @@ impl SteadyStudyTail {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(SteadyStudyPhase::AwaitingPublication)?;
         let task = self.publication_task.as_ref().expect("awaited publication");
@@ -308,10 +308,7 @@ impl SteadyStudyTail {
             task,
             &publication,
             self.baseline.as_ref().expect("frozen baseline"),
-            &PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting,
-            },
+            &accounting,
             self.source.output_policy,
         )?;
         self.publication = Some(publication);
@@ -386,16 +383,9 @@ impl SteadyStudyTail {
     fn extend_usage(
         &self,
         plan: &FeaResourcePlan,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<PreparedResourceUsage> {
-        let wall_millis = accounting.resources.usage.wall_millis;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: plan.clone(),
-                accounting,
-            }],
-            wall_millis,
-        )?;
+        let graph = accounting.resource_graph(plan)?;
         extend_resource_usage(
             self.usage.as_ref().expect("completed solve usage"),
             &graph,

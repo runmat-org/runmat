@@ -11,10 +11,9 @@ use runmat_analysis_execution::{
     prepare_observation_assembly, prepare_observation_fanout, prepare_observation_reduction,
     prepare_result_publication, prepare_structural_field_recovery, AccuracyPreparation,
     AnalysisHostWorkload, ObservationAssemblyPreparation, ObservationPreparation,
-    ObservationReductionPreparation, ObservationWorkloadSource, PlannedResourceUsageAttempt,
-    PlannedResourceUsageGraph, PreparedAnalysisProgram, PreparedResourceUsage,
-    PreparedStructuralLinearProgram, ResultPublicationPreparation,
-    StructuralFieldRecoveryPreparation,
+    ObservationReductionPreparation, ObservationWorkloadSource, PlannedResourceUsageGraph,
+    PreparedAnalysisProgram, PreparedResourceUsage, PreparedStructuralLinearProgram,
+    ResultPublicationPreparation, StructuralFieldRecoveryPreparation,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, SequenceIdentity, StructuralLinearWorkload,
@@ -32,6 +31,10 @@ use runmat_execution_runner_native::{
 use runmat_meshing_core::CanonicalMeshingContract;
 
 use super::{analysis_resources, analysis_submission, capabilities, wait_for_native_task};
+
+#[path = "publication_chain/diagnostics.rs"]
+mod diagnostics;
+use diagnostics::remote_timeout_summary;
 
 pub(super) trait PublicationChainDriver {
     type Store: CacheImport;
@@ -170,10 +173,36 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let mut observation_attempts = Vec::new();
     let mut contribution_groups = BTreeMap::new();
     for (partition, response) in fanout.partitions.iter().zip(responses) {
-        observation_attempts.push(PlannedResourceUsageAttempt {
-            plan: partition.resource_plan.clone(),
-            accounting: response.resources,
-        });
+        let execution = response
+            .phase_execution()
+            .expect("complete original observation task history");
+        execution
+            .validate_for(
+                &partition.host,
+                &partition.resource_plan,
+                &response.response,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "original observation validation failed: {error}; {}",
+                    diagnostics::attempt_summary(
+                        response.execution.as_ref().expect("original task history")
+                    ),
+                )
+            });
+        observation_attempts.extend(
+            execution
+                .resource_graph(&partition.resource_plan)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "original observation history is not fully accounted: {error}; {}",
+                        diagnostics::attempt_summary(
+                            response.execution.as_ref().expect("original task history")
+                        ),
+                    )
+                })
+                .attempts,
+        );
         let imported = import_observation_partition_contribution(
             driver.store(),
             response.response,
@@ -206,10 +235,29 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
                 Some(&reduction.resource_plan),
             )
             .await;
-        observation_attempts.push(PlannedResourceUsageAttempt {
-            plan: reduction.resource_plan.clone(),
-            accounting: response.resources,
-        });
+        let execution = response
+            .phase_execution()
+            .expect("complete original observation task history");
+        execution
+            .validate_for(
+                &reduction.host,
+                &reduction.resource_plan,
+                &response.response,
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "original observation validation failed: {error}; {}",
+                    diagnostics::attempt_summary(
+                        response.execution.as_ref().expect("original task history")
+                    ),
+                )
+            });
+        observation_attempts.extend(
+            execution
+                .resource_graph(&reduction.resource_plan)
+                .unwrap()
+                .attempts,
+        );
         reduced.push(
             import_reduced_observation(driver.store(), response.response, &reduction, limits)
                 .unwrap(),
@@ -240,10 +288,22 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             Some(&observations.resource_plan),
         )
         .await;
-    observation_attempts.push(PlannedResourceUsageAttempt {
-        plan: observations.resource_plan.clone(),
-        accounting: observation_response.resources,
-    });
+    let execution = observation_response
+        .phase_execution()
+        .expect("complete original observation task history");
+    execution
+        .validate_for(
+            &observations.host,
+            &observations.resource_plan,
+            &observation_response.response,
+        )
+        .unwrap();
+    observation_attempts.extend(
+        execution
+            .resource_graph(&observations.resource_plan)
+            .unwrap()
+            .attempts,
+    );
     let imported_observations = import_observation_assembly(
         driver.store(),
         observation_response.response,
@@ -339,6 +399,19 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             Some(&accuracy.resource_plan),
         )
         .await;
+    let accuracy_execution = accuracy_response
+        .phase_execution()
+        .expect("complete original accuracy task history");
+    accuracy_execution
+        .validate_for(
+            &accuracy.host,
+            &accuracy.resource_plan,
+            &accuracy_response.response,
+        )
+        .unwrap();
+    let accuracy_graph = accuracy_execution
+        .resource_graph(&accuracy.resource_plan)
+        .unwrap();
     let imported_accuracy = import_accuracy(
         driver.store(),
         accuracy_response.response,
@@ -347,17 +420,9 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     )
     .unwrap();
 
-    let accuracy_wall = accuracy_response.resources.resources.usage.wall_millis;
     let resource_usage = runmat_analysis_execution::extend_resource_usage(
         &resource_usage,
-        &PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: accuracy.resource_plan.clone(),
-                accounting: accuracy_response.resources,
-            }],
-            accuracy_wall,
-        )
-        .unwrap(),
+        &accuracy_graph,
         &solve.host.artifact_access,
         runmat_analysis_execution::AnalysisOutputPolicy::new(DEFAULT_ANALYSIS_CHUNK_BYTES, limits)
             .unwrap(),
@@ -385,6 +450,9 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             Some(&publication.resource_plan),
         )
         .await;
+    let publication_execution = publication_response
+        .phase_execution()
+        .expect("complete original publication history");
     let published = import_published_result(
         driver.store(),
         publication_response.response,
@@ -396,10 +464,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         &publication,
         &published,
         &resource_usage,
-        &runmat_analysis_execution::PlannedResourceUsageAttempt {
-            plan: publication.resource_plan.clone(),
-            accounting: publication_response.resources,
-        },
+        &publication_execution,
         runmat_analysis_execution::AnalysisOutputPolicy::new(DEFAULT_ANALYSIS_CHUNK_BYTES, limits)
             .unwrap(),
     )
@@ -409,7 +474,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         published.result.source_resource_usage,
         resource_usage.evidence.identity()
     );
-    runmat_analysis_execution::validate_result_publication_resource_usage(
+    runmat_analysis_execution::validate_retained_result_publication_resource_usage(
         &published.result,
         &resource_usage.evidence,
         &terminal.evidence,
@@ -422,6 +487,28 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
 pub(super) struct MeteredProgramResponse {
     pub response: ProgramExecutionResponse,
     pub resources: AttemptResourceAccounting,
+    pub execution: Option<runmat_execution_runner::TaskExecutionEvidence>,
+    pub graph_wall_millis: u64,
+}
+
+impl MeteredProgramResponse {
+    pub fn phase_execution(
+        &self,
+    ) -> Result<runmat_analysis_execution::AnalysisPhaseExecutionEvidence, String> {
+        let original = self.execution.clone().ok_or_else(|| {
+            "durable supervisor completion lacks the original portable admitted task/history"
+                .to_string()
+        })?;
+        let phase = runmat_analysis_execution::AnalysisPhaseExecutionEvidence::new(
+            original,
+            self.graph_wall_millis,
+        )
+        .map_err(|error| error.to_string())?;
+        if phase.winning_accounting() != &self.resources {
+            return Err("response accounting differs from original portable commit".into());
+        }
+        Ok(phase)
+    }
 }
 
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
@@ -431,7 +518,11 @@ pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResp
     )
 }
 
-pub(super) fn metered_response(success: AttemptSuccess) -> MeteredProgramResponse {
+pub(super) fn metered_response(
+    success: AttemptSuccess,
+    execution: runmat_execution_runner::TaskExecutionEvidence,
+    graph_wall_millis: u64,
+) -> MeteredProgramResponse {
     success.validate_accounting().unwrap();
     let resources = success
         .resources
@@ -442,6 +533,8 @@ pub(super) fn metered_response(success: AttemptSuccess) -> MeteredProgramRespons
     MeteredProgramResponse {
         response,
         resources,
+        execution: Some(execution),
+        graph_wall_millis,
     }
 }
 
@@ -464,6 +557,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
     ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
+            let started = Instant::now();
             program.write_to(self.store).unwrap();
             let task = self
                 .session
@@ -483,7 +577,15 @@ impl PublicationChainDriver for ProcessDriver<'_> {
                 .unwrap()
                 .pop()
                 .unwrap();
-            metered_response(wait_for_native_task(task).await)
+            {
+                let success = wait_for_native_task(&task).await;
+                metered_response(
+                    success,
+                    task.try_execution_evidence()
+                        .expect("original native terminal history"),
+                    u64::try_from(started.elapsed().as_millis().max(1)).unwrap(),
+                )
+            }
         })
     }
 
@@ -496,6 +598,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
         )>,
     ) -> Pin<Box<dyn Future<Output = Vec<MeteredProgramResponse>> + 'a>> {
         Box::pin(async move {
+            let started = Instant::now();
             for (_, program, _) in &workloads {
                 program.write_to(self.store).unwrap();
             }
@@ -524,7 +627,19 @@ impl PublicationChainDriver for ProcessDriver<'_> {
                 .unwrap();
             let mut responses = Vec::with_capacity(tasks.len());
             for task in tasks {
-                responses.push(metered_response(wait_for_native_task(task).await));
+                responses.push({
+                    let success = wait_for_native_task(&task).await;
+                    metered_response(
+                        success,
+                        task.try_execution_evidence()
+                            .expect("original native terminal history"),
+                        u64::try_from(started.elapsed().as_millis().max(1)).unwrap(),
+                    )
+                });
+            }
+            let wall = u64::try_from(started.elapsed().as_millis().max(1)).unwrap();
+            for response in &mut responses {
+                response.graph_wall_millis = wall;
             }
             responses
         })
@@ -533,7 +648,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
 
 pub(super) struct DurableDriver {
     config: runmat_execution_runner_native::supervisor::LocalSupervisorConfig,
-    supervisor: Arc<runmat_execution_runner_native::supervisor::LocalSupervisor>,
+    supervisor: Option<Arc<runmat_execution_runner_native::supervisor::LocalSupervisor>>,
     store: FilesystemObjectStore,
     submission_sequence: u64,
 }
@@ -546,7 +661,7 @@ impl DurableDriver {
         let store = supervisor.object_store().unwrap();
         Self {
             config,
-            supervisor,
+            supervisor: Some(supervisor),
             store,
             submission_sequence: 0,
         }
@@ -567,6 +682,7 @@ impl PublicationChainDriver for DurableDriver {
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
     ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
+            let started = Instant::now();
             program.write_to(&mut self.store).unwrap();
             // The durable supervisor accepts generic programs, so this driver must carry
             // the same host requirements that analysis task submission normally adds.
@@ -580,12 +696,29 @@ impl PublicationChainDriver for DurableDriver {
             self.submission_sequence += 1;
             let idempotency_key =
                 format!("analysis-publication-chain-{}", self.submission_sequence);
+            let context = self
+                .supervisor
+                .as_ref()
+                .unwrap()
+                .execution_context(Some(&idempotency_key))
+                .await
+                .unwrap();
+            let original_task = analysis_submission(
+                context.scope_id,
+                context.pool_id,
+                host,
+                &program.request,
+                resource_plan,
+                allocation.clone(),
+            );
             let (record, duplicate) = self
                 .supervisor
+                .as_ref()
+                .expect("durable supervisor is open")
                 .submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
                         program.request.clone(),
-                        allocation.clone(),
+                        original_task.clone(),
                         Some(idempotency_key),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     ),
@@ -595,12 +728,12 @@ impl PublicationChainDriver for DurableDriver {
             assert!(!duplicate);
             let response = tokio::time::timeout(Duration::from_secs(15), async {
                 loop {
-                    self.supervisor.reconcile().await.unwrap();
-                    let attachment = self
+                    let supervisor = self
                         .supervisor
-                        .attach(record.handle.id, 0, 0)
-                        .await
-                        .unwrap();
+                        .as_ref()
+                        .expect("durable supervisor is open");
+                    supervisor.reconcile().await.unwrap();
+                    let attachment = supervisor.attach(record.handle.id, 0, 0).await.unwrap();
                     if attachment.record.state.is_terminal() {
                         let resources = attachment.resources.as_ref().expect(
                             "durable analysis task must retain generic resource accounting",
@@ -616,6 +749,9 @@ impl PublicationChainDriver for DurableDriver {
                         break MeteredProgramResponse {
                             response,
                             resources: resources.clone(),
+                            execution: attachment.execution,
+                            graph_wall_millis: u64::try_from(started.elapsed().as_millis().max(1))
+                                .unwrap(),
                         };
                     }
                     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -623,11 +759,15 @@ impl PublicationChainDriver for DurableDriver {
             })
             .await
             .expect("durable analysis completion timeout");
-            self.supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open(
+            // Reattach under a new exclusive owner after releasing the previous
+            // supervisor. The object store does not own the authority lease.
+            drop(self.supervisor.take());
+            let supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open(
                 self.config.clone(),
             )
             .unwrap();
-            self.store = self.supervisor.object_store().unwrap();
+            self.store = supervisor.object_store().unwrap();
+            self.supervisor = Some(supervisor);
             response
         })
     }
@@ -666,6 +806,7 @@ impl PublicationChainDriver for RemoteDriver {
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
     ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
+            let started = Instant::now();
             if let Some(plan) = resource_plan {
                 let inventory = super::inventory();
                 assert!(
@@ -692,21 +833,20 @@ impl PublicationChainDriver for RemoteDriver {
                         .collect(),
                 )
                 .unwrap();
+            let submission = analysis_submission(
+                self.scope_id,
+                self.pool_id,
+                host,
+                &program.request,
+                resource_plan,
+                resource_plan
+                    .map(|plan| plan.request.clone())
+                    .unwrap_or_else(analysis_resources),
+            );
+            let task_id = submission.request.id;
             let completion = self
                 .pool
-                .submit_graph(vec![(
-                    program.request.clone(),
-                    analysis_submission(
-                        self.scope_id,
-                        self.pool_id,
-                        host,
-                        &program.request,
-                        resource_plan,
-                        resource_plan
-                            .map(|plan| plan.request.clone())
-                            .unwrap_or_else(analysis_resources),
-                    ),
-                )])
+                .submit_graph(vec![(program.request.clone(), submission)])
                 .unwrap()
                 .pop()
                 .unwrap();
@@ -728,7 +868,12 @@ impl PublicationChainDriver for RemoteDriver {
                         .to_vec(),
                 );
             }
-            metered_response(success)
+            let evidence = self.pool.task_execution_evidence(task_id).unwrap();
+            metered_response(
+                success,
+                evidence,
+                u64::try_from(started.elapsed().as_millis().max(1)).unwrap(),
+            )
         })
     }
 
@@ -741,6 +886,7 @@ impl PublicationChainDriver for RemoteDriver {
         )>,
     ) -> Pin<Box<dyn Future<Output = Vec<MeteredProgramResponse>> + 'a>> {
         Box::pin(async move {
+            let started = Instant::now();
             for (_, program, _) in &workloads {
                 for object in &program.objects {
                     self.pool
@@ -758,31 +904,31 @@ impl PublicationChainDriver for RemoteDriver {
                     )
                     .unwrap();
             }
-            let completions = self
-                .pool
-                .submit_graph(
-                    workloads
-                        .iter()
-                        .map(|(host, program, resource_plan)| {
-                            (
-                                program.request.clone(),
-                                analysis_submission(
-                                    self.scope_id,
-                                    self.pool_id,
-                                    host,
-                                    &program.request,
-                                    *resource_plan,
-                                    resource_plan
-                                        .map(|plan| plan.request.clone())
-                                        .unwrap_or_else(analysis_resources),
-                                ),
-                            )
-                        })
-                        .collect(),
-                )
-                .unwrap();
+            let submissions = workloads
+                .iter()
+                .map(|(host, program, resource_plan)| {
+                    (
+                        program.request.clone(),
+                        analysis_submission(
+                            self.scope_id,
+                            self.pool_id,
+                            host,
+                            &program.request,
+                            *resource_plan,
+                            resource_plan
+                                .map(|plan| plan.request.clone())
+                                .unwrap_or_else(analysis_resources),
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let task_ids = submissions
+                .iter()
+                .map(|(_, submission)| submission.request.id)
+                .collect::<Vec<_>>();
+            let completions = self.pool.submit_graph(submissions).unwrap();
             let mut responses = Vec::with_capacity(completions.len());
-            for completion in completions {
+            for (completion, task_id) in completions.into_iter().zip(task_ids) {
                 let success =
                     match tokio::time::timeout(Duration::from_secs(15), completion.wait()).await {
                         Ok(result) => result.unwrap(),
@@ -801,27 +947,14 @@ impl PublicationChainDriver for RemoteDriver {
                             .to_vec(),
                     );
                 }
-                responses.push(metered_response(success));
+                let evidence = self.pool.task_execution_evidence(task_id).unwrap();
+                responses.push(metered_response(success, evidence, 1));
+            }
+            let wall = u64::try_from(started.elapsed().as_millis().max(1)).unwrap();
+            for response in &mut responses {
+                response.graph_wall_millis = wall;
             }
             responses
         })
     }
-}
-
-fn remote_timeout_summary(pool: &RemotePoolDriver) -> String {
-    let snapshot = pool.snapshot();
-    let pending = snapshot
-        .tasks
-        .iter()
-        .filter(|(_, task)| !matches!(task.state, runmat_execution::state::TaskState::Succeeded))
-        .take(8)
-        .map(|(id, task)| (id, task.state))
-        .collect::<Vec<_>>();
-    format!(
-        "tasks={}, attempts={}, events={}, pending(first 8)={pending:?}, last_event_sequence={:?}",
-        snapshot.tasks.len(),
-        snapshot.attempts.len(),
-        snapshot.events.len(),
-        snapshot.events.last().map(|event| event.sequence)
-    )
 }

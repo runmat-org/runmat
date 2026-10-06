@@ -7,13 +7,13 @@ use crate::{
     },
     NativeExecutionError, NativeExecutionResult,
 };
+use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
     AnalysisHostWorkload, CompletedMagneticStudy, MagneticStudyCoordinator, MagneticStudyPhase,
     MagneticStudyPreparation, PreparedAnalysisProgram,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 #[derive(Clone, Debug)]
 pub struct MagneticStudyExecutionPolicy {
@@ -191,7 +191,7 @@ async fn execute_one(
     plan: &FeaResourcePlan,
     dependencies: Vec<AnalysisTaskDependency>,
     policy: &MagneticStudyExecutionPolicy,
-) -> NativeExecutionResult<(ExecutedAnalysisTask, AttemptResourceAccounting)> {
+) -> NativeExecutionResult<(ExecutedAnalysisTask, AnalysisPhaseExecutionEvidence)> {
     execute_governed_analysis_phase(
         pool,
         host,

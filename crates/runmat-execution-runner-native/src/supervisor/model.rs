@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use runmat_execution::identity::{AttemptId, WorkerId};
-use runmat_execution::resource::ResourceRequest;
-use runmat_execution::value::{ValueLimits, ValuePayload};
+use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
@@ -68,10 +66,10 @@ impl BatchSubmission {
         let mut identity = b"runmat-local-batch-request-v1\0".to_vec();
         let mut stable = self.clone();
         stable.idempotency_key = None;
-        identity.extend(
-            serde_json::to_vec(&stable)
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
-        );
+        identity.extend(runmat_canonical_codec::encode_json_bounded(
+            &stable,
+            u64::from(super::protocol::SUPERVISOR_MAX_MESSAGE_BYTES),
+        )?);
         Ok(Digest::sha256(identity))
     }
 
@@ -84,13 +82,18 @@ impl BatchSubmission {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProgramBatchSubmission {
-    pub recipe: ProgramBuildRecipe,
-    pub artifact: ProgramArtifact,
+pub struct ProgramBatchSubmission<
+    R = ProgramBuildRecipe,
+    A = ProgramArtifact,
+    V = Vec<ValuePayload>,
+    T = runmat_execution_runner::TaskSubmission,
+> {
+    pub recipe: R,
+    pub artifact: A,
     pub function: usize,
-    pub arguments: Vec<ValuePayload>,
+    pub arguments: V,
     pub requested_outputs: u16,
-    pub resources: ResourceRequest,
+    pub task: T,
     pub idempotency_key: Option<String>,
     pub retention_millis: u64,
 }
@@ -98,7 +101,7 @@ pub struct ProgramBatchSubmission {
 impl ProgramBatchSubmission {
     pub fn from_request(
         request: ProgramExecutionRequest,
-        resources: ResourceRequest,
+        task: runmat_execution_runner::TaskSubmission,
         idempotency_key: Option<String>,
         retention_millis: u64,
     ) -> Self {
@@ -108,19 +111,21 @@ impl ProgramBatchSubmission {
             function: request.function,
             arguments: request.arguments,
             requested_outputs: request.requested_outputs,
-            resources,
+            task,
             idempotency_key,
             retention_millis,
         }
     }
 
-    pub fn program_request(&self) -> ProgramExecutionRequest {
+    pub fn program_request(
+        &self,
+    ) -> runmat_execution_artifact::BorrowedProgramExecutionRequest<'_> {
         ProgramExecutionRequest {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-            recipe: self.recipe.clone(),
-            artifact: self.artifact.clone(),
+            recipe: &self.recipe,
+            artifact: &self.artifact,
             function: self.function,
-            arguments: self.arguments.clone(),
+            arguments: self.arguments.as_slice(),
             requested_outputs: self.requested_outputs,
         }
     }
@@ -129,9 +134,20 @@ impl ProgramBatchSubmission {
         self.program_request()
             .validate_for_portable_host()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        self.resources
+        self.task
+            .request
+            .resources
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        if self.task.request.inputs != self.arguments
+            || self.task.request.outputs.requested_outputs != self.requested_outputs
+            || self.task.request.program_artifact_id
+                != runmat_execution::identity::ArtifactId::derive(&[self.artifact.id.0.bytes()])
+        {
+            return Err(NativeExecutionError::Protocol(
+                "durable task differs from its original program invocation".into(),
+            ));
+        }
         if self.arguments.len() > MAX_BATCH_ARGUMENTS
             || self
                 .idempotency_key
@@ -144,22 +160,27 @@ impl ProgramBatchSubmission {
                 "program batch submission contains an inconsistent callable/output contract or invalid argument, key, or retention".into(),
             ));
         }
-        for argument in &self.arguments {
-            argument
-                .validate(ValueLimits::default())
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        }
         Ok(())
     }
 
     pub fn request_digest(&self) -> NativeExecutionResult<Digest> {
-        let mut stable = self.clone();
-        stable.idempotency_key = None;
+        // Same schema and identity bytes; borrowed physics/program payloads are not
+        // copied merely to omit the caller's idempotency key from content identity.
+        let stable = ProgramBatchSubmission {
+            recipe: &self.recipe,
+            artifact: &self.artifact,
+            function: self.function,
+            arguments: self.arguments.as_slice(),
+            requested_outputs: self.requested_outputs,
+            task: &self.task,
+            idempotency_key: None,
+            retention_millis: self.retention_millis,
+        };
         let mut identity = b"runmat-local-program-batch-request-v1\0".to_vec();
-        identity.extend(
-            serde_json::to_vec(&stable)
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
-        );
+        identity.extend(runmat_canonical_codec::encode_json_bounded(
+            &stable,
+            u64::from(super::protocol::SUPERVISOR_MAX_MESSAGE_BYTES),
+        )?);
         Ok(Digest::sha256(identity))
     }
 
@@ -234,36 +255,19 @@ pub struct DriverCompletion {
     pub success: bool,
     pub exit_code: Option<i32>,
     pub message: Option<String>,
-    pub response: Option<ProgramExecutionResponse>,
-    pub resources: Option<AttemptResourceAccounting>,
 }
 
 impl DriverCompletion {
     pub fn validate(&self) -> NativeExecutionResult<()> {
-        let response_succeeded = self.response.as_ref().map(|response| {
-            matches!(
-                response,
-                ProgramExecutionResponse::Success { .. }
-                    | ProgramExecutionResponse::ExternalizedSuccess { .. }
-            )
-        });
-        let resources_are_valid = self
-            .resources
-            .as_ref()
-            .map(AttemptResourceAccounting::validate)
-            .transpose()
-            .is_ok();
-        if self.schema_version != 3
+        if self.schema_version != 4
             || self
                 .message
                 .as_ref()
                 .is_some_and(|value| value.len() > 16 * 1024)
-            || response_succeeded.is_some_and(|succeeded| succeeded != self.success)
-            || self.response.is_some() != self.resources.is_some()
-            || !resources_are_valid
+            || self.success && self.exit_code != Some(0)
         {
             return Err(NativeExecutionError::Protocol(
-                "durable driver completion is malformed".into(),
+                "durable script completion is malformed".into(),
             ));
         }
         Ok(())
@@ -275,6 +279,8 @@ impl DriverCompletion {
 pub struct DriverMarker {
     pub schema_version: u16,
     pub process_id: u32,
+    #[serde(deserialize_with = "required_marker_attempt")]
+    pub attempt_id: Option<runmat_execution::identity::AttemptId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -287,21 +293,34 @@ pub struct JobAttachment {
     pub next_stderr_offset: u64,
     pub response: Option<ProgramExecutionResponse>,
     pub resources: Option<AttemptResourceAccounting>,
+    pub execution: Option<runmat_execution_runner::TaskExecutionEvidence>,
+    pub latest_progress: Option<crate::protocol::ProgramProgress>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramBatchExecution {
     pub response: ProgramExecutionResponse,
-    pub resources: AttemptResourceAccounting,
+    pub report: runmat_execution_runner::port::BackendReport,
+    pub latest_progress: Option<crate::protocol::ProgramProgress>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DurableProgramAttempt {
-    pub attempt_id: AttemptId,
-    pub worker_id: WorkerId,
+    pub schema_version: u16,
+    pub request: runmat_execution_runner::AttemptRequest,
+    pub config: crate::NativeExecutionConfig,
+    pub job_directory: PathBuf,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DurableExecutionContext {
+    pub scope_id: runmat_execution::ExecutionScopeId,
+    pub pool_id: runmat_execution::PoolId,
+}
+
+#[derive(Debug)]
 pub enum BatchDriverInvocation {
     Script {
         job_directory: PathBuf,
@@ -311,8 +330,9 @@ pub enum BatchDriverInvocation {
     },
     Program {
         job_directory: PathBuf,
-        attempt: DurableProgramAttempt,
+        attempt: Box<DurableProgramAttempt>,
         submission: Box<ProgramBatchSubmission>,
+        lease: Box<super::DurableAttemptLease>,
     },
 }
 
@@ -326,7 +346,7 @@ impl BatchDriverInvocation {
     }
 }
 
-fn valid_source_name(value: &str) -> bool {
+pub(super) fn valid_source_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 255
         && value.is_ascii()
@@ -340,4 +360,10 @@ fn valid_source_name(value: &str) -> bool {
 
 fn idempotency_digest(key: &str) -> Digest {
     Digest::sha256([b"runmat-local-batch-idempotency-v1\0", key.as_bytes()].concat())
+}
+
+fn required_marker_attempt<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<runmat_execution::identity::AttemptId>, D::Error> {
+    Option::<runmat_execution::identity::AttemptId>::deserialize(deserializer)
 }

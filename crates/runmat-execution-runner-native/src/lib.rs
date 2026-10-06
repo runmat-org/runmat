@@ -65,6 +65,8 @@ mod materialized_project;
 mod meshing_evaluator;
 mod meshing_host;
 mod meshing_platform;
+mod native_pool;
+mod process_provider;
 mod program_object_source;
 mod program_session;
 mod protocol;
@@ -74,6 +76,9 @@ mod runtime_meshing_provider;
 mod service;
 mod structural_study_root;
 pub mod supervisor;
+mod task_outcome;
+pub use task_outcome::NativeTaskQuiescence;
+mod program_workload;
 mod test_workload;
 mod typed_fea;
 mod worker;
@@ -152,9 +157,6 @@ pub use analysis_transient::{
     StructuralTransientRecoveryPublisher,
 };
 pub use config::NativeExecutionConfig;
-pub use driver::{
-    NATIVE_ACCELERATOR_REQUESTS_ENV, NATIVE_ACCELERATOR_REQUIRED_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
-};
 pub use error::{NativeExecutionError, NativeExecutionResult};
 pub use exact_geometry_admission::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
@@ -211,8 +213,11 @@ pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvalu
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
 };
+pub use process_provider::{
+    NATIVE_ACCELERATOR_REQUESTS_ENV, NATIVE_ACCELERATOR_REQUIRED_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
+};
 pub use program_object_source::NativeProgramObjectSource;
-pub use program_session::{NativeProgramSession, NativeProgramTask};
+pub use program_session::{NativeProgramCompletion, NativeProgramSession, NativeProgramTask};
 pub use protocol::{ProgramProgress, WorkerProcessMessage, WorkerResponse};
 pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,

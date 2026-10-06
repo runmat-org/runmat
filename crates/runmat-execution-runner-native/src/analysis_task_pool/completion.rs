@@ -6,9 +6,34 @@ pub(crate) struct AnalysisTaskCompletion {
     pub response: ProgramExecutionResponse,
     pub attempt: Option<AttemptSuccess>,
     pub evidence: TaskExecutionEvidence,
+    pub failure: Option<crate::task_outcome::NativeTaskFailure>,
 }
 
 impl AnalysisTaskCompletion {
+    pub(crate) fn from_native(
+        completion: crate::NativeProgramCompletion,
+    ) -> NativeExecutionResult<Self> {
+        let (result, evidence, checkpoint) = completion.into_parts();
+        let checkpoint_failure =
+            crate::task_outcome::NativeTaskFailure::from_checkpoint(&checkpoint);
+        let evidence = evidence.ok_or_else(|| {
+            checkpoint_failure.as_ref().map_or_else(
+                || protocol("local completion lacks original scheduler evidence"),
+                |failure| failure.error(),
+            )
+        })?;
+        let mut completed = Self::new(evidence, result)?;
+        if let Some(failure) = checkpoint_failure {
+            completed.response = ProgramExecutionResponse::Failure {
+                message: checkpoint
+                    .delivery_error()
+                    .expect("failed checkpoint has a diagnostic"),
+            };
+            completed.attempt = None;
+            completed.failure = Some(failure);
+        }
+        Ok(completed)
+    }
     pub(crate) fn new(
         evidence: TaskExecutionEvidence,
         result: Result<AttemptSuccess, String>,
@@ -29,6 +54,7 @@ impl AnalysisTaskCompletion {
                 "analysis completion still has active scheduler work",
             ));
         }
+        let failure = crate::task_outcome::NativeTaskFailure::from_scheduler(&evidence, &result);
         let (response, attempt) = match result {
             Ok(success) => {
                 let commit = evidence
@@ -52,6 +78,7 @@ impl AnalysisTaskCompletion {
             response,
             attempt,
             evidence,
+            failure,
         })
     }
 }
@@ -60,7 +87,11 @@ impl AnalysisTaskCompletion {
 pub(crate) fn delivered_attempt<'a>(
     response: &ProgramExecutionResponse,
     attempt: Option<&'a AttemptSuccess>,
+    failure: Option<&crate::task_outcome::NativeTaskFailure>,
 ) -> NativeExecutionResult<&'a AttemptSuccess> {
+    if let Some(failure) = failure {
+        return Err(failure.error());
+    }
     if let ProgramExecutionResponse::Failure { message } = response {
         return Err(protocol(message));
     }

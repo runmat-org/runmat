@@ -1,7 +1,7 @@
 //! Native thermal-only execution of retained electrical loss; not scheduler/restart evidence.
 use super::*;
 use runmat_analysis_fea::execution::RetainedJouleHeatSource;
-use runmat_execution_artifact::{cache::FilesystemObjectStore, ProgramExecutionResponse};
+use runmat_execution_artifact::cache::FilesystemObjectStore;
 use runmat_meshing_core::SolverMeshArtifact;
 
 #[path = "electrothermal/fixture.rs"]
@@ -36,11 +36,6 @@ fn native_retained_joule_source_executes_only_thermal_and_cold_imports_both_orde
     use runmat_analysis_execution::{
         execute_serial_analysis, import_thermal_completion, AnalysisHostResponse,
     };
-    use runmat_execution::{
-        identity::{AttemptId, WorkerId},
-        resource::ResourceAccounting,
-    };
-    use runmat_execution_runner::AttemptResourceAccounting;
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let (source, bound, mesh) = fixture(order);
         let task = prepare(Some(source), bound.clone(), mesh.clone());
@@ -61,27 +56,25 @@ fn native_retained_joule_source_executes_only_thermal_and_cold_imports_both_orde
         let response = AnalysisHostResponse::completed(&task.host, &completed)
             .unwrap()
             .program_response();
-        let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &response else {
-            panic!("native thermal solve must externalize");
-        };
-        let bytes = result_objects
-            .iter()
-            .map(|object| object.encoded_length)
-            .sum();
-        // Explicit test reservation accounting, not measured scheduler/RSS evidence.
-        let accounting = AttemptResourceAccounting::new(
-            AttemptId::derive(&[b"retained-joule-test"]),
-            WorkerId::derive(&[b"inline-native-test"]),
-            ResourceAccounting::for_reserved_interval(
-                task.resource_plan.request.clone(),
-                1,
-                bytes,
-                0,
-                0,
-            )
-            .unwrap(),
+        let (submission, _) = crate::analysis_task::prepare_analysis_task(
+            runmat_execution::ExecutionScopeId::derive(&[b"retained-joule-fixture"]),
+            runmat_execution::PoolId::derive(&[b"retained-joule-fixture"]),
+            &task.host,
+            &task.program,
+            vec![],
+            Default::default(),
+            crate::analysis_task::AnalysisTaskPolicy {
+                resources: task.resource_plan.request.clone(),
+                resource_plan: Some(&task.resource_plan),
+                prepared_closure: None,
+                retry: runmat_execution::task::RetryPolicy::Never,
+                deadline_unix_millis: None,
+                priority: 0,
+            },
         )
         .unwrap();
+        let accounting =
+            crate::analysis_task_pool::phase_fixture::successful_phase(submission, &response, 1);
         drop(completed);
         drop(store);
         let cold = FilesystemObjectStore::open(&object_root, limits.max_object_bytes).unwrap();

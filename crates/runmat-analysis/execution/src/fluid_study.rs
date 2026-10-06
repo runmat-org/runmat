@@ -6,6 +6,7 @@ use crate::phase_accounting::validate_analysis_phase_accounting as validate_acco
 use crate::steady_study::{SteadyStudyPhase, SteadyStudySource, SteadyStudyTail};
 use std::collections::BTreeSet;
 
+use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SequenceIdentity},
     study::{
@@ -15,16 +16,14 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     import_fluid_steady_result, prepare_fluid_steady_task, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisOutputPolicy, FluidSteadyTaskPreparation, ImportedAccuracy, ImportedFluidSteadyResult,
-    ImportedPublishedResult, ImportedSemanticState, PlannedResourceUsageAttempt,
-    PlannedResourceUsageGraph, PreparedAccuracy, PreparedFluidSteadyTask, PreparedResourceUsage,
-    PreparedResultPublication, PreparedSemanticStatePublication,
+    ImportedPublishedResult, ImportedSemanticState, PreparedAccuracy, PreparedFluidSteadyTask,
+    PreparedResourceUsage, PreparedResultPublication, PreparedSemanticStatePublication,
 };
 
 mod completion;
@@ -165,7 +164,7 @@ impl FluidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(FluidStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
@@ -182,13 +181,7 @@ impl FluidStudyCoordinator {
             task,
             self.preparation.output_policy.inventory_limits(),
         )?;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting: accounting.clone(),
-            }],
-            accounting.resources.usage.wall_millis,
-        )?;
+        let graph = accounting.resource_graph(&task.resource_plan)?;
         let usage = crate::prepare_planned_resource_graph_usage(
             &task.resource_plan,
             task.host.workload.identity.digest(),
@@ -215,7 +208,7 @@ impl FluidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = FluidStudyResultPhase::Accuracy;
         let tail = self
@@ -243,7 +236,7 @@ impl FluidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = FluidStudyResultPhase::State {
             ordinal: self.states().len(),
@@ -271,7 +264,7 @@ impl FluidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = FluidStudyResultPhase::Publication;
         let tail = self

@@ -8,10 +8,6 @@ use runmat_analysis_fea::{
     properties::compile_property_map,
     topology::FiniteVolumeProjectionPolicy,
 };
-use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::ResourceAccounting,
-};
 use runmat_meshing_core::{fixtures, SolverMeshArtifact};
 fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let mesh = fixtures::slab_mesh(1);
@@ -176,19 +172,13 @@ fn empty_response() -> ProgramExecutionResponse {
         result_objects: Vec::new(),
     }
 }
-fn accounting(task: &PreparedFluidSteadyTask) -> AttemptResourceAccounting {
-    AttemptResourceAccounting {
-        attempt_id: AttemptId::derive(&[b"fluid-attempt"]),
-        worker_id: WorkerId::derive(&[b"fluid-worker"]),
-        resources: ResourceAccounting::for_reserved_interval(
-            task.resource_plan.request.clone(),
-            1,
-            0,
-            0,
-            0,
-        )
-        .unwrap(),
-    }
+fn accounting(task: &PreparedFluidSteadyTask) -> AnalysisPhaseExecutionEvidence {
+    crate::tests::phase_execution(
+        &task.host,
+        &task.program,
+        &task.resource_plan.request,
+        &empty_response(),
+    )
 }
 #[test]
 fn exact_authored_plan_and_owned_phases_fail_closed() {
@@ -225,10 +215,10 @@ fn failed_import_never_installs_usage_or_terminal_authority() {
     let mut study = FluidStudyCoordinator::new(preparation()).unwrap();
     let task = study.prepare_solve().unwrap();
     let usage = accounting(task);
-    let mut foreign = usage.clone();
     let mut allocation = task.resource_plan.request.clone();
     allocation.memory_bytes += 1;
-    foreign.resources = ResourceAccounting::for_reserved_interval(allocation, 1, 0, 0, 0).unwrap();
+    let foreign =
+        crate::tests::phase_execution(&task.host, &task.program, &allocation, &empty_response());
     assert!(study
         .complete_solve(&EmptyStore, empty_response(), foreign)
         .is_err());
@@ -307,14 +297,9 @@ fn accuracy_owns_one_plan_and_preserves_original_state_source() {
     let output_policy = study.preparation.output_policy;
     let task = study.prepare_solve().unwrap();
     let original_inputs = task.inputs.clone();
-    let graph = PlannedResourceUsageGraph::new(
-        vec![PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting: accounting(task),
-        }],
-        1,
-    )
-    .unwrap();
+    let graph = accounting(task)
+        .resource_graph(&task.resource_plan)
+        .unwrap();
     let usage = prepare_planned_resource_graph_usage(
         &task.resource_plan,
         task.host.workload.identity.digest(),

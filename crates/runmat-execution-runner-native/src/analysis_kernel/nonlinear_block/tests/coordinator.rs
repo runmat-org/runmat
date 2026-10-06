@@ -10,12 +10,7 @@ use runmat_analysis_fea::{
     planning::resource::FeaResourcePlan, results::accuracy::AccuracyStatus,
     study::plan_nonlinear_solid_study_product,
 };
-use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::ResourceAccounting,
-};
 use runmat_execution_artifact::{cache::FilesystemObjectStore, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 fn preparation(quadratic: bool) -> NonlinearSolidStudyPreparation {
     preparation_with_fields(quadratic, false)

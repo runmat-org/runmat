@@ -24,7 +24,7 @@ pub struct MagneticStudyResultClosure {
     pub phase: MagneticStudyResultPhase,
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 
 impl MagneticStudyResultClosure {
@@ -32,13 +32,13 @@ impl MagneticStudyResultClosure {
         phase: MagneticStudyResultPhase,
         host: &AnalysisHostWorkload,
         response: &ProgramExecutionResponse,
-        accounting: &AttemptResourceAccounting,
+        accounting: &AnalysisPhaseExecutionEvidence,
     ) -> Self {
         Self {
             phase,
             workload: host.workload.clone(),
             response: response.clone(),
-            accounting: accounting.clone(),
+            execution: accounting.clone(),
         }
     }
 
@@ -184,31 +184,32 @@ pub fn import_magnetic_study_completion(
         closure.validate_for(phase, host)?;
         match phase {
             MagneticStudyResultPhase::Solve => {
-                study.complete_solve(source, closure.response, closure.accounting)?
+                study.complete_solve(source, closure.response, closure.execution)?
             }
             MagneticStudyResultPhase::FieldRecovery => {
-                study.complete_field_recovery(source, closure.response, closure.accounting)?
+                study.complete_field_recovery(source, closure.response, closure.execution)?
             }
             MagneticStudyResultPhase::ObservationPartition { ordinal } => study
                 .complete_observation_partition(
                     source,
                     ordinal,
                     closure.response,
-                    closure.accounting,
+                    closure.execution,
                 )?,
-            MagneticStudyResultPhase::ObservationReduction { .. } => study
-                .complete_observation_reduction(source, closure.response, closure.accounting)?,
+            MagneticStudyResultPhase::ObservationReduction { .. } => {
+                study.complete_observation_reduction(source, closure.response, closure.execution)?
+            }
             MagneticStudyResultPhase::ObservationAssembly => {
-                study.complete_observation_assembly(source, closure.response, closure.accounting)?
+                study.complete_observation_assembly(source, closure.response, closure.execution)?
             }
             MagneticStudyResultPhase::Accuracy => {
-                study.complete_accuracy(source, closure.response, closure.accounting)?
+                study.complete_accuracy(source, closure.response, closure.execution)?
             }
             MagneticStudyResultPhase::State { .. } => {
-                study.complete_next_state(source, closure.response, closure.accounting)?
+                study.complete_next_state(source, closure.response, closure.execution)?
             }
             MagneticStudyResultPhase::Publication => {
-                study.complete_publication(source, closure.response, closure.accounting)?
+                study.complete_publication(source, closure.response, closure.execution)?
             }
         }
     }

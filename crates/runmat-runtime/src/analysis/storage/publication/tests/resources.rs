@@ -206,7 +206,15 @@ fn source_workspace_exhaustion_preserves_preparation_and_allows_an_admitted_retr
     assert_eq!(builder.preparation_resident_bytes, original);
     reference.encoded_length = 8;
     builder.admit_source_objects(&[reference]).unwrap();
-    assert!(builder.preparation_resident_bytes > original);
+    assert_eq!(builder.preparation_resident_bytes, original);
+    assert!(builder.source_workspace_bytes > 0);
+    let phase = builder.begin_source_phase().unwrap();
+    assert_eq!(
+        builder.active_source_workspace().unwrap(),
+        builder.source_workspace_bytes
+    );
+    drop(phase);
+    assert_eq!(builder.active_source_workspace().unwrap(), 0);
     assert!(builder.store.runs.read().unwrap().is_empty());
 }
 

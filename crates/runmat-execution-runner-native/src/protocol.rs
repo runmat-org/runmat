@@ -48,9 +48,12 @@ pub enum WorkerProcessMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StoredProgram {
-    pub recipe: runmat_execution_artifact::ProgramBuildRecipe,
-    pub artifact: runmat_execution_artifact::ProgramArtifact,
+pub struct StoredProgram<
+    R = runmat_execution_artifact::ProgramBuildRecipe,
+    A = runmat_execution_artifact::ProgramArtifact,
+> {
+    pub recipe: R,
+    pub artifact: A,
     pub function: usize,
 }
 

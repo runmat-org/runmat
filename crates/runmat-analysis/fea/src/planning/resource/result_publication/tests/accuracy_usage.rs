@@ -131,7 +131,7 @@ fn unrelated_accuracy_cannot_satisfy_publication_even_after_rehashing_every_boun
     let terminal = terminal_usage(&request, &accuracy, &usage, &foreign, &rebound);
     assert!(terminal.overruns.is_empty());
     let error =
-        validate_result_publication_resource_usage(&forged, &foreign, &terminal).unwrap_err();
+        validate_result_publication_resource_usage(&forged, &foreign, &terminal, 1).unwrap_err();
     assert!(error
         .to_string()
         .contains("source-bound accuracy scheduler attempt"));
@@ -206,7 +206,7 @@ fn repeated_accuracy_attempts_are_preserved_in_terminal_usage() {
     let receipt = PublishedAnalysisResult::new(&request, &accuracy, &usage).unwrap();
     receipt.validate_sources(&accuracy, &usage).unwrap();
     let terminal = terminal_usage(&request, &accuracy, &usage, &usage, &request);
-    validate_result_publication_resource_usage(&receipt, &usage, &terminal).unwrap();
+    validate_result_publication_resource_usage(&receipt, &usage, &terminal, 1).unwrap();
     assert_eq!(terminal.attempts.len(), 4);
     for original in &usage.attempts {
         assert!(terminal.attempts.contains(original));

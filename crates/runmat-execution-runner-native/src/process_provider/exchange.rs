@@ -1,4 +1,4 @@
-use super::{LocalDriver, TaskCompletion, TransportMeters};
+use super::{NativeProcessProvider, ProcessControl, TransportMeters};
 use crate::protocol::{WorkerProcessMessage, WorkerRequest, WorkerResponse};
 use runmat_process_host::{
     ipc::{read_payload, write_payload, FrameLimits, MeteredIo},
@@ -9,17 +9,17 @@ use std::time::Duration;
 use tokio::io::BufReader;
 
 pub(super) async fn exchange(
-    driver: &LocalDriver,
+    provider: &NativeProcessProvider<'_>,
     child: &mut ChildProcess,
     request: &WorkerRequest,
-    completion: &TaskCompletion,
+    control: &dyn ProcessControl,
     meters: &TransportMeters,
 ) -> Result<WorkerResponse, String> {
     let stdio = child.take_stdio().map_err(|error| error.to_string())?;
     let mut reader = BufReader::new(MeteredIo::new(stdio.stdout, meters.received.clone()));
     let mut writer = MeteredIo::new(stdio.stdin, meters.sent.clone());
     let limits = FrameLimits {
-        max_message_bytes: driver.config.max_message_bytes,
+        max_message_bytes: provider.config.max_message_bytes,
     };
     let payload = serde_json::to_vec(request).map_err(|error| error.to_string())?;
     write_payload(&mut writer, &payload, limits)
@@ -27,7 +27,7 @@ pub(super) async fn exchange(
         .map_err(|error| error.to_string())?;
     let mut last_progress_sequence = 0;
     let response = loop {
-        let payload = read_payload_until_cancelled(&mut reader, limits, &completion.cancelled)
+        let payload = read_payload_until_cancelled(&mut reader, limits, control.cancellation())
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "execution was cancelled".to_string())?;
@@ -40,7 +40,7 @@ pub(super) async fn exchange(
                     return Err("native worker progress is not strictly monotone".into());
                 }
                 last_progress_sequence = progress.sequence;
-                completion.record_progress(progress);
+                control.record_progress(progress);
             }
             WorkerProcessMessage::Completed { response } => break response,
         }
@@ -54,7 +54,7 @@ pub(super) async fn exchange(
     Ok(response)
 }
 
-pub(super) async fn read_payload_until_cancelled(
+pub(crate) async fn read_payload_until_cancelled(
     reader: &mut (impl tokio::io::AsyncRead + Unpin),
     limits: FrameLimits,
     cancelled: &AtomicBool,

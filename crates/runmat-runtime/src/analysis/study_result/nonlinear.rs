@@ -95,16 +95,18 @@ impl NonlinearSolidStudyObjectSource {
         staging: &crate::analysis::storage::AnalysisPublicationBuilder,
         retained_input: &crate::analysis::storage::publication::PreparationReservation,
     ) -> Result<Vec<String>, crate::analysis::storage::AnalysisPublicationError> {
-        staging.require_source_objects(&completed.catalog.objects)?;
-        self.authenticate(
-            completed,
-            staging.source_workspace_with_preparation(retained_input, completed)?,
-        )?;
-        super::super::study_result_manifest::persist_catalog_objects(
+        {
+            let _source_phase = staging.begin_source_phase()?;
+            staging.require_source_objects(&completed.catalog.objects)?;
+            self.authenticate(
+                completed,
+                staging.source_workspace_with_preparation(retained_input, completed)?,
+            )?;
+        }
+        super::super::study_publication::catalog::persist_objects(
             self,
             &completed.catalog,
             definition,
-            "nonlinear-object",
             staging,
         )
     }

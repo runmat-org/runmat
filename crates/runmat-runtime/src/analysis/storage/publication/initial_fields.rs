@@ -14,6 +14,15 @@ impl AnalysisPublicationBuilder {
         if *admission {
             return Err("original fields cannot attach after publication inventory freezes".into());
         }
+        if self
+            .store
+            .observations
+            .read()
+            .map_err(|_| "publication observation store poisoned")?
+            .contains_key(run_id)
+        {
+            return Err("original fields cannot change a run bound to observations".into());
+        }
         self.admit(
             resident(catalog, self.maximum_bytes)?
                 .checked_mul(3)

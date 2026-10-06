@@ -207,6 +207,9 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             )
             .await;
 
+        let original_execution = process
+            .phase_execution()
+            .expect("original admitted thermal task history");
         // Import must reject a foreign admission plan even when the response is genuine.
         let mut foreign = runmat_analysis_execution::PreparedThermalTask {
             output_policy: prepared.output_policy,
@@ -222,32 +225,36 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         assert!(import_thermal_completion(
             driver.store(),
             process.response.clone(),
-            process.resources.clone(),
+            original_execution.clone(),
             &foreign,
             output_policy,
         )
         .is_err());
 
-        let mut wrong_allocation = process.resources.clone();
-        let mut allocation = wrong_allocation.resources.allocation.clone();
-        allocation.memory_bytes += 1;
-        wrong_allocation.resources =
-            runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-                allocation,
-                process.resources.resources.usage.wall_millis,
-                process.resources.resources.artifact_bytes,
-                process.resources.resources.usage.egress_bytes,
-                process.resources.resources.usage.relay_bytes,
-            )
-            .unwrap();
-        assert!(study
-            .complete_solve(driver.store(), process.response.clone(), wrong_allocation,)
-            .is_err());
-        let mut wrong_bytes = process.resources.clone();
-        wrong_bytes.resources.artifact_bytes += 1;
-        assert!(study
-            .complete_solve(driver.store(), process.response.clone(), wrong_bytes,)
-            .is_err());
+        // Corrupt original accounting cannot even construct the sealed phase carrier.
+        for alter_bytes in [false, true] {
+            let mut original = original_execution.task_evidence().clone();
+            let resources = original
+                .task
+                .committed
+                .as_mut()
+                .unwrap()
+                .resources
+                .as_mut()
+                .unwrap();
+            if alter_bytes {
+                resources.resources.artifact_bytes += 1;
+            } else {
+                resources.resources.allocation.memory_bytes += 1;
+            }
+            assert!(
+                runmat_analysis_execution::AnalysisPhaseExecutionEvidence::new(
+                    original,
+                    original_execution.graph_wall_millis()
+                )
+                .is_err()
+            );
+        }
         let mut missing_object = process.response.clone();
         if let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
             result_objects,
@@ -257,12 +264,12 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             result_objects.pop();
         }
         assert!(study
-            .complete_solve(driver.store(), missing_object, process.resources.clone(),)
+            .complete_solve(driver.store(), missing_object, original_execution.clone())
             .is_err());
         assert_eq!(study.phase(), ThermalStudyPhase::AwaitingSolve);
         assert!(study.result().is_none());
         study
-            .complete_solve(driver.store(), process.response, process.resources)
+            .complete_solve(driver.store(), process.response, original_execution)
             .unwrap();
         let result = study.result().unwrap();
         assert_eq!(result.manifest, inline.manifest);
@@ -312,7 +319,13 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             .unwrap();
             assert_eq!(outputs.manifest, inline_outputs.manifest);
             study
-                .complete_observation(driver.store(), response.response, response.resources)
+                .complete_observation(
+                    driver.store(),
+                    response.response.clone(),
+                    response
+                        .phase_execution()
+                        .expect("original admitted phase history"),
+                )
                 .unwrap();
             observation_phases += 1;
         }
@@ -331,7 +344,13 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             )
             .await;
         study
-            .complete_accuracy(driver.store(), response.response, response.resources)
+            .complete_accuracy(
+                driver.store(),
+                response.response.clone(),
+                response
+                    .phase_execution()
+                    .expect("original admitted phase history"),
+            )
             .unwrap();
         assert_eq!(
             study.accuracy().unwrap().artifact.gate().status,
@@ -350,7 +369,13 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
                 .execute(&task.host, &task.program, Some(&task.resource_plan))
                 .await;
             study
-                .complete_next_state(driver.store(), response.response, response.resources)
+                .complete_next_state(
+                    driver.store(),
+                    response.response.clone(),
+                    response
+                        .phase_execution()
+                        .expect("original admitted phase history"),
+                )
                 .unwrap();
             let state = &study.states().last().unwrap().state;
             assert_eq!(state.state_id, declaration.state_id);
@@ -377,7 +402,13 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             .execute(&task.host, &task.program, Some(&task.resource_plan))
             .await;
         study
-            .complete_publication(driver.store(), response.response, response.resources)
+            .complete_publication(
+                driver.store(),
+                response.response.clone(),
+                response
+                    .phase_execution()
+                    .expect("original admitted phase history"),
+            )
             .unwrap();
         let completed = study.into_completed().unwrap();
         assert_eq!(completed.compiled.model, expected_model);
@@ -389,7 +420,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             completed.terminal_usage.evidence.attempts.len(),
             3 + observation_phases + declarations.len()
         );
-        runmat_analysis_execution::validate_result_publication_resource_usage(
+        runmat_analysis_execution::validate_retained_result_publication_resource_usage(
             &completed.publication.result,
             &baseline.evidence,
             &completed.terminal_usage.evidence,

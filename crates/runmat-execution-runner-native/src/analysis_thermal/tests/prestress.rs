@@ -176,12 +176,10 @@ fn replayed_named_thermal_publication_drives_real_modal_and_buckling_workers() {
                 .state_publication_dependency(&StateId("absent".into()))
                 .is_err());
             let mut forged = completed.result_closures().to_vec();
-            forged
-                .last_mut()
-                .unwrap()
-                .accounting
-                .resources
-                .artifact_bytes += 1;
+            forged.last_mut().unwrap().response = ProgramExecutionResponse::ExternalizedSuccess {
+                outputs: vec![],
+                result_objects: vec![],
+            };
             assert!(
                 ThermalPrestressSource::import(&store, completed.preparation(), forged).is_err()
             );

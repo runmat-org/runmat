@@ -25,20 +25,20 @@ pub struct NonlinearSolidStudyResultClosure {
     pub phase: NonlinearSolidStudyResultPhase,
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 impl NonlinearSolidStudyResultClosure {
     pub(super) fn new(
         phase: NonlinearSolidStudyResultPhase,
         host: &AnalysisHostWorkload,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> Self {
         Self {
             phase,
             workload: host.workload.clone(),
             response,
-            accounting,
+            execution: accounting,
         }
     }
 }
@@ -180,31 +180,32 @@ pub(super) fn import_with_retained(
         }
         match phase {
             NonlinearSolidStudyResultPhase::Block { .. } => {
-                study.complete_block(source, closure.response, closure.accounting)?
+                study.complete_block(source, closure.response, closure.execution)?
             }
             NonlinearSolidStudyResultPhase::FieldRecovery => {
-                study.complete_field_recovery(source, closure.response, closure.accounting)?
+                study.complete_field_recovery(source, closure.response, closure.execution)?
             }
             NonlinearSolidStudyResultPhase::ObservationPartition { ordinal } => study
                 .complete_observation_partition(
                     source,
                     ordinal,
                     closure.response,
-                    closure.accounting,
+                    closure.execution,
                 )?,
-            NonlinearSolidStudyResultPhase::ObservationReduction { .. } => study
-                .complete_observation_reduction(source, closure.response, closure.accounting)?,
+            NonlinearSolidStudyResultPhase::ObservationReduction { .. } => {
+                study.complete_observation_reduction(source, closure.response, closure.execution)?
+            }
             NonlinearSolidStudyResultPhase::ObservationAssembly => {
-                study.complete_observation_assembly(source, closure.response, closure.accounting)?
+                study.complete_observation_assembly(source, closure.response, closure.execution)?
             }
             NonlinearSolidStudyResultPhase::Accuracy => {
-                study.complete_accuracy(source, closure.response, closure.accounting)?
+                study.complete_accuracy(source, closure.response, closure.execution)?
             }
             NonlinearSolidStudyResultPhase::State { .. } => {
-                study.complete_next_state(source, closure.response, closure.accounting)?
+                study.complete_next_state(source, closure.response, closure.execution)?
             }
             NonlinearSolidStudyResultPhase::Publication => {
-                study.complete_publication(source, closure.response, closure.accounting)?
+                study.complete_publication(source, closure.response, closure.execution)?
             }
         }
         // Field fanout still consumes the original recovered source in the next

@@ -1,10 +1,9 @@
 use super::*;
 
-use runmat_execution::resource::ResourceRequest;
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver_with_response, execute_program_batch, prepare_batch_driver,
-    BatchDriverInvocation, LocalJobState, LocalSupervisor, LocalSupervisorConfig,
-    ProgramBatchSubmission, SupervisorPaths, MIN_RETENTION_MILLIS,
+    execute_and_complete_program_batch, prepare_batch_driver, BatchDriverInvocation, LocalJobState,
+    LocalSupervisor, LocalSupervisorConfig, ProgramBatchSubmission, SupervisorPaths,
+    MIN_RETENTION_MILLIS,
 };
 pub(super) use runmat_meshing_execution::MeshingKernelDispatcher as CurvePipelineKernel;
 use runmat_meshing_execution::{ExactCurveJoinKernel, ExactCurveStageKernel};
@@ -17,20 +16,6 @@ pub(super) struct CurveFixture {
     pub(super) input: PreparedExactGeometryInput,
     pub(super) expected_partition_outputs: Vec<ValuePayload>,
     pub(super) expected_join_outputs: Vec<ValuePayload>,
-}
-
-fn durable_meshing_resources() -> ResourceRequest {
-    ResourceRequest {
-        cpu_millicores: 1_000,
-        memory_bytes: 1024 * 1024 * 1024,
-        scratch_bytes: 1024 * 1024 * 1024,
-        max_wall_millis: 60_000,
-        max_artifact_bytes: limits().inventory.max_total_bytes,
-        max_egress_bytes: 0,
-        max_relay_bytes: 0,
-        accelerators: Vec::new(),
-        required_capabilities: Default::default(),
-    }
 }
 
 pub(super) async fn native_conformance() {
@@ -84,12 +69,13 @@ pub(super) async fn native_conformance() {
 
 pub(super) async fn durable_conformance() {
     let directory = tempfile::tempdir().unwrap();
-    let configuration = LocalSupervisorConfig {
-        executable: std::env::current_exe().unwrap(),
-        paths: SupervisorPaths::new(directory.path().join("durable-state")).unwrap(),
-        max_stderr_bytes: 1024 * 1024,
-        max_object_bytes: limits().inventory.max_object_bytes,
-    };
+    let mut execution = config(directory.path(), "--curve-child");
+    execution.max_object_bytes = limits().inventory.max_object_bytes;
+    let configuration = LocalSupervisorConfig::new(
+        execution,
+        SupervisorPaths::new(directory.path().join("durable-state")).unwrap(),
+    )
+    .unwrap();
     let fixture = fixture(revision(), "durable-curve-meshing-run");
     let supervisor = LocalSupervisor::open(configuration.clone()).unwrap();
     let mut store = supervisor.object_store().unwrap();
@@ -101,17 +87,27 @@ pub(super) async fn durable_conformance() {
     );
     seed_host_invocation(&mut store, &fixture.join_host, &fixture.join_request);
 
+    let context = supervisor
+        .execution_context(Some("curve-partition"))
+        .await
+        .unwrap();
+    let partition_task = submission_for(
+        context.scope_id,
+        context.pool_id,
+        &fixture.partition_host,
+        &fixture.partition_request,
+    );
     let partition = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
             fixture.partition_request.clone(),
-            durable_meshing_resources(),
+            partition_task.clone(),
             Some("curve-partition".into()),
             MIN_RETENTION_MILLIS,
         ))
         .await
         .unwrap()
         .0;
-    let partition = wait_for_durable(&supervisor, partition.handle.id).await;
+    let partition = wait_for_durable(&supervisor, partition.handle.id, &partition_task).await;
     let ProgramExecutionResponse::ExternalizedSuccess {
         outputs,
         result_objects,
@@ -137,17 +133,27 @@ pub(super) async fn durable_conformance() {
         Some(ProgramExecutionResponse::ExternalizedSuccess { .. })
     ));
 
+    let context = supervisor
+        .execution_context(Some("curve-join"))
+        .await
+        .unwrap();
+    let join_task = submission_for(
+        context.scope_id,
+        context.pool_id,
+        &fixture.join_host,
+        &fixture.join_request,
+    );
     let join = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
             fixture.join_request.clone(),
-            durable_meshing_resources(),
+            join_task.clone(),
             Some("curve-join".into()),
             MIN_RETENTION_MILLIS,
         ))
         .await
         .unwrap()
         .0;
-    let join = wait_for_durable(&supervisor, join.handle.id).await;
+    let join = wait_for_durable(&supervisor, join.handle.id, &join_task).await;
     let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = join.response.unwrap()
     else {
         panic!("durable curve join did not externalize its result")
@@ -172,20 +178,23 @@ pub(super) async fn durable_conformance() {
 pub(super) async fn run_durable_driver() {
     let invocation = prepare_batch_driver().unwrap();
     let BatchDriverInvocation::Program {
-        job_directory,
         attempt,
         submission,
+        lease,
+        ..
     } = invocation
     else {
         panic!("meshing conformance durable driver received a script")
     };
-    let execution = execute_program_batch(attempt, *submission).await.unwrap();
-    complete_batch_driver_with_response(&job_directory, execution).unwrap();
+    execute_and_complete_program_batch(*attempt, *submission, *lease)
+        .await
+        .unwrap();
 }
 
 async fn wait_for_durable(
     supervisor: &std::sync::Arc<LocalSupervisor>,
     job_id: runmat_execution::JobId,
+    original_task: &runmat_execution_runner::TaskSubmission,
 ) -> runmat_execution_runner_native::supervisor::JobAttachment {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -197,7 +206,16 @@ async fn wait_for_durable(
                     .as_ref()
                     .expect("durable meshing must retain generic resource accounting");
                 resources.validate().unwrap();
-                assert_eq!(resources.resources.allocation, durable_meshing_resources());
+                assert_eq!(
+                    resources.resources.allocation,
+                    original_task.request.resources
+                );
+                let history = attachment
+                    .execution
+                    .as_ref()
+                    .expect("durable meshing must retain original admitted history");
+                history.validate().unwrap();
+                assert_eq!(&history.task.submission, original_task);
                 break attachment;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

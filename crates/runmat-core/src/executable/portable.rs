@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use super::ExecutableUnit;
 
-const SOURCE_MAP_SCHEMA_VERSION: u16 = 1;
+pub(super) const SOURCE_MAP_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Serialize)]
 struct PortableSourceMap<'a> {
@@ -65,7 +65,7 @@ impl ExecutableUnit {
         self.portable_envelope_for_selection(Some((bytecode.display_name.clone(), function_id)))
     }
 
-    fn portable_envelope_for_selection(
+    pub(super) fn portable_envelope_for_selection(
         &self,
         selected: Option<(String, runmat_hir::FunctionId)>,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
@@ -133,9 +133,9 @@ impl ExecutableUnit {
                 .iter()
                 .map(|region| region.contract.clone())
                 .collect(),
-            interop: runmat_types::InteropManifest::empty(),
-            parallel: runmat_types::ParallelManifest::empty(),
-            optional_sections: Vec::new(),
+            interop: self.interop.clone(),
+            parallel: self.parallel.clone(),
+            optional_sections: self.optional_sections.clone(),
         };
         runmat_execution::ExecutableUnitEnvelope::new(manifest, payloads)
             .map_err(|error| error.to_string())

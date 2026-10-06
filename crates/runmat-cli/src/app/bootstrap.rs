@@ -325,6 +325,7 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
+        publication_staging_bytes: analysis::FeaRuntimeConfig::default().publication_staging_bytes,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
     Ok(())

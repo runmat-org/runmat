@@ -76,7 +76,7 @@ impl NonlinearSolidStudyCoordinator {
         source: &impl CacheImport,
         ordinal: usize,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(NonlinearSolidStudyPhase::AwaitingObservationPartitions)?;
         if self.observation_state.contributions.contains_key(&ordinal) {
@@ -103,7 +103,7 @@ impl NonlinearSolidStudyCoordinator {
                 closure.phase,
                 &closure.workload,
                 &closure.response,
-                &closure.accounting,
+                &closure.execution,
             )),
             Some(&task.resource_plan),
         )?;
@@ -113,15 +113,12 @@ impl NonlinearSolidStudyCoordinator {
             response,
             self.preparation.output_policy,
         )?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting,
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let count = fanout.partitions.len();
         self.observation_state
             .contributions
             .insert(ordinal, contribution);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.closures.push(closure);
         if self.observation_state.contributions.len() == count {
             self.phase = NonlinearSolidStudyPhase::ReadyForObservationReduction { ordinal: 0 };
@@ -152,7 +149,7 @@ impl NonlinearSolidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let ordinal = self.observation_state.reduced.len();
         self.require(NonlinearSolidStudyPhase::AwaitingObservationReduction { ordinal })?;
@@ -173,7 +170,7 @@ impl NonlinearSolidStudyCoordinator {
                 closure.phase,
                 &closure.workload,
                 &closure.response,
-                &closure.accounting,
+                &closure.execution,
             )),
             Some(&task.resource_plan),
         )?;
@@ -182,12 +179,9 @@ impl NonlinearSolidStudyCoordinator {
             response,
             self.preparation.output_policy,
         )?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting,
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         self.observation_state.reduced.push(reduced);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.closures.push(closure);
         let count = self
             .observation_state
@@ -230,7 +224,7 @@ impl NonlinearSolidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(NonlinearSolidStudyPhase::AwaitingObservationAssembly)?;
         let task = self
@@ -250,7 +244,7 @@ impl NonlinearSolidStudyCoordinator {
                 closure.phase,
                 &closure.workload,
                 &closure.response,
-                &closure.accounting,
+                &closure.execution,
             )),
             Some(&task.resource_plan),
         )?;
@@ -277,18 +271,16 @@ impl NonlinearSolidStudyCoordinator {
                 mesh: Some(&self.preparation.mesh),
             },
         )?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting,
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let mut attempts = self.attempts.clone();
-        attempts.push(attempt.clone());
+        attempts.extend(task_attempts.iter().cloned());
         let tail = self.build_original_tail(
             self.source_host.as_ref().expect("terminal host"),
             self.source_plan.as_ref().expect("terminal plan"),
             self.block.as_ref().expect("terminal block"),
             &attempts,
             Some(catalog.clone()),
+            accounting.graph_wall_millis(),
         )?;
         self.observation_state.completed = Some(artifact);
         self.observation_state.catalog = Some(catalog);
@@ -298,7 +290,7 @@ impl NonlinearSolidStudyCoordinator {
         self.observation_state.reduced.clear();
         self.observation_state.assembly = None;
         self.recovery_task = None;
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.closures.push(closure);
         self.tail = Some(tail);
         self.phase = NonlinearSolidStudyPhase::ReadyForAccuracy;

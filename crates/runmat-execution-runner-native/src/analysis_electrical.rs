@@ -1,13 +1,13 @@
 //! Whole-study electrical placement through the shared admitted analysis task pool.
 pub(crate) mod source;
 
+use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
     AnalysisHostWorkload, CompletedElectricalStudy, ElectricalStudyCoordinator,
     ElectricalStudyPreparation, PreparedAnalysisProgram,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 use crate::{
     analysis_task_pool::{
@@ -122,7 +122,7 @@ async fn execute_one(
     plan: &FeaResourcePlan,
     dependencies: Vec<AnalysisTaskDependency>,
     policy: &ElectricalStudyExecutionPolicy,
-) -> NativeExecutionResult<(ExecutedAnalysisTask, AttemptResourceAccounting)> {
+) -> NativeExecutionResult<(ExecutedAnalysisTask, AnalysisPhaseExecutionEvidence)> {
     execute_governed_analysis_phase(
         pool,
         host,

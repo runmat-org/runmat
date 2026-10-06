@@ -1,11 +1,12 @@
 //! Placement-neutral orchestration of an exact authored acoustic frequency plan.
 //! Each entry owns its numerical evidence; aggregation is a separately governed task.
 use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
+use crate::AnalysisPhaseExecutionEvidence;
 use crate::{
     import_acoustic_frequency_assembly, prepare_acoustic_frequency_assembly_task,
     AcousticFrequencyAssemblyPreparation, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisOutputPolicy,
-    ImportedAcousticFrequencyAssembly, PlannedResourceUsageAttempt, PlannedResourceUsageGraph,
+    ImportedAcousticFrequencyAssembly, PlannedResourceUsageGraph,
     PreparedAcousticFrequencyAssemblyTask, PreparedResourceUsage,
 };
 use runmat_analysis_fea::{
@@ -17,7 +18,6 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 use std::{collections::BTreeSet, sync::Arc};
 mod completion;
@@ -189,7 +189,7 @@ impl AcousticStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
         wave_wall_millis: u64,
     ) -> AnalysisBridgeResult<()> {
         if self.assembly.is_some() {
@@ -203,7 +203,7 @@ impl AcousticStudyCoordinator {
         let closure = AcousticStudyAssemblyClosure {
             workload: task.host.workload.clone(),
             response: response.clone(),
-            accounting: accounting.clone(),
+            execution: accounting.clone(),
         };
         let assembly = import_acoustic_frequency_assembly(
             source,
@@ -219,10 +219,7 @@ impl AcousticStudyCoordinator {
             .iter()
             .flat_map(|entry| entry.resource_attempts().iter().cloned())
             .collect();
-        attempts.push(PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting,
-        });
+        attempts.extend(accounting.resource_graph(&task.resource_plan)?.attempts);
         let graph = PlannedResourceUsageGraph::new(attempts, wave_wall_millis)?;
         let usage = crate::prepare_planned_resource_graph_usage(
             &task.resource_plan,

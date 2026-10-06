@@ -66,8 +66,20 @@ impl ObservationAttachment {
         run: &AnalysisRunResult,
         run_digest: Digest,
     ) -> Result<(), String> {
-        if self.schema_version != 1 || self.run_id != run.run_id || self.run_digest != run_digest {
-            return Err("observation attachment differs from immutable run metadata".into());
+        if self.schema_version != 1 {
+            return Err("observation attachment schema is unsupported".into());
+        }
+        if self.run_id != run.run_id {
+            return Err(format!(
+                "observation attachment run ID `{}` differs from original run `{}`",
+                self.run_id, run.run_id,
+            ));
+        }
+        if self.run_digest != run_digest {
+            return Err(format!(
+                "observation attachment digest {} differs from immutable run digest {}",
+                self.run_digest, run_digest,
+            ));
         }
         self.publication.validate(&self.objects)
     }

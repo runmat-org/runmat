@@ -327,7 +327,7 @@ fn assert_terminal_publication_usage(
         publication.result.source_resource_usage,
         baseline.evidence.identity()
     );
-    runmat_analysis_execution::validate_result_publication_resource_usage(
+    runmat_analysis_execution::validate_retained_result_publication_resource_usage(
         &publication.result,
         &baseline.evidence,
         &terminal.evidence,

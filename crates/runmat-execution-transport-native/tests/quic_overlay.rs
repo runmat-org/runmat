@@ -94,3 +94,68 @@ async fn pinned_quic_carries_only_application_encrypted_frames() {
     .is_err());
     accept.abort();
 }
+
+/// The locked Quinn default idle timeout is 30s. Keepalive remains 10s. Stall
+/// this current-thread caller beyond the unchanged idle limit: only the shared
+/// network reactor can service the connection during that interval.
+#[tokio::test(flavor = "current_thread")]
+async fn quic_remains_live_while_its_current_thread_caller_is_blocked() {
+    let CertifiedKey { cert, signing_key } =
+        generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
+    let certificate = cert.der().to_vec();
+    let listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![certificate.clone()],
+        signing_key.serialize_der(),
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let endpoint = PinnedQuicEndpoint {
+        authority: listener.local_addr().unwrap(),
+        server_name: "runmat.execution".into(),
+        certificate_der: certificate,
+    };
+    let (client, server) = tokio::join!(
+        QuicOverlayConnection::connect(
+            SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
+            &endpoint,
+            FrameLimits::default()
+        ),
+        listener.accept(),
+    );
+    let client = client.unwrap();
+    let server = server.unwrap();
+    // Deliberately block the calling executor; spawn_blocking would not exercise
+    // the regression. This does not raise any connection or task deadline.
+    std::thread::sleep(std::time::Duration::from_secs(35));
+    let mut encrypt = EncryptedFrameSession::new(
+        "blocked-caller",
+        [29; 16],
+        "client-to-server",
+        1,
+        RunKeyMaterial::from_entropy([31; 32]).unwrap(),
+    )
+    .unwrap();
+    let frame = encrypt
+        .seal(FrameKind::Control, b"still live", FrameLimits::default())
+        .unwrap();
+    client.send(&frame).await.unwrap();
+    let delivered = tokio::time::timeout(std::time::Duration::from_secs(5), server.receive())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut decrypt = EncryptedFrameSession::new(
+        "blocked-caller",
+        [29; 16],
+        "client-to-server",
+        1,
+        RunKeyMaterial::from_entropy([31; 32]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        decrypt.open(&delivered, FrameLimits::default()).unwrap(),
+        b"still live"
+    );
+    client.close();
+    server.close();
+}

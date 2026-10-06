@@ -4,9 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use runmat_execution_runner_native::supervisor::{
-    complete_batch_driver, complete_batch_driver_with_response, execute_program_batch,
-    prepare_batch_driver, BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState,
-    LocalSupervisorClient,
+    complete_batch_driver, execute_and_complete_program_batch, prepare_batch_driver,
+    BatchDriverInvocation, BatchSubmission, LocalJobRecord, LocalJobState, LocalSupervisorClient,
 };
 use runmat_execution_runner_native::WorkerResponse;
 use runmat_process_host::environment::EnvironmentPolicy;
@@ -125,35 +124,29 @@ pub async fn run_driver() -> std::process::ExitCode {
         BatchDriverInvocation::Program {
             attempt,
             submission,
+            lease,
             ..
         } => {
-            let execution = match execute_program_batch(attempt, *submission).await {
-                Ok(execution) => execution,
-                Err(error) => {
-                    let message = error.to_string();
-                    if let Err(commit_error) =
-                        complete_batch_driver(&job_directory, false, None, Some(message.clone()))
-                    {
-                        eprintln!(
-                            "runmat batch driver failed to commit execution error: {commit_error}"
-                        );
-                        return std::process::ExitCode::from(2);
+            let execution =
+                match execute_and_complete_program_batch(*attempt, *submission, *lease).await {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        let message = error.to_string();
+                        // Original provider ownership/report recovery records this loss.
+                        // A script completion cannot stand in for a portable attempt.
+                        eprintln!("runmat batch driver failed: {message}");
+                        return std::process::ExitCode::from(1);
                     }
-                    eprintln!("runmat batch driver failed: {message}");
-                    return std::process::ExitCode::from(1);
-                }
-            };
+                };
             let success = matches!(
                 &execution.response,
                 WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. }
             );
-            if let Err(error) = complete_batch_driver_with_response(&job_directory, execution) {
-                Err(error.to_string())
-            } else if success {
-                return std::process::ExitCode::SUCCESS;
+            return if success {
+                std::process::ExitCode::SUCCESS
             } else {
-                return std::process::ExitCode::from(1);
-            }
+                std::process::ExitCode::from(1)
+            };
         }
     };
     let (success, exit_code, message) = match outcome {

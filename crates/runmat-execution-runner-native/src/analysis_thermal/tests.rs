@@ -8,6 +8,7 @@ use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,
     Temperature, ThermalDomain,
 };
+use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
     validate_result_publication_resource_usage, AnalysisHostWorkload, AnalysisOutputPolicy,
     ImportedThermalResult, PreparedAnalysisProgram, ThermalStudyCoordinator, ThermalStudyPhase,
@@ -24,15 +25,11 @@ use runmat_analysis_fea::{
     ComputeBackend,
 };
 use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::ResourceAccounting,
-    task::RetryPolicy,
-    Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision,
+    task::RetryPolicy, Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision,
 };
 use runmat_execution_artifact::{
     cache::FilesystemObjectStore, ArtifactAccess, ProgramExecutionResponse,
 };
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 use crate::{
@@ -148,8 +145,8 @@ fn planning_policy() -> ThermalStudyPlanningPolicy {
     }
 }
 
-/// Execute the real immutable program. Reserved accounting is explicitly test accounting,
-/// not an assertion that a scheduler ran or that these one-millisecond intervals were measured.
+/// Execute the real immutable program and retain the actual portable test driver history.
+/// Its one-millisecond reports are fixture data, not native placement or measurement.
 /// Allocation comes from the same authoritative submission builder as native placement.
 fn execute(
     store: &mut FilesystemObjectStore,
@@ -157,7 +154,7 @@ fn execute(
     program: &PreparedAnalysisProgram,
     plan: &FeaResourcePlan,
     ordinal: usize,
-) -> (ProgramExecutionResponse, AttemptResourceAccounting) {
+) -> (ProgramExecutionResponse, AnalysisPhaseExecutionEvidence) {
     let (submission, _) = prepare_analysis_task(
         ExecutionScopeId::derive(&[b"inline-thermal-test"]),
         PoolId::derive(&[b"inline-thermal-test"]),
@@ -182,20 +179,11 @@ fn execute(
         &NativeAnalysisKernel,
         NativeAnalysisHostLimits::default(),
     );
-    let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &response else {
-        panic!("real native phase failed: {response:?}");
-    };
-    let bytes = result_objects
-        .iter()
-        .map(|object| object.encoded_length)
-        .sum();
-    let accounting = AttemptResourceAccounting::new(
-        AttemptId::derive(&[b"inline-test-reservation", &ordinal.to_le_bytes()]),
-        WorkerId::derive(&[b"inline-test-not-scheduler-evidence"]),
-        ResourceAccounting::for_reserved_interval(submission.request.resources, 1, bytes, 0, 0)
-            .unwrap(),
-    )
-    .unwrap();
+    let accounting = crate::analysis_task_pool::phase_fixture::successful_phase(
+        submission,
+        &response,
+        ordinal as u64 + 1,
+    );
     (response, accounting)
 }
 
@@ -258,10 +246,12 @@ fn run_chain(
         0,
     );
     // Correct response with an altered artifact byte count must not consume the pending solve.
-    let mut wrong = accounting.clone();
-    wrong.resources.artifact_bytes += 1;
+    let wrong_response = ProgramExecutionResponse::ExternalizedSuccess {
+        outputs: Vec::new(),
+        result_objects: Vec::new(),
+    };
     assert!(study
-        .complete_solve(&store, response.clone(), wrong)
+        .complete_solve(&store, wrong_response, accounting.clone())
         .is_err());
     assert_eq!(study.phase(), ThermalStudyPhase::AwaitingSolve);
     assert!(study.result().is_none());
@@ -373,9 +363,14 @@ fn run_chain(
         .evidence
         .attempts
         .iter()
-        .find(|attempt| attempt.attempt_id == publication_accounting.attempt_id)
+        .find(|attempt| {
+            attempt.attempt_id == publication_accounting.winning_accounting().attempt_id
+        })
         .unwrap();
-    assert_eq!(interval.resources, publication_accounting.resources);
+    assert_eq!(
+        interval.resources,
+        publication_accounting.winning_accounting().resources
+    );
     let receipt = &completed.publication.result;
     assert_eq!(receipt.source_resource_usage, baseline.evidence.identity());
     assert_eq!(receipt.source_resource_plan, solve_plan);
@@ -389,6 +384,7 @@ fn run_chain(
         receipt,
         &baseline.evidence,
         &completed.terminal_usage.evidence,
+        publication_accounting.graph_wall_millis(),
     )
     .unwrap();
 }

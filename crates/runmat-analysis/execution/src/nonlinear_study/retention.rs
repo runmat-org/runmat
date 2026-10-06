@@ -28,7 +28,7 @@ pub(super) type ProposedClosure<'a> = (
     NonlinearSolidStudyResultPhase,
     &'a AnalysisWorkloadRequest,
     &'a ProgramExecutionResponse,
-    &'a AttemptResourceAccounting,
+    &'a AnalysisPhaseExecutionEvidence,
 );
 
 impl NonlinearSolidStudyCoordinator {

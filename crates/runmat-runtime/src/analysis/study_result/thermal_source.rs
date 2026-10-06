@@ -13,6 +13,18 @@ use runmat_execution::{value::PublishedObjectSource, Digest};
 use std::sync::Arc;
 pub trait ThermalStudySource: PublishedObjectSource {
     fn authenticate(&self, completed: &ThermalStudyCompletion) -> Result<(), String>;
+    /// Source-owned replay/read/decode peak, excluding the caller's already retained DTO.
+    /// Profiling must enforce the allowance before any payload allocation or typed decode.
+    fn publication_workspace(
+        &self,
+        completed: &ThermalStudyCompletion,
+        maximum_workspace_bytes: u64,
+    ) -> Result<u64, crate::analysis::storage::AnalysisPublicationError>;
+    fn authenticate_admitted(
+        &self,
+        completed: &ThermalStudyCompletion,
+        maximum_workspace_bytes: u64,
+    ) -> Result<(), crate::analysis::storage::AnalysisPublicationError>;
     fn read_observation(
         &self,
         catalog: ObservationPublicationCatalogIdentity,
@@ -72,19 +84,43 @@ impl ThermalStudyObjectSource {
     ) -> Result<(), String> {
         self.0.authenticate(completed)
     }
+    pub(in crate::analysis) fn authenticate_admitted(
+        &self,
+        completed: &ThermalStudyCompletion,
+        maximum: u64,
+    ) -> Result<(), crate::analysis::storage::AnalysisPublicationError> {
+        self.0.authenticate_admitted(completed, maximum)
+    }
+    pub(in crate::analysis) fn admit_publication(
+        &self,
+        completed: &ThermalStudyCompletion,
+        staging: &mut crate::analysis::storage::AnalysisPublicationBuilder,
+    ) -> Result<(), crate::analysis::storage::AnalysisPublicationError> {
+        let maximum = staging.source_workspace_limit()?;
+        let required = {
+            let _phase = staging.begin_source_profile(maximum)?;
+            self.0.publication_workspace(completed, maximum)?
+        };
+        staging.admit_profiled_source_objects(&completed.catalog.objects, required)
+    }
     pub(in crate::analysis) fn persist(
         &self,
         completed: &ThermalStudyCompletion,
         study_digest: Digest,
         staging: &crate::analysis::storage::AnalysisPublicationBuilder,
     ) -> Result<Vec<String>, crate::analysis::storage::AnalysisPublicationError> {
-        staging.require_source_objects(&completed.catalog.objects)?;
-        self.authenticate(completed)?;
-        super::super::study_result_manifest::persist_catalog_objects(
+        {
+            let _source_phase = staging.begin_source_phase()?;
+            staging.require_source_objects(&completed.catalog.objects)?;
+            self.authenticate_admitted(
+                completed,
+                staging.source_replay_allowance(&completed.catalog.objects)?,
+            )?;
+        }
+        super::super::study_publication::catalog::persist_objects(
             self,
             &completed.catalog,
             study_digest,
-            "thermal-object",
             staging,
         )
     }

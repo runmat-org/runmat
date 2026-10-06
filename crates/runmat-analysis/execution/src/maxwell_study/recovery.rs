@@ -38,7 +38,7 @@ impl MaxwellStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(MaxwellStudyPhase::AwaitingFieldRecovery)?;
         let task = self.recovery_task.as_ref().expect("awaited recovery");
@@ -138,16 +138,9 @@ impl MaxwellStudyCoordinator {
     pub(super) fn extend_usage(
         &self,
         plan: &runmat_analysis_fea::planning::resource::FeaResourcePlan,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<PreparedResourceUsage> {
-        let wall = accounting.resources.usage.wall_millis;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: plan.clone(),
-                accounting,
-            }],
-            wall,
-        )?;
+        let graph = accounting.resource_graph(plan)?;
         extend_resource_usage(
             self.usage
                 .as_ref()

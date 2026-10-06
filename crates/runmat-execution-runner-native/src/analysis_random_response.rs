@@ -12,7 +12,7 @@ use runmat_analysis_execution::{
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
+        configure_local_analysis, execute_analysis_task_batch, planned_phase_execution,
         AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
         PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
@@ -87,7 +87,7 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("modal extraction returned an invalid task inventory"))?;
     let modal_dependency = dependency(&executed_modal);
-    let modal_attempt = planned_resource_attempt(&modal.resource_plan, &executed_modal)?;
+    let modal_attempt = planned_phase_execution(&modal.resource_plan, &executed_modal)?;
     coordinator
         .complete_modal(pool, executed_modal.response, &modal)
         .map_err(protocol)?;
@@ -109,7 +109,7 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("modal-basis publication returned an invalid task inventory"))?;
     let basis_dependency = dependency(&executed_basis);
-    let basis_attempt = planned_resource_attempt(&basis.resource_plan, &executed_basis)?;
+    let basis_attempt = planned_phase_execution(&basis.resource_plan, &executed_basis)?;
     coordinator
         .complete_basis_state(pool, executed_basis.response, &basis)
         .map_err(protocol)?;
@@ -133,14 +133,26 @@ async fn execute_with_pool(
         .map(dependency)
         .collect::<Vec<_>>();
     let mut resource_attempts = Vec::with_capacity(intervals.len() + 3);
-    resource_attempts.push(modal_attempt);
-    resource_attempts.push(basis_attempt);
+    resource_attempts.extend(
+        modal_attempt
+            .resource_graph(&modal.resource_plan)
+            .map_err(protocol)?
+            .attempts,
+    );
+    resource_attempts.extend(
+        basis_attempt
+            .resource_graph(&basis.resource_plan)
+            .map_err(protocol)?
+            .attempts,
+    );
     let mut responses = BTreeMap::new();
     for (interval, executed) in intervals.iter().zip(executed_intervals) {
-        resource_attempts.push(planned_resource_attempt(
-            &interval.resource_plan,
-            &executed,
-        )?);
+        resource_attempts.extend(
+            planned_phase_execution(&interval.resource_plan, &executed)?
+                .resource_graph(&interval.resource_plan)
+                .map_err(protocol)?
+                .attempts,
+        );
         responses.insert(interval.host.workload.identity.digest(), executed.response);
     }
     coordinator
@@ -164,10 +176,12 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("random-response assembly returned an invalid task inventory"))?;
     let assembly_dependency = dependency(&executed_assembly);
-    resource_attempts.push(planned_resource_attempt(
-        &assembly.resource_plan,
-        &executed_assembly,
-    )?);
+    resource_attempts.extend(
+        planned_phase_execution(&assembly.resource_plan, &executed_assembly)?
+            .resource_graph(&assembly.resource_plan)
+            .map_err(protocol)?
+            .attempts,
+    );
     coordinator
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
@@ -212,15 +226,17 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("random-response accuracy returned an invalid task inventory"))?;
     let accuracy_dependency = dependency(&executed_accuracy);
-    let accuracy_attempt = planned_resource_attempt(&accuracy.resource_plan, &executed_accuracy)?;
-    let accuracy_wall = accuracy_attempt.accounting.resources.usage.wall_millis;
+    let accuracy_attempt = planned_phase_execution(&accuracy.resource_plan, &executed_accuracy)?;
+    let accuracy_graph = accuracy_attempt
+        .resource_graph(&accuracy.resource_plan)
+        .map_err(protocol)?;
     coordinator
         .complete_accuracy(pool, executed_accuracy.response, &accuracy)
         .map_err(protocol)?;
 
     let resource_usage = runmat_analysis_execution::extend_resource_usage(
         &resource_usage,
-        &PlannedResourceUsageGraph::new(vec![accuracy_attempt], accuracy_wall).map_err(protocol)?,
+        &accuracy_graph,
         &publication_access,
         runmat_analysis_execution::AnalysisOutputPolicy::new(chunk_bytes, inventory_limits)
             .map_err(protocol)?,
@@ -245,16 +261,17 @@ async fn execute_with_pool(
     .map_err(|_| protocol("random-statistics publication returned an invalid task inventory"))?;
     let statistics_dependency = dependency(&executed_statistics);
     let statistics_attempt =
-        planned_resource_attempt(&statistics.resource_plan, &executed_statistics)?;
+        planned_phase_execution(&statistics.resource_plan, &executed_statistics)?;
     coordinator
         .complete_statistics_state(pool, executed_statistics.response, &statistics)
         .map_err(protocol)?;
 
-    let statistics_wall = statistics_attempt.accounting.resources.usage.wall_millis;
+    let statistics_graph = statistics_attempt
+        .resource_graph(&statistics.resource_plan)
+        .map_err(protocol)?;
     let resource_usage = runmat_analysis_execution::extend_resource_usage(
         &resource_usage,
-        &PlannedResourceUsageGraph::new(vec![statistics_attempt], statistics_wall)
-            .map_err(protocol)?,
+        &statistics_graph,
         &publication_access,
         runmat_analysis_execution::AnalysisOutputPolicy::new(chunk_bytes, inventory_limits)
             .map_err(protocol)?,
@@ -282,7 +299,7 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("random-response publication returned an invalid task inventory"))?;
     let publication_attempt =
-        planned_resource_attempt(&publication.resource_plan, &executed_publication)?;
+        planned_phase_execution(&publication.resource_plan, &executed_publication)?;
     coordinator
         .complete_publication(pool, executed_publication.response, &publication)
         .map_err(protocol)?;

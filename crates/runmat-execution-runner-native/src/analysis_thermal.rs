@@ -6,13 +6,13 @@ use runmat_analysis_core::StateId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
     AnalysisHostWorkload, CompletedThermalStudy, PreparedAnalysisProgram, ThermalStudyCoordinator,
     ThermalStudyPreparation,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 use crate::{
     analysis_task_pool::{
@@ -218,7 +218,7 @@ async fn execute_one(
     plan: &FeaResourcePlan,
     dependencies: Vec<AnalysisTaskDependency>,
     policy: &ThermalStudyExecutionPolicy,
-) -> NativeExecutionResult<(ExecutedAnalysisTask, AttemptResourceAccounting)> {
+) -> NativeExecutionResult<(ExecutedAnalysisTask, AnalysisPhaseExecutionEvidence)> {
     execute_governed_analysis_phase(
         pool,
         host,

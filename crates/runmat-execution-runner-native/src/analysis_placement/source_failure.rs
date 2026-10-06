@@ -3,7 +3,7 @@ use runmat_analysis_execution::AnalysisBridgeError;
 use runmat_analysis_fea::{contracts::FeaRunError, planning::resource::ResourcePlanningError};
 use runmat_runtime::analysis::storage::AnalysisPublicationError;
 
-pub(super) fn limit(message: impl Into<String>) -> AnalysisPublicationError {
+pub(crate) fn limit(message: impl Into<String>) -> AnalysisPublicationError {
     AnalysisPublicationError::ResourceLimit {
         message: message.into(),
     }
@@ -18,19 +18,25 @@ fn resource(error: ResourcePlanningError) -> AnalysisPublicationError {
         invalid => invalid.to_string().into(),
     }
 }
-pub(super) fn fea(error: FeaRunError) -> AnalysisPublicationError {
+pub(crate) fn fea(error: FeaRunError) -> AnalysisPublicationError {
     match error {
         FeaRunError::Resource(error) => resource(error),
         rejected => rejected.to_string().into(),
     }
 }
-pub(super) fn bridge(error: AnalysisBridgeError) -> AnalysisPublicationError {
+pub(crate) fn artifact(
+    error: runmat_execution_artifact::ArtifactError,
+) -> AnalysisPublicationError {
+    match error {
+        runmat_execution_artifact::ArtifactError::Limit(message) => limit(message),
+        rejected => rejected.to_string().into(),
+    }
+}
+pub(crate) fn bridge(error: AnalysisBridgeError) -> AnalysisPublicationError {
     match error {
         AnalysisBridgeError::RetentionCapacity(error) => limit(error.to_string()),
         AnalysisBridgeError::Codec(error) => error.into(),
-        AnalysisBridgeError::Artifact(runmat_execution_artifact::ArtifactError::Limit(message)) => {
-            limit(message)
-        }
+        AnalysisBridgeError::Artifact(error) => artifact(error),
         AnalysisBridgeError::Analysis(
             runmat_analysis_fea::execution::AnalysisExecutionError::Limit(message),
         ) => limit(message),

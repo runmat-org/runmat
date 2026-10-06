@@ -17,6 +17,8 @@ pub(crate) enum ExecutableBackendPolicy {
 pub enum ProcedureTarget {
     Entrypoint,
     Function(String),
+    /// Exact compiler identity; display names are not callable authority.
+    SemanticFunction(runmat_types::ProgramFunctionId),
 }
 
 #[derive(Clone, Debug)]

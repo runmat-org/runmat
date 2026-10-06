@@ -1,11 +1,11 @@
 use std::path::Path;
 use std::time::Instant;
 
+use super::driver_files::{load_driver_invocation, write_completion, write_driver_marker};
 use super::model::{
     BatchDriverInvocation, DriverCompletion, DurableProgramAttempt, ProgramBatchExecution,
     ProgramBatchSubmission,
 };
-use super::store::{load_driver_invocation, write_completion, write_driver_marker};
 use crate::protocol::WorkerResponse;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -18,7 +18,11 @@ pub fn prepare_batch_driver() -> NativeExecutionResult<BatchDriverInvocation> {
             )
         })?;
     let invocation = load_driver_invocation(&job_directory)?;
-    write_driver_marker(&job_directory, std::process::id())?;
+    let attempt_id = match &invocation {
+        BatchDriverInvocation::Program { attempt, .. } => Some(attempt.request.id),
+        BatchDriverInvocation::Script { .. } => None,
+    };
+    write_driver_marker(&job_directory, std::process::id(), attempt_id)?;
     Ok(invocation)
 }
 
@@ -31,114 +35,96 @@ pub fn complete_batch_driver(
     write_completion(
         job_directory,
         &DriverCompletion {
-            schema_version: 3,
+            schema_version: 4,
             success,
             exit_code,
             message,
-            response: None,
-            resources: None,
         },
     )
 }
 
-pub fn complete_batch_driver_with_response(
-    job_directory: &Path,
-    execution: ProgramBatchExecution,
-) -> NativeExecutionResult<()> {
-    let ProgramBatchExecution {
-        response,
-        resources,
-    } = execution;
-    let (success, exit_code, message) = match &response {
-        WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. } => {
-            (true, Some(0), None)
-        }
-        WorkerResponse::Failure { message } => (false, None, Some(message.clone())),
-    };
-    write_completion(
-        job_directory,
-        &DriverCompletion {
-            schema_version: 3,
-            success,
-            exit_code,
-            message,
-            response: Some(response),
-            resources: Some(resources),
-        },
-    )
-}
-
-pub async fn execute_program_batch(
+pub async fn execute_and_complete_program_batch(
     attempt: DurableProgramAttempt,
     submission: ProgramBatchSubmission,
+    lease: super::DurableAttemptLease,
 ) -> NativeExecutionResult<ProgramBatchExecution> {
+    lease.validate(&attempt.job_directory, &attempt.request)?;
+    use crate::process_provider::NativeProcessProvider;
     submission.validate()?;
-    let started = Instant::now();
-    let allocation = submission.resources.clone();
-    let response = execute_program_response(&submission).await;
-    let artifact_bytes = response_artifact_bytes(&response)?;
-    let wall_millis = u64::try_from(started.elapsed().as_millis()).map_err(|_| {
-        NativeExecutionError::Protocol("durable program wall-clock accounting overflowed".into())
-    })?;
-    let resources = runmat_execution_runner::AttemptResourceAccounting::new(
-        attempt.attempt_id,
-        attempt.worker_id,
-        runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-            allocation,
-            wall_millis,
-            artifact_bytes,
-            0,
-            0,
-        )
-        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
-    )
-    .map_err(NativeExecutionError::Protocol)?;
-    Ok(ProgramBatchExecution {
-        response,
-        resources,
-    })
-}
-
-async fn execute_program_response(submission: &ProgramBatchSubmission) -> WorkerResponse {
-    let request = submission.program_request();
-    if request.artifact.form != runmat_execution_artifact::ExecutableForm::MeshingWorkload {
-        return crate::worker::execute(request).await;
+    attempt
+        .config
+        .validate()
+        .map_err(NativeExecutionError::Configuration)?;
+    if attempt.schema_version != 1 || attempt.request.task != submission.task.request {
+        return Err(NativeExecutionError::Protocol(
+            "durable provider differs from original assigned invocation".into(),
+        ));
     }
-    let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
-        return WorkerResponse::Failure {
-            message: "durable meshing driver has no verified object store".into(),
-        };
-    };
-    let limits = crate::NativeMeshingHostLimits::default();
-    let mut store =
-        match crate::FilesystemObjectStore::open(root, limits.inventory.max_object_bytes) {
-            Ok(store) => store,
-            Err(error) => {
-                return WorkerResponse::Failure {
-                    message: error.to_string(),
-                }
-            }
-        };
-    crate::execute_meshing_program_request(
-        &request,
-        &mut store,
-        &crate::native_meshing_kernel_dispatcher(),
-        &runmat_meshing_core::NeverCancelled,
-        &mut runmat_meshing_execution::NoopMeshingProgress,
-        limits,
+    let artifacts =
+        crate::local_store::ArtifactStore::new(attempt.config.store_root.join("artifacts"))?;
+    let objects = crate::FilesystemObjectStore::open(
+        attempt.config.store_root.join("objects"),
+        attempt.config.max_object_bytes,
     )
-}
-
-fn response_artifact_bytes(response: &WorkerResponse) -> NativeExecutionResult<u64> {
-    let references = match response {
-        WorkerResponse::ExternalizedSuccess { result_objects, .. } => result_objects.as_slice(),
-        WorkerResponse::Success { .. } | WorkerResponse::Failure { .. } => &[],
+    .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let control = super::control::DurableControl::default();
+    let cancellation =
+        super::program_store::cancel_path(&attempt.job_directory, attempt.request.id);
+    let provider = NativeProcessProvider {
+        config: &attempt.config,
+        artifacts: &artifacts,
+        objects: &objects,
     };
-    references.iter().try_fold(0_u64, |total, reference| {
-        total.checked_add(reference.encoded_length).ok_or_else(|| {
-            NativeExecutionError::Protocol(
-                "durable program result artifact accounting overflowed".into(),
-            )
-        })
-    })
+    let execution = crate::process_provider::execute_attempt(
+        &provider,
+        &attempt.request,
+        &control,
+        Instant::now(),
+    );
+    tokio::pin!(execution);
+    let observed = tokio::select! {
+        observed = &mut execution => observed,
+        result = super::control::watch(&cancellation, &attempt.request) => {
+            control.stop(result);
+            execution.await
+        },
+    };
+    let response = observed
+        .response
+        .clone()
+        .unwrap_or_else(|| WorkerResponse::Failure {
+            message: observed
+                .result
+                .as_ref()
+                .err()
+                .cloned()
+                .unwrap_or_else(|| "provider response is unavailable".into()),
+        });
+    let (_, report) = observed.into_report(&attempt.request, &control);
+    // Cancellation/transport failure may follow an otherwise valid response.
+    let response = if matches!(
+        report.report,
+        runmat_execution_runner::AttemptReport::Succeeded { .. }
+    ) {
+        response
+    } else {
+        WorkerResponse::Failure {
+            message: match &report.report {
+                runmat_execution_runner::AttemptReport::Failed { message, .. }
+                | runmat_execution_runner::AttemptReport::Lost { message } => message.clone(),
+                _ => "durable execution was cancelled".into(),
+            },
+        }
+    };
+    let latest_progress = control.latest_progress();
+    let completed = ProgramBatchExecution {
+        response,
+        report,
+        latest_progress,
+    };
+    // Publish before releasing physical ownership. A cold supervisor cannot see
+    // an absent lease in the successful-report publication gap.
+    super::program_store::write_program_completion(&attempt.job_directory, completed.clone())?;
+    drop(lease);
+    Ok(completed)
 }

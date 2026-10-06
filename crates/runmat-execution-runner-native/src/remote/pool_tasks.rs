@@ -30,26 +30,14 @@ pub(super) async fn execute_single_root(
         RetryPolicy::Never,
     )?;
     match completion.wait().await {
-        Ok(success) if success.result_objects.is_empty() => match success.outputs.as_slice() {
-            [value] => packaged(
-                ProgramExecutionResponse::Success {
-                    value: value.clone(),
-                },
-                pool,
-            )
-            .map(RemotePoolExecutionOutcome::Completed),
-            _ => Err(protocol(
-                "remote worker returned an invalid inline output count",
-            )),
-        },
-        Ok(success) => packaged(
-            ProgramExecutionResponse::ExternalizedSuccess {
-                outputs: success.outputs,
-                result_objects: success.result_objects,
-            },
-            pool,
-        )
-        .map(RemotePoolExecutionOutcome::Completed),
+        Ok(success) => {
+            let response = ProgramExecutionResponse::from_success_outputs(
+                success.outputs,
+                success.result_objects,
+            );
+            response.validate_against(&request).map_err(protocol)?;
+            packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+        }
         Err(message) => task_failure_outcome(pool, task_id, message),
     }
 }

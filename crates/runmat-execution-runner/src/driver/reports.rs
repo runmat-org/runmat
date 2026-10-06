@@ -18,51 +18,11 @@ impl Driver {
         report: BackendReport,
         actions: &mut Vec<DriverAction>,
     ) -> RunnerResult<()> {
-        let Some(attempt) = self.snapshot.attempts.get(&report.attempt_id).cloned() else {
-            self.discard_backend_report(report, "unknown attempt", actions);
-            return Ok(());
-        };
-        if report.driver_fence != self.snapshot.driver_fence
-            || report.driver_fence != attempt.request.driver_fence
-        {
-            self.discard_backend_report(report, "stale driver fence", actions);
+        if let Some(reason) = self.backend_report_rejection_reason(&report) {
+            self.discard_backend_report(report, reason, actions);
             return Ok(());
         }
-        if report.task_id != attempt.request.task_id
-            || report.worker_id != attempt.request.worker_id
-        {
-            self.discard_backend_report(report, "attempt identity mismatch", actions);
-            return Ok(());
-        }
-        if attempt_state_is_terminal(attempt.state) {
-            self.discard_backend_report(report, "attempt is already terminal", actions);
-            return Ok(());
-        }
-        if let Some(execution) = &report.execution {
-            if matches!(report.report, AttemptReport::Started)
-                || execution.validate_against(&attempt.request).is_err()
-            {
-                self.discard_backend_report(
-                    report,
-                    "invalid provider execution observation",
-                    actions,
-                );
-                return Ok(());
-            }
-        }
-        if let Some(resources) = &report.unsuccessful_resources {
-            if matches!(
-                report.report,
-                AttemptReport::Started | AttemptReport::Succeeded { .. }
-            ) || resources.validate_against(&attempt.request).is_err()
-                || report.execution.as_ref().is_some_and(|execution| {
-                    resources.resources.usage.wall_millis != execution.wall_millis
-                })
-            {
-                self.discard_backend_report(report, "invalid unsuccessful accounting", actions);
-                return Ok(());
-            }
-        }
+        let attempt = self.snapshot.attempts[&report.attempt_id].clone();
         let resources = report.unsuccessful_resources.clone();
         let execution = report.execution.clone();
         match report.report {
@@ -151,11 +111,66 @@ impl Driver {
                     attempt_id: report.attempt_id,
                 });
                 if !self.task_is_terminal(report.task_id)? {
+                    let requested_at_driver_millis = self.snapshot.now_millis;
+                    self.task_mut(report.task_id)?.cancellation = Some(crate::TaskCancellation {
+                        cause: crate::TaskCancellationCause::Provider {
+                            attempt_id: attempt.request.id,
+                        },
+                        requested_at_driver_millis,
+                    });
                     self.transition_task(report.task_id, TaskState::Cancelled)?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// Advisory validation under the caller's scheduler lock. Hosts must retain
+    /// that lock through a related authority transition; this is not a lease.
+    pub fn accepts_backend_report(&self, report: &BackendReport) -> bool {
+        self.backend_report_rejection_reason(report).is_none()
+    }
+
+    pub(super) fn backend_report_rejection_reason(
+        &self,
+        report: &BackendReport,
+    ) -> Option<&'static str> {
+        let Some(attempt) = self.snapshot.attempts.get(&report.attempt_id) else {
+            return Some("unknown attempt");
+        };
+        if report.driver_fence != self.snapshot.driver_fence
+            || report.driver_fence != attempt.request.driver_fence
+        {
+            return Some("stale driver fence");
+        }
+        if report.task_id != attempt.request.task_id
+            || report.worker_id != attempt.request.worker_id
+        {
+            return Some("attempt identity mismatch");
+        }
+        if attempt_state_is_terminal(attempt.state) {
+            return Some("attempt is already terminal");
+        }
+        if let Some(execution) = &report.execution {
+            if matches!(report.report, AttemptReport::Started)
+                || execution.validate_against(&attempt.request).is_err()
+            {
+                return Some("invalid provider execution observation");
+            }
+        }
+        if let Some(resources) = &report.unsuccessful_resources {
+            if matches!(
+                report.report,
+                AttemptReport::Started | AttemptReport::Succeeded { .. }
+            ) || resources.validate_against(&attempt.request).is_err()
+                || report.execution.as_ref().is_some_and(|execution| {
+                    resources.resources.usage.wall_millis != execution.wall_millis
+                })
+            {
+                return Some("invalid unsuccessful accounting");
+            }
+        }
+        None
     }
 
     fn start_attempt(&mut self, report: &BackendReport) -> RunnerResult<()> {
@@ -293,7 +308,7 @@ impl Driver {
         Ok(())
     }
 
-    fn discard_backend_report(
+    pub(super) fn discard_backend_report(
         &mut self,
         report: BackendReport,
         reason: &str,

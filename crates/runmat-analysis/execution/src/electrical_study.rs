@@ -6,6 +6,7 @@ use crate::phase_accounting::validate_analysis_phase_accounting as validate_acco
 use crate::steady_study::{SteadyStudyPhase, SteadyStudySource, SteadyStudyTail};
 use std::collections::BTreeSet;
 
+use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     study::{
@@ -15,7 +16,6 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
@@ -23,9 +23,8 @@ use crate::{
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisOutputPolicy, ElectricalStaticTaskPreparation, ImportedAccuracy,
     ImportedElectricalStaticResult, ImportedPublishedResult, ImportedSemanticState,
-    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAccuracy,
-    PreparedElectricalStaticTask, PreparedResourceUsage, PreparedResultPublication,
-    PreparedSemanticStatePublication,
+    PreparedAccuracy, PreparedElectricalStaticTask, PreparedResourceUsage,
+    PreparedResultPublication, PreparedSemanticStatePublication,
 };
 
 mod completion;
@@ -142,7 +141,7 @@ impl ElectricalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(ElectricalStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
@@ -159,13 +158,7 @@ impl ElectricalStudyCoordinator {
             task,
             self.preparation.output_policy.inventory_limits(),
         )?;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting: accounting.clone(),
-            }],
-            accounting.resources.usage.wall_millis,
-        )?;
+        let graph = accounting.resource_graph(&task.resource_plan)?;
         let usage = crate::prepare_planned_resource_graph_usage(
             &task.resource_plan,
             task.host.workload.identity.digest(),
@@ -213,7 +206,7 @@ impl ElectricalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = ElectricalStudyResultPhase::Accuracy;
         let tail = self
@@ -241,7 +234,7 @@ impl ElectricalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = ElectricalStudyResultPhase::State {
             ordinal: self.states().len(),
@@ -269,7 +262,7 @@ impl ElectricalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = ElectricalStudyResultPhase::Publication;
         let tail = self

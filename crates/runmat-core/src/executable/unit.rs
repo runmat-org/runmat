@@ -30,6 +30,9 @@ pub struct ExecutableUnit {
     bytecode: Rc<runmat_vm::Bytecode>,
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
+    pub(super) interop: runmat_types::InteropManifest,
+    pub(super) parallel: runmat_types::ParallelManifest,
+    pub(super) optional_sections: Vec<runmat_execution::ExecutableOptionalSection>,
 }
 
 impl ExecutableUnit {
@@ -63,6 +66,9 @@ impl ExecutableUnit {
             bytecode: Rc::new(bytecode),
             layout: Rc::new(layout),
             functions,
+            interop: runmat_types::InteropManifest::empty(),
+            parallel: runmat_types::ParallelManifest::empty(),
+            optional_sections: Vec::new(),
         })
     }
 

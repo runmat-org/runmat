@@ -15,6 +15,7 @@ pub const ANALYSIS_HOST_ABI: &str = "host-v2";
 pub const ANALYSIS_HOST_EXECUTION_MODE: &str = "analysis";
 pub const ANALYSIS_HOST_TARGET_PROFILE: &str = "portable-analysis-host-v2";
 const HOST_PROGRAM_BYTES: &[u8] = b"runmat-analysis-host\0";
+pub(crate) const ANALYSIS_HOST_ENTRYPOINT: &str = "analysis_workload";
 const HOST_PREFIX: &[u8] = b"runmat-analysis-host-invocation/v2\0";
 const HOST_DOMAIN: &str = "host-invocation";
 const HOST_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
@@ -56,7 +57,7 @@ pub fn prepare_analysis_host_program(
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision,
-        entrypoint: "analysis_workload".into(),
+        entrypoint: ANALYSIS_HOST_ENTRYPOINT.into(),
         outputs: OutputContract {
             requested_outputs: 1,
         },
@@ -152,12 +153,7 @@ impl AnalysisHostWorkload {
         Ok(host)
     }
 
-    pub fn prepare_program_request(
-        &self,
-        program_revision: ProgramRevision,
-        input_roots: &[ValueRef],
-    ) -> AnalysisBridgeResult<PreparedAnalysisHostInvocation> {
-        self.validate_inputs(input_roots)?;
+    pub(crate) fn invocation_descriptor(&self) -> AnalysisBridgeResult<(LogicalObject, ValueRef)> {
         let descriptor = LogicalObject::new(
             ObjectNamespace::InputValue,
             format!(
@@ -172,6 +168,16 @@ impl AnalysisHostWorkload {
             ValueRefKind::DriverObject,
             ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
         )?;
+        Ok((descriptor, descriptor_root))
+    }
+
+    pub fn prepare_program_request(
+        &self,
+        program_revision: ProgramRevision,
+        input_roots: &[ValueRef],
+    ) -> AnalysisBridgeResult<PreparedAnalysisHostInvocation> {
+        self.validate_inputs(input_roots)?;
+        let (descriptor, descriptor_root) = self.invocation_descriptor()?;
         let AnalysisHostProgramArtifact { recipe, artifact } =
             prepare_analysis_host_program(program_revision)?;
         let mut arguments = Vec::with_capacity(input_roots.len() + 1);

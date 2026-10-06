@@ -16,6 +16,39 @@ impl CacheImport for DownloadedThermalObjects {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
     }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if self
+            .0
+            .get(&digest)
+            .is_some_and(|bytes| bytes.len() as u64 > maximum)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "downloaded thermal object exceeds caller read allowance".into(),
+            ));
+        }
+        Ok(self.0.get(&digest).cloned())
+    }
+}
+
+/// Provider causes, deliberately with misleading text to prevent string classification.
+struct RejectingThermalObjects {
+    capacity: bool,
+}
+impl CacheImport for RejectingThermalObjects {
+    fn read_verified(&self, _: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        Err(if self.capacity {
+            runmat_execution_artifact::ArtifactError::Limit("opaque provider rejection".into())
+        } else {
+            runmat_execution_artifact::ArtifactError::Identity("memory limit exceeded".into())
+        })
+    }
+    fn read_verified_bounded(&self, digest: Digest, _: u64) -> ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified(digest)
+    }
 }
 
 #[test]
@@ -120,11 +153,8 @@ fn run(observation_policy: Option<runmat_analysis_core::PartialAccessPolicy>, or
     let task_count = pool.tasks.len();
     let root = prepare_thermal_study_root(&completed.thermal).unwrap();
     let source = RetainedThermalSource {
-        inventory_limits: completed
-            .thermal
-            .preparation()
-            .output_policy
-            .inventory_limits(),
+        inventory_limits: completed.thermal.output_policy().inventory_limits(),
+        catalog: root.catalog,
         completed: completed.thermal,
         store: pool.store.clone(),
         objects: root
@@ -134,6 +164,68 @@ fn run(observation_policy: Option<runmat_analysis_core::PartialAccessPolicy>, or
             .collect(),
     };
     let dto = completion(&source.completed).unwrap();
+    assert!(matches!(
+        source.publication_workspace(&dto, 0),
+        Err(runmat_runtime::analysis::storage::AnalysisPublicationError::ResourceLimit { .. })
+    ));
+    let workspace = source.publication_workspace(&dto, 128 << 20).unwrap();
+    assert!(workspace > source.completed.retained_storage_bytes(128 << 20).unwrap());
+    println!("original thermal source requested publication workspace={workspace} bytes");
+    let mut outside = dto.clone();
+    outside.catalog.objects.pop();
+    assert!(source.authenticate_admitted(&outside, workspace).is_err());
+    assert!(source.authenticate_admitted(&dto, workspace - 1).is_err());
+    source.authenticate_admitted(&dto, workspace).unwrap();
+    authentication::validate_completion(&source.completed, &dto).unwrap();
+    for substitute in 0..6 {
+        let mut forged = dto.clone();
+        match substitute {
+            0 => forged.field_partitions.swap(0, 1),
+            1 => forged
+                .field_partitions
+                .push(forged.field_partitions[0].clone()),
+            2 => forged.field_partitions[0].source_indices[0] += 1,
+            3 => forged.frozen_project_digest = Some(Digest::sha256(b"foreign project")),
+            4 => forged.compiled.module_path.push_str("foreign"),
+            _ => forged.field_partitions[0].schema_version += 1,
+        }
+        assert!(authentication::validate_completion(&source.completed, &forged).is_err());
+    }
+    assert!(matches!(
+        CacheImport::read_verified_bounded(&source, dto.root.logical_digest, 0),
+        Err(runmat_execution_artifact::ArtifactError::Limit(_))
+    ));
+    // Independently replay through a failing original provider. Capacity survives replay;
+    // an identity failure with capacity-looking text must remain a contract failure.
+    for capacity in [true, false] {
+        let rejecting = RetainedThermalSource {
+            inventory_limits: source.inventory_limits,
+            completed: source.completed.clone(),
+            catalog: source.catalog.clone(),
+            objects: source.objects.clone(),
+            store: RejectingThermalObjects { capacity },
+        };
+        assert_eq!(
+            matches!(
+                rejecting.authenticate_original(&dto).unwrap_err(),
+                runmat_runtime::analysis::storage::AnalysisPublicationError::ResourceLimit { .. }
+            ),
+            capacity,
+        );
+        let descendant = dto
+            .catalog
+            .objects
+            .iter()
+            .find(|reference| !rejecting.objects.contains_key(&reference.logical_digest))
+            .unwrap();
+        assert_eq!(
+            matches!(
+                rejecting.read_catalog_object(descendant).unwrap_err(),
+                runmat_execution_artifact::ArtifactError::Limit(_)
+            ),
+            capacity,
+        );
+    }
     source.authenticate(&dto).unwrap();
     if observation_policy.is_some() {
         observation_queries::check(&source, &dto);
@@ -170,6 +262,14 @@ fn run(observation_policy: Option<runmat_analysis_core::PartialAccessPolicy>, or
     let mut reference = dto.root.clone();
     reference.encoded_length += 1;
     assert!(PublishedObjectSource::read_verified(&source, &reference).is_err());
+    for metadata in 0..2 {
+        let mut reference = dto.root.clone();
+        match metadata {
+            0 => reference.media_type.push_str("foreign"),
+            _ => reference.value_schema.push_str("foreign"),
+        }
+        assert!(PublishedObjectSource::read_verified(&source, &reference).is_err());
+    }
     assert!(convert(source.completed.clone(), pool.store.clone()).is_ok());
     let empty_directory = tempfile::tempdir().unwrap();
     let empty_store =

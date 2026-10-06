@@ -38,10 +38,12 @@ fn replacement_requires_a_strictly_newer_nonzero_fence() {
 #[test]
 fn checkpoint_schema_and_exhausted_local_fence_fail_closed() {
     let snapshot = common::fixture(1, 1).driver.snapshot();
-    let mut invalid = DriverCheckpoint::new(1, snapshot.clone());
-    invalid.schema_version = 2;
-    assert!(invalid.clone().restore().is_err());
-    assert!(invalid.restore_at_fence(100).is_err());
+    for schema_version in [1, 3] {
+        let mut invalid = DriverCheckpoint::new(1, snapshot.clone());
+        invalid.schema_version = schema_version;
+        assert!(invalid.clone().restore().is_err());
+        assert!(invalid.restore_at_fence(100).is_err());
+    }
     let highest = reconcile_snapshot_at_fence(snapshot, u64::MAX)
         .unwrap()
         .snapshot();

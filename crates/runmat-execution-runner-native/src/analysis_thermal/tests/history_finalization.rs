@@ -202,10 +202,12 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
                 &partition.resource_plan,
                 ordinal,
             );
-            attempts.push(PlannedResourceUsageAttempt {
-                plan: partition.resource_plan.clone(),
-                accounting,
-            });
+            attempts.extend(
+                accounting
+                    .resource_graph(&partition.resource_plan)
+                    .unwrap()
+                    .attempts,
+            );
             ordinal += 1;
             let contribution =
                 import_observation_partition_contribution(&store, response, partition, limits)
@@ -227,10 +229,12 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
                 &reduced.resource_plan,
                 ordinal,
             );
-            attempts.push(PlannedResourceUsageAttempt {
-                plan: reduced.resource_plan.clone(),
-                accounting,
-            });
+            attempts.extend(
+                accounting
+                    .resource_graph(&reduced.resource_plan)
+                    .unwrap()
+                    .attempts,
+            );
             ordinal += 1;
             let sample = import_reduced_observation(&store, response, &reduced, limits).unwrap();
             let id = sample.result.observation_id.clone();
@@ -274,10 +278,12 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
                 &checkpoint_task.resource_plan,
                 ordinal,
             );
-            attempts.push(PlannedResourceUsageAttempt {
-                plan: checkpoint_task.resource_plan.clone(),
-                accounting,
-            });
+            attempts.extend(
+                accounting
+                    .resource_graph(&checkpoint_task.resource_plan)
+                    .unwrap()
+                    .attempts,
+            );
             ordinal += 1;
             let checkpoint = import_observation_history_checkpoint_task(
                 &store,
@@ -370,10 +376,12 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
             &finalization.resource_plan,
             ordinal,
         );
-        attempts.push(PlannedResourceUsageAttempt {
-            plan: finalization.resource_plan.clone(),
-            accounting,
-        });
+        attempts.extend(
+            accounting
+                .resource_graph(&finalization.resource_plan)
+                .unwrap()
+                .attempts,
+        );
         ordinal += 1;
         let finalized =
             import_observation_history_finalization_task(&store, response, &finalization, limits)
@@ -483,10 +491,12 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
         ordinal,
     );
     ordinal += 1;
-    attempts.push(PlannedResourceUsageAttempt {
-        plan: accuracy.resource_plan.clone(),
-        accounting,
-    });
+    attempts.extend(
+        accounting
+            .resource_graph(&accuracy.resource_plan)
+            .unwrap()
+            .attempts,
+    );
     let accuracy_result = import_accuracy(&store, response, &accuracy, limits).unwrap();
     assert_eq!(
         accuracy_result.artifact.source_observations,
@@ -663,10 +673,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
         &publication,
         &published,
         &baseline,
-        &PlannedResourceUsageAttempt {
-            plan: publication.resource_plan.clone(),
-            accounting,
-        },
+        &accounting,
         output_policy,
     )
     .unwrap();

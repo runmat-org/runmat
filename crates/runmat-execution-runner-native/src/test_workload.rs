@@ -63,6 +63,9 @@ pub async fn execute_host_program_request_with_project(
             &request, &mut store, limits,
         );
     }
+    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
+        return crate::program_workload::execute_unit(&request, project).await;
+    }
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
         return runmat_vm::execute_program_request(request).await;
     }

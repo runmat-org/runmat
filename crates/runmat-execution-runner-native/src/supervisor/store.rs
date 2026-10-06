@@ -1,24 +1,26 @@
+use std::borrow::Borrow;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::{Digest, JobHandle, JobId, OutputContract, RunId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::driver_files::marker_path;
 use super::filesystem::{
-    atomic_json, atomic_write, io_error, read_json, secure_directory, unix_millis,
+    atomic_json, atomic_write, io_error, read_json, read_optional_json, secure_directory,
+    unix_millis,
 };
 use super::model::{
-    BatchDriverInvocation, BatchSubmission, DriverCompletion, DriverMarker, DurableProgramAttempt,
-    JobAttachment, LocalJobRecord, LocalJobState, ProgramBatchSubmission,
+    BatchSubmission, DriverCompletion, DriverMarker, JobAttachment, LocalJobRecord, LocalJobState,
+    ProgramBatchSubmission,
 };
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 const ATTACH_CHUNK_BYTES: usize = 1024 * 1024;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SupervisorPaths {
     pub root: PathBuf,
     pub jobs: PathBuf,
@@ -72,18 +74,18 @@ impl SupervisorPaths {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PersistedRequest {
-    schema_version: u16,
-    handle: JobHandle,
-    request_digest: Digest,
-    workload: PersistedWorkload,
+pub(super) struct PersistedRequest<W = PersistedWorkload> {
+    pub(super) schema_version: u16,
+    pub(super) handle: JobHandle,
+    pub(super) request_digest: Digest,
+    pub(super) workload: W,
     idempotency_key_digest: Option<Digest>,
-    retention_millis: u64,
+    pub(super) retention_millis: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
-enum PersistedWorkload {
+pub(super) enum PersistedWorkload<P = Box<ProgramBatchSubmission>> {
     Script {
         source_digest: Digest,
         source_name: String,
@@ -91,15 +93,15 @@ enum PersistedWorkload {
         working_directory: String,
     },
     Program {
-        submission: Box<ProgramBatchSubmission>,
+        submission: P,
     },
 }
 
-impl PersistedWorkload {
+impl<P: Borrow<ProgramBatchSubmission>> PersistedWorkload<P> {
     fn digest(&self) -> Digest {
         match self {
             Self::Script { source_digest, .. } => *source_digest,
-            Self::Program { submission } => submission.artifact.id.0,
+            Self::Program { submission } => submission.borrow().artifact.id.0,
         }
     }
 }
@@ -123,7 +125,7 @@ impl JobStore {
         submission.validate()?;
         let request_digest = submission.request_digest()?;
         let idempotency_key_digest = submission.idempotency_digest();
-        let workload = PersistedWorkload::Script {
+        let workload = PersistedWorkload::<Box<ProgramBatchSubmission>>::Script {
             source_digest: Digest::sha256(&submission.source),
             source_name: submission.source_name.clone(),
             arguments: submission.arguments.clone(),
@@ -141,7 +143,7 @@ impl JobStore {
 
     pub(super) fn create_program(
         &self,
-        submission: ProgramBatchSubmission,
+        submission: &ProgramBatchSubmission,
         now: u64,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
         submission.validate()?;
@@ -151,20 +153,18 @@ impl JobStore {
             request_digest,
             idempotency_key_digest,
             submission.retention_millis,
-            PersistedWorkload::Program {
-                submission: Box::new(submission),
-            },
+            PersistedWorkload::Program { submission },
             now,
             None,
         )
     }
 
-    fn create_record(
+    fn create_record<P: Borrow<ProgramBatchSubmission> + Serialize>(
         &self,
         request_digest: Digest,
         idempotency_key_digest: Option<Digest>,
         retention_millis: u64,
-        workload: PersistedWorkload,
+        workload: PersistedWorkload<P>,
         now: u64,
         frozen_source: Option<(&str, &[u8])>,
     ) -> NativeExecutionResult<(LocalJobRecord, bool)> {
@@ -187,7 +187,7 @@ impl JobStore {
         let run_id = RunId::derive(&[job_id.bytes(), b"local-batch"]);
         let requested_outputs = match &workload {
             PersistedWorkload::Script { .. } => 0,
-            PersistedWorkload::Program { submission } => submission.requested_outputs,
+            PersistedWorkload::Program { submission } => submission.borrow().requested_outputs,
         };
         let handle = JobHandle {
             id: job_id,
@@ -204,7 +204,7 @@ impl JobStore {
             schema_version: 1,
             handle: handle.clone(),
             request_digest,
-            workload: workload.clone(),
+            workload: &workload,
             idempotency_key_digest,
             retention_millis,
         };
@@ -266,24 +266,14 @@ impl JobStore {
         &self,
         job_id: JobId,
     ) -> NativeExecutionResult<Option<DriverCompletion>> {
-        let path = self.job_dir(job_id).join("completion.json");
-        if !path.exists() {
+        if self.program_submission(job_id)?.is_some() {
             return Ok(None);
         }
-        let completion: DriverCompletion = read_json(&path)?;
+        let path = self.job_dir(job_id).join("completion.json");
+        let Some(completion) = read_optional_json::<DriverCompletion>(&path)? else {
+            return Ok(None);
+        };
         completion.validate()?;
-        let request: PersistedRequest = read_json(&self.job_dir(job_id).join("request.json"))?;
-        match (&request.workload, &completion.response) {
-            (PersistedWorkload::Script { .. }, None) => {}
-            (PersistedWorkload::Program { submission }, Some(response)) => response
-                .validate_against(&submission.program_request())
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
-            _ => {
-                return Err(NativeExecutionError::Protocol(
-                    "durable completion differs from its persisted workload kind".into(),
-                ))
-            }
-        }
         Ok(Some(completion))
     }
 
@@ -291,12 +281,17 @@ impl JobStore {
         &self,
         job_id: JobId,
     ) -> NativeExecutionResult<Option<DriverMarker>> {
-        let path = self.job_dir(job_id).join("driver.json");
-        if !path.exists() {
+        let attempt_id = self
+            .program_assignment(job_id)?
+            .map(|assignment| assignment.request.id);
+        let path = marker_path(&self.job_dir(job_id), attempt_id);
+        let Some(marker) = read_optional_json::<DriverMarker>(&path)? else {
             return Ok(None);
-        }
-        let marker: DriverMarker = read_json(&path)?;
-        if marker.schema_version != 1 || marker.process_id == 0 {
+        };
+        if marker.schema_version != if marker.attempt_id.is_some() { 3 } else { 2 }
+            || marker.process_id == 0
+            || marker.attempt_id != attempt_id
+        {
             return Err(NativeExecutionError::Protocol(
                 "durable driver marker is malformed".into(),
             ));
@@ -313,17 +308,16 @@ impl JobStore {
         let job_dir = self.job_dir(job_id);
         let (stdout, next_stdout_offset) = read_chunk(&job_dir.join("stdout.log"), stdout_offset)?;
         let (stderr, next_stderr_offset) = read_chunk(&job_dir.join("stderr.log"), stderr_offset)?;
-        let completion = self.completion(job_id)?;
         Ok(JobAttachment {
             record: self.record(job_id)?,
             stdout,
             stderr,
             next_stdout_offset,
             next_stderr_offset,
-            response: completion
-                .as_ref()
-                .and_then(|completion| completion.response.clone()),
-            resources: completion.and_then(|completion| completion.resources),
+            response: None,
+            resources: None,
+            execution: None,
+            latest_progress: None,
         })
     }
 
@@ -339,17 +333,23 @@ impl JobStore {
         self.paths.jobs.join(job_id.to_string())
     }
 
-    pub(super) fn gc(&self, now: u64) -> NativeExecutionResult<Vec<JobId>> {
-        let expired = self
+    pub(super) fn gc(
+        &self,
+        now: u64,
+        mut can_collect: impl FnMut(JobId) -> NativeExecutionResult<bool>,
+    ) -> NativeExecutionResult<Vec<JobId>> {
+        let mut collected = Vec::new();
+        for record in self
             .list()?
             .into_iter()
             .filter(|record| record.state.is_terminal() && record.retain_until_unix_millis <= now)
-            .map(|record| record.handle.id)
-            .collect::<Vec<_>>();
-        for job_id in &expired {
-            fs::remove_dir_all(self.job_dir(*job_id)).map_err(io_error)?;
+        {
+            if can_collect(record.handle.id)? {
+                fs::remove_dir_all(self.job_dir(record.handle.id)).map_err(io_error)?;
+                collected.push(record.handle.id);
+            }
         }
-        Ok(expired)
+        Ok(collected)
     }
 
     fn recover_record(&self, job_id: JobId) -> NativeExecutionResult<LocalJobRecord> {
@@ -392,111 +392,14 @@ impl JobStore {
     }
 }
 
-pub(super) fn write_completion(
-    job_dir: &Path,
-    completion: &DriverCompletion,
-) -> NativeExecutionResult<()> {
-    atomic_json(&job_dir.join("completion.json"), completion)
-}
-
-pub(super) fn write_driver_marker(job_dir: &Path, process_id: u32) -> NativeExecutionResult<()> {
-    if process_id == 0 {
-        return Err(NativeExecutionError::Protocol(
-            "durable driver process id must be non-zero".into(),
-        ));
-    }
-    atomic_json(
-        &job_dir.join("driver.json"),
-        &DriverMarker {
-            schema_version: 1,
-            process_id,
-        },
-    )
-}
-
-pub(super) fn load_driver_invocation(
-    job_dir: &Path,
-) -> NativeExecutionResult<BatchDriverInvocation> {
-    if !job_dir.is_absolute() {
-        return Err(NativeExecutionError::Configuration(
-            "durable driver job directory must be absolute".into(),
-        ));
-    }
-    let request: PersistedRequest = read_json(&job_dir.join("request.json"))?;
-    let expected_name = request.handle.id.to_string();
-    if request.schema_version != 1
-        || job_dir.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str())
-    {
-        return Err(NativeExecutionError::Protocol(
-            "durable driver request identity is invalid".into(),
-        ));
-    }
-    match request.workload {
-        PersistedWorkload::Script {
-            source_digest,
-            source_name,
-            arguments,
-            working_directory,
-        } => {
-            let source_path = job_dir.join(&source_name);
-            let source = fs::read(&source_path).map_err(io_error)?;
-            if Digest::sha256(&source) != source_digest {
-                return Err(NativeExecutionError::Protocol(
-                    "durable driver source no longer matches its frozen request".into(),
-                ));
-            }
-            let submission = BatchSubmission {
-                source_name,
-                source,
-                arguments,
-                working_directory,
-                idempotency_key: None,
-                retention_millis: request.retention_millis,
-            };
-            submission.validate()?;
-            if submission.request_digest()? != request.request_digest {
-                return Err(NativeExecutionError::Protocol(
-                    "durable driver request no longer matches its identity".into(),
-                ));
-            }
-            Ok(BatchDriverInvocation::Script {
-                job_directory: job_dir.to_path_buf(),
-                source_path,
-                arguments: submission.arguments,
-                working_directory: PathBuf::from(submission.working_directory),
-            })
-        }
-        PersistedWorkload::Program { mut submission } => {
-            submission.idempotency_key = None;
-            submission.validate()?;
-            if submission.request_digest()? != request.request_digest {
-                return Err(NativeExecutionError::Protocol(
-                    "durable program request no longer matches its identity".into(),
-                ));
-            }
-            Ok(BatchDriverInvocation::Program {
-                job_directory: job_dir.to_path_buf(),
-                attempt: DurableProgramAttempt {
-                    attempt_id: AttemptId::derive(&[
-                        request.handle.id.bytes(),
-                        &request.handle.generation.to_be_bytes(),
-                    ]),
-                    worker_id: WorkerId::derive(&[
-                        request.handle.id.bytes(),
-                        b"durable-local-driver",
-                    ]),
-                },
-                submission,
-            })
-        }
-    }
-}
-
 fn read_chunk(path: &Path, offset: u64) -> NativeExecutionResult<(Vec<u8>, u64)> {
-    if !path.exists() {
-        return Ok((Vec::new(), offset));
-    }
-    let mut file = File::open(path).map_err(io_error)?;
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Vec::new(), offset))
+        }
+        Err(error) => return Err(io_error(error)),
+    };
     let length = file.metadata().map_err(io_error)?.len();
     let start = offset.min(length);
     file.seek(SeekFrom::Start(start)).map_err(io_error)?;

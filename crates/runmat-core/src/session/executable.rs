@@ -480,20 +480,67 @@ impl RunMatSession {
 
         let result = match invocation.target {
             crate::ProcedureTarget::Entrypoint => {
+                if invocation.requested_outputs > 1 {
+                    return Err(runtime_error(
+                        "RunMat:ExecutableArity",
+                        "scripts do not define multiple output ordinals",
+                    ));
+                }
                 if !invocation.arguments.is_empty() {
                     return Err(runtime_error(
                         "RunMat:ExecutableArity",
                         "executable entrypoint does not accept invocation arguments",
                     ));
                 }
+                if invocation.requested_outputs == 1 {
+                    // Native script tiering currently has a zero-output contract.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
+                        return Err(runtime_error(
+                            "RunMat:ExecutableArity",
+                            "native scripts do not support an ans output",
+                        ));
+                    }
+                    self.invoke_script_interpreted(unit, 1).await
+                } else {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
+                        self.invoke_generic_native(unit, None, Vec::new(), 0).await
+                    } else {
+                        self.invoke_tiered_entrypoint(unit).await
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    self.invoke_entrypoint_interpreted(unit).await
+                }
+            }
+            crate::ProcedureTarget::SemanticFunction(function) => {
+                let index = usize::try_from(function.0).map_err(|_| {
+                    runtime_error(
+                        "RunMat:UndefinedExecutableProcedure",
+                        "semantic function identity exceeds this host",
+                    )
+                })?;
+                let function = runmat_hir::FunctionId(index);
+                if unit.functions().get(function).is_none() {
+                    return Err(runtime_error(
+                        "RunMat:UndefinedExecutableProcedure",
+                        "executable unit does not contain the semantic procedure",
+                    ));
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
-                    self.invoke_generic_native(unit, None, Vec::new(), 0).await
-                } else {
-                    self.invoke_tiered_entrypoint(unit).await
+                    return Err(runtime_error(
+                        "RunMat:ExecutableBackend",
+                        "exact semantic invocation currently requires the portable interpreter",
+                    ));
                 }
-                #[cfg(target_arch = "wasm32")]
-                self.invoke_entrypoint_interpreted(unit).await
+                self.invoke_procedure_interpreted(
+                    unit,
+                    function,
+                    invocation.arguments,
+                    invocation.requested_outputs,
+                )
+                .await
             }
             crate::ProcedureTarget::Function(name) => {
                 let function = unit.functions().resolve_name(&name).ok_or_else(|| {
@@ -552,22 +599,7 @@ impl RunMatSession {
         &mut self,
         unit: &crate::ExecutableUnit,
     ) -> std::result::Result<Value, RuntimeError> {
-        let mut variables = vec![Value::Num(0.0); unit.bytecode().var_count];
-        match runmat_vm::interpret_with_vars_in_context(
-            unit.bytecode(),
-            &mut variables,
-            Some(&unit.source().relative_path),
-            self.runtime_context
-                .clone()
-                .with_program_revision(Some(unit.revision().program_revision.clone())),
-        )
-        .await?
-        {
-            runmat_vm::InterpreterOutcome::Completed(values) => Ok(values
-                .into_iter()
-                .last()
-                .unwrap_or(Value::OutputList(Vec::new()))),
-        }
+        self.invoke_script_interpreted(unit, 0).await
     }
 
     async fn invoke_procedure_interpreted(

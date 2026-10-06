@@ -95,6 +95,21 @@ pub fn prepare_structural_study_publication(
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // Authenticate and retain original source objects before materializing derived
+    // runs and independent suffix outputs. The catalog remains private until the
+    // whole publication commits; source replay does not overlap those outputs.
+    let numerical_evidence = StructuralStudyNumericalEvidence::from_result(
+        result.numerical(),
+        study_definition_digest,
+        &preparation.staging,
+    )
+    .map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(
+            error,
+            &context,
+            |message| typed_publication_error(&context, &compiled.study_id, message),
+        )
+    })?;
     let mut intent = PreparedStructuralStudyIntent {
         study_id: compiled.study_id.clone(),
         geometry_source_digest: Digest::from_bytes(*result.mesh().geometry.source_digest.bytes()),
@@ -139,18 +154,7 @@ pub fn prepare_structural_study_publication(
         result.workloads(),
         result.mesh(),
         result.meshing_evidence(),
-        StructuralStudyNumericalEvidence::from_result(
-            result.numerical(),
-            study_definition_digest,
-            &published.staging,
-        )
-        .map_err(|error| {
-            crate::analysis::prepared_study_publication::publication_failure(
-                error,
-                &published_context,
-                invalid,
-            )
-        })?,
+        numerical_evidence,
         &published,
     )
     .map_err(|error| {

@@ -76,6 +76,7 @@ pub(crate) fn validate_history(
         }
         None => {}
     }
+    super::super::cancellation::validate_cancellation(task, history, now_millis)?;
     validate_commit(task, history)
 }
 

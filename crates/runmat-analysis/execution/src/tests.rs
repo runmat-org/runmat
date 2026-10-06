@@ -4019,3 +4019,6 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
     assert_eq!(selected.manifest, *result.manifest());
     assert_eq!(selected.sample, result.samples()[1]);
 }
+
+mod phase_execution;
+pub(crate) use phase_execution::phase_execution;

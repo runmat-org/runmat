@@ -127,12 +127,12 @@ fn rebuild(
 #[test]
 fn terminal_is_exact_canonical_extension() {
     let (receipt, baseline, terminal) = fixture();
-    validate_result_publication_resource_usage(&receipt, &baseline, &terminal).unwrap();
+    validate_result_publication_resource_usage(&receipt, &baseline, &terminal, 2).unwrap();
     let decoded =
         ResourceUsageEvidence::from_canonical_bytes(&terminal.canonical_bytes().unwrap()).unwrap();
     assert_eq!(terminal, decoded);
-    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &baseline).is_err());
-    assert!(validate_result_publication_resource_usage(&receipt, &terminal, &terminal).is_err());
+    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &baseline, 2).is_err());
+    assert!(validate_result_publication_resource_usage(&receipt, &terminal, &terminal, 2).is_err());
 }
 
 #[test]
@@ -147,7 +147,8 @@ fn rejects_rewritten_baseline_extra_attempt_and_invented_wall() {
     assert!(validate_result_publication_resource_usage(
         &receipt,
         &baseline,
-        &rebuild(&terminal, attempts, 3)
+        &rebuild(&terminal, attempts, 3),
+        2
     )
     .is_err());
     let mut attempts = terminal.attempts.clone();
@@ -157,13 +158,15 @@ fn rejects_rewritten_baseline_extra_attempt_and_invented_wall() {
     assert!(validate_result_publication_resource_usage(
         &receipt,
         &baseline,
-        &rebuild(&terminal, attempts, 4)
+        &rebuild(&terminal, attempts, 4),
+        2
     )
     .is_err());
     assert!(validate_result_publication_resource_usage(
         &receipt,
         &baseline,
-        &rebuild(&terminal, terminal.attempts.clone(), 4)
+        &rebuild(&terminal, terminal.attempts.clone(), 4),
+        2
     )
     .is_err());
 }
@@ -186,7 +189,7 @@ fn rejects_publication_overrun() {
     .unwrap();
     let overrun = rebuild(&terminal, attempts, 3);
     assert!(!overrun.overruns.is_empty());
-    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &overrun).is_err());
+    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &overrun, 2).is_err());
 }
 
 #[test]
@@ -207,7 +210,7 @@ fn rejects_canonical_foreign_workload_and_missing_baseline_attempt() {
         3,
     )
     .unwrap();
-    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &foreign).is_err());
+    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &foreign, 2).is_err());
     // Keep a primary-plan attempt, but substitute its identity. The evidence is internally
     // canonical and balanced; only exact preservation of the baseline detects this omission.
     let mut attempts = terminal.attempts.clone();
@@ -217,7 +220,9 @@ fn rejects_canonical_foreign_workload_and_missing_baseline_attempt() {
         .unwrap()
         .attempt_id = AttemptId::derive(&[b"replacement"]);
     let substituted = rebuild(&terminal, attempts, 3);
-    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &substituted).is_err());
+    assert!(
+        validate_result_publication_resource_usage(&receipt, &baseline, &substituted, 2).is_err()
+    );
 }
 
 #[test]
@@ -243,7 +248,7 @@ fn accepts_platform_capability_augmentation_but_rejects_changed_numeric_allocati
             crate::ANALYSIS_HOST_ABI
         )));
     let augmented = rebuild(&terminal, attempts.clone(), 3);
-    validate_result_publication_resource_usage(&receipt, &baseline, &augmented).unwrap();
+    validate_result_publication_resource_usage(&receipt, &baseline, &augmented, 2).unwrap();
 
     let added = attempts
         .iter_mut()
@@ -266,4 +271,40 @@ fn accepts_platform_capability_augmentation_but_rejects_changed_numeric_allocati
         3,
     )
     .is_err());
+}
+
+#[test]
+fn publication_retry_inventory_uses_observed_interval_and_preserves_every_original_row() {
+    let (receipt, baseline, terminal) = fixture();
+    let mut attempts = terminal.attempts.clone();
+    let mut earlier = attempts
+        .iter()
+        .find(|attempt| attempt.plan != baseline.primary_plan)
+        .unwrap()
+        .clone();
+    earlier.attempt_id = AttemptId::derive(&[b"earlier-publication-attempt"]);
+    earlier.resources = ResourceAccounting::for_reserved_interval(
+        earlier.resources.allocation.clone(),
+        5,
+        17,
+        19,
+        23,
+    )
+    .unwrap();
+    attempts.push(earlier.clone());
+    // Host interval includes scheduling overhead; independent fixture data,
+    // rather than the sum of worker reservations.
+    let retried = rebuild(&terminal, attempts, 31);
+    validate_result_publication_resource_usage(&receipt, &baseline, &retried, 30).unwrap();
+    crate::validate_retained_result_publication_resource_usage(&receipt, &baseline, &retried)
+        .unwrap();
+    assert!(retried.attempts.contains(&earlier));
+    for original in &terminal.attempts {
+        assert!(retried.attempts.contains(original));
+    }
+    assert!(validate_result_publication_resource_usage(&receipt, &baseline, &retried, 7).is_err());
+    let cold =
+        ResourceUsageEvidence::from_canonical_bytes(&retried.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(cold, retried);
+    validate_result_publication_resource_usage(&receipt, &baseline, &cold, 30).unwrap();
 }

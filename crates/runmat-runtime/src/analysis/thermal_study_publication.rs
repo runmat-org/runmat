@@ -58,27 +58,56 @@ pub fn prepare_thermal_study_publication(
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
     let invalid = |message| publication_error(&context, &completed.compiled.study_id, message);
-    let preparation =
-        crate::analysis::study_publication::preparation::PublicationPreparation::capture_catalog(
+    let mut preparation =
+        crate::analysis::study_publication::preparation::PublicationPreparation::capture(
             study_definition_digest,
             &(completed, mesh, meshing_evidence, options),
-            &completed.catalog,
         )
         .map_err(|error| {
             crate::analysis::prepared_study_publication::publication_failure(
                 error, &context, invalid,
             )
         })?;
+    source
+        .admit_publication(completed, &mut preparation.staging)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
 
-    admission::validate(
-        completed,
-        source,
-        mesh,
-        meshing_evidence,
-        options,
-        study_definition_digest,
-    )
-    .map_err(invalid)?;
+    {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+        source
+            .authenticate_admitted(
+                completed,
+                preparation
+                    .staging
+                    .source_replay_allowance(&completed.catalog.objects)
+                    .map_err(|error| {
+                        crate::analysis::prepared_study_publication::publication_failure(
+                            error, &context, invalid,
+                        )
+                    })?,
+            )
+            .map_err(|error| {
+                crate::analysis::prepared_study_publication::publication_failure(
+                    error, &context, invalid,
+                )
+            })?;
+        admission::validate(
+            completed,
+            mesh,
+            meshing_evidence,
+            options,
+            study_definition_digest,
+        )
+        .map_err(invalid)?;
+    }
     let run_id = publication_identity.local_run_id(
         runmat_analysis_core::PhysicsFamily::Thermal,
         study_definition_digest,
@@ -86,8 +115,6 @@ pub fn prepare_thermal_study_publication(
     );
     // Reconstruct only retained partitions; the shared owner also validates accuracy/resource
     // closure and projects catalog-backed observations without gathering or evaluating them.
-    let run = materialization::admit(completed, source, mesh, options, &run_id, &context)
-        .map_err(invalid)?;
     let object_artifact_paths = source
         .persist(completed, study_definition_digest, &preparation.staging)
         .map_err(|error| {
@@ -95,6 +122,15 @@ pub fn prepare_thermal_study_publication(
                 error, &context, invalid,
             )
         })?;
+    let run = {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+        materialization::admit(completed, source, mesh, options, &run_id, &context)
+            .map_err(invalid)?
+    };
     let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
         artifact: mesh.clone(),
         evidence: meshing_evidence.clone(),

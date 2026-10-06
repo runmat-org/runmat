@@ -55,7 +55,7 @@ impl AcousticStudyEntryCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         match self.phase {
             AcousticStudyPhase::AwaitingSolve => self.complete_solve(source, response, accounting),

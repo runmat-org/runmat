@@ -40,6 +40,20 @@ impl TaskCompletion {
         }
     }
 
+    pub(crate) fn try_native_completion(&self) -> Option<crate::NativeProgramCompletion> {
+        self.value
+            .lock()
+            .expect("task completion poisoned")
+            .as_ref()
+            .map(|value| {
+                crate::NativeProgramCompletion::new(
+                    value.original.result.clone(),
+                    value.original.evidence.clone(),
+                    value.checkpoint.clone(),
+                )
+            })
+    }
+
     pub(crate) fn try_value(&self) -> Option<TransferResult> {
         self.value
             .lock()
@@ -183,3 +197,12 @@ pub(super) fn from_task_snapshot(
 
 #[cfg(test)]
 mod tests;
+
+impl crate::process_provider::ProcessControl for TaskCompletion {
+    fn cancellation(&self) -> &AtomicBool {
+        &self.cancelled
+    }
+    fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
+        TaskCompletion::record_progress(self, progress);
+    }
+}

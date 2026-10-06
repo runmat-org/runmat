@@ -203,7 +203,7 @@ fn assert_bad_transcripts(cold: &MemoryStore, completed: &CompletedThermalStudy)
     wrong_response[1].response = valid[2].response.clone();
     reject("foreign observation response", wrong_response);
     let mut wrong_accounting = valid.to_vec();
-    wrong_accounting[1].accounting = valid[2].accounting.clone();
+    wrong_accounting[1].execution = valid[2].execution.clone();
     reject("foreign observation accounting", wrong_accounting);
     let mut wrong_phase = valid.to_vec();
     wrong_phase[0].phase = ThermalStudyResultPhase::Accuracy;
@@ -298,16 +298,7 @@ fn assert_observation_inventories(cold: &MemoryStore, completed: &CompletedTherm
     use runmat_execution_artifact::ProgramExecutionResponse;
 
     let valid = completed.result_closures();
-    for (ordinal, expected_error) in [
-        (
-            1,
-            "observation contribution inventory differs from canonical closure",
-        ),
-        (
-            2,
-            "observation reduction inventory differs from canonical closure",
-        ),
-    ] {
+    for ordinal in [1, 2] {
         assert_eq!(valid[ordinal].phase, ThermalStudyResultPhase::Observation);
         for mutation in [
             InventoryMutation::Reordered,
@@ -362,30 +353,21 @@ fn assert_observation_inventories(cold: &MemoryStore, completed: &CompletedTherm
                     bytes.checked_add(reference.encoded_length)
                 })
                 .unwrap();
-            let original = &closure.accounting.resources;
+            let original = &closure.execution.winning_accounting().resources;
             if mutation == InventoryMutation::Reordered {
                 assert_eq!(artifact_bytes, original.artifact_bytes);
             }
-            // Preserve the admitted allocation and a valid accounting interval while matching
-            // the forged inventory's byte total. Failure must be the exact closure gate, not
-            // stale artifact byte accounting or a later baseline/publication mismatch.
-            closure.accounting.resources =
-                runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-                    original.allocation.clone(),
-                    original.usage.wall_millis,
-                    artifact_bytes,
-                    original.usage.egress_bytes,
-                    original.usage.relay_bytes,
-                )
-                .unwrap();
-            closure.accounting.validate().unwrap();
+            // The original immutable commit cannot be rewritten to match a forged
+            // inventory. Association rejects the altered response before physical import.
             let error =
                 match import_thermal_study_completion(cold, completed.preparation(), transcript) {
                     Ok(_) => panic!("accepted {mutation:?} observation {ordinal} inventory"),
                     Err(error) => error,
                 };
             assert!(
-                error.to_string().contains(expected_error),
+                error
+                    .to_string()
+                    .contains("phase response or callable differs from its original task"),
                 "wrong rejection for {mutation:?} observation {ordinal}: {error}"
             );
         }

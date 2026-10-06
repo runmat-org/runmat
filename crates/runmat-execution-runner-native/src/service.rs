@@ -14,29 +14,12 @@ use runmat_value::Value;
 use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
 use crate::durable::DurableJobBridge;
-use crate::supervisor::ProgramBatchSubmission;
 use crate::{NativeExecutionConfig, NativeExecutionResult};
 
 static NEXT_NATIVE_SCOPE: AtomicU64 = AtomicU64::new(1);
 
-enum FutureState {
-    Deferred(DeferredCall),
-    Running(Arc<TaskCompletion>),
-    Completed(Result<Value, ExecutionServiceError>),
-    Cancelled,
-}
-
-struct TaskRecord {
-    future_id: FutureId,
-    generation: u64,
-}
-
-struct State {
-    next_future: u64,
-    next_task: u64,
-    futures: HashMap<FutureId, FutureState>,
-    tasks: HashMap<TaskId, TaskRecord>,
-}
+mod state;
+use state::{FutureRecord, FutureState, State, TaskRecord};
 
 pub struct NativeExecutionService {
     scope_id: ExecutionScopeId,
@@ -77,25 +60,15 @@ impl NativeExecutionService {
         value: Value,
     ) -> Result<Result<(FutureHandle, Option<TaskId>), Value>, ExecutionServiceError> {
         match value {
-            Value::Future(handle) => Ok(Ok((handle, None))),
+            Value::Future(handle) => {
+                self.validate_scope(handle.scope_id)?;
+                let state = self.state.lock().expect("native service poisoned");
+                Ok(Ok((state.future(&handle)?.handle.clone(), None)))
+            }
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.lock().expect("native service poisoned");
-                let task = state
-                    .tasks
-                    .get(&handle.id)
-                    .ok_or(ExecutionServiceError::UnknownHandle)?;
-                if task.generation != handle.generation {
-                    return Err(ExecutionServiceError::UnknownHandle);
-                }
-                Ok(Ok((
-                    FutureHandle {
-                        id: task.future_id,
-                        scope_id: self.scope_id,
-                        outputs: handle.outputs,
-                    },
-                    Some(handle.id),
-                )))
+                Ok(Ok((state.task_future(&handle)?.clone(), Some(handle.id))))
             }
             value => Ok(Err(value)),
         }
@@ -116,60 +89,63 @@ impl RuntimeExecutionServices for NativeExecutionService {
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let mut state = self.state.lock().expect("native service poisoned");
         let sequence = state.next_future;
-        state.next_future = sequence.wrapping_add(1);
+        state.next_future = sequence
+            .checked_add(1)
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
         let id = FutureId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
-        state.futures.insert(id, FutureState::Deferred(call));
-        Ok(FutureHandle {
+        let handle = FutureHandle {
             id,
             scope_id: self.scope_id,
             outputs: OutputContract { requested_outputs },
-        })
+        };
+        state.futures.insert(
+            id,
+            FutureRecord {
+                handle: handle.clone(),
+                state: FutureState::Deferred(call),
+            },
+        );
+        Ok(handle)
     }
 
     fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("native service poisoned");
-        let call = match state.futures.get(&future.id) {
-            Some(FutureState::Deferred(call)) => call.clone(),
-            Some(_) => {
+        let record = state.future(future)?;
+        let call = match &record.state {
+            FutureState::Deferred(call) => call.clone(),
+            _ => {
                 return Err(ExecutionServiceError::Failed(
                     "future has already been scheduled".into(),
                 ))
             }
-            None => return Err(ExecutionServiceError::UnknownHandle),
         };
-        let (recipe, artifact, inputs) = materialize_call(&call, future.outputs.clone())?;
+        let outputs = record.handle.outputs.clone();
+        let (recipe, artifact, inputs) = materialize_call(&call, outputs.clone())?;
         let sequence = state.next_task;
-        state.next_task = sequence.wrapping_add(1);
+        state.next_task = sequence
+            .checked_add(1)
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
         let id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         let completion = self
             .driver
-            .submit(
-                id,
-                call.function,
-                recipe,
-                artifact,
-                inputs,
-                future.outputs.clone(),
-            )
+            .submit(id, call.function, recipe, artifact, inputs, outputs.clone())
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-        state
-            .futures
-            .insert(future.id, FutureState::Running(completion));
-        let generation = 1;
+        state.future_mut(future)?.state = FutureState::Running(completion);
+        let handle = TaskHandle {
+            id,
+            scope_id: self.scope_id,
+            generation: 1,
+            outputs,
+        };
         state.tasks.insert(
             id,
             TaskRecord {
+                handle: handle.clone(),
                 future_id: future.id,
-                generation,
             },
         );
-        Ok(TaskHandle {
-            id,
-            scope_id: self.scope_id,
-            generation,
-            outputs: future.outputs.clone(),
-        })
+        Ok(handle)
     }
 
     fn submit_job(
@@ -181,16 +157,17 @@ impl RuntimeExecutionServices for NativeExecutionService {
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let outputs = OutputContract { requested_outputs };
         let (recipe, artifact, arguments) = materialize_call(&call, outputs)?;
-        self.durable.submit(ProgramBatchSubmission {
-            recipe,
-            artifact,
-            function: call.function,
-            arguments,
-            requested_outputs,
-            resources: options.resources,
-            idempotency_key: options.idempotency_key,
-            retention_millis: options.retention_millis,
-        })
+        self.durable.submit(
+            runmat_execution_artifact::ProgramExecutionRequest {
+                schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                recipe,
+                artifact,
+                function: call.function,
+                arguments,
+                requested_outputs,
+            },
+            options,
+        )
     }
 
     fn await_job(&self, job: &JobHandle) -> Result<Value, ExecutionServiceError> {
@@ -199,7 +176,13 @@ impl RuntimeExecutionServices for NativeExecutionService {
 
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
         if let Value::Job(handle) = &value {
-            return self.await_job(handle).map(AwaitAction::Completed);
+            return self
+                .durable
+                .try_await_job(handle)
+                .map(|result| match result {
+                    Some(value) => AwaitAction::Completed(value),
+                    None => AwaitAction::Pending(value),
+                });
         }
         let original = value.clone();
         let (future, task_id) = match self.future_for_value(value)? {
@@ -209,23 +192,20 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.validate_scope(future.scope_id)?;
         let completion = {
             let mut state = self.state.lock().expect("native service poisoned");
-            match state
-                .futures
-                .get_mut(&future.id)
-                .ok_or(ExecutionServiceError::UnknownHandle)?
-            {
+            let record = state.future_mut(&future)?;
+            match &mut record.state {
                 FutureState::Deferred(call) => {
                     let call = call.clone();
-                    *state
-                        .futures
-                        .get_mut(&future.id)
-                        .expect("future was just resolved") = FutureState::Completed(Err(
-                        ExecutionServiceError::Failed("future is executing in its caller".into()),
-                    ));
+                    record.state = FutureState::ExecutingInCaller;
                     return Ok(AwaitAction::ExecuteFuture {
                         handle: future,
                         call,
                     });
+                }
+                FutureState::ExecutingInCaller => {
+                    return Err(ExecutionServiceError::Failed(
+                        "future is already executing in its caller".into(),
+                    ))
                 }
                 FutureState::Running(completion) => Arc::clone(completion),
                 FutureState::Completed(result) => {
@@ -238,30 +218,42 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
             }
         };
-        let Some(completion) = completion.try_value() else {
+        let Some(outcome) = completion.try_value() else {
             return Ok(AwaitAction::Pending(original));
         };
-        let result = completion
+        let result = outcome
             .and_then(|success| {
-                let [payload] = success.outputs.as_slice() else {
-                    return Err(
-                        "native runtime call did not return exactly one output value".into(),
-                    );
-                };
                 if !success.result_objects.is_empty() {
                     return Err(
                         "native runtime call returned externalized objects without an artifact consumer"
                             .into(),
                     );
                 }
-                runmat_runtime::execution::value_codec::decode_inline_value(payload)
+                runmat_runtime::execution::value_codec::decode_inline_outputs(&success.outputs, usize::from(future.outputs.requested_outputs))
                     .map_err(|error| error.to_string())
             })
             .map_err(ExecutionServiceError::Failed);
+        let result = if completion.try_execution_evidence().is_some_and(|evidence| {
+            evidence.task.state == runmat_execution::state::TaskState::Cancelled
+        }) && completion
+            .try_checkpoint_evidence()
+            .is_some_and(|checkpoint| checkpoint.delivery_error().is_none())
+        {
+            Err(ExecutionServiceError::Cancelled)
+        } else {
+            result
+        };
         let mut state = self.state.lock().expect("native service poisoned");
-        state
-            .futures
-            .insert(future.id, FutureState::Completed(result.clone()));
+        let record = state.future_mut(&future)?;
+        let result = match &record.state {
+            FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
+            FutureState::Completed(committed) => committed.clone(),
+            FutureState::Running(original) if Arc::ptr_eq(original, &completion) => {
+                record.state = FutureState::Completed(result.clone());
+                result
+            }
+            _ => return Err(ExecutionServiceError::UnknownHandle),
+        };
         if let Some(task_id) = task_id {
             state.tasks.remove(&task_id);
         }
@@ -274,46 +266,61 @@ impl RuntimeExecutionServices for NativeExecutionService {
         result: Result<Value, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
-        self.state
-            .lock()
-            .expect("native service poisoned")
-            .futures
-            .insert(future.id, FutureState::Completed(result));
+        let mut state = self.state.lock().expect("native service poisoned");
+        let record = state.future_mut(future)?;
+        match record.state {
+            FutureState::ExecutingInCaller => {}
+            FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
+            _ => {
+                return Err(ExecutionServiceError::Failed(
+                    "future is not executing in its caller".into(),
+                ))
+            }
+        }
+        if let Ok(value) = &result {
+            runmat_runtime::execution::value_codec::validate_output_arity(
+                value,
+                usize::from(record.handle.outputs.requested_outputs),
+            )
+            .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
+        }
+        record.state = FutureState::Completed(result);
         Ok(())
     }
 
     fn cancel(
         &self,
         value: &Value,
-        _reason: CancellationReason,
+        reason: CancellationReason,
     ) -> Result<(), ExecutionServiceError> {
-        let future_id = match value {
-            Value::Future(handle) => {
-                self.validate_scope(handle.scope_id)?;
-                handle.id
-            }
-            Value::Task(handle) => {
-                self.validate_scope(handle.scope_id)?;
-                self.state
-                    .lock()
-                    .expect("native service poisoned")
-                    .tasks
-                    .get(&handle.id)
-                    .ok_or(ExecutionServiceError::UnknownHandle)?
-                    .future_id
-            }
-            Value::Job(handle) => return self.durable.cancel(handle.clone()),
-            _ => return Err(ExecutionServiceError::UnknownHandle),
-        };
-        let mut state = self.state.lock().expect("native service poisoned");
-        let record = state
-            .futures
-            .get_mut(&future_id)
-            .ok_or(ExecutionServiceError::UnknownHandle)?;
-        if let FutureState::Running(completion) = record {
-            completion.cancel();
+        if let Value::Job(handle) = value {
+            return self.durable.cancel(handle.clone(), reason);
         }
-        *record = FutureState::Cancelled;
+        let (future, task_id) = self
+            .future_for_value(value.clone())?
+            .map_err(|_| ExecutionServiceError::UnknownHandle)?;
+        let mut state = self.state.lock().expect("native service poisoned");
+        let record = state.future_mut(&future)?;
+        if matches!(record.state, FutureState::Completed(_)) {
+            return Ok(());
+        }
+        if let FutureState::Running(_) = &record.state {
+            let id = task_id
+                .or_else(|| {
+                    state
+                        .tasks
+                        .iter()
+                        .find_map(|(id, task)| (task.future_id == future.id).then_some(*id))
+                })
+                .ok_or(ExecutionServiceError::UnknownHandle)?;
+            self.driver
+                .cancel_task(id, reason)
+                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+            // The shared driver owns terminal outcome and quiescence. Keep polling
+            // the original completion; a cancellation request is not a terminal report.
+            return Ok(());
+        }
+        record.state = FutureState::Cancelled;
         Ok(())
     }
 
@@ -321,11 +328,14 @@ impl RuntimeExecutionServices for NativeExecutionService {
         self.driver.cancel_all(reason);
         let mut state = self.state.lock().expect("native service poisoned");
         for future in state.futures.values_mut() {
-            if let FutureState::Running(completion) = future {
+            if let FutureState::Running(completion) = &future.state {
                 completion.cancel();
             }
-            if !matches!(future, FutureState::Completed(_)) {
-                *future = FutureState::Cancelled;
+            if !matches!(
+                future.state,
+                FutureState::Completed(_) | FutureState::Running(_)
+            ) {
+                future.state = FutureState::Cancelled;
             }
         }
     }

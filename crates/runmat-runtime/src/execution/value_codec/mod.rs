@@ -2,6 +2,7 @@ mod decode;
 mod encode;
 mod error;
 mod immutable_class;
+mod outputs;
 
 pub use decode::decode_inline_value;
 pub use encode::encode_inline_value;
@@ -9,6 +10,7 @@ pub use error::ValueCodecError;
 pub use immutable_class::{
     register_immutable_value_class, ImmutableValueClassSchema, ImmutableValueClassValidator,
 };
+pub use outputs::{decode_inline_outputs, encode_inline_outputs, validate_output_arity};
 
 #[cfg(test)]
 mod tests {

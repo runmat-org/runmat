@@ -7,30 +7,34 @@ fn execute(
     host: &runmat_analysis_execution::AnalysisHostWorkload,
     plan: &FeaResourcePlan,
     policy: AnalysisOutputPolicy,
-) -> (ProgramExecutionResponse, AttemptResourceAccounting) {
-    let start = std::time::Instant::now();
+) -> (
+    ProgramExecutionResponse,
+    runmat_analysis_execution::AnalysisPhaseExecutionEvidence,
+) {
     let response = super::process::run_terminated(root, program, policy);
-    let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &response else {
-        panic!("original generic native program failed: {response:?}");
-    };
-    let bytes = result_objects.iter().map(|r| r.encoded_length).sum();
-    let mut allocation = plan.request.clone();
-    allocation
-        .required_capabilities
-        .extend(host.workload.generic_capabilities().unwrap());
-    let accounting = AttemptResourceAccounting {
-        attempt_id: AttemptId::derive(&[plan.identity.digest().bytes()]),
-        worker_id: WorkerId::derive(&[b"terminated-native-j2-coordinator"]),
-        resources: ResourceAccounting::for_reserved_interval(
-            allocation,
-            u64::try_from(start.elapsed().as_millis()).unwrap().max(1),
-            bytes,
-            0,
-            0,
-        )
-        .unwrap(),
-    };
-    // Reserved allocations with observed elapsed time/bytes; no RSS attestation claimed.
+    // Physical execution is a real terminated producer. Admission/history below
+    // is portable-driver fixture evidence, not measured native worker placement.
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let fence = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (submission, _) = crate::analysis_task::prepare_analysis_task(
+        runmat_execution::ExecutionScopeId::derive(&[b"native-j2-fixture", &fence.to_be_bytes()]),
+        runmat_execution::PoolId::derive(&[b"native-j2-fixture", &fence.to_be_bytes()]),
+        host,
+        program,
+        vec![],
+        Default::default(),
+        crate::analysis_task::AnalysisTaskPolicy {
+            resources: plan.request.clone(),
+            resource_plan: Some(plan),
+            prepared_closure: None,
+            retry: runmat_execution::task::RetryPolicy::Never,
+            deadline_unix_millis: None,
+            priority: 0,
+        },
+    )
+    .unwrap();
+    let accounting =
+        crate::analysis_task_pool::phase_fixture::successful_phase(submission, &response, fence);
     (response, accounting)
 }
 
@@ -64,10 +68,12 @@ pub(in super::super) fn execute_preparation(
                     &task.resource_plan,
                     policy,
                 );
-                let mut altered = accounting.clone();
-                altered.resources.artifact_bytes += 1;
+                let altered_response = ProgramExecutionResponse::ExternalizedSuccess {
+                    outputs: vec![],
+                    result_objects: vec![],
+                };
                 assert!(study
-                    .complete_block(&open(), done.clone(), altered)
+                    .complete_block(&open(), altered_response, accounting.clone())
                     .is_err());
                 assert_eq!(
                     study.phase(),
@@ -93,10 +99,12 @@ pub(in super::super) fn execute_preparation(
                     &task.resource_plan,
                     policy,
                 );
-                let mut altered = accounting.clone();
-                altered.resources.artifact_bytes += 1;
+                let altered_response = ProgramExecutionResponse::ExternalizedSuccess {
+                    outputs: vec![],
+                    result_objects: vec![],
+                };
                 assert!(study
-                    .complete_field_recovery(&open(), done.clone(), altered)
+                    .complete_field_recovery(&open(), altered_response, accounting.clone())
                     .is_err());
                 assert_eq!(
                     study.phase(),

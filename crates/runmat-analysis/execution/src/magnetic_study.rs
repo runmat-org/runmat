@@ -6,6 +6,7 @@ use crate::phase_accounting::validate_analysis_phase_accounting as validate_acco
 use crate::steady_study::{SteadyStudyPhase, SteadyStudySource, SteadyStudyTail};
 use std::collections::BTreeSet;
 
+use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     study::{
@@ -15,16 +16,15 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     import_magnetostatic_result, prepare_magnetostatic_task, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisOutputPolicy, ImportedAccuracy, ImportedMagnetostaticResult, ImportedPublishedResult,
-    ImportedSemanticState, MagnetostaticTaskPreparation, PlannedResourceUsageAttempt,
-    PlannedResourceUsageGraph, PreparedAccuracy, PreparedMagnetostaticTask, PreparedResourceUsage,
-    PreparedResultPublication, PreparedSemanticStatePublication,
+    ImportedSemanticState, MagnetostaticTaskPreparation, PreparedAccuracy,
+    PreparedMagnetostaticTask, PreparedResourceUsage, PreparedResultPublication,
+    PreparedSemanticStatePublication,
 };
 
 mod completion;
@@ -163,7 +163,7 @@ impl MagneticStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(MagneticStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
@@ -180,13 +180,7 @@ impl MagneticStudyCoordinator {
             task,
             self.preparation.output_policy.inventory_limits(),
         )?;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting: accounting.clone(),
-            }],
-            accounting.resources.usage.wall_millis,
-        )?;
+        let graph = accounting.resource_graph(&task.resource_plan)?;
         let usage = crate::prepare_planned_resource_graph_usage(
             &task.resource_plan,
             task.host.workload.identity.digest(),
@@ -213,7 +207,7 @@ impl MagneticStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = MagneticStudyResultPhase::Accuracy;
         let tail = self
@@ -241,7 +235,7 @@ impl MagneticStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = MagneticStudyResultPhase::State {
             ordinal: self.states().len(),
@@ -269,7 +263,7 @@ impl MagneticStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = MagneticStudyResultPhase::Publication;
         let tail = self

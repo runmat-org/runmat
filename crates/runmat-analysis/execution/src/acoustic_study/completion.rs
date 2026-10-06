@@ -20,7 +20,7 @@ pub struct AcousticStudyResultClosure {
     pub phase: AcousticStudyResultPhase,
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 
 /// Canonical frequency coordinate scopes every saved entry phase.
@@ -37,7 +37,7 @@ pub struct AcousticStudyEntryClosure {
 pub struct AcousticStudyAssemblyClosure {
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 
 impl AcousticStudyResultClosure {
@@ -45,13 +45,13 @@ impl AcousticStudyResultClosure {
         phase: AcousticStudyResultPhase,
         host: &AnalysisHostWorkload,
         response: &ProgramExecutionResponse,
-        accounting: &AttemptResourceAccounting,
+        accounting: &AnalysisPhaseExecutionEvidence,
     ) -> Self {
         Self {
             phase,
             workload: host.workload.clone(),
             response: response.clone(),
-            accounting: accounting.clone(),
+            execution: accounting.clone(),
         }
     }
 
@@ -216,16 +216,16 @@ pub fn import_acoustic_study_completion(
             closure.validate_for(phase, host)?;
             match phase {
                 AcousticStudyResultPhase::Solve => {
-                    entry.complete_solve(source, closure.response, closure.accounting)?
+                    entry.complete_solve(source, closure.response, closure.execution)?
                 }
                 AcousticStudyResultPhase::Accuracy => {
-                    entry.complete_accuracy(source, closure.response, closure.accounting)?
+                    entry.complete_accuracy(source, closure.response, closure.execution)?
                 }
                 AcousticStudyResultPhase::State { .. } => {
-                    entry.complete_next_state(source, closure.response, closure.accounting)?
+                    entry.complete_next_state(source, closure.response, closure.execution)?
                 }
                 AcousticStudyResultPhase::Publication => {
-                    entry.complete_publication(source, closure.response, closure.accounting)?
+                    entry.complete_publication(source, closure.response, closure.execution)?
                 }
             }
         }
@@ -241,7 +241,7 @@ pub fn import_acoustic_study_completion(
     study.complete_assembly(
         source,
         assembly.response,
-        assembly.accounting,
+        assembly.execution,
         wave_wall_millis,
     )?;
     study.into_completed()

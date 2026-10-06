@@ -59,13 +59,15 @@ impl MagneticStudyObjectSource {
         definition: Digest,
         staging: &crate::analysis::storage::AnalysisPublicationBuilder,
     ) -> Result<Vec<String>, crate::analysis::storage::AnalysisPublicationError> {
-        staging.require_source_objects(&completed.catalog.objects)?;
-        self.authenticate(completed)?;
-        super::super::study_result_manifest::persist_catalog_objects(
+        {
+            let _source_phase = staging.begin_source_phase()?;
+            staging.require_source_objects(&completed.catalog.objects)?;
+            self.authenticate(completed)?;
+        }
+        super::super::study_publication::catalog::persist_objects(
             self,
             &completed.catalog,
             definition,
-            "magnetic-object",
             staging,
         )
     }

@@ -2,10 +2,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use runmat_execution::state::{AttemptState, TaskState};
-use runmat_execution::TaskId;
 use runmat_execution_runner::driver::DriverEventKind;
 use runmat_execution_runner::port::BackendReport;
-use runmat_execution_runner::{AttemptSuccess, DriverAction, DriverCommand, DriverSnapshot};
+use runmat_execution_runner::task::TaskRecord;
+use runmat_execution_runner::{AttemptSuccess, Driver, DriverAction, DriverCommand};
 
 use super::RemotePoolDriver;
 
@@ -22,8 +22,7 @@ impl RemotePoolDriver {
                     return;
                 }
             };
-            let snapshot = driver.snapshot();
-            let outcome = snapshot.tasks.get(&task_id).and_then(|task| {
+            let outcome = driver.task_record(task_id).ok().and_then(|task| {
                 if task.state == TaskState::Succeeded {
                     Some(match &task.committed {
                         Some(commit) => self
@@ -38,7 +37,7 @@ impl RemotePoolDriver {
                         None => Err("succeeded remote task has no committed result".into()),
                     })
                 } else {
-                    terminal_failure(&snapshot, task_id, task.state).map(Err)
+                    terminal_failure(&driver, task).map(Err)
                 }
             });
             // Serialize committed-object protection and stale-result disposal with
@@ -75,18 +74,15 @@ impl RemotePoolDriver {
     }
 
     pub(super) fn resolve_non_success_terminals(&self) {
-        let snapshot = self
-            .driver
-            .lock()
-            .expect("remote driver poisoned")
-            .snapshot();
-        let terminal = snapshot
-            .tasks
-            .iter()
-            .filter_map(|(task_id, task)| {
-                terminal_failure(&snapshot, *task_id, task.state).map(|message| (*task_id, message))
-            })
-            .collect::<Vec<_>>();
+        let terminal = {
+            let driver = self.driver.lock().expect("remote driver poisoned");
+            driver
+                .task_records()
+                .filter_map(|task| {
+                    terminal_failure(&driver, task).map(|message| (task.id(), message))
+                })
+                .collect::<Vec<_>>()
+        };
         for (task_id, message) in terminal {
             self.resolve_task(task_id, Err(message));
         }
@@ -110,32 +106,30 @@ impl RemotePoolDriver {
     }
 }
 
-fn terminal_failure(
-    snapshot: &DriverSnapshot,
-    task_id: TaskId,
-    state: TaskState,
-) -> Option<String> {
-    let message = match state {
+fn terminal_failure(driver: &Driver, task: &TaskRecord) -> Option<String> {
+    let task_id = task.id();
+    let message = match task.state {
         TaskState::Failed => "remote task failed",
         TaskState::Indeterminate => "remote worker was lost",
         TaskState::Cancelled
-            if !snapshot.attempts.values().any(|attempt| {
-                attempt.request.task_id == task_id
-                    && matches!(
+            if !driver
+                .task_attempts(task_id)
+                .expect("task is borrowed from this driver")
+                .any(|attempt| {
+                    matches!(
                         attempt.state,
                         AttemptState::Assigned | AttemptState::Starting | AttemptState::Running
                     )
-            }) =>
+                }) =>
         {
             "remote task was cancelled"
         }
         _ => return None,
     };
     Some(
-        snapshot
-            .attempts
-            .values()
-            .filter(|attempt| attempt.request.task_id == task_id)
+        driver
+            .task_attempts(task_id)
+            .expect("task is borrowed from this driver")
             .max_by_key(|attempt| attempt.request.ordinal)
             .and_then(|attempt| attempt.terminal.as_ref())
             .and_then(|terminal| terminal.diagnostic.clone())

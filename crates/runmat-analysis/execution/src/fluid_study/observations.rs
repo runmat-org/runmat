@@ -77,7 +77,7 @@ impl FluidStudyCoordinator {
         source: &impl CacheImport,
         ordinal: usize,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(FluidStudyPhase::AwaitingObservationPartitions)?;
         if self.observation_state.contributions.contains_key(&ordinal) {
@@ -140,7 +140,7 @@ impl FluidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let ordinal = self.observation_state.reduced.len();
         self.require(FluidStudyPhase::AwaitingObservationReduction { ordinal })?;
@@ -205,7 +205,7 @@ impl FluidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(FluidStudyPhase::AwaitingObservationAssembly)?;
         let task = self

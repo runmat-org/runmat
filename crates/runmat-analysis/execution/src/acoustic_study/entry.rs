@@ -1,6 +1,7 @@
 //! Governed lifecycle of one explicitly keyed entry of an authored acoustic frequency plan.
 
 use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
+use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     planning::resource::FeaResourcePlan,
@@ -8,7 +9,6 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::Digest;
 use runmat_execution_artifact::{cache::CacheImport, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 use crate::{
     complete_result_publication_resource_usage, extend_resource_usage, import_accuracy,
@@ -17,10 +17,9 @@ use crate::{
     prepare_semantic_state_publication, AccuracyPreparation, AcousticHarmonicTaskPreparation,
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, ImportedAccuracy,
     ImportedAcousticHarmonicResult, ImportedPublishedResult, ImportedSemanticState,
-    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAccuracy,
-    PreparedAcousticHarmonicTask, PreparedResourceUsage, PreparedResultPublication,
-    PreparedSemanticStatePublication, ResultPublicationPreparation,
-    SemanticStatePublicationPreparation,
+    PlannedResourceUsageAttempt, PreparedAccuracy, PreparedAcousticHarmonicTask,
+    PreparedResourceUsage, PreparedResultPublication, PreparedSemanticStatePublication,
+    ResultPublicationPreparation, SemanticStatePublicationPreparation,
 };
 
 use super::completion::{AcousticStudyResultClosure, AcousticStudyResultPhase};
@@ -149,15 +148,12 @@ impl AcousticStudyEntryCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(AcousticStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting: accounting.clone(),
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let closure = AcousticStudyResultClosure::new(
             AcousticStudyResultPhase::Solve,
             &task.host,
@@ -170,13 +166,7 @@ impl AcousticStudyEntryCoordinator {
             task,
             self.preparation.output_policy.inventory_limits(),
         )?;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting: accounting.clone(),
-            }],
-            accounting.resources.usage.wall_millis,
-        )?;
+        let graph = accounting.resource_graph(&task.resource_plan)?;
         let usage = crate::prepare_planned_resource_graph_usage(
             &task.resource_plan,
             task.host.workload.identity.digest(),
@@ -189,7 +179,7 @@ impl AcousticStudyEntryCoordinator {
         self.result = Some(result);
         self.usage = Some(usage);
         self.closures.push(closure);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.phase = AcousticStudyPhase::ReadyForAccuracy;
         Ok(())
     }
@@ -234,15 +224,12 @@ impl AcousticStudyEntryCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(AcousticStudyPhase::AwaitingAccuracy)?;
         let task = self.accuracy_task.as_ref().expect("awaited accuracy");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting: accounting.clone(),
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let closure = AcousticStudyResultClosure::new(
             AcousticStudyResultPhase::Accuracy,
             &task.host,
@@ -258,7 +245,7 @@ impl AcousticStudyEntryCoordinator {
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
         self.accuracy = Some(accuracy);
         self.closures.push(closure);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.usage = Some(usage);
         self.advance_state();
         Ok(())
@@ -297,17 +284,14 @@ impl AcousticStudyEntryCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(AcousticStudyPhase::AwaitingState {
             ordinal: self.states.len(),
         })?;
         let task = self.state_task.as_ref().expect("awaited state");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting: accounting.clone(),
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let closure = AcousticStudyResultClosure::new(
             AcousticStudyResultPhase::State {
                 ordinal: self.states.len(),
@@ -325,7 +309,7 @@ impl AcousticStudyEntryCoordinator {
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
         self.states.push(state);
         self.closures.push(closure);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.usage = Some(usage);
         self.state_task = None;
         self.advance_state();
@@ -376,15 +360,12 @@ impl AcousticStudyEntryCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(AcousticStudyPhase::AwaitingPublication)?;
         let task = self.publication_task.as_ref().expect("awaited publication");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting: accounting.clone(),
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let closure = AcousticStudyResultClosure::new(
             AcousticStudyResultPhase::Publication,
             &task.host,
@@ -401,15 +382,12 @@ impl AcousticStudyEntryCoordinator {
             task,
             &publication,
             self.baseline.as_ref().expect("frozen baseline"),
-            &PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting,
-            },
+            &accounting,
             self.preparation.output_policy,
         )?;
         self.publication = Some(publication);
         self.closures.push(closure);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.terminal = Some(terminal);
         self.phase = AcousticStudyPhase::Complete;
         Ok(())
@@ -498,16 +476,9 @@ impl AcousticStudyEntryCoordinator {
     fn extend_usage(
         &self,
         plan: &FeaResourcePlan,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<PreparedResourceUsage> {
-        let wall_millis = accounting.resources.usage.wall_millis;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: plan.clone(),
-                accounting,
-            }],
-            wall_millis,
-        )?;
+        let graph = accounting.resource_graph(plan)?;
         extend_resource_usage(
             self.usage.as_ref().expect("completed solve usage"),
             &graph,

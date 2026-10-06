@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
 
 use minicbor::Encoder;
@@ -44,14 +45,23 @@ impl ProgramExecutionDescriptor {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProgramExecutionRequest {
+pub struct ProgramExecutionRequest<
+    R = ProgramBuildRecipe,
+    A = ProgramArtifact,
+    V = Vec<ValuePayload>,
+> {
     pub schema_version: u16,
-    pub recipe: ProgramBuildRecipe,
-    pub artifact: ProgramArtifact,
+    pub recipe: R,
+    pub artifact: A,
     pub function: usize,
-    pub arguments: Vec<ValuePayload>,
+    pub arguments: V,
     pub requested_outputs: u16,
 }
+
+/// Original request fields borrowed for validation, identity and transport encoding.
+/// Owned deserialization retains the same default request type and wire schema.
+pub type BorrowedProgramExecutionRequest<'a> =
+    ProgramExecutionRequest<&'a ProgramBuildRecipe, &'a ProgramArtifact, &'a [ValuePayload]>;
 
 impl ProgramExecutionRequest {
     pub fn from_parts(
@@ -71,43 +81,60 @@ impl ProgramExecutionRequest {
         request.validate()?;
         Ok(request)
     }
+}
+
+impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValuePayload]>>
+    ProgramExecutionRequest<R, A, V>
+{
+    pub fn as_borrowed(&self) -> BorrowedProgramExecutionRequest<'_> {
+        ProgramExecutionRequest {
+            schema_version: self.schema_version,
+            recipe: self.recipe.borrow(),
+            artifact: self.artifact.borrow(),
+            function: self.function,
+            arguments: self.arguments.as_ref(),
+            requested_outputs: self.requested_outputs,
+        }
+    }
 
     pub fn validate(&self) -> ArtifactResult<()> {
+        let recipe = self.recipe.borrow();
+        let artifact = self.artifact.borrow();
+        let arguments = self.arguments.as_ref();
         if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1 {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
         }
-        self.artifact.validate_against(&self.recipe)?;
-        if !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
-            || self.requested_outputs != self.recipe.outputs.requested_outputs
-            || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
+        artifact.validate_against(recipe)?;
+        if !entrypoint_matches(artifact.form, self.function, &recipe.entrypoint)
+            || self.requested_outputs != recipe.outputs.requested_outputs
+            || arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
             || (matches!(
-                self.artifact.form,
+                artifact.form,
                 ExecutableForm::InterpreterScriptV1 | ExecutableForm::TestAttemptV1
-            ) && !self.arguments.is_empty())
+            ) && !arguments.is_empty())
         {
             return Err(ArtifactError::Invalid(
                 "program execution request has an inconsistent callable, output contract, or argument count".into(),
             ));
         }
-        if self.artifact.form == ExecutableForm::ExecutableUnitV3 {
-            let envelope = self
-                .artifact
+        if artifact.form == ExecutableForm::ExecutableUnitV3 {
+            let envelope = artifact
                 .executable_unit()?
                 .expect("executable-unit form returns its validated envelope");
             if usize::try_from(envelope.manifest.identity.entrypoint_function.0).ok()
                 != Some(self.function)
                 || (envelope.manifest.identity.entrypoint_kind
                     == runmat_execution::ExecutableEntrypointKind::Script
-                    && !self.arguments.is_empty())
+                    && !arguments.is_empty())
             {
                 return Err(ArtifactError::Invalid(
                     "executable unit request does not match its declared entrypoint".into(),
                 ));
             }
         }
-        for argument in &self.arguments {
+        for argument in arguments {
             argument
                 .validate(ValueLimits::default())
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
@@ -117,15 +144,15 @@ impl ProgramExecutionRequest {
 
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
         self.validate()?;
-        self.artifact.target.validate_for_portable_host()
+        self.artifact.borrow().target.validate_for_portable_host()
     }
 
     pub fn canonical_digest(&self) -> ArtifactResult<Digest> {
         self.validate()?;
-        let recipe_id = self.recipe.id()?;
+        let recipe_id = self.recipe.borrow().id()?;
         let function = u64::try_from(self.function)
             .map_err(|_| ArtifactError::Limit("program function index exceeds u64".into()))?;
-        let argument_count = u64::try_from(self.arguments.len())
+        let argument_count = u64::try_from(self.arguments.as_ref().len())
             .map_err(|_| ArtifactError::Limit("program argument count exceeds u64".into()))?;
         let mut bytes = b"runmat-program-execution-request\0".to_vec();
         let mut encoder = Encoder::new(&mut bytes);
@@ -133,12 +160,12 @@ impl ProgramExecutionRequest {
             .array(6)
             .and_then(|encoder| encoder.u16(self.schema_version))
             .and_then(|encoder| encoder.bytes(recipe_id.0.bytes()))
-            .and_then(|encoder| encoder.bytes(self.artifact.id.0.bytes()))
+            .and_then(|encoder| encoder.bytes(self.artifact.borrow().id.0.bytes()))
             .and_then(|encoder| encoder.u64(function))
             .and_then(|encoder| encoder.u16(self.requested_outputs))
             .and_then(|encoder| encoder.array(argument_count))
             .map_err(encoding)?;
-        for argument in &self.arguments {
+        for argument in self.arguments.as_ref() {
             let argument = serde_json::to_vec(argument)
                 .map_err(|error| ArtifactError::Encoding(error.to_string()))?;
             encoder
@@ -200,7 +227,14 @@ impl ProgramExecutionResponse {
         }
     }
 
-    pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
+    pub fn validate_against<
+        R: Borrow<ProgramBuildRecipe>,
+        A: Borrow<ProgramArtifact>,
+        V: AsRef<[ValuePayload]>,
+    >(
+        &self,
+        request: &ProgramExecutionRequest<R, A, V>,
+    ) -> ArtifactResult<()> {
         request.validate()?;
         match self {
             Self::Success { value } => {
@@ -209,14 +243,18 @@ impl ProgramExecutionResponse {
                         "single-value response differs from its output contract".into(),
                     ));
                 }
-                value
-                    .validate(ValueLimits::default())
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
+                validate_externalized_inventory(
+                    std::slice::from_ref(value),
+                    &[],
+                    request.requested_outputs,
+                )
             }
             Self::ExternalizedSuccess {
                 outputs,
                 result_objects,
-            } => validate_externalized_success(request, outputs, result_objects),
+            } => {
+                validate_externalized_inventory(outputs, result_objects, request.requested_outputs)
+            }
             Self::Failure { message } => {
                 if message.is_empty() || message.len() > 1024 * 1024 {
                     return Err(ArtifactError::Limit(
@@ -229,21 +267,12 @@ impl ProgramExecutionResponse {
     }
 }
 
-fn validate_externalized_success(
-    request: &ProgramExecutionRequest,
-    outputs: &[ValuePayload],
-    result_objects: &[ValueRef],
-) -> ArtifactResult<()> {
-    validate_externalized_inventory(outputs, result_objects, request.requested_outputs)
-}
-
 pub(super) fn validate_externalized_inventory(
     outputs: &[ValuePayload],
     result_objects: &[ValueRef],
     requested_outputs: u16,
 ) -> ArtifactResult<()> {
     if outputs.len() != usize::from(requested_outputs)
-        || result_objects.is_empty()
         || result_objects.len() > MAX_PROGRAM_EXECUTION_RESULT_OBJECTS
     {
         return Err(ArtifactError::Limit(
@@ -401,6 +430,39 @@ mod tests {
     }
 
     #[test]
+    fn borrowed_request_preserves_original_payload_wire_identity_and_cold_decode() {
+        let mut owned = request();
+        owned.arguments.push(ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::String("λ\\\"\n".repeat(25_000)),
+        )));
+        let borrowed = owned.as_borrowed();
+        assert!(std::ptr::eq(borrowed.recipe, &owned.recipe));
+        assert!(std::ptr::eq(borrowed.artifact, &owned.artifact));
+        assert_eq!(borrowed.arguments.as_ptr(), owned.arguments.as_ptr());
+        borrowed.validate_for_portable_host().unwrap();
+        let bytes = serde_json::to_vec(&borrowed).unwrap();
+        assert_eq!(bytes, serde_json::to_vec(&owned).unwrap());
+        assert_eq!(
+            borrowed.canonical_digest().unwrap(),
+            owned.canonical_digest().unwrap()
+        );
+        let cold: ProgramExecutionRequest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(cold, owned);
+        cold.validate_for_portable_host().unwrap();
+        let response = ProgramExecutionResponse::Success {
+            value: ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Logical(
+                true,
+            ))),
+        };
+        response.validate_against(&borrowed).unwrap();
+        response.validate_against(&cold).unwrap();
+        let mut foreign = borrowed;
+        foreign.function += 1;
+        assert!(foreign.validate().is_err());
+        assert!(response.validate_against(&foreign).is_err());
+    }
+
+    #[test]
     fn script_form_has_an_explicit_argument_free_entrypoint() {
         let mut script = request();
         script.recipe.entrypoint = "script".into();
@@ -451,6 +513,48 @@ mod tests {
             ProgramExecutionResponse::ExternalizedSuccess { .. }
         ));
         response.validate_against(&request).unwrap();
+    }
+
+    #[test]
+    fn inline_output_lists_preserve_exact_arity_through_cold_transport() {
+        for count in [0, 2, 3] {
+            let mut request = request();
+            request.requested_outputs = count;
+            request.recipe.outputs.requested_outputs = count;
+            request.artifact = ProgramArtifact::materialize(
+                &request.recipe,
+                ExecutableForm::InterpreterBytecodeV1,
+                b"program".to_vec(),
+            )
+            .unwrap();
+            let outputs = (0..count)
+                .map(|index| {
+                    ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::F64Bits(
+                        f64::from(index).to_bits(),
+                    )))
+                })
+                .collect();
+            let response = ProgramExecutionResponse::from_success_outputs(outputs, vec![]);
+            response.validate_against(&request).unwrap();
+            let cold: ProgramExecutionResponse =
+                serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
+            assert_eq!(cold, response);
+            cold.validate_against(&request).unwrap();
+            request.requested_outputs = 1;
+            request.recipe.outputs.requested_outputs = 1;
+            request.artifact = ProgramArtifact::materialize(
+                &request.recipe,
+                ExecutableForm::InterpreterBytecodeV1,
+                b"program".to_vec(),
+            )
+            .unwrap();
+            assert!(cold.validate_against(&request).is_err());
+        }
+        let missing = ProgramExecutionResponse::from_success_outputs(
+            vec![ValuePayload::Object(Box::new(result_reference(b"root")))],
+            vec![],
+        );
+        assert!(missing.validate_against(&request()).is_err());
     }
 
     #[test]

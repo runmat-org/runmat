@@ -119,7 +119,7 @@ pub(super) async fn run() {
         )
         .unwrap();
         let result = wait_for_native_task(
-            session
+            &session
                 .submit(prepared.request().clone(), submission)
                 .unwrap(),
         )

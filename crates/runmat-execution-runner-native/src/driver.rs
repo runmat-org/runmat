@@ -1,10 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use runmat_execution::identity::{ArtifactId, WorkerId};
-use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
-use runmat_execution::state::PoolState;
+use runmat_execution::identity::ArtifactId;
+use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::ValuePayload;
 use runmat_execution::{
@@ -13,8 +11,8 @@ use runmat_execution::{
 use runmat_execution_artifact::{ProgramArtifact, ProgramBuildRecipe};
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
-    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
-    DriverCommand, DriverConfig, PoolSpec, TaskSubmission, WorkerSpec,
+    AttemptReport, AttemptRequest, Driver, DriverAction, DriverCommand, DriverConfig,
+    TaskSubmission,
 };
 
 mod process;
@@ -25,10 +23,7 @@ use crate::{
     FilesystemObjectStore, NativeExecutionConfig, NativeExecutionError, NativeExecutionResult,
 };
 
-pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
-pub const NATIVE_ACCELERATOR_REQUIRED_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED";
-pub const NATIVE_ACCELERATOR_REQUESTS_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUESTS";
-pub(crate) type TransferResult = Result<AttemptSuccess, String>;
+use crate::process_provider::TransferResult;
 
 mod clock;
 mod completion;
@@ -54,53 +49,8 @@ impl LocalDriver {
         config: NativeExecutionConfig,
         scope_id: ExecutionScopeId,
     ) -> NativeExecutionResult<Arc<Self>> {
-        config
-            .validate()
-            .map_err(NativeExecutionError::Configuration)?;
-        let pool_id = PoolId::derive(&[scope_id.bytes(), b"local"]);
-        let cpu = config
-            .max_workers
-            .saturating_mul(config.worker_cpu_millicores);
-        let memory = u64::from(config.max_workers).saturating_mul(config.worker_memory_bytes);
-        let scratch = u64::from(config.max_workers).saturating_mul(config.worker_scratch_bytes);
-        let resources = ResourceInventory {
-            cpu_millicores: cpu,
-            memory_bytes: memory,
-            scratch_bytes: scratch,
-            accelerators: config.worker_accelerators.clone(),
-            capabilities: config.worker_capabilities.clone(),
-        };
         let mut driver = Driver::new(DriverConfig::default(), 1)?;
-        driver.handle(DriverCommand::RegisterScope {
-            scope_id,
-            parent: None,
-        })?;
-        driver.handle(DriverCommand::CreatePool(PoolSpec {
-            id: pool_id,
-            min_workers: config.max_workers,
-            max_workers: config.max_workers,
-            max_in_flight: config.max_workers,
-            resource_limit: resources.clone(),
-        }))?;
-        driver.handle(DriverCommand::SetPoolState {
-            pool_id,
-            state: PoolState::Ready,
-        })?;
-        for index in 0..config.max_workers {
-            let index_bytes = index.to_be_bytes();
-            let worker_id = WorkerId::derive(&[pool_id.bytes().as_slice(), &index_bytes]);
-            driver.handle(DriverCommand::RegisterWorker(WorkerSpec {
-                id: worker_id,
-                pool_id,
-                resources: ResourceInventory {
-                    cpu_millicores: config.worker_cpu_millicores,
-                    memory_bytes: config.worker_memory_bytes,
-                    scratch_bytes: config.worker_scratch_bytes,
-                    accelerators: config.worker_accelerators.clone(),
-                    capabilities: config.worker_capabilities.clone(),
-                },
-            }))?;
-        }
+        let pool_id = crate::native_pool::register(&mut driver, &config, scope_id)?;
         prepare_session_root(&config.store_root)?;
         let store_lifetime =
             crate::program_object_source::SessionStoreLifetime::new(config.store_root.clone());
@@ -325,21 +275,70 @@ impl LocalDriver {
             .collect())
     }
 
+    pub(crate) fn cancel_task(
+        self: &Arc<Self>,
+        task_id: TaskId,
+        reason: CancellationReason,
+    ) -> NativeExecutionResult<()> {
+        let now_millis = self.clock.now_millis();
+        self.apply_cancellation(DriverCommand::CancelTask {
+            task_id,
+            reason,
+            now_millis,
+        })
+    }
+
     pub(crate) fn cancel_all(self: &Arc<Self>, reason: CancellationReason) {
-        let actions = {
+        let now_millis = self.clock.now_millis();
+        self.apply_cancellation(DriverCommand::CancelScope {
+            scope_id: self.scope_id,
+            reason,
+            now_millis,
+        })
+        .expect("native cancellation uses an admitted scope and monotonic driver clock");
+    }
+
+    fn apply_cancellation(
+        self: &Arc<Self>,
+        mut command: DriverCommand,
+    ) -> NativeExecutionResult<()> {
+        let completions = self
+            .completions
+            .lock()
+            .expect("completion registry poisoned")
+            .iter()
+            .map(|(id, completion)| (*id, Arc::clone(completion)))
+            .collect::<Vec<_>>();
+        let (actions, terminal, checkpoint) = {
             let mut driver = self.driver.lock().expect("local driver poisoned");
-            let now_millis = self.clock.now_millis().max(driver.now_millis());
-            let actions = driver
-                .handle(DriverCommand::CancelScope {
-                    scope_id: self.scope_id,
-                    reason,
-                    now_millis,
+            match &mut command {
+                DriverCommand::CancelTask { now_millis, .. }
+                | DriverCommand::CancelScope { now_millis, .. } => {
+                    *now_millis = (*now_millis).max(driver.now_millis())
+                }
+                _ => unreachable!("cancellation command constructed by this adapter"),
+            }
+            let actions = driver.handle(command)?;
+            let snapshot = driver.snapshot();
+            let checkpoint = self.persist_observed_snapshot(&snapshot);
+            let terminal = completions
+                .into_iter()
+                .filter_map(|(id, completion)| {
+                    completion::from_task_snapshot(
+                        &snapshot,
+                        id,
+                        Err("original cancellation decision".into()),
+                    )
+                    .map(|original| (completion, original))
                 })
-                .expect("native cancellation uses a monotonic driver clock");
-            self.persist_observed_snapshot(&driver.snapshot());
-            actions
+                .collect::<Vec<_>>();
+            (actions, terminal, checkpoint)
         };
+        for (completion, original) in terminal {
+            completion.complete(original, checkpoint.clone());
+        }
         Self::dispatch(Arc::clone(self), actions);
+        Ok(())
     }
 
     fn dispatch(this: Arc<Self>, actions: Vec<DriverAction>) {
@@ -382,20 +381,7 @@ impl LocalDriver {
                 .cloned()
                 .expect("scheduled task has completion");
             let observed = process::execute_attempt(&this, &request, &completion);
-            let result = observed.result;
-            let report = match &result {
-                Ok(success) => AttemptReport::Succeeded {
-                    result: success.clone(),
-                },
-                Err(_) if completion.cancelled.load(Ordering::Acquire) => AttemptReport::Cancelled,
-                Err(message) => AttemptReport::Failed {
-                    kind: AttemptFailureKind::Execution,
-                    message: message.clone(),
-                },
-            };
-            let mut report = BackendReport::for_request(&request, report);
-            report.execution = Some(Box::new(observed.execution));
-            report.unsuccessful_resources = observed.unsuccessful_resources;
+            let (result, report) = observed.into_report(&request, completion.as_ref());
             let (actions, snapshot, checkpoint) = {
                 let mut driver = this.driver.lock().expect("local driver poisoned");
                 let actions = driver

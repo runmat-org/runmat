@@ -4,42 +4,6 @@ use runmat_analysis_fea::study::CompiledAnalysisStudy;
 use runmat_execution::Digest;
 use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact, StableDigest};
 
-/// Persist a complete authenticated inventory through the shared immutable artifact owner.
-/// Family adapters authenticate their semantic completion before calling this transport helper.
-pub(super) fn persist_catalog_objects(
-    source: &impl runmat_execution::value::PublishedObjectSource,
-    catalog: &runmat_execution::value::PublishedObjectCatalog,
-    definition: Digest,
-    object_stage_prefix: &str,
-    staging: &super::storage::AnalysisPublicationBuilder,
-) -> Result<Vec<String>, super::storage::AnalysisPublicationError> {
-    catalog.validate().map_err(|e| e.to_string())?;
-    staging.require_source_objects(&catalog.objects)?;
-    catalog
-        .objects
-        .iter()
-        .map(|reference| {
-            let bytes = source.read_verified(reference)?;
-            if Digest::sha256(&bytes) != reference.logical_digest
-                || bytes.len() as u64 != reference.encoded_length
-            {
-                return Err("study catalog object digest or length mismatch".into());
-            }
-            staging.persist_evidence(
-                &definition.to_string(),
-                &format!(
-                    "{object_stage_prefix}-{}",
-                    reference
-                        .logical_digest
-                        .to_string()
-                        .trim_start_matches("sha256:")
-                ),
-                serde_json::json!({"reference": reference, "bytes": bytes}),
-            )
-        })
-        .collect()
-}
-
 /// The generic axes retain each physics owner's actual workload and numerical evidence schema.
 /// Field names and ordering preserve the existing structural typed-result JSON contract.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -141,79 +105,5 @@ impl<Workloads, NumericalEvidence> StudyResultManifest<Workloads, NumericalEvide
             numerical_evidence,
             public_run: public_run.clone(),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use runmat_execution::value::{
-        artifact_object_value_id, PublishedObjectCatalog, PublishedObjectSource, ValueRef,
-        ValueRefKind,
-    };
-    struct SubstitutedSource(std::sync::atomic::AtomicUsize);
-    impl PublishedObjectSource for SubstitutedSource {
-        fn read_verified(&self, _: &ValueRef) -> Result<Vec<u8>, String> {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(b"other".to_vec())
-        }
-    }
-    #[test]
-    fn shared_catalog_persistence_rejects_substituted_payload_before_writing() {
-        let logical_digest = Digest::sha256(b"original");
-        let encryption_context = Digest::sha256(b"authority");
-        let reference = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
-            id: artifact_object_value_id(logical_digest, encryption_context, "authority"),
-            logical_digest,
-            encoded_length: 8,
-            media_type: "application/vnd.runmat.test".into(),
-            value_schema: "runmat.test".into(),
-            encryption_context,
-            kind: ValueRefKind::ResultObject,
-            authorization_scope: "authority".into(),
-            resident_fence: None,
-        };
-        let catalog =
-            PublishedObjectCatalog::new(vec![reference.clone()], vec![reference]).unwrap();
-        let mut staging = crate::analysis::storage::AnalysisPublicationBuilder::new(
-            Digest::sha256(b"test"),
-            128 << 20,
-        )
-        .unwrap();
-        let source = SubstitutedSource(std::sync::atomic::AtomicUsize::new(0));
-        assert!(matches!(
-            persist_catalog_objects(
-                &source,
-                &catalog,
-                Digest::sha256(b"study"),
-                "test-object",
-                &staging
-            ),
-            Err(crate::analysis::storage::AnalysisPublicationError::ResourceLimit { .. })
-        ));
-        assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 0);
-        staging.admit_source_objects(&catalog.objects).unwrap();
-        assert!(persist_catalog_objects(
-            &source,
-            &catalog,
-            Digest::sha256(b"study"),
-            "test-object",
-            &staging,
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("digest or length mismatch"));
-        assert_eq!(source.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-        let mut absent = catalog;
-        absent.objects.clear();
-        assert!(persist_catalog_objects(
-            &source,
-            &absent,
-            Digest::sha256(b"study"),
-            "test-object",
-            &staging,
-        )
-        .is_err());
     }
 }

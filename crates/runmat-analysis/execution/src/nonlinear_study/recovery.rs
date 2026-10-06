@@ -63,7 +63,7 @@ impl NonlinearSolidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(NonlinearSolidStudyPhase::AwaitingFieldRecovery)?;
         let task = self.recovery_task.as_ref().expect("awaited recovery");
@@ -76,10 +76,8 @@ impl NonlinearSolidStudyCoordinator {
         let fields = import_nonlinear_recovered_fields(source, response.clone(), task)?;
         let closure =
             NonlinearSolidStudyResultClosure::new(phase, &task.host, response, accounting.clone());
-        self.attempts.push(PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting,
-        });
+        self.attempts
+            .extend(accounting.resource_graph(&task.resource_plan)?.attempts);
         self.closures.push(closure);
         self.fields = Some(fields);
         self.phase = NonlinearSolidStudyPhase::ReadyForObservationFanout;
@@ -92,11 +90,15 @@ impl NonlinearSolidStudyCoordinator {
         block: &ImportedNonlinearSolidBlock,
         attempts: &[PlannedResourceUsageAttempt],
         observations: Option<ObservationPublicationCatalog>,
+        incoming_wall_millis: u64,
     ) -> AnalysisBridgeResult<SteadyStudyTail> {
-        let wall = attempts
+        // Native nonlinear phases execute sequentially; each closure retains the
+        // enclosing host interval, independently of its workers' reserved time.
+        let wall = self
+            .closures
             .iter()
-            .try_fold(0u64, |n, a| {
-                n.checked_add(a.accounting.resources.usage.wall_millis)
+            .try_fold(incoming_wall_millis, |n, closure| {
+                n.checked_add(closure.execution.graph_wall_millis())
             })
             .ok_or_else(|| invalid("nonlinear cumulative wall overflow"))?;
         let usage = prepare_planned_resource_graph_usage(

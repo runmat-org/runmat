@@ -35,7 +35,7 @@ fn analysis_completion_requires_original_commit_and_terminal_inventory() {
     assert_eq!(delivery.evidence, original);
     assert!(delivery.attempt.is_none());
     assert!(matches!(crate::analysis_task_pool::delivered_attempt(
-        &delivery.response, delivery.attempt.as_ref()),
+        &delivery.response, delivery.attempt.as_ref(), delivery.failure.as_ref()),
         Err(crate::NativeExecutionError::Protocol(message)) if message == "original storage failure"));
     assert!(
         matches!(delivery.response, runmat_execution_artifact::ProgramExecutionResponse::Failure { message }

@@ -45,9 +45,20 @@ pub enum DriverCommand {
     RegisterWorker(WorkerSpec),
     DrainWorker(WorkerId),
     WorkerLost(WorkerId),
+    /// Fence the provider before recording its original triggering loss report,
+    /// then close any other active attempts on that worker in the same command.
+    WorkerLostWithReport {
+        worker_id: WorkerId,
+        report: Box<BackendReport>,
+    },
     Submit(Box<TaskSubmission>),
     SubmitBatch(Vec<TaskSubmission>),
     BackendReport(BackendReport),
+    CancelTask {
+        task_id: TaskId,
+        reason: CancellationReason,
+        now_millis: u64,
+    },
     CancelScope {
         scope_id: ExecutionScopeId,
         reason: CancellationReason,

@@ -173,7 +173,7 @@ pub fn prepare_thermal_study_root(
         })
         .transpose()?;
     let wire = CompletionWire {
-        schema_version: 3,
+        schema_version: 4,
         preparation: preparation_wire,
         closures: completed.result_closures().to_vec(),
         descendants,
@@ -247,7 +247,7 @@ pub fn import_thermal_study_root(
     }
     let wire: CompletionWire =
         decode_contract(PREFIX, "thermal-study-completion", &payload, LIMITS)?;
-    if wire.schema_version != 3 {
+    if wire.schema_version != 4 {
         return Err(invalid("unsupported thermal completion schema"));
     }
     if wire.preparation.max_objects > limits.max_objects

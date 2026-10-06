@@ -8,6 +8,15 @@ pub fn validate_analysis_phase_accounting(
     host: &AnalysisHostWorkload,
     plan: &FeaResourcePlan,
     response: &ProgramExecutionResponse,
+    execution: &crate::AnalysisPhaseExecutionEvidence,
+) -> AnalysisBridgeResult<()> {
+    execution.validate_for(host, plan, response)
+}
+
+pub(crate) fn validate_winning_accounting(
+    host: &AnalysisHostWorkload,
+    plan: &FeaResourcePlan,
+    response: &ProgramExecutionResponse,
     accounting: &AttemptResourceAccounting,
 ) -> AnalysisBridgeResult<()> {
     host.validate()?;

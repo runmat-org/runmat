@@ -19,6 +19,8 @@ pub struct TaskSubmission {
 pub struct TaskRecord {
     pub submission: TaskSubmission,
     pub state: TaskState,
+    #[serde(deserialize_with = "super::cancellation::deserialize_cancellation")]
+    pub cancellation: Option<super::TaskCancellation>,
     pub attempt_count: u16,
     pub active_attempt: Option<AttemptId>,
     pub committed: Option<ResultCommit>,
@@ -35,6 +37,7 @@ impl TaskRecord {
         Self {
             submission,
             state,
+            cancellation: None,
             attempt_count: 0,
             active_attempt: None,
             committed: None,

@@ -221,24 +221,36 @@ async fn run_block(
     let cold = import_fluid_transient_checkpoint(&source, done.response.clone(), &task).unwrap();
     assert_eq!(cold.checkpoint, done.original.checkpoint);
     request.recover_output(&cold.checkpoint, mesh).unwrap();
-    let mut accounting = done.usage.attempts[0].accounting.clone();
-    accounting.resources.artifact_bytes += 1;
-    assert!(validate_analysis_phase_accounting(
-        &task.host,
-        &task.resource_plan,
-        &done.response,
-        &accounting
+    let phase = runmat_analysis_execution::AnalysisPhaseExecutionEvidence::new(
+        done.execution.clone(),
+        done.usage.wall_millis,
     )
-    .is_err());
-    let mut accounting = done.usage.attempts[0].accounting.clone();
-    accounting.resources.allocation.memory_bytes += 1;
-    assert!(validate_analysis_phase_accounting(
-        &task.host,
-        &task.resource_plan,
-        &done.response,
-        &accounting
-    )
-    .is_err());
+    .unwrap();
+    validate_analysis_phase_accounting(&task.host, &task.resource_plan, &done.response, &phase)
+        .unwrap();
+    for alter_bytes in [false, true] {
+        let mut original = done.execution.clone();
+        let resources = original
+            .task
+            .committed
+            .as_mut()
+            .unwrap()
+            .resources
+            .as_mut()
+            .unwrap();
+        if alter_bytes {
+            resources.resources.artifact_bytes += 1;
+        } else {
+            resources.resources.allocation.memory_bytes += 1;
+        }
+        assert!(
+            runmat_analysis_execution::AnalysisPhaseExecutionEvidence::new(
+                original,
+                done.usage.wall_millis
+            )
+            .is_err()
+        );
+    }
     let mut response = done.response.clone();
     if let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &mut response {
         result_objects.push(result_objects[0].clone());

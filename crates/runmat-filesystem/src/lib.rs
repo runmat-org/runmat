@@ -9,9 +9,13 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod file_lock;
+#[cfg(not(target_arch = "wasm32"))]
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
+#[cfg(not(target_arch = "wasm32"))]
+pub use file_lock::ExclusiveFileLock;
 mod publication;
 pub use publication::{AtomicCreateResult, AtomicReplaceOutcome, PublicationDurability};
 #[cfg(not(target_arch = "wasm32"))]

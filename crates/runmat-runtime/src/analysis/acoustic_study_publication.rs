@@ -70,15 +70,22 @@ pub fn prepare_acoustic_study_publication(
             )
         })?;
 
-    admission::validate(
-        completed,
-        source,
-        mesh,
-        meshing_evidence,
-        options,
-        definition,
-    )
-    .map_err(invalid)?;
+    {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+        admission::validate(
+            completed,
+            source,
+            mesh,
+            meshing_evidence,
+            options,
+            definition,
+        )
+        .map_err(invalid)?;
+    }
     let [authored_step] = completed.compiled.model.sequence.steps.as_slice() else {
         return Err(invalid(
             "acoustic publication requires one authored step".into(),
@@ -89,7 +96,6 @@ pub fn prepare_acoustic_study_publication(
         definition,
         &authored_step.step_id,
     );
-    let run = materialization::admit(completed, source, options, &run_id).map_err(invalid)?;
     let object_artifact_paths = source
         .persist(completed, definition, &preparation.staging)
         .map_err(|error| {
@@ -97,6 +103,14 @@ pub fn prepare_acoustic_study_publication(
                 error, &context, invalid,
             )
         })?;
+    let run = {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+        materialization::admit(completed, source, options, &run_id).map_err(invalid)?
+    };
     let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
         artifact: mesh.clone(),
         evidence: meshing_evidence.clone(),

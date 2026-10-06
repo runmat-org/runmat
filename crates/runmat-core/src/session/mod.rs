@@ -54,20 +54,24 @@ mod config;
 mod executable;
 mod fea_source;
 pub use fea_source::CheckedFeaSessionSource;
-mod fea_workspace;
-mod fea_publication;
 mod fea_changes;
+mod fea_publication;
+mod fea_workspace;
 pub use fea_publication::PreparedFeaWorkspacePublication;
 mod fea_working;
 pub use fea_working::{FeaWorkingCheckRequest, FeaWorkingSource};
 mod fea_queries;
-pub use fea_workspace::{FeaCapturedDependency, FeaWorkspaceCapture, FeaWorkspaceCheckRequest, FeaWorkspaceCheckResult};
+pub use fea_workspace::{
+    FeaCapturedDependency, FeaWorkspaceCapture, FeaWorkspaceCheckRequest, FeaWorkspaceCheckResult,
+};
 mod init;
 mod pinned;
+mod portable;
 #[cfg(not(target_arch = "wasm32"))]
 mod program;
 mod project;
 mod run;
+mod script;
 mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).

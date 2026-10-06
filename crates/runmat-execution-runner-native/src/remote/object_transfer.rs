@@ -95,6 +95,16 @@ impl RemoteObjectStore {
 }
 
 impl CacheImport for RemoteObjectStore {
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.0
+            .lock()
+            .expect("remote object store poisoned")
+            .read_verified_bounded(digest, maximum_bytes)
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         self.0
             .lock()
@@ -267,6 +277,13 @@ impl RemoteObjectCache {
 }
 
 impl CacheImport for RemoteObjectCache {
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.store.read_verified_bounded(digest, maximum_bytes)
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         self.store.read_verified(digest)
     }

@@ -225,3 +225,4 @@ fn uncertain_checkpoint_blocks_delivery_without_rewriting_original_execution() {
 }
 
 mod analysis;
+mod cancellation;

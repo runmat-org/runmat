@@ -144,6 +144,48 @@ pub(super) fn json(
 }
 
 impl AnalysisPublicationBuilder {
+    /// In-process source-owner demand, bound to the complete original reference inventory.
+    /// This is resource admission, never a numerical proof decoded from a digest.
+    pub(in crate::analysis) fn admit_profiled_source_objects(
+        &mut self,
+        objects: &[runmat_execution::value::ValueRef],
+        required: u64,
+    ) -> Result<(), AnalysisPublicationError> {
+        if self.source_phase_active()? {
+            return Err("cannot change source inventory during its active phase".into());
+        }
+        let encoded = objects.iter().map(|r| r.encoded_length).max().unwrap_or(0);
+        if required < encoded || (encoded > 0 && required == 0) {
+            return Err(AnalysisPublicationError::ResourceLimit {
+                message: "source demand omits original transport".into(),
+            });
+        }
+        let planned = self.source_workspace_bytes.max(required);
+        self.admit(planned)?;
+        let identity = canonical_digest("publication-source-inventory", &objects)?;
+        self.source_profiles.insert(identity, required);
+        self.source_workspace_bytes = planned;
+        Ok(())
+    }
+
+    pub(super) fn planned_source_workspace(
+        &self,
+        objects: &[runmat_execution::value::ValueRef],
+    ) -> Result<u64, AnalysisPublicationError> {
+        let identity = canonical_digest("publication-source-inventory", &objects)?;
+        self.source_profiles
+            .get(&identity)
+            .copied()
+            .map_or_else(|| source_workspace(objects), Ok)
+    }
+
+    pub(in crate::analysis) fn source_replay_allowance(
+        &self,
+        objects: &[runmat_execution::value::ValueRef],
+    ) -> Result<u64, AnalysisPublicationError> {
+        self.require_source_objects(objects)?;
+        self.active_source_workspace()
+    }
     /// Borrowed original metadata plus its copy/verification workspace remain charged
     /// while new staged output and commit/recovery work are admitted.
     pub(in crate::analysis) fn admit_preparation(
@@ -173,10 +215,17 @@ impl AnalysisPublicationBuilder {
         &mut self,
         objects: &[runmat_execution::value::ValueRef],
     ) -> Result<(), AnalysisPublicationError> {
+        if self.source_phase_active()? {
+            return Err("cannot change source inventory during its active phase".into());
+        }
         let required = source_workspace(objects)?;
-        self.admit(required)?;
-        self.preparation_resident_bytes = add(self.preparation_resident_bytes, required)?;
-        self.source_workspace_bytes = add(self.source_workspace_bytes, required)?;
+        let planned = self.source_workspace_bytes.max(required);
+        self.admit(planned)?;
+        let identity = canonical_digest("publication-source-inventory", &objects)?;
+        self.source_profiles.insert(identity, required);
+        // Catalogs are consumed sequentially. Input and output storage is retained;
+        // only one guarded replay workspace can be active at a time.
+        self.source_workspace_bytes = planned;
         Ok(())
     }
 
@@ -184,7 +233,13 @@ impl AnalysisPublicationBuilder {
         &self,
         objects: &[runmat_execution::value::ValueRef],
     ) -> Result<(), AnalysisPublicationError> {
-        if source_workspace(objects)? > self.source_workspace_bytes {
+        let identity = canonical_digest("publication-source-inventory", &objects)?;
+        if !self.source_replay_active()?
+            || self
+                .source_profiles
+                .get(&identity)
+                .is_none_or(|required| *required > self.source_workspace_bytes)
+        {
             return Err(AnalysisPublicationError::ResourceLimit {
                 message: "source objects lack their admitted publication workspace".into(),
             });
@@ -213,11 +268,9 @@ impl AnalysisPublicationBuilder {
                 .map_err(|_| "staging lock poisoned")?,
             self.maximum_bytes,
         )?;
-        // Source workspace was charged before authentication. Reuse that reservation
-        // during this phase; original inputs and staged outputs remain charged.
-        let fixed = add(retained, self.preparation_resident_bytes)?
-            .checked_sub(self.source_workspace_bytes)
-            .ok_or("source workspace exceeds its preparation reservation")?;
+        // Original inputs and staged outputs remain charged. The source phase uses
+        // this remaining allowance; its temporary workspace is not retained at commit.
+        let fixed = add(retained, self.preparation_resident_bytes)?;
         let available = self
             .maximum_bytes
             .checked_sub(fixed)
@@ -336,7 +389,7 @@ impl AnalysisPublicationBuilder {
     }
 }
 
-fn source_workspace(
+pub(super) fn source_workspace(
     objects: &[runmat_execution::value::ValueRef],
 ) -> Result<u64, AnalysisPublicationError> {
     let Some(encoded) = objects

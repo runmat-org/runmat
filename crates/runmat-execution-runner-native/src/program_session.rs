@@ -19,6 +19,9 @@ use crate::{
     ProgramProgress,
 };
 
+mod completion;
+pub use completion::NativeProgramCompletion;
+
 static NEXT_PROGRAM_SCOPE: AtomicU64 = AtomicU64::new(1);
 
 pub struct NativeProgramSession {
@@ -199,6 +202,11 @@ pub struct NativeProgramTask {
 }
 
 impl NativeProgramTask {
+    /// One immutable read of original execution and its separate durability outcome.
+    pub fn try_completion(&self) -> Option<NativeProgramCompletion> {
+        self.completion.try_native_completion()
+    }
+
     pub fn try_result(&self) -> Option<Result<AttemptSuccess, String>> {
         self.completion.try_value()
     }

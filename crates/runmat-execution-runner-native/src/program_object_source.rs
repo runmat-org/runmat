@@ -45,6 +45,13 @@ impl CacheImport for NativeProgramObjectSource {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         self.store.read_verified(digest)
     }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.store.read_verified_bounded(digest, maximum_bytes)
+    }
 }
 
 #[cfg(test)]
@@ -73,6 +80,16 @@ mod tests {
         let another_reader = source.clone();
         drop(session);
         assert!(session_root.is_dir());
+        assert!(matches!(
+            source.read_verified_bounded(object.descriptor.digest, 0),
+            Err(runmat_execution_artifact::ArtifactError::Limit(_))
+        ));
+        assert_eq!(
+            source
+                .read_verified_bounded(object.descriptor.digest, object.bytes.len() as u64)
+                .unwrap(),
+            Some(object.bytes.clone())
+        );
         assert_eq!(
             source.read_verified(object.descriptor.digest).unwrap(),
             Some(object.bytes.clone())

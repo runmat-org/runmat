@@ -9,7 +9,8 @@ use crate::RunnerResult;
 
 pub type PortFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BackendReport {
     pub attempt_id: AttemptId,
     pub task_id: TaskId,
@@ -17,9 +18,11 @@ pub struct BackendReport {
     pub driver_fence: u64,
     pub report: AttemptReport,
     /// Original provider evidence; absent when the provider cannot establish it.
+    #[serde(deserialize_with = "required_option")]
     pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
     /// Original accounting for an unsuccessful terminal report. Absence leaves
     /// consumption unknown; successful accounting belongs to AttemptSuccess.
+    #[serde(deserialize_with = "required_option")]
     pub unsuccessful_resources: Option<Box<crate::task::AttemptResourceAccounting>>,
 }
 
@@ -44,4 +47,12 @@ pub trait BackendPort {
     ) -> PortFuture<'a, RunnerResult<BackendReport>>;
 
     fn cancel<'a>(&'a mut self, request: &'a AttemptRequest) -> PortFuture<'a, RunnerResult<()>>;
+}
+
+fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    serde::Deserialize::deserialize(deserializer)
 }

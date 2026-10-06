@@ -29,7 +29,9 @@ pub(crate) use observation_usage::observation_usage_index_bytes;
 pub use observation_usage::validate_observation_publication_usage;
 pub use profile::published_result_encoding_profile;
 pub(crate) use usage::validate_accuracy_resource_usage;
-pub use usage::validate_result_publication_resource_usage;
+pub use usage::{
+    validate_result_publication_resource_usage, validate_retained_result_publication_resource_usage,
+};
 
 /// Immutable terminal receipt for a result set admitted by its typed accuracy policy.
 #[derive(Clone, Debug, PartialEq, Deserialize)]

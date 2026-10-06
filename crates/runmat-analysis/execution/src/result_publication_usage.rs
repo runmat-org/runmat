@@ -5,8 +5,8 @@ use runmat_execution::value::ValueRefKind;
 
 use crate::{
     extend_resource_usage, AnalysisBridgeError, AnalysisBridgeResult, AnalysisOutputPolicy,
-    ImportedPublishedResult, PlannedResourceUsageAttempt, PlannedResourceUsageGraph,
-    PreparedResourceUsage, PreparedResultPublication,
+    AnalysisPhaseExecutionEvidence, ImportedPublishedResult, PreparedResourceUsage,
+    PreparedResultPublication,
 };
 
 #[cfg(test)]
@@ -16,23 +16,21 @@ pub fn complete_result_publication_resource_usage(
     prepared: &PreparedResultPublication,
     published: &ImportedPublishedResult,
     baseline: &PreparedResourceUsage,
-    attempt: &PlannedResourceUsageAttempt,
+    execution: &AnalysisPhaseExecutionEvidence,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedResourceUsage> {
     prepared.request.validate()?;
+    let accounting = execution.winning_accounting();
+    let graph = execution.resource_graph(&prepared.resource_plan)?;
     published.result.validate()?;
-    if attempt.plan != prepared.resource_plan
-        || !runmat_analysis_fea::planning::resource::allocation_matches_plan(
-            &attempt.accounting.resources.allocation,
-            &prepared.resource_plan.request,
-        )
-        || !prepared.host.workload.generic_capabilities()?.is_subset(
-            &attempt
-                .accounting
-                .resources
-                .allocation
-                .required_capabilities,
-        )
+    if !runmat_analysis_fea::planning::resource::allocation_matches_plan(
+        &accounting.resources.allocation,
+        &prepared.resource_plan.request,
+    ) || !prepared
+        .host
+        .workload
+        .generic_capabilities()?
+        .is_subset(&accounting.resources.allocation.required_capabilities)
         || published.result.request != prepared.request.identity()
         || published.result.producer != prepared.request.producer
         || published.result.source_result != prepared.request.source_result
@@ -81,6 +79,7 @@ pub fn complete_result_publication_resource_usage(
     output_set.validate_resource_facts(prepared.resource_plan.input.output_set.as_ref().ok_or(
         AnalysisBridgeError::Identity("publication plan omits its output-set envelope"),
     )?)?;
+    let output_set_root = output_set.root.clone();
     references.push(output_set.root);
     crate::object::retain_unique_references(&mut references);
     let artifact_bytes = references.iter().try_fold(0_u64, |sum, reference| {
@@ -88,20 +87,29 @@ pub fn complete_result_publication_resource_usage(
             AnalysisBridgeError::Invalid("publication artifact bytes overflow".into())
         })
     })?;
-    if attempt.accounting.resources.artifact_bytes != artifact_bytes {
+    if accounting.resources.artifact_bytes != artifact_bytes {
         return Err(AnalysisBridgeError::Identity(
             "publication accounting differs from its complete output inventory",
         ));
     }
-    let graph = PlannedResourceUsageGraph::new(
-        vec![attempt.clone()],
-        attempt.accounting.resources.usage.wall_millis,
+    // Bind the exact canonical publication closure to the original committed
+    // task response, even when this API is called without a study coordinator.
+    execution.validate_for(
+        &prepared.host,
+        &prepared.resource_plan,
+        &runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
+                output_set_root,
+            ))],
+            result_objects: references,
+        },
     )?;
     let terminal = extend_resource_usage(baseline, &graph, access, policy)?;
     validate_result_publication_resource_usage(
         &published.result,
         &baseline.evidence,
         &terminal.evidence,
+        execution.graph_wall_millis(),
     )?;
     Ok(terminal)
 }

@@ -16,7 +16,7 @@ pub(in crate::analysis) fn validate_publication_chain(
     publication
         .validate_sources(accuracy, baseline)
         .map_err(|error| error.to_string())?;
-    runmat_analysis_fea::results::publication::validate_result_publication_resource_usage(
+    runmat_analysis_fea::results::publication::validate_retained_result_publication_resource_usage(
         publication,
         baseline,
         usage,

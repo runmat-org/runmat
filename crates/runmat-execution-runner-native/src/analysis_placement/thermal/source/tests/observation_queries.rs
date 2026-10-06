@@ -13,6 +13,23 @@ impl CacheImport for RecordingObjects {
         self.reads.lock().unwrap().push(digest);
         Ok(self.objects.lock().unwrap().get(&digest).cloned())
     }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        let objects = self.objects.lock().unwrap();
+        if objects
+            .get(&digest)
+            .is_some_and(|bytes| bytes.len() as u64 > maximum)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "recorded thermal object exceeds caller read allowance".into(),
+            ));
+        }
+        self.reads.lock().unwrap().push(digest);
+        Ok(objects.get(&digest).cloned())
+    }
 }
 
 pub(super) fn check_persistence(

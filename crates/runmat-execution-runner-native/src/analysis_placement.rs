@@ -43,6 +43,7 @@ pub struct NativeStructuralStudyPlacement {
     program_environment: ProgramEnvironment,
 }
 
+pub(crate) mod source_failure;
 mod thermal;
 pub(crate) use thermal::convert_completed_thermal_study;
 pub use thermal::thermal_study_completion_from_source;

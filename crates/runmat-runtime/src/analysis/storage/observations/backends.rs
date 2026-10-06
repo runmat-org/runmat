@@ -34,6 +34,16 @@ impl InMemoryAnalysisArtifactStore {
         completed: &ThermalStudyCompletion,
         source: &ThermalStudyObjectSource,
     ) -> Result<(), String> {
+        let attachment = self.prepare_observations(run_id, completed, source)?;
+        self.install_observations(run_id, attachment, source)
+    }
+
+    pub(in crate::analysis::storage) fn prepare_observations(
+        &self,
+        run_id: &str,
+        completed: &ThermalStudyCompletion,
+        source: &ThermalStudyObjectSource,
+    ) -> Result<ObservationAttachment, String> {
         let run = self
             .load_run_metadata(run_id)?
             .ok_or("observation run is absent")?;
@@ -48,6 +58,19 @@ impl InMemoryAnalysisArtifactStore {
             completed,
             source,
         )?;
+        Ok(attachment)
+    }
+
+    pub(in crate::analysis::storage) fn install_observations(
+        &self,
+        run_id: &str,
+        attachment: ObservationAttachment,
+        source: &ThermalStudyObjectSource,
+    ) -> Result<(), String> {
+        let run = self
+            .load_run_metadata(run_id)?
+            .ok_or("observation run is absent")?;
+        attachment.validate(&run, self.observation_run_digest(run_id)?)?;
         let mut attachments = self
             .observations
             .write()

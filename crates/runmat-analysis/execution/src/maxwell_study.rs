@@ -6,6 +6,7 @@ use crate::phase_accounting::validate_analysis_phase_accounting as validate_acco
 use crate::steady_study::{SteadyStudyPhase, SteadyStudySource, SteadyStudyTail};
 use std::collections::BTreeSet;
 
+use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     study::{
@@ -14,16 +15,15 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     import_maxwell_harmonic_result, prepare_maxwell_harmonic_task, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisOutputPolicy, ImportedAccuracy, ImportedMaxwellHarmonicResult, ImportedPublishedResult,
-    ImportedSemanticState, MaxwellHarmonicTaskPreparation, PlannedResourceUsageAttempt,
-    PlannedResourceUsageGraph, PreparedAccuracy, PreparedMaxwellHarmonicTask,
-    PreparedResourceUsage, PreparedResultPublication, PreparedSemanticStatePublication,
+    ImportedSemanticState, MaxwellHarmonicTaskPreparation, PreparedAccuracy,
+    PreparedMaxwellHarmonicTask, PreparedResourceUsage, PreparedResultPublication,
+    PreparedSemanticStatePublication,
 };
 
 mod completion;
@@ -160,7 +160,7 @@ impl MaxwellStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(MaxwellStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
@@ -177,13 +177,7 @@ impl MaxwellStudyCoordinator {
             task,
             self.preparation.output_policy.inventory_limits(),
         )?;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting: accounting.clone(),
-            }],
-            accounting.resources.usage.wall_millis,
-        )?;
+        let graph = accounting.resource_graph(&task.resource_plan)?;
         let usage = crate::prepare_planned_resource_graph_usage(
             &task.resource_plan,
             task.host.workload.identity.digest(),
@@ -210,7 +204,7 @@ impl MaxwellStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = MaxwellStudyResultPhase::Accuracy;
         let tail = self
@@ -238,7 +232,7 @@ impl MaxwellStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = MaxwellStudyResultPhase::State {
             ordinal: self.states().len(),
@@ -266,7 +260,7 @@ impl MaxwellStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let phase = MaxwellStudyResultPhase::Publication;
         let tail = self

@@ -37,6 +37,8 @@ use crate::{
 };
 
 const PREFIX: &[u8] = b"runmat-electrical-study-completion\0";
+// Full original task history replaces the previous winning-attempt payload.
+const COMPLETION_SCHEMA_VERSION: u16 = 2;
 const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 #[cfg(test)]
@@ -141,7 +143,7 @@ pub fn prepare_electrical_study_root(
     let descendants = descendant_catalog(completed, &access)?;
     check_inventory(&descendants.objects, &access, policy.inventory_limits())?;
     let wire = CompletionWire {
-        schema_version: 1,
+        schema_version: COMPLETION_SCHEMA_VERSION,
         preparation: PreparationWire::new(preparation),
         closures: completed.result_closures().to_vec(),
         descendants,
@@ -212,7 +214,7 @@ pub fn import_electrical_study_root(
     }
     let wire: CompletionWire =
         decode_contract(PREFIX, "electrical-study-completion", &payload, LIMITS)?;
-    if wire.schema_version != 1 {
+    if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported electrical completion schema"));
     }
     if wire.preparation.max_objects > limits.max_objects

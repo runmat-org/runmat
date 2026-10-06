@@ -277,3 +277,125 @@ fn portable_history_preserves_lost_attempt_and_rejects_lineage_corruption() {
         assert!(invalid.validate().is_err(), "corruption {corruption}");
     }
 }
+
+#[test]
+fn live_task_extraction_preserves_original_retry_history_and_rejects_unknown_task() {
+    let mut fixture = common::fixture(2, 2);
+    let task = common::task(
+        "focused-original",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },
+    );
+    let first = common::submit(&mut fixture.driver, task);
+    let unrelated = common::submit(
+        &mut fixture.driver,
+        common::task("unrelated", fixture.scope, fixture.pool, RetryPolicy::Never),
+    );
+    let next = fixture
+        .driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &first,
+            AttemptReport::Lost {
+                message: "original loss".into(),
+            },
+        )))
+        .unwrap()
+        .into_iter()
+        .find_map(|action| match action {
+            DriverAction::Launch(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(BackendReport::for_request(
+            &next,
+            common::success(&next),
+        )))
+        .unwrap();
+    let evidence = fixture
+        .driver
+        .task_execution_evidence(first.task_id)
+        .unwrap();
+    evidence.validate().unwrap();
+    assert_eq!(evidence.attempts.len(), 2);
+    assert!(evidence
+        .attempts
+        .iter()
+        .all(|attempt| attempt.request.task_id == first.task_id));
+    assert_eq!(
+        evidence.task.committed.as_ref().unwrap().attempt_id,
+        next.id
+    );
+    assert!(evidence.resource_aggregate(1).is_err()); // Lost usage stays unknown.
+    assert_eq!(
+        evidence,
+        fixture
+            .driver
+            .snapshot()
+            .task_execution_evidence(first.task_id)
+            .unwrap()
+    );
+    assert!(fixture
+        .driver
+        .task_execution_evidence(unrelated.task_id)
+        .unwrap()
+        .task
+        .committed
+        .is_none());
+    assert!(matches!(
+        fixture
+            .driver
+            .task_execution_evidence(runmat_execution::TaskId::derive(&[b"missing"])),
+        Err(runmat_execution_runner::RunnerError::UnknownTask(_))
+    ));
+}
+
+#[test]
+fn borrowed_pool_inspection_tracks_admitted_work_and_worker_loss() {
+    use runmat_execution_runner::pool::WorkerLifecycle;
+    let mut fixture = common::fixture(1, 1);
+    let request = common::submit(
+        &mut fixture.driver,
+        common::task(
+            "pool-inspection",
+            fixture.scope,
+            fixture.pool,
+            RetryPolicy::Never,
+        ),
+    );
+    let pool = fixture.driver.pool_record(fixture.pool).unwrap();
+    assert_eq!(pool.active_attempts, 1);
+    assert_eq!(
+        pool.workers[&request.worker_id].lifecycle,
+        WorkerLifecycle::Ready
+    );
+    assert_eq!(pool.workers[&request.worker_id].active_attempts, 1);
+    fixture
+        .driver
+        .handle(DriverCommand::WorkerLost(request.worker_id))
+        .unwrap();
+    let pool = fixture.driver.pool_record(fixture.pool).unwrap();
+    assert_eq!(pool.active_attempts, 0);
+    assert_eq!(
+        pool.workers[&request.worker_id].lifecycle,
+        WorkerLifecycle::Lost
+    );
+    assert_eq!(pool.workers[&request.worker_id].active_attempts, 0);
+    let history = fixture
+        .driver
+        .task_execution_evidence(request.task_id)
+        .unwrap();
+    assert_eq!(
+        history.attempts[0].terminal.as_ref().unwrap().disposition,
+        AttemptDisposition::Lost
+    );
+    assert!(history.resource_aggregate(1).is_err());
+    assert!(matches!(
+        fixture
+            .driver
+            .pool_record(runmat_execution::PoolId::derive(&[b"missing"])),
+        Err(runmat_execution_runner::RunnerError::UnknownPool(_))
+    ));
+}

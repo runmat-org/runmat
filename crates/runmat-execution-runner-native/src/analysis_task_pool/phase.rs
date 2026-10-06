@@ -11,7 +11,7 @@ pub(crate) async fn execute_governed_analysis_phase(
     policy: AnalysisTaskBatchPolicy,
 ) -> NativeExecutionResult<(
     ExecutedAnalysisTask,
-    runmat_execution_runner::AttemptResourceAccounting,
+    runmat_analysis_execution::AnalysisPhaseExecutionEvidence,
 )> {
     execute_governed_analysis_task(
         pool,
@@ -34,7 +34,7 @@ pub(crate) async fn execute_governed_analysis_task(
     policy: AnalysisTaskBatchPolicy,
 ) -> NativeExecutionResult<(
     ExecutedAnalysisTask,
-    runmat_execution_runner::AttemptResourceAccounting,
+    runmat_analysis_execution::AnalysisPhaseExecutionEvidence,
 )> {
     let plan = task
         .resource_plan
@@ -43,6 +43,6 @@ pub(crate) async fn execute_governed_analysis_task(
         .await?
         .try_into()
         .map_err(|_| protocol("analysis phase returned an invalid task inventory"))?;
-    let accounting = planned_resource_attempt(plan, &executed)?.accounting;
+    let accounting = planned_phase_execution(plan, &executed)?;
     Ok((executed, accounting))
 }

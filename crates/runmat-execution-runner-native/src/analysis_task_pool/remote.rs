@@ -110,10 +110,27 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
                         self.pool.cancel(CancellationReason::ParentScope)?;
                         cancellation_started = Some(Instant::now());
                     }
-                    let evidence = self.pool.snapshot().task_execution_evidence(task_id).map_err(protocol)?;
+                    let evidence = self.pool.task_execution_evidence(task_id).map_err(protocol)?;
                     responses[index] = Some(AnalysisTaskCompletion::new(evidence, result)?);
                 }
                 _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+            }
+        }
+        if responses
+            .iter()
+            .flatten()
+            .any(|response| response.evidence.task.cancellation.is_some())
+        {
+            let confirmed = tokio::time::timeout(
+                Duration::from_secs(5),
+                self.pool.wait_for_cancellation_quiescence(),
+            )
+            .await
+            .unwrap_or(false);
+            for response in responses.iter_mut().flatten() {
+                if let Some(failure) = &mut response.failure {
+                    failure.confirm_remote_quiescence(confirmed);
+                }
             }
         }
         responses

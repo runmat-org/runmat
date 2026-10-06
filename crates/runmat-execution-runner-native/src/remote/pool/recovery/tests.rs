@@ -452,7 +452,7 @@ async fn completed_program_and_original_commit_survive_cold_restore_without_disp
 async fn authority_and_metadata_substitutions_fail_before_object_reads() {
     let (pool, _, task) = fixture().await;
     let checkpoint = pool.capture_checkpoint(1).unwrap();
-    for case in 0..6 {
+    for case in 0..10 {
         let mut damaged = checkpoint.clone();
         let mut replacement = authority(&checkpoint);
         match case {
@@ -469,6 +469,10 @@ async fn authority_and_metadata_substitutions_fail_before_object_reads() {
                     .program
                     .requested_outputs += 1
             }
+            6 => damaged.schema_version = 1,
+            7 => damaged.scheduler.schema_version = 1,
+            8 => damaged.scheduler.snapshot.schema_version = 2,
+            9 => damaged.schema_version = 3,
             _ => unreachable!(),
         }
         assert!(RemotePoolDriver::restore_checkpoint(

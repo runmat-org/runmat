@@ -1,6 +1,6 @@
 use runmat_analysis_execution::{
-    validate_result_publication_resource_usage, ImportedPublishedResult, PreparedAnalysisObjects,
-    PreparedResourceUsage,
+    validate_retained_result_publication_resource_usage, ImportedPublishedResult,
+    PreparedAnalysisObjects, PreparedResourceUsage,
 };
 use runmat_analysis_fea::planning::resource::{
     validate_resource_usage_evidence, ResourceUsageEvidence,
@@ -54,7 +54,7 @@ pub(super) fn import_specialized_publication(
             "specialized published result differs from its exact governed sources",
         ));
     }
-    validate_result_publication_resource_usage(
+    validate_retained_result_publication_resource_usage(
         &publication,
         &publication_baseline_usage.evidence,
         &resource_usage.evidence,

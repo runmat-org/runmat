@@ -25,11 +25,17 @@ pub enum SavedOutputIntent {
     FeaStudy {
         study_id: String,
         expectation: Box<runmat_execution_runner_native::StructuralStudyResultExpectation>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assessment_functions:
+            Vec<runmat_analysis_execution::assessment_program::FrozenAssessmentCallable>,
     },
     FeaSweep {
         sweep_id: String,
         case_ids: Vec<String>,
         expectation: Box<runmat_execution_runner_native::StructuralSweepResultExpectation>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        assessment_functions:
+            Vec<Vec<runmat_analysis_execution::assessment_program::FrozenAssessmentCallable>>,
     },
     Mesh {
         solver_mesh_path: PathBuf,
@@ -111,16 +117,19 @@ impl SavedRemoteRun {
             SavedOutputIntent::FeaStudy {
                 study_id,
                 expectation,
+                assessment_functions,
             } => {
                 if study_id.trim().is_empty() {
                     anyhow::bail!("saved FEA study identity is empty");
                 }
                 expectation.validate()?;
+                validate_frozen_assessments(&expectation.study.assessments, assessment_functions)?;
             }
             SavedOutputIntent::FeaSweep {
                 sweep_id,
                 case_ids,
                 expectation,
+                assessment_functions,
             } => {
                 if sweep_id.trim().is_empty()
                     || case_ids.len() != expectation.studies.len()
@@ -133,6 +142,20 @@ impl SavedRemoteRun {
                     anyhow::bail!("saved FEA sweep identity or case order is invalid");
                 }
                 expectation.validate()?;
+                if assessment_functions.is_empty() {
+                    for study in &expectation.studies {
+                        validate_frozen_assessments(&study.study.assessments, &[])?;
+                    }
+                } else {
+                    if assessment_functions.len() != expectation.studies.len() {
+                        anyhow::bail!(
+                            "saved FEA sweep callable inventory differs from its case order"
+                        );
+                    }
+                    for (study, functions) in expectation.studies.iter().zip(assessment_functions) {
+                        validate_frozen_assessments(&study.study.assessments, functions)?;
+                    }
+                }
             }
             _ => {}
         }
@@ -268,6 +291,33 @@ impl SavedRemoteRun {
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy(bytes)
             .map_err(anyhow::Error::from)
     }
+}
+
+fn validate_frozen_assessments(
+    assessments: &[runmat_analysis_core::AuthoredAssessment],
+    functions: &[runmat_analysis_execution::assessment_program::FrozenAssessmentCallable],
+) -> Result<()> {
+    let expected: Vec<_> = assessments
+        .iter()
+        .filter(|assessment| {
+            matches!(
+                assessment.rule,
+                runmat_analysis_core::AssessmentRule::Function { .. }
+            )
+        })
+        .collect();
+    if functions.len() != expected.len()
+        || functions
+            .iter()
+            .zip(expected)
+            .any(|(function, assessment)| function.assessment() != assessment)
+    {
+        anyhow::bail!("saved FEA function inventory differs from its checked criteria");
+    }
+    for function in functions {
+        function.validate().map_err(anyhow::Error::msg)?;
+    }
+    Ok(())
 }
 
 fn validate_input_expectations(

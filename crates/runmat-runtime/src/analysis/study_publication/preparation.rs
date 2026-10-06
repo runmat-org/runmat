@@ -40,11 +40,11 @@ impl PublicationPreparation {
         match result {
             Result::ThermalPrestress {
                 thermal,
+                thermal_source,
                 structural,
                 ..
             } => {
-                self.staging
-                    .admit_source_objects(&thermal.catalog.objects)?;
+                thermal_source.admit_publication(thermal, &mut self.staging)?;
                 self.admit_structural_sources(structural)
             }
             Result::StructuralFrequency(frequency) => self

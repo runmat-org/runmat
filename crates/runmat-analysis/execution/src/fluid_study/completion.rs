@@ -24,7 +24,7 @@ pub struct FluidStudyResultClosure {
     pub phase: FluidStudyResultPhase,
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 
 impl FluidStudyResultClosure {
@@ -32,13 +32,13 @@ impl FluidStudyResultClosure {
         phase: FluidStudyResultPhase,
         host: &AnalysisHostWorkload,
         response: &ProgramExecutionResponse,
-        accounting: &AttemptResourceAccounting,
+        accounting: &AnalysisPhaseExecutionEvidence,
     ) -> Self {
         Self {
             phase,
             workload: host.workload.clone(),
             response: response.clone(),
-            accounting: accounting.clone(),
+            execution: accounting.clone(),
         }
     }
 
@@ -83,7 +83,7 @@ impl CompletedFluidStudy {
             FluidStudyResultPhase::Solve,
             &coordinator.prepare_solve()?.host,
         )?;
-        coordinator.complete_solve(source, solve.response.clone(), solve.accounting.clone())?;
+        coordinator.complete_solve(source, solve.response.clone(), solve.execution.clone())?;
         let recovery = self
             .closures
             .get(1)
@@ -205,31 +205,32 @@ pub fn import_fluid_study_completion(
         closure.validate_for(phase, host)?;
         match phase {
             FluidStudyResultPhase::Solve => {
-                study.complete_solve(source, closure.response, closure.accounting)?
+                study.complete_solve(source, closure.response, closure.execution)?
             }
             FluidStudyResultPhase::FieldRecovery => {
-                study.complete_field_recovery(source, closure.response, closure.accounting)?
+                study.complete_field_recovery(source, closure.response, closure.execution)?
             }
             FluidStudyResultPhase::ObservationPartition { ordinal } => study
                 .complete_observation_partition(
                     source,
                     ordinal,
                     closure.response,
-                    closure.accounting,
+                    closure.execution,
                 )?,
-            FluidStudyResultPhase::ObservationReduction { .. } => study
-                .complete_observation_reduction(source, closure.response, closure.accounting)?,
+            FluidStudyResultPhase::ObservationReduction { .. } => {
+                study.complete_observation_reduction(source, closure.response, closure.execution)?
+            }
             FluidStudyResultPhase::ObservationAssembly => {
-                study.complete_observation_assembly(source, closure.response, closure.accounting)?
+                study.complete_observation_assembly(source, closure.response, closure.execution)?
             }
             FluidStudyResultPhase::Accuracy => {
-                study.complete_accuracy(source, closure.response, closure.accounting)?
+                study.complete_accuracy(source, closure.response, closure.execution)?
             }
             FluidStudyResultPhase::State { .. } => {
-                study.complete_next_state(source, closure.response, closure.accounting)?
+                study.complete_next_state(source, closure.response, closure.execution)?
             }
             FluidStudyResultPhase::Publication => {
-                study.complete_publication(source, closure.response, closure.accounting)?
+                study.complete_publication(source, closure.response, closure.execution)?
             }
         }
     }

@@ -30,8 +30,6 @@ use runmat_execution_runner_native::{
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 
-use super::analysis_resources;
-
 #[path = "signal/acoustic.rs"]
 mod acoustic;
 #[path = "signal/compilation.rs"]
@@ -208,7 +206,7 @@ impl SignalFixture {
                     signal_submission(&self.prepared, chunk, session.scope_id(), session.pool_id()),
                 )
                 .unwrap();
-            let success = super::wait_for_native_task(task).await;
+            let success = super::wait_for_native_task(&task).await;
             assert!(success.result_objects.is_empty());
             assert_eq!(success.outputs.len(), 1);
             outputs.push(GeneratorChunkOutput {
@@ -221,26 +219,33 @@ impl SignalFixture {
 
     async fn durable(&self) -> CanonicalSignalRealization {
         let directory = tempfile::tempdir().unwrap();
-        let supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open(
-            runmat_execution_runner_native::supervisor::LocalSupervisorConfig {
-                executable: std::env::current_exe().unwrap(),
-                paths: runmat_execution_runner_native::supervisor::SupervisorPaths::new(
+        let supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open({
+            let mut execution = NativeExecutionConfig::for_current_executable().unwrap();
+            execution.worker_arguments = vec!["--child".into()];
+            execution.max_workers = 2;
+            execution.max_object_bytes = 64 * 1024 * 1024;
+            runmat_execution_runner_native::supervisor::LocalSupervisorConfig::new(
+                execution,
+                runmat_execution_runner_native::supervisor::SupervisorPaths::new(
                     directory.path().join("durable-signal"),
                 )
                 .unwrap(),
-                max_stderr_bytes: 1024 * 1024,
-                max_object_bytes: 64 * 1024 * 1024,
-            },
-        )
+            )
+            .unwrap()
+        })
         .unwrap();
         let mut outputs = Vec::new();
         for (index, chunk) in self.prepared.program.chunks.iter().enumerate() {
+            let key = format!("signal-placement-{index}");
+            let context = supervisor.execution_context(Some(&key)).await.unwrap();
+            let original_task =
+                signal_submission(&self.prepared, chunk, context.scope_id, context.pool_id);
             let (record, duplicate) = supervisor
                 .submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
                         chunk.request.clone(),
-                        analysis_resources(),
-                        Some(format!("signal-placement-{index}")),
+                        original_task.clone(),
+                        Some(key),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     ),
                 )
@@ -257,7 +262,16 @@ impl SignalFixture {
                             .as_ref()
                             .expect("durable signal must retain generic resource accounting");
                         resources.validate().unwrap();
-                        assert_eq!(resources.resources.allocation, analysis_resources());
+                        assert_eq!(
+                            resources.resources.allocation,
+                            original_task.request.resources
+                        );
+                        let history = attachment
+                            .execution
+                            .as_ref()
+                            .expect("durable signal must retain original admitted history");
+                        history.validate().unwrap();
+                        assert_eq!(history.task.submission, original_task);
                         break attachment.response.unwrap_or_else(|| {
                             panic!("durable signal failed: {:?}", attachment.record.message)
                         });

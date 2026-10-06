@@ -6,10 +6,6 @@ use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
     properties::compile_property_map,
 };
-use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::ResourceAccounting,
-};
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, StableDigest,
 };
@@ -102,19 +98,13 @@ impl CacheImport for EmptyStore {
         Ok(None)
     }
 }
-fn accounting(task: &PreparedMaxwellHarmonicTask) -> AttemptResourceAccounting {
-    AttemptResourceAccounting {
-        attempt_id: AttemptId::derive(&[b"maxwell-attempt"]),
-        worker_id: WorkerId::derive(&[b"maxwell-worker"]),
-        resources: ResourceAccounting::for_reserved_interval(
-            task.resource_plan.request.clone(),
-            1,
-            0,
-            0,
-            0,
-        )
-        .unwrap(),
-    }
+fn accounting(task: &PreparedMaxwellHarmonicTask) -> AnalysisPhaseExecutionEvidence {
+    crate::tests::phase_execution(
+        &task.host,
+        &task.program,
+        &task.resource_plan.request,
+        &empty_response(),
+    )
 }
 fn empty_response() -> ProgramExecutionResponse {
     ProgramExecutionResponse::ExternalizedSuccess {
@@ -171,11 +161,14 @@ fn failed_solve_import_never_installs_result_usage_or_terminal_authority() {
         let mut study = MaxwellStudyCoordinator::new(preparation(order)).unwrap();
         let task = study.prepare_solve().unwrap();
         let usage = accounting(task);
-        let mut foreign = usage.clone();
         let mut allocation = task.resource_plan.request.clone();
         allocation.memory_bytes += 1;
-        foreign.resources =
-            ResourceAccounting::for_reserved_interval(allocation, 1, 0, 0, 0).unwrap();
+        let foreign = crate::tests::phase_execution(
+            &task.host,
+            &task.program,
+            &allocation,
+            &empty_response(),
+        );
         assert!(matches!(
             study.complete_solve(&EmptyStore, empty_response(), foreign),
             Err(AnalysisBridgeError::Identity(_))

@@ -45,7 +45,7 @@ impl NonlinearSolidStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         let NonlinearSolidStudyPhase::AwaitingBlock { ordinal } = self.phase() else {
             return Err(invalid("nonlinear study has no awaited block"));
@@ -61,12 +61,9 @@ impl NonlinearSolidStudyCoordinator {
             Some(&task.resource_plan),
         )?;
         let imported = import_nonlinear_solid_block(source, response.clone(), task)?;
-        let attempt = PlannedResourceUsageAttempt {
-            plan: task.resource_plan.clone(),
-            accounting: accounting.clone(),
-        };
+        let task_attempts = accounting.resource_graph(&task.resource_plan)?.attempts;
         let mut attempts = self.attempts.clone();
-        attempts.push(attempt.clone());
+        attempts.extend(task_attempts.iter().cloned());
         let tail = if imported.block.complete
             && self.preparation.product.workload.model.sequence.steps[0]
                 .observations
@@ -78,6 +75,7 @@ impl NonlinearSolidStudyCoordinator {
                 &imported,
                 &attempts,
                 None,
+                accounting.graph_wall_millis(),
             )?)
         } else {
             None
@@ -88,7 +86,7 @@ impl NonlinearSolidStudyCoordinator {
         // All fallible source/accounting/admission work precedes visible lifecycle mutation.
         let closure =
             NonlinearSolidStudyResultClosure::new(phase, &task.host, response, accounting);
-        self.attempts.push(attempt);
+        self.attempts.extend(task_attempts);
         self.closures.push(closure);
         self.block = Some(imported);
         // Replay retains immutable references; input/program byte copies from the

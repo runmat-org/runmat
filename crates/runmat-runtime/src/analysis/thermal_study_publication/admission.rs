@@ -5,15 +5,12 @@ use runmat_analysis_fea::ThermalProcedureControl;
 
 pub(super) fn validate(
     completed: &ThermalStudyCompletion,
-    source: &ThermalStudyObjectSource,
     mesh: &SolverMeshArtifact,
     evidence: &MeshingEvidence,
     options: &AnalysisThermalRunOptions,
     definition: Digest,
 ) -> Result<(), String> {
-    // The source adapter re-imports the immutable execution closure and verifies every object.
-    // This precedes all filesystem publication and prevents caller-supplied DTO authority.
-    source.authenticate(completed)?;
+    // The caller has authenticated the original source under its captured resource lease.
     completed
         .compiled
         .validate_against(mesh)

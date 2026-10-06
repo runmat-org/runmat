@@ -33,29 +33,36 @@ pub fn prepare_nonlinear_solid_study_publication(
             )
         })?;
 
-    let workspace = preparation
-        .staging
-        .source_workspace_with_preparation(&preparation.retained_input, completed)
-        .map_err(|error| {
+    {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
             crate::analysis::prepared_study_publication::publication_failure(
                 error, &context, invalid,
             )
         })?;
-    admission::validate(
-        completed,
-        source,
-        mesh,
-        meshing_evidence,
-        definition,
-        workspace,
-    )
-    .map_err(|error| {
-        crate::analysis::prepared_study_publication::publication_failure(
-            error.context("nonlinear input authentication"),
-            &context,
-            invalid,
+        let workspace = preparation
+            .staging
+            .source_workspace_with_preparation(&preparation.retained_input, completed)
+            .map_err(|error| {
+                crate::analysis::prepared_study_publication::publication_failure(
+                    error, &context, invalid,
+                )
+            })?;
+        admission::validate(
+            completed,
+            source,
+            mesh,
+            meshing_evidence,
+            definition,
+            workspace,
         )
-    })?;
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error.context("nonlinear input authentication"),
+                &context,
+                invalid,
+            )
+        })?;
+    }
     let options = admission::options(&completed.workload.controls);
     let step_id = &completed.workload.model.sequence.steps[0].step_id;
     let run_id = publication_identity.local_run_id(
@@ -63,23 +70,6 @@ pub fn prepare_nonlinear_solid_study_publication(
         definition,
         step_id,
     );
-    let run = materialization::admit(
-        completed,
-        source,
-        mesh,
-        &options,
-        &run_id,
-        &context,
-        &mut preparation.staging,
-        &preparation.retained_input,
-    )
-    .map_err(|error| {
-        crate::analysis::prepared_study_publication::publication_failure(
-            error.context("nonlinear field materialization"),
-            &context,
-            invalid,
-        )
-    })?;
     let object_artifact_paths = source
         .persist(
             completed,
@@ -94,6 +84,30 @@ pub fn prepare_nonlinear_solid_study_publication(
                 invalid,
             )
         })?;
+    let run = {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+        materialization::admit(
+            completed,
+            source,
+            mesh,
+            &options,
+            &run_id,
+            &context,
+            &mut preparation.staging,
+            &preparation.retained_input,
+        )
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error.context("nonlinear field materialization"),
+                &context,
+                invalid,
+            )
+        })?
+    };
     let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
         artifact: mesh.clone(),
         evidence: meshing_evidence.clone(),

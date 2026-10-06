@@ -6,7 +6,7 @@ use crate::remote::pool_tests::{
 use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::state::PoolState;
 use runmat_execution::value::{InlineValue, ValuePayload};
-use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId};
+use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_runner::{AttemptReport, AttemptRequest, PoolSpec, WorkerSpec};
 use tokio::sync::oneshot;
 
@@ -529,12 +529,13 @@ async fn original_terminal_loss_diagnostic_survives_remote_delivery() {
             message: message.into(),
         },
     ));
+    let diagnostic = {
+        let driver = fixture.pool.driver.lock().unwrap();
+        let task = driver.task_record(fixture.attempt.task_id).unwrap();
+        terminal_failure(&driver, task)
+    };
+    assert_eq!(diagnostic, Some(message.into()));
     let snapshot = fixture.pool.snapshot();
-    let task = &snapshot.tasks[&fixture.attempt.task_id];
-    assert_eq!(
-        terminal_failure(&snapshot, fixture.attempt.task_id, task.state),
-        Some(message.into())
-    );
     let evidence = snapshot
         .task_execution_evidence(fixture.attempt.task_id)
         .unwrap();

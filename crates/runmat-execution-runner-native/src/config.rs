@@ -9,7 +9,8 @@ use runmat_execution::{
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeExecutionConfig {
     pub executable: PathBuf,
     pub worker_arguments: Vec<String>,

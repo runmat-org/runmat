@@ -115,6 +115,10 @@ pub async fn submit(
     {
         bail!("remote script jobs do not accept positional function arguments");
     }
+    let requested_outputs = match identity.entrypoint_kind {
+        runmat_execution::ExecutableEntrypointKind::Script => 0,
+        runmat_execution::ExecutableEntrypointKind::Function => 1,
+    };
     let executable_function = usize::try_from(identity.entrypoint_function.0)
         .context("portable entrypoint identity exceeds this host")?;
     let executable_bytes = executable.canonical_bytes()?;
@@ -123,9 +127,7 @@ pub async fn submit(
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
         entrypoint: executable_function.to_string(),
-        outputs: OutputContract {
-            requested_outputs: 1,
-        },
+        outputs: OutputContract { requested_outputs },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),
         features: BTreeSet::new(),
@@ -154,7 +156,7 @@ pub async fn submit(
         recipe,
         artifact,
         function: executable_function,
-        requested_outputs: 1,
+        requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,

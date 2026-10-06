@@ -9,11 +9,7 @@ use runmat_analysis_fea::{
     properties::compile_property_map,
     topology::AnalysisProjection,
 };
-use runmat_execution::{
-    identity::{AttemptId, WorkerId},
-    resource::ResourceAccounting,
-    ProgramEnvironment,
-};
+use runmat_execution::ProgramEnvironment;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, StableDigest,
@@ -141,18 +137,15 @@ fn acoustic_failed_response_never_advances_or_installs_usage() {
     let mut coordinator = AcousticStudyCoordinator::new(preparation()).unwrap();
     let study = coordinator.entry_mut(0).unwrap();
     let task = study.prepare_solve().unwrap();
-    let accounting = AttemptResourceAccounting {
-        attempt_id: AttemptId::derive(&[b"attempt"]),
-        worker_id: WorkerId::derive(&[b"worker"]),
-        resources: ResourceAccounting::for_reserved_interval(
-            task.resource_plan.request.clone(),
-            1,
-            0,
-            0,
-            0,
-        )
-        .unwrap(),
-    };
+    let accounting = crate::tests::phase_execution(
+        &task.host,
+        &task.program,
+        &task.resource_plan.request,
+        &ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: Vec::new(),
+            result_objects: Vec::new(),
+        },
+    );
     assert!(study
         .complete_solve(
             &EmptyStore,
@@ -174,18 +167,15 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
     let study = coordinator.entry_mut(0).unwrap();
     let entry = study.entry();
     let task = study.prepare_solve().unwrap();
-    let accounting = AttemptResourceAccounting {
-        attempt_id: AttemptId::derive(&[b"attempt"]),
-        worker_id: WorkerId::derive(&[b"worker"]),
-        resources: ResourceAccounting::for_reserved_interval(
-            task.resource_plan.request.clone(),
-            1,
-            0,
-            0,
-            0,
-        )
-        .unwrap(),
-    };
+    let accounting = crate::tests::phase_execution(
+        &task.host,
+        &task.program,
+        &task.resource_plan.request,
+        &ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: Vec::new(),
+            result_objects: Vec::new(),
+        },
+    );
     let response = ProgramExecutionResponse::ExternalizedSuccess {
         outputs: Vec::new(),
         result_objects: Vec::new(),
@@ -199,7 +189,7 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
     let assembly = super::completion::AcousticStudyAssemblyClosure {
         workload: task.host.workload.clone(),
         response: response.clone(),
-        accounting: accounting.clone(),
+        execution: accounting.clone(),
     };
     assert!(import_acoustic_study_completion(
         &EmptyStore,
@@ -239,7 +229,7 @@ fn acoustic_completion_replay_rejects_missing_and_substituted_phase_workloads() 
     let assembly = super::completion::AcousticStudyAssemblyClosure {
         workload: task.host.workload.clone(),
         response: response.clone(),
-        accounting: accounting.clone(),
+        execution: accounting.clone(),
     };
     assert!(import_acoustic_study_completion(
         &EmptyStore,

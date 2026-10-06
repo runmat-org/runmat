@@ -1,32 +1,31 @@
-//! Solve-attempt accounting for thermal results; not whole-study resource evidence.
+//! Original thermal-solve execution accounting; not whole-study resource evidence.
+use crate::AnalysisPhaseExecutionEvidence;
 use crate::{
     import_thermal_result, prepare_planned_resource_graph_usage, AnalysisBridgeError,
-    AnalysisBridgeResult, AnalysisOutputPolicy, ImportedThermalResult, PlannedResourceUsageAttempt,
-    PlannedResourceUsageGraph, PreparedResourceUsage, PreparedThermalTask,
+    AnalysisBridgeResult, AnalysisOutputPolicy, ImportedThermalResult, PreparedResourceUsage,
+    PreparedThermalTask,
 };
 use runmat_analysis_fea::{
     execution::AnalysisNumericalObjectKind, planning::resource::FeaResourcePhase,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution_artifact::{cache::CacheImport, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 pub struct ImportedThermalCompletion {
     pub result: ImportedThermalResult,
-    /// Only the admitted thermal solve attempt, excluding subsequent post-processing tasks.
+    /// Every original attempt of the admitted thermal solve, excluding subsequent post-processing tasks.
     pub solve_usage: PreparedResourceUsage,
 }
 
 /// Import a scheduler-returned response and its associated accounting together.
 ///
-/// The caller must preserve the scheduler/supervisor's response-accounting association.
-/// Accounting contains attempt and worker identities, not a task identity, so this adapter
-/// cannot independently authenticate that association. It validates the closed result inventory,
-/// reconciles its encoded bytes, and binds usage to the admitted plan and semantic result.
+/// Complete original task history binds the delivered response to its invocation.
+/// Unknown earlier consumption blocks complete solve usage; this is internal lineage,
+/// not trusted worker attestation or measured utilization/RSS.
 pub fn import_thermal_completion(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
-    accounting: AttemptResourceAccounting,
+    accounting: AnalysisPhaseExecutionEvidence,
     prepared: &PreparedThermalTask,
     output_policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<ImportedThermalCompletion> {
@@ -38,9 +37,7 @@ pub fn import_thermal_completion(
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     prepared.host.validate_inputs(&roots)?;
-    accounting.validate().map_err(|error| {
-        AnalysisBridgeError::Invalid(format!("invalid thermal attempt accounting: {error}"))
-    })?;
+    accounting.validate_for(&prepared.host, &prepared.resource_plan, &response)?;
     let result =
         import_thermal_result(source, response, prepared, output_policy.inventory_limits())?;
     let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &result.response
@@ -57,7 +54,7 @@ pub fn import_thermal_completion(
         .ok_or_else(|| {
             AnalysisBridgeError::Invalid("thermal result byte count overflowed".into())
         })?;
-    if bytes != accounting.resources.artifact_bytes {
+    if bytes != accounting.winning_accounting().resources.artifact_bytes {
         return Err(AnalysisBridgeError::Identity(
             "thermal accounting artifact bytes differ from the validated result closure",
         ));
@@ -82,14 +79,7 @@ pub fn import_thermal_completion(
             "thermal completion resource plan differs from the admitted solve",
         ));
     }
-    let wall_millis = accounting.resources.usage.wall_millis;
-    let graph = PlannedResourceUsageGraph::new(
-        vec![PlannedResourceUsageAttempt {
-            plan: prepared.resource_plan.clone(),
-            accounting,
-        }],
-        wall_millis,
-    )?;
+    let graph = accounting.resource_graph(&prepared.resource_plan)?;
     let solve_usage = prepare_planned_resource_graph_usage(
         &prepared.resource_plan,
         prepared.host.workload.identity.digest(),

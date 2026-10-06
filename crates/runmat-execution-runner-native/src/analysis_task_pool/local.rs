@@ -88,15 +88,12 @@ impl AnalysisTaskPool for LocalAnalysisTaskPool {
                 if responses[index].is_some() {
                     continue;
                 }
-                if let Some(result) = task.try_result() {
-                    if result.is_err() && cancellation_started.is_none() {
+                if let Some(completion) = task.try_completion() {
+                    if completion.delivery_result().is_err() && cancellation_started.is_none() {
                         self.session.cancel(CancellationReason::ParentScope);
                         cancellation_started = Some(Instant::now());
                     }
-                    let evidence = task.try_execution_evidence().ok_or_else(|| {
-                        protocol("local analysis completion lacks original execution evidence")
-                    })?;
-                    responses[index] = Some(AnalysisTaskCompletion::new(evidence, result)?);
+                    responses[index] = Some(AnalysisTaskCompletion::from_native(completion)?);
                 }
             }
             if responses.iter().any(Option::is_none) {

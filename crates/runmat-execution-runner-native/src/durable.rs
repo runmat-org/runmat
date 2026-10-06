@@ -11,15 +11,17 @@ use crate::supervisor::{LocalJobState, LocalSupervisorClient, ProgramBatchSubmis
 
 enum Command {
     Submit {
-        submission: Box<ProgramBatchSubmission>,
+        program: Box<runmat_execution_artifact::ProgramExecutionRequest>,
+        options: runmat_runtime::execution::DurableJobOptions,
         response: mpsc::Sender<Result<JobHandle, ExecutionServiceError>>,
     },
-    Await {
+    Inspect {
         handle: JobHandle,
-        response: mpsc::Sender<Result<ProgramExecutionResponse, ExecutionServiceError>>,
+        response: mpsc::Sender<Result<Option<ProgramExecutionResponse>, ExecutionServiceError>>,
     },
     Cancel {
         handle: JobHandle,
+        reason: runmat_execution::CancellationReason,
         response: mpsc::Sender<Result<(), ExecutionServiceError>>,
     },
 }
@@ -40,27 +42,51 @@ impl DurableJobBridge {
 
     pub(crate) fn submit(
         &self,
-        submission: ProgramBatchSubmission,
+        program: runmat_execution_artifact::ProgramExecutionRequest,
+        options: runmat_runtime::execution::DurableJobOptions,
     ) -> Result<JobHandle, ExecutionServiceError> {
         self.request(|response| Command::Submit {
-            submission: Box::new(submission),
+            program: Box::new(program),
+            options,
             response,
         })
     }
 
     pub(crate) fn await_job(&self, handle: JobHandle) -> Result<Value, ExecutionServiceError> {
-        let response = self.request(|response| Command::Await { handle, response })?;
-        let ProgramExecutionResponse::Success { value: payload } = response else {
-            return Err(ExecutionServiceError::Failed(
-                "durable runtime value cannot consume an externalized program response".into(),
-            ));
-        };
-        runmat_runtime::execution::value_codec::decode_inline_value(&payload)
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+        loop {
+            if let Some(value) = self.try_await_job(&handle)? {
+                return Ok(value);
+            }
+            // Blocking convenience API; the runtime await path uses one inspection
+            // and yields Pending instead. No bridge command waits for task lifetime.
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 
-    pub(crate) fn cancel(&self, handle: JobHandle) -> Result<(), ExecutionServiceError> {
-        self.request(|response| Command::Cancel { handle, response })
+    pub(crate) fn try_await_job(
+        &self,
+        handle: &JobHandle,
+    ) -> Result<Option<Value>, ExecutionServiceError> {
+        let requested = usize::from(handle.outputs.requested_outputs);
+        let response = self.request(|response| Command::Inspect {
+            handle: handle.clone(),
+            response,
+        })?;
+        response
+            .map(|response| decode_outputs(response, requested))
+            .transpose()
+    }
+
+    pub(crate) fn cancel(
+        &self,
+        handle: JobHandle,
+        reason: runmat_execution::CancellationReason,
+    ) -> Result<(), ExecutionServiceError> {
+        self.request(|response| Command::Cancel {
+            handle,
+            reason,
+            response,
+        })
     }
 
     fn request<T>(
@@ -92,22 +118,27 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
     while let Ok(command) = commands.recv() {
         match command {
             Command::Submit {
-                submission,
+                program,
+                options,
                 response,
             } => {
                 let result = runtime
-                    .block_on(client.submit_program(*submission))
+                    .block_on(submit_original(&client, *program, options))
                     .map(|(record, _)| record.handle)
                     .map_err(service_error);
                 let _ = response.send(result);
             }
-            Command::Await { handle, response } => {
-                let result = runtime.block_on(await_job(&client, handle));
+            Command::Inspect { handle, response } => {
+                let result = runtime.block_on(inspect_job(&client, handle));
                 let _ = response.send(result);
             }
-            Command::Cancel { handle, response } => {
+            Command::Cancel {
+                handle,
+                reason,
+                response,
+            } => {
                 let result = runtime
-                    .block_on(client.cancel(handle.id))
+                    .block_on(client.cancel_handle(handle, reason))
                     .map(|_| ())
                     .map_err(service_error);
                 let _ = response.send(result);
@@ -116,46 +147,107 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
     }
 }
 
-async fn await_job(
+async fn inspect_job(
     client: &LocalSupervisorClient,
     handle: JobHandle,
-) -> Result<ProgramExecutionResponse, ExecutionServiceError> {
-    loop {
-        let attachment = client
-            .attach(handle.id, 0, 0)
-            .await
-            .map_err(service_error)?;
-        if attachment.record.handle != handle {
-            return Err(ExecutionServiceError::UnknownHandle);
-        }
-        match attachment.record.state {
-            LocalJobState::Succeeded => {
-                let response = attachment.response.ok_or_else(|| {
-                    ExecutionServiceError::Failed(
-                        "durable program completed without a result".into(),
-                    )
-                })?;
-                return Ok(response);
-            }
-            LocalJobState::Failed | LocalJobState::Indeterminate => {
-                return Err(ExecutionServiceError::Failed(
-                    attachment
-                        .record
-                        .message
-                        .unwrap_or_else(|| "durable program failed".into()),
-                ))
-            }
-            LocalJobState::Cancelled => return Err(ExecutionServiceError::Cancelled),
-            LocalJobState::Queued
-            | LocalJobState::Starting
-            | LocalJobState::Running
-            | LocalJobState::Cancelling => {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
+) -> Result<Option<ProgramExecutionResponse>, ExecutionServiceError> {
+    let attachment = client
+        .attach(handle.id, 0, 0)
+        .await
+        .map_err(service_error)?;
+    if attachment.record.handle != handle {
+        return Err(ExecutionServiceError::UnknownHandle);
     }
+    match attachment.record.state {
+        LocalJobState::Succeeded => attachment.response.map(Some).ok_or_else(|| {
+            ExecutionServiceError::Failed("durable program completed without a result".into())
+        }),
+        LocalJobState::Failed | LocalJobState::Indeterminate => Err(ExecutionServiceError::Failed(
+            attachment
+                .record
+                .message
+                .unwrap_or_else(|| "durable program failed".into()),
+        )),
+        LocalJobState::Cancelled => Err(ExecutionServiceError::Cancelled),
+        LocalJobState::Queued
+        | LocalJobState::Starting
+        | LocalJobState::Running
+        | LocalJobState::Cancelling => Ok(None),
+    }
+}
+
+fn decode_outputs(
+    response: ProgramExecutionResponse,
+    requested: usize,
+) -> Result<Value, ExecutionServiceError> {
+    let outputs = match response {
+        ProgramExecutionResponse::Success { value } => vec![value],
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs,
+            result_objects,
+        } if result_objects.is_empty() => outputs,
+        ProgramExecutionResponse::ExternalizedSuccess { .. } => {
+            return Err(ExecutionServiceError::Failed(
+                "durable runtime value requires an artifact consumer for externalized objects"
+                    .into(),
+            ))
+        }
+        ProgramExecutionResponse::Failure { message } => {
+            return Err(ExecutionServiceError::Failed(message))
+        }
+    };
+    runmat_runtime::execution::value_codec::decode_inline_outputs(&outputs, requested)
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
 }
 
 fn service_error(error: crate::NativeExecutionError) -> ExecutionServiceError {
     ExecutionServiceError::Failed(error.to_string())
+}
+
+async fn submit_original(
+    client: &LocalSupervisorClient,
+    program: runmat_execution_artifact::ProgramExecutionRequest,
+    options: runmat_runtime::execution::DurableJobOptions,
+) -> crate::NativeExecutionResult<(crate::supervisor::LocalJobRecord, bool)> {
+    use runmat_execution::{
+        task::{Callable, RetryPolicy, TaskRequest},
+        Digest, OutputContract, TaskId,
+    };
+    let context = client
+        .execution_context(options.idempotency_key.as_deref())
+        .await?;
+    let task = runmat_execution_runner::TaskSubmission {
+        request: TaskRequest {
+            id: TaskId::derive(&[context.scope_id.bytes(), program.artifact.id.0.bytes()]),
+            scope_id: context.scope_id,
+            pool_id: context.pool_id,
+            program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[program
+                .artifact
+                .id
+                .0
+                .bytes()]),
+            callable: Callable {
+                owner_identity: "runmat.runtime".into(),
+                qualified_name: program.function.to_string(),
+                entrypoint_digest: Digest::sha256(program.function.to_be_bytes()),
+            },
+            inputs: program.arguments.clone(),
+            outputs: OutputContract {
+                requested_outputs: program.requested_outputs,
+            },
+            resources: options.resources,
+            retry: RetryPolicy::Never,
+            deadline_unix_millis: None,
+        },
+        dependencies: Default::default(),
+        priority: 0,
+    };
+    client
+        .submit_program(ProgramBatchSubmission::from_request(
+            program,
+            task,
+            options.idempotency_key,
+            options.retention_millis,
+        ))
+        .await
 }

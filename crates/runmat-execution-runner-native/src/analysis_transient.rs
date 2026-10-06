@@ -239,6 +239,7 @@ async fn execute_task(
     TaskId,
     Option<PlannedResourceUsageAttempt>,
 )> {
+    let started = std::time::Instant::now();
     pool.register_program(program)?;
     let resources = resource_plan
         .map(|plan| plan.request.clone())
@@ -285,6 +286,9 @@ async fn execute_task(
         response: completion.response,
         attempt: completion.attempt,
         evidence: completion.evidence,
+        failure: completion.failure,
+        graph_wall_millis: u64::try_from(started.elapsed().as_millis().max(1))
+            .map_err(|_| protocol("transient execution interval overflow"))?,
     };
     let planned_attempt = resource_plan
         .map(|plan| planned_resource_attempt(plan, &executed))

@@ -3,6 +3,7 @@
 use super::*;
 use crate::AnalysisWorkloadRequest;
 use serde::{Deserialize, Serialize};
+mod resources;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -21,7 +22,7 @@ pub struct ThermalStudyResultClosure {
     pub phase: ThermalStudyResultPhase,
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 
 impl ThermalStudyResultClosure {
@@ -29,13 +30,13 @@ impl ThermalStudyResultClosure {
         phase: ThermalStudyResultPhase,
         host: &AnalysisHostWorkload,
         response: &ProgramExecutionResponse,
-        accounting: &AttemptResourceAccounting,
+        accounting: &AnalysisPhaseExecutionEvidence,
     ) -> Self {
         Self {
             phase,
             workload: host.workload.clone(),
             response: response.clone(),
-            accounting: accounting.clone(),
+            execution: accounting.clone(),
         }
     }
 
@@ -66,6 +67,15 @@ pub(super) struct ThermalStudyReplayContext {
 }
 
 impl CompletedThermalStudy {
+    /// Original source policy without constructing another mesh-bearing preparation.
+    pub fn output_policy(&self) -> AnalysisOutputPolicy {
+        self.replay.output_policy
+    }
+
+    pub fn frozen_project_digest(&self) -> Option<Digest> {
+        self.replay.frozen_project_digest
+    }
+
     pub fn scope(&self) -> ThermalStudyScope {
         self.replay.scope
     }
@@ -144,19 +154,19 @@ pub fn import_thermal_study_completion(
         closure.validate_for(phase, host)?;
         match phase {
             ThermalStudyResultPhase::Solve => {
-                study.complete_solve(source, closure.response, closure.accounting)?
+                study.complete_solve(source, closure.response, closure.execution)?
             }
             ThermalStudyResultPhase::Observation => {
-                study.complete_observation(source, closure.response, closure.accounting)?
+                study.complete_observation(source, closure.response, closure.execution)?
             }
             ThermalStudyResultPhase::Accuracy => {
-                study.complete_accuracy(source, closure.response, closure.accounting)?
+                study.complete_accuracy(source, closure.response, closure.execution)?
             }
             ThermalStudyResultPhase::State { .. } => {
-                study.complete_next_state(source, closure.response, closure.accounting)?
+                study.complete_next_state(source, closure.response, closure.execution)?
             }
             ThermalStudyResultPhase::Publication => {
-                study.complete_publication(source, closure.response, closure.accounting)?
+                study.complete_publication(source, closure.response, closure.execution)?
             }
         }
     }

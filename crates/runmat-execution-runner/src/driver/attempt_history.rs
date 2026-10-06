@@ -1,10 +1,10 @@
 //! Complete scheduler-owned task history. Never aggregate only the winning retry.
 use runmat_execution::TaskId;
 
-use crate::task::{AttemptRecord, AttemptResourceAggregate, TaskExecutionEvidence};
+use crate::task::{AttemptRecord, AttemptResourceAggregate, TaskExecutionEvidence, TaskRecord};
 use crate::{RunnerError, RunnerResult};
 
-use super::DriverSnapshot;
+use super::{Driver, DriverSnapshot};
 
 impl DriverSnapshot {
     /// Original attempts in admitted ordinal order, including live and unsuccessful
@@ -48,5 +48,38 @@ impl DriverSnapshot {
             driver_fence: self.driver_fence,
             observed_at_driver_millis: self.now_millis,
         })
+    }
+}
+
+impl Driver {
+    /// Borrow live scheduler-owned metadata. This is inspection under the caller's
+    /// driver authority, not validation or attestation of an imported carrier.
+    pub fn task_record(&self, task_id: TaskId) -> RunnerResult<&TaskRecord> {
+        self.snapshot
+            .tasks
+            .get(&task_id)
+            .ok_or(RunnerError::UnknownTask(task_id))
+    }
+
+    pub fn task_records(&self) -> impl Iterator<Item = &TaskRecord> {
+        self.snapshot.tasks.values()
+    }
+
+    /// Borrow all original attempts for a task; ordinal order is not implied.
+    pub fn task_attempts(
+        &self,
+        task_id: TaskId,
+    ) -> RunnerResult<impl Iterator<Item = &AttemptRecord>> {
+        self.task_record(task_id)?;
+        Ok(self
+            .snapshot
+            .attempts
+            .values()
+            .filter(move |attempt| attempt.request.task_id == task_id))
+    }
+
+    /// Extract one original task without cloning the enclosing live pool inventory.
+    pub fn task_execution_evidence(&self, task_id: TaskId) -> RunnerResult<TaskExecutionEvidence> {
+        self.snapshot.task_execution_evidence(task_id)
     }
 }

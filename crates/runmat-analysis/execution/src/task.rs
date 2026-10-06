@@ -274,7 +274,7 @@ pub fn build_analysis_task_submission(
         program_artifact_id: context.program_artifact_id,
         callable: Callable {
             owner_identity: ANALYSIS_EXECUTION_CALLABLE_OWNER.into(),
-            qualified_name: "analysis_workload".into(),
+            qualified_name: crate::host::ANALYSIS_HOST_ENTRYPOINT.into(),
             entrypoint_digest: workload.identity.digest(),
         },
         inputs: program_roots

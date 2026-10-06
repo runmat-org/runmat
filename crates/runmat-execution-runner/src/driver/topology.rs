@@ -10,6 +10,18 @@ use super::state::attempt_state_is_terminal;
 use super::{Driver, DriverAction, DriverEventKind};
 
 impl Driver {
+    /// Borrow the current scheduler-owned pool while the caller holds driver authority.
+    /// Inspection does not copy task histories or authorize a provider launch.
+    pub fn pool_record(
+        &self,
+        pool_id: runmat_execution::PoolId,
+    ) -> RunnerResult<&crate::pool::PoolRecord> {
+        self.snapshot
+            .pools
+            .get(&pool_id)
+            .ok_or(RunnerError::UnknownPool(pool_id))
+    }
+
     pub(super) fn register_worker(&mut self, spec: WorkerSpec) -> RunnerResult<()> {
         let pool = self.pool_mut(spec.pool_id)?;
         if let Some(existing) = pool.workers.get(&spec.id) {
@@ -66,6 +78,37 @@ impl Driver {
     ) -> RunnerResult<()> {
         self.worker_mut(worker_id)?.lifecycle = WorkerLifecycle::Lost;
         self.emit(DriverEventKind::WorkerLost { worker_id });
+        self.close_lost_worker_attempts(worker_id, actions)
+    }
+
+    pub(super) fn worker_lost_with_report(
+        &mut self,
+        worker_id: WorkerId,
+        report: BackendReport,
+        actions: &mut Vec<DriverAction>,
+    ) -> RunnerResult<()> {
+        if report.worker_id != worker_id || !matches!(report.report, AttemptReport::Lost { .. }) {
+            return Err(RunnerError::Invalid(
+                "worker loss requires its original provider loss report".into(),
+            ));
+        }
+        // Validate the triggering attempt before changing worker authority. A
+        // stale, foreign or malformed report cannot fence unrelated live work.
+        if let Some(reason) = self.backend_report_rejection_reason(&report) {
+            self.discard_backend_report(report, reason, actions);
+            return Ok(());
+        }
+        self.worker_mut(worker_id)?.lifecycle = WorkerLifecycle::Lost;
+        self.emit(DriverEventKind::WorkerLost { worker_id });
+        self.apply_backend_report(report, actions)?;
+        self.close_lost_worker_attempts(worker_id, actions)
+    }
+
+    fn close_lost_worker_attempts(
+        &mut self,
+        worker_id: WorkerId,
+        actions: &mut Vec<DriverAction>,
+    ) -> RunnerResult<()> {
         let reports = self
             .snapshot
             .attempts
@@ -155,6 +198,20 @@ impl Driver {
         if let Some(state) = dependency_state {
             record.state = state;
             record.active_attempt = None;
+            if state == TaskState::Cancelled {
+                let dependency = record
+                    .submission
+                    .dependencies
+                    .iter()
+                    .find(|id| self.snapshot.tasks[id].state == TaskState::Cancelled)
+                    .expect("merged cancellation has an original cancelled dependency");
+                record.cancellation = Some(crate::TaskCancellation {
+                    cause: crate::TaskCancellationCause::Dependency {
+                        task_id: *dependency,
+                    },
+                    requested_at_driver_millis: self.snapshot.now_millis,
+                });
+            }
         } else if dependencies_succeeded {
             record.state = TaskState::Ready;
         }

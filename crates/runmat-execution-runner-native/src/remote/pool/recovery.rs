@@ -135,10 +135,10 @@ impl RemotePoolCheckpoint {
     }
 
     fn validate(&self) -> NativeExecutionResult<()> {
-        if self.schema_version != 1 || self.scheduler.schema_version != 1 {
+        if self.schema_version != 2 {
             return Err(invalid("unsupported remote checkpoint schema"));
         }
-        self.scheduler.snapshot.validate()?;
+        self.scheduler.validate()?;
         let snapshot = &self.scheduler.snapshot;
         if snapshot.pools.len() != 1
             || !snapshot.pools.contains_key(&self.pool_id)
@@ -254,7 +254,7 @@ impl RemotePoolDriver {
         let mut value_inputs = self.values.checkpoint_references();
         value_inputs.sort_by_key(|reference| reference.id);
         let checkpoint = RemotePoolCheckpoint {
-            schema_version: 1,
+            schema_version: 2,
             scope_id: self.scope_id,
             pool_id: self.pool_id,
             value_scope: self.value_scope.clone(),

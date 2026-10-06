@@ -32,7 +32,7 @@ pub struct DriverSnapshot {
 
 impl DriverSnapshot {
     pub fn validate(&self) -> RunnerResult<()> {
-        if self.schema_version != 2 || self.driver_fence == 0 {
+        if self.schema_version != 3 || self.driver_fence == 0 {
             return Err(RunnerError::Invalid(
                 "driver snapshot schema or fence is invalid".into(),
             ));
@@ -95,6 +95,51 @@ impl DriverSnapshot {
                 .push(attempt);
         }
         for (id, task) in &self.tasks {
+            if let Some(cancellation) = task.cancellation {
+                match cancellation.cause {
+                    crate::TaskCancellationCause::Task { task_id, reason } => {
+                        if task_id != *id || !self.events.iter().any(|event| matches!(event.kind,
+                            super::DriverEventKind::TaskCancellationRequested { task_id: original, reason: original_reason, now_millis }
+                                if original == task_id && original_reason == reason && now_millis == cancellation.requested_at_driver_millis)) {
+                            return Err(RunnerError::Invalid("task cancellation differs from its original driver decision".into()));
+                        }
+                    }
+                    crate::TaskCancellationCause::Scope { scope_id, reason } => {
+                        let state = self.cancellation.state(task.submission.request.scope_id);
+                        if !self.events.iter().any(|event| matches!(event.kind,
+                            super::DriverEventKind::ScopeCancelled { scope_id: original_scope, reason: original_reason }
+                                if original_scope == scope_id && original_reason == reason))
+                            || !self
+                            .cancellation
+                            .is_ancestor(scope_id, task.submission.request.scope_id)
+                            || state.is_none_or(|state| {
+                                state.reason != reason
+                                    || state.requested_at_millis
+                                        != cancellation.requested_at_driver_millis
+                            })
+                        {
+                            return Err(RunnerError::Invalid(
+                                "task cancellation differs from its original scope decision".into(),
+                            ));
+                        }
+                    }
+                    crate::TaskCancellationCause::Dependency { task_id } => {
+                        if self.tasks.get(&task_id).is_none_or(|parent| {
+                            parent.state != runmat_execution::state::TaskState::Cancelled
+                                || parent.cancellation.is_none_or(|cause| {
+                                    cause.requested_at_driver_millis
+                                        > cancellation.requested_at_driver_millis
+                                })
+                        }) {
+                            return Err(RunnerError::Invalid(
+                                "task cancellation differs from its original dependency decision"
+                                    .into(),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
             crate::task::validate_history(
                 task,
                 histories.get(id).map_or(&[], Vec::as_slice),

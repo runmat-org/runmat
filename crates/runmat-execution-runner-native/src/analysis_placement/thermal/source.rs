@@ -14,6 +14,7 @@ use runmat_runtime::analysis::{
     ThermalStudyCompletion, ThermalStudyObjectSource, ThermalStudySource,
 };
 
+mod authentication;
 mod observations;
 #[cfg(test)]
 use runmat_execution_artifact::cache::FilesystemObjectStore;
@@ -23,45 +24,113 @@ mod tests;
 struct RetainedThermalSource<S> {
     inventory_limits: runmat_execution_artifact::object::ObjectInventoryLimits,
     completed: CompletedThermalStudy,
+    catalog: runmat_execution::value::PublishedObjectCatalog,
     store: S,
     objects: BTreeMap<Digest, Vec<u8>>,
 }
 
 impl<S: CacheImport> CacheImport for RetainedThermalSource<S> {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded(digest, self.inventory_limits.max_object_bytes)
+    }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        let reference = self
+            .catalog
+            .objects
+            .iter()
+            .find(|r| r.logical_digest == digest)
+            .ok_or_else(|| {
+                runmat_execution_artifact::ArtifactError::Identity(
+                    "thermal source read outside original catalog".into(),
+                )
+            })?;
+        let maximum = maximum_bytes.min(self.inventory_limits.max_object_bytes);
+        if reference.encoded_length > maximum {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "thermal source object exceeds caller read allowance".into(),
+            ));
+        }
+        let maximum = reference.encoded_length;
         if let Some(bytes) = self.objects.get(&digest) {
+            if bytes.len() as u64 > maximum {
+                return Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "thermal source object exceeds caller read allowance".into(),
+                ));
+            }
             return Ok(Some(bytes.clone()));
         }
-        self.store.read_verified(digest)
+        self.store.read_verified_bounded(digest, maximum)
     }
 }
 
 impl<S: CacheImport + Send + Sync> PublishedObjectSource for RetainedThermalSource<S> {
     fn read_verified(&self, reference: &ValueRef) -> Result<Vec<u8>, String> {
-        self.completed
-            .result
-            .host
-            .artifact_access
-            .validate_reference(
-                reference,
-                runmat_execution::value::ValueRefKind::ResultObject,
-                &reference.media_type,
-                &reference.value_schema,
-            )
-            .map_err(|error| error.to_string())?;
-        let bytes = CacheImport::read_verified(self, reference.logical_digest)
-            .map_err(|error| error.to_string())?
-            .ok_or("thermal source omitted a catalog object")?;
-        if Digest::sha256(&bytes) != reference.logical_digest
-            || bytes.len() as u64 != reference.encoded_length
-        {
-            return Err("thermal source object digest or length differs".into());
-        }
-        Ok(bytes)
+        self.read_catalog_object(reference)
+            .map_err(|error| error.to_string())
     }
 }
 
 impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<S> {
+    fn publication_workspace(
+        &self,
+        candidate: &ThermalStudyCompletion,
+        maximum: u64,
+    ) -> Result<u64, runmat_runtime::analysis::storage::AnalysisPublicationError> {
+        use super::super::source_failure::{bridge, limit};
+        if candidate
+            .catalog
+            .objects
+            .iter()
+            .any(|r| r.encoded_length > maximum)
+        {
+            return Err(limit(
+                "declared thermal source transport exceeds captured allowance",
+            ));
+        }
+        if candidate.catalog != self.catalog
+            || self.catalog.roots.len() != 1
+            || self.catalog.roots.first() != Some(&candidate.root)
+        {
+            return Err("thermal source workspace catalog differs from original closure".into());
+        }
+        let codec = runmat_canonical_codec::CanonicalLimits::new(
+            usize::try_from(maximum)
+                .map_err(|_| limit("thermal source workspace address space"))?,
+            100_000_000,
+            65_536,
+            64,
+        );
+        let mut owned = runmat_canonical_codec::profile_serialized(&self.catalog, codec)?
+            .materialization_resident_bytes_estimate;
+        for bytes in self.objects.values() {
+            owned = owned
+                .checked_add(bytes.capacity() as u64)
+                .ok_or_else(|| limit("thermal source root storage overflow"))?;
+        }
+        let available = maximum
+            .checked_sub(owned)
+            .ok_or_else(|| limit("thermal source retained roots exceed allowance"))?;
+        let required = self
+            .completed
+            .publication_workspace_bytes(self, &self.catalog, available)
+            .map_err(bridge)?;
+        owned
+            .checked_add(required)
+            .ok_or_else(|| limit("thermal source workspace overflow"))
+    }
+    fn authenticate_admitted(
+        &self,
+        candidate: &ThermalStudyCompletion,
+        maximum: u64,
+    ) -> Result<(), runmat_runtime::analysis::storage::AnalysisPublicationError> {
+        self.publication_workspace(candidate, maximum)?;
+        self.authenticate_original(candidate)
+    }
     fn read_observation(
         &self,
         catalog: observations::CatalogIdentity,
@@ -106,23 +175,8 @@ impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<
         )
     }
     fn authenticate(&self, candidate: &ThermalStudyCompletion) -> Result<(), String> {
-        let replay = import_thermal_study_completion(
-            self,
-            self.completed.preparation(),
-            self.completed.result_closures().to_vec(),
-        )
-        .map_err(|error| error.to_string())?;
-        if replay != self.completed {
-            return Err("thermal completion differs from authenticated replay".into());
-        }
-        let expected = completion(&replay)?;
-        if &expected != candidate {
-            return Err("runtime thermal completion differs from authenticated replay".into());
-        }
-        for reference in &expected.catalog.objects {
-            PublishedObjectSource::read_verified(self, reference)?;
-        }
-        Ok(())
+        self.authenticate_original(candidate)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -159,7 +213,7 @@ fn completion(completed: &CompletedThermalStudy) -> Result<ThermalStudyCompletio
         baseline_usage: completed.baseline_usage.evidence.clone(),
         terminal_usage: completed.terminal_usage.evidence.clone(),
         publication: completed.publication.result.clone(),
-        frozen_project_digest: completed.preparation().frozen_project_digest,
+        frozen_project_digest: completed.frozen_project_digest(),
         root: root.root,
         catalog: root.catalog,
     })
@@ -171,7 +225,8 @@ pub(crate) fn convert(
 ) -> Result<(ThermalStudyCompletion, ThermalStudyObjectSource), String> {
     let root = prepare_thermal_study_root(&completed).map_err(|error| error.to_string())?;
     let source = RetainedThermalSource {
-        inventory_limits: completed.preparation().output_policy.inventory_limits(),
+        inventory_limits: completed.output_policy().inventory_limits(),
+        catalog: root.catalog,
         objects: root
             .objects
             .into_iter()
@@ -191,8 +246,10 @@ pub fn thermal_study_completion_from_source(
     completed: CompletedThermalStudy,
     source: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(ThermalStudyCompletion, ThermalStudyObjectSource), String> {
+    let root = prepare_thermal_study_root(&completed).map_err(|e| e.to_string())?;
     let source = RetainedThermalSource {
-        inventory_limits: completed.preparation().output_policy.inventory_limits(),
+        inventory_limits: completed.output_policy().inventory_limits(),
+        catalog: root.catalog,
         completed,
         store: source,
         objects: BTreeMap::new(),

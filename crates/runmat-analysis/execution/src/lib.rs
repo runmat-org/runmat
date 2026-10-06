@@ -37,6 +37,8 @@ pub use fluid_transient_task::{
     prepare_fluid_transient_task, FluidTransientTaskPreparation, PreparedFluidTransientTask,
 };
 pub use phase_accounting::validate_analysis_phase_accounting;
+mod phase_execution;
+pub use phase_execution::AnalysisPhaseExecutionEvidence;
 mod nonlinear_block;
 mod nonlinear_study;
 mod study_closure;
@@ -113,7 +115,9 @@ mod result_publication_resource;
 mod result_publication_usage;
 pub use result_publication_resource::build_prepared_result_publication_resource_plan;
 pub use result_publication_usage::complete_result_publication_resource_usage;
-pub use runmat_analysis_fea::results::publication::validate_result_publication_resource_usage;
+pub use runmat_analysis_fea::results::publication::{
+    validate_result_publication_resource_usage, validate_retained_result_publication_resource_usage,
+};
 mod semantic_state_object_access;
 mod serial;
 mod signal_deferred;

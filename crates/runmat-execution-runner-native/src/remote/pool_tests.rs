@@ -1648,3 +1648,8 @@ fn bundle_receipt(bundle_digest: Digest, bytes: &[u8]) -> RemoteBundleReceipt {
         stored_bytes: bytes.len() as u64,
     }
 }
+
+#[path = "pool_tests/degraded_capacity.rs"]
+mod degraded_capacity;
+
+mod delivery_accounting;

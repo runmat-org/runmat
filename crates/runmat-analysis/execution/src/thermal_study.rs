@@ -2,8 +2,10 @@
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
+use crate::phase_accounting::validate_analysis_phase_accounting as validate_accounting;
 use std::collections::BTreeSet;
 
+use crate::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_core::AuthoredOutput;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
@@ -12,7 +14,6 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
-use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
@@ -21,8 +22,7 @@ use crate::{
     prepare_accuracy, prepare_result_publication, prepare_semantic_state_publication,
     prepare_thermal_task, AccuracyPreparation, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisOutputPolicy, ImportedAccuracy,
-    ImportedPublishedResult, ImportedSemanticState, ImportedThermalResult,
-    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAccuracy,
+    ImportedPublishedResult, ImportedSemanticState, ImportedThermalResult, PreparedAccuracy,
     PreparedResourceUsage, PreparedResultPublication, PreparedSemanticStatePublication,
     PreparedThermalTask, ResultPublicationPreparation, SemanticStatePublicationPreparation,
     ThermalTaskPreparation,
@@ -167,7 +167,7 @@ impl ThermalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(ThermalStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
@@ -220,7 +220,7 @@ impl ThermalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(ThermalStudyPhase::AwaitingObservation)?;
         let task = self.observations.pending()?;
@@ -283,7 +283,7 @@ impl ThermalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(ThermalStudyPhase::AwaitingAccuracy)?;
         let task = self.accuracy_task.as_ref().expect("awaited accuracy");
@@ -336,7 +336,7 @@ impl ThermalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(ThermalStudyPhase::AwaitingState {
             ordinal: self.states.len(),
@@ -410,7 +410,7 @@ impl ThermalStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<()> {
         self.require(ThermalStudyPhase::AwaitingPublication)?;
         let task = self.publication_task.as_ref().expect("awaited publication");
@@ -431,10 +431,7 @@ impl ThermalStudyCoordinator {
             task,
             &publication,
             self.baseline.as_ref().expect("frozen baseline"),
-            &PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting,
-            },
+            &accounting,
             self.preparation.output_policy,
         )?;
         self.publication = Some(publication);
@@ -534,16 +531,9 @@ impl ThermalStudyCoordinator {
     fn extend_usage(
         &self,
         plan: &FeaResourcePlan,
-        accounting: AttemptResourceAccounting,
+        accounting: AnalysisPhaseExecutionEvidence,
     ) -> AnalysisBridgeResult<PreparedResourceUsage> {
-        let wall_millis = accounting.resources.usage.wall_millis;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: plan.clone(),
-                accounting,
-            }],
-            wall_millis,
-        )?;
+        let graph = accounting.resource_graph(plan)?;
         extend_resource_usage(
             self.usage.as_ref().expect("completed solve usage"),
             &graph,
@@ -551,41 +541,6 @@ impl ThermalStudyCoordinator {
             self.preparation.output_policy,
         )
     }
-}
-
-fn validate_accounting(
-    host: &AnalysisHostWorkload,
-    plan: &FeaResourcePlan,
-    response: &ProgramExecutionResponse,
-    accounting: &AttemptResourceAccounting,
-) -> AnalysisBridgeResult<()> {
-    accounting
-        .validate()
-        .map_err(|error| invalid(error.to_string()))?;
-    let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = response else {
-        return Err(invalid(
-            "thermal study requires externalized phase completion",
-        ));
-    };
-    let bytes = result_objects
-        .iter()
-        .try_fold(0_u64, |sum, object| sum.checked_add(object.encoded_length))
-        .ok_or_else(|| invalid("thermal phase output byte count overflow"))?;
-    if bytes != accounting.resources.artifact_bytes
-        || !runmat_analysis_fea::planning::resource::allocation_matches_plan(
-            &accounting.resources.allocation,
-            &plan.request,
-        )
-        || !host
-            .workload
-            .generic_capabilities()?
-            .is_subset(&accounting.resources.allocation.required_capabilities)
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "thermal phase accounting differs from its admitted request and output closure",
-        ));
-    }
-    Ok(())
 }
 
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {

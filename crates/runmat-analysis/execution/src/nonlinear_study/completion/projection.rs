@@ -147,7 +147,7 @@ pub(super) fn import_prefix(
         if task.request.block_ordinal != original || task.host.workload != closure.workload {
             return Err(invalid("original nonlinear prefix phase/workload differs"));
         }
-        study.complete_block(source, closure.response.clone(), closure.accounting.clone())?;
+        study.complete_block(source, closure.response.clone(), closure.execution.clone())?;
         if original == ordinal {
             return Ok(study.block.take().expect("completed original block"));
         }

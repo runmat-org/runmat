@@ -20,7 +20,7 @@ pub struct ElectricalStudyResultClosure {
     pub phase: ElectricalStudyResultPhase,
     pub workload: AnalysisWorkloadRequest,
     pub response: ProgramExecutionResponse,
-    pub accounting: AttemptResourceAccounting,
+    pub execution: AnalysisPhaseExecutionEvidence,
 }
 
 impl ElectricalStudyResultClosure {
@@ -28,13 +28,13 @@ impl ElectricalStudyResultClosure {
         phase: ElectricalStudyResultPhase,
         host: &AnalysisHostWorkload,
         response: &ProgramExecutionResponse,
-        accounting: &AttemptResourceAccounting,
+        accounting: &AnalysisPhaseExecutionEvidence,
     ) -> Self {
         Self {
             phase,
             workload: host.workload.clone(),
             response: response.clone(),
-            accounting: accounting.clone(),
+            execution: accounting.clone(),
         }
     }
 
@@ -151,16 +151,16 @@ pub fn import_electrical_study_completion(
         closure.validate_for(phase, host)?;
         match phase {
             ElectricalStudyResultPhase::Solve => {
-                study.complete_solve(source, closure.response, closure.accounting)?
+                study.complete_solve(source, closure.response, closure.execution)?
             }
             ElectricalStudyResultPhase::Accuracy => {
-                study.complete_accuracy(source, closure.response, closure.accounting)?
+                study.complete_accuracy(source, closure.response, closure.execution)?
             }
             ElectricalStudyResultPhase::State { .. } => {
-                study.complete_next_state(source, closure.response, closure.accounting)?
+                study.complete_next_state(source, closure.response, closure.execution)?
             }
             ElectricalStudyResultPhase::Publication => {
-                study.complete_publication(source, closure.response, closure.accounting)?
+                study.complete_publication(source, closure.response, closure.execution)?
             }
         }
     }

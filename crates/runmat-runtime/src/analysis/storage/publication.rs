@@ -5,11 +5,13 @@ use std::collections::BTreeSet;
 
 mod assessment;
 mod binding;
+mod catalog;
 pub(super) mod filesystem;
 mod initial_fields;
 pub(super) mod memory;
 mod preparation;
 mod source_fields;
+mod source_phase;
 pub(in crate::analysis) use preparation::PreparationReservation;
 pub(in crate::analysis::storage) mod resources;
 pub(in crate::analysis::storage) mod retention;
@@ -21,6 +23,8 @@ pub struct AnalysisPublicationBuilder {
     maximum_bytes: u64,
     preparation_resident_bytes: u64,
     source_workspace_bytes: u64,
+    source_profiles: BTreeMap<Digest, u64>,
+    source_phase: Arc<std::sync::Mutex<Option<source_phase::SourceWorkspaceCharge>>>,
     preparation_scope: Arc<()>,
     evidence_access: crate::analysis::structural_study::publication::evidence::StudyEvidenceAccess,
     admission: std::sync::Mutex<bool>,
@@ -116,6 +120,10 @@ impl PreparedAnalysisPublication {
             .observations
             .iter()
             .map(|(id, attachment)| {
+                let Some(PersistedAnalysisArtifact::Standard(run)) = self.runs.get(id) else {
+                    return Err("observation attachment lacks its original standard run".into());
+                };
+                attachment.validate(&run.metadata, run.run_digest)?;
                 Ok((
                     id.clone(),
                     canonical_digest("analysis-publication-observation", attachment)?,
@@ -164,6 +172,8 @@ impl AnalysisPublicationBuilder {
             maximum_bytes: maximum_staging_bytes,
             preparation_resident_bytes: 0,
             source_workspace_bytes: 0,
+            source_profiles: BTreeMap::new(),
+            source_phase: Arc::new(std::sync::Mutex::new(None)),
             preparation_scope: Arc::new(()),
             evidence_access: crate::analysis::structural_study::publication::evidence::StudyEvidenceAccess::capture(),
             admission: std::sync::Mutex::new(false),
@@ -186,15 +196,21 @@ impl AnalysisPublicationBuilder {
             .observations
             .read()
             .map_err(|_| "staging lock poisoned")?;
-        let total = resources::retained(&runs, &chunks, &observations, self.maximum_bytes)?
+        let retained = resources::retained(&runs, &chunks, &observations, self.maximum_bytes)?;
+        let source_workspace = self.active_source_workspace()?;
+        let total = retained
             .checked_add(self.preparation_resident_bytes)
+            .and_then(|bytes| bytes.checked_add(source_workspace))
             .and_then(|bytes| bytes.checked_add(additional))
             .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
                 message: "staging byte overflow".into(),
             })?;
         if total > self.maximum_bytes {
             return Err(AnalysisPublicationError::ResourceLimit {
-                message: "publication staging exceeds its byte budget".into(),
+                message: format!(
+                    "publication staging exceeds its byte budget: retained={retained}, preparation={}, source_workspace={source_workspace}, additional={additional}, required={total}, maximum={} bytes",
+                    self.preparation_resident_bytes, self.maximum_bytes,
+                ),
             });
         }
         Ok(())
@@ -226,6 +242,7 @@ impl AnalysisPublicationBuilder {
         roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, AnalysisPublicationError> {
+        let _source_phase = self.begin_catalog_phase(&catalog.objects)?;
         let guard = self
             .admission
             .lock()
@@ -245,6 +262,7 @@ impl AnalysisPublicationBuilder {
         roots: &crate::analysis::FrequencySampleArtifactRootInventory,
         source: &dyn runmat_execution::value::PublishedObjectSource,
     ) -> Result<AnalysisArtifactRecord, AnalysisPublicationError> {
+        let _source_phase = self.begin_catalog_phase(&catalog.objects)?;
         let guard = self
             .admission
             .lock()
@@ -263,12 +281,15 @@ impl AnalysisPublicationBuilder {
         completed: &crate::analysis::ThermalStudyCompletion,
         source: &crate::analysis::ThermalStudyObjectSource,
     ) -> Result<(), AnalysisPublicationError> {
-        let guard = self
-            .admission
-            .lock()
-            .map_err(|_| "staging admission lock poisoned")?;
-        if *guard {
-            return Err("publication inventory is frozen for manifest preparation".into());
+        let phase = self.begin_catalog_phase(&completed.catalog.objects)?;
+        {
+            let guard = self
+                .admission
+                .lock()
+                .map_err(|_| "staging admission lock poisoned")?;
+            if *guard {
+                return Err("publication inventory is frozen for manifest preparation".into());
+            }
         }
         let metadata = resident(
             &(
@@ -294,10 +315,12 @@ impl AnalysisPublicationBuilder {
                         message: "staging byte overflow".into(),
                     })
             })?;
-        self.admit(bytes)?;
-        self.store
-            .persist_thermal_observations(run_id, completed, source)
-            .map_err(Into::into)
+        let attachment = self.store.prepare_observations(run_id, completed, source)?;
+        phase.with_transport(self, bytes, || {
+            self.store
+                .install_observations(run_id, attachment, source)
+                .map_err(Into::into)
+        })
     }
     pub fn load_assessment_metadata(
         &self,
@@ -310,6 +333,9 @@ impl AnalysisPublicationBuilder {
         self,
         manifest: serde_json::Value,
     ) -> Result<PreparedAnalysisPublication, AnalysisPublicationError> {
+        if self.source_phase_active()? {
+            return Err("publication source phase is still active".into());
+        }
         {
             let runs = self
                 .store

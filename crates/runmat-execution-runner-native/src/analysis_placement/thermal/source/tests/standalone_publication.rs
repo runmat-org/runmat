@@ -19,6 +19,14 @@ impl CacheImport for CountedThermalObjects {
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         CacheImport::read_verified(&self.objects, digest)
     }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.objects.read_verified_bounded(digest, maximum)
+    }
 }
 
 fn standalone_preparation(
@@ -128,11 +136,8 @@ fn check(order: ElementOrder, transient: bool) {
     let task_count = pool.tasks.len();
     let root = prepare_thermal_study_root(&executed.completed).unwrap();
     let source = RetainedThermalSource {
-        inventory_limits: executed
-            .completed
-            .preparation()
-            .output_policy
-            .inventory_limits(),
+        inventory_limits: executed.completed.output_policy().inventory_limits(),
+        catalog: root.catalog,
         completed: executed.completed,
         store: pool.store.clone(),
         objects: root
@@ -186,6 +191,7 @@ fn check(order: ElementOrder, transient: bool) {
     let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counted = ThermalStudyObjectSource::new(RetainedThermalSource {
         inventory_limits: source.inventory_limits,
+        catalog: source.catalog.clone(),
         completed: source.completed.clone(),
         store: CountedThermalObjects {
             objects: downloaded.clone(),
@@ -250,6 +256,7 @@ fn check(order: ElementOrder, transient: bool) {
     missing.0.remove(&descendant.logical_digest);
     let incomplete = ThermalStudyObjectSource::new(RetainedThermalSource {
         inventory_limits: source.inventory_limits,
+        catalog: source.catalog.clone(),
         completed: source.completed.clone(),
         store: missing,
         objects: BTreeMap::new(),
@@ -303,7 +310,27 @@ fn check(order: ElementOrder, transient: bool) {
         .as_array()
         .unwrap()
     {
-        assert!(std::path::Path::new(path.as_str().unwrap()).is_file());
+        let path = std::path::Path::new(path.as_str().unwrap());
+        let reference = completed
+            .catalog
+            .objects
+            .iter()
+            .find(|reference| {
+                path.file_name().unwrap().to_str().unwrap()
+                    == format!(
+                        "sha256_{}.object",
+                        reference
+                            .logical_digest
+                            .to_string()
+                            .trim_start_matches("sha256:")
+                    )
+            })
+            .expect("published binary object belongs to original catalog");
+        let bytes = runmat_filesystem::NativeFsProvider
+            .read_bounded_sync(path, reference.encoded_length)
+            .unwrap();
+        assert_eq!(bytes.len() as u64, reference.encoded_length);
+        assert_eq!(Digest::sha256(&bytes), reference.logical_digest);
     }
     let step = &published.data.steps[0];
     assert_eq!(step.identity.family(), PhysicsFamily::Thermal);

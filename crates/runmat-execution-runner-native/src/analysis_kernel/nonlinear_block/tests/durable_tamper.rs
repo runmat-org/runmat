@@ -54,7 +54,11 @@ pub(super) fn verify_rehashed_metadata(
         limits,
     )
     .unwrap();
-    for alteration in 0..6 {
+    assert_eq!(
+        original_wire["schema_version"], 2,
+        "original completion schema"
+    );
+    for alteration in 0..7 {
         let mut wire = original_wire.clone();
         match alteration {
             0 => {} // Round trip is admitted: JSON value transport itself is not a rejection cause.
@@ -63,7 +67,7 @@ pub(super) fn verify_rehashed_metadata(
                 wire["closures"].as_array_mut().unwrap().remove(1);
             }
             3 => wire["closures"].as_array_mut().unwrap().swap(0, 1),
-            4 => wire["schema_version"] = 2.into(),
+            4 => wire["schema_version"] = 1.into(),
             5 => {
                 let catalog: runmat_execution::value::PublishedObjectCatalog =
                     serde_json::from_value(wire["descendants"].clone()).unwrap();
@@ -79,7 +83,14 @@ pub(super) fn verify_rehashed_metadata(
                 )
                 .unwrap();
             }
+            6 => wire["schema_version"] = 3.into(),
             _ => unreachable!(),
+        }
+        if alteration != 0 {
+            assert_ne!(
+                wire, original_wire,
+                "alteration {alteration} must change original metadata"
+            );
         }
         let bytes = encode_contract(
             b"runmat-nonlinear-solid-study-completion\0",

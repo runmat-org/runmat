@@ -1,17 +1,17 @@
 //! Whole-study acoustic placement through the shared admitted analysis task pool.
 pub(crate) mod source;
 
+use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
 use runmat_analysis_execution::{
     AcousticStudyCoordinator, AcousticStudyPreparation, AnalysisHostWorkload,
     CompletedAcousticStudy, PreparedAnalysisProgram,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
-use runmat_execution_runner::AttemptResourceAccounting;
 
 use crate::{
     analysis_task_pool::{
-        execute_analysis_task_batch, execute_governed_analysis_phase, planned_resource_attempt,
+        execute_analysis_task_batch, execute_governed_analysis_phase, planned_phase_execution,
         AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask,
         PreparedAnalysisTask,
     },
@@ -110,12 +110,12 @@ pub(crate) async fn execute_with_pool(
             let (_, _, plan) = coordinator.entries()[ordinal]
                 .pending_task()
                 .map_err(protocol)?;
-            let attempt = planned_resource_attempt(plan, &executed)?;
+            let attempt = planned_phase_execution(plan, &executed)?;
             let dependency = dependency(&executed);
             coordinator
                 .entry_mut(ordinal)
                 .map_err(protocol)?
-                .complete_next(pool, executed.response, attempt.accounting)
+                .complete_next(pool, executed.response, attempt)
                 .map_err(protocol)?;
             preceding[ordinal] = Some(dependency);
         }
@@ -154,7 +154,7 @@ async fn execute_one(
     plan: &FeaResourcePlan,
     dependencies: Vec<AnalysisTaskDependency>,
     policy: &AcousticStudyExecutionPolicy,
-) -> NativeExecutionResult<(ExecutedAnalysisTask, AttemptResourceAccounting)> {
+) -> NativeExecutionResult<(ExecutedAnalysisTask, AnalysisPhaseExecutionEvidence)> {
     execute_governed_analysis_phase(
         pool,
         host,

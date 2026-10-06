@@ -9,10 +9,13 @@ pub(in crate::analysis) struct StudyEvidenceAccess {
 }
 impl StudyEvidenceAccess {
     pub(in crate::analysis) fn capture() -> Self {
-        Self {
-            root: study_evidence_root(),
-            provider: runmat_filesystem::current_provider(),
-        }
+        Self::new(study_evidence_root(), runmat_filesystem::current_provider())
+    }
+    pub(in crate::analysis) fn new(
+        root: PathBuf,
+        provider: Arc<dyn runmat_filesystem::FsProvider>,
+    ) -> Self {
+        Self { root, provider }
     }
     pub(in crate::analysis) fn persist_bytes(
         &self,
@@ -22,18 +25,18 @@ impl StudyEvidenceAccess {
     ) -> Result<String, Error> {
         let available = maximum
             .checked_sub(bytes.len() as u64)
-            .filter(|bytes| *bytes > 0)
-            .ok_or_else(|| limited("immutable state buffers exceed their phase allowance"))?;
+            .filter(|available| *available > 0 && *available >= bytes.len() as u64)
+            .ok_or_else(|| limited("immutable object buffers exceed their phase allowance"))?;
         let scope = self
             .provider
             .workspace_access(&self.root, true, available)?;
         let path = std::path::Path::new(relative);
-        scope.create_dir_all(path.parent().ok_or("state path has no parent")?)?;
+        scope.create_dir_all(path.parent().ok_or("immutable object path has no parent")?)?;
         match scope.atomic_create_new(path, bytes, available)? {
             runmat_filesystem::AtomicCreateResult::Published { .. } => {}
             runmat_filesystem::AtomicCreateResult::Existing(existing) if existing == bytes => {}
             runmat_filesystem::AtomicCreateResult::Existing(_) => {
-                return Err("semantic state identity already contains different content".into())
+                return Err("immutable object identity already contains different content".into())
             }
         }
         scope.synchronize_immutable(path).map_err(|error| {

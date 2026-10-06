@@ -30,7 +30,7 @@ impl Driver {
         }
         Ok(Self {
             snapshot: DriverSnapshot {
-                schema_version: 2,
+                schema_version: 3,
                 config,
                 driver_fence,
                 now_millis: 0,
@@ -65,6 +65,13 @@ impl Driver {
 
     pub fn snapshot(&self) -> DriverSnapshot {
         self.snapshot.clone()
+    }
+
+    /// Borrow complete original history for validation and serialization.
+    /// The borrow prevents driver mutation until the reader releases it. Use an
+    /// owned snapshot only when independent retention or rollback requires it.
+    pub fn snapshot_ref(&self) -> &DriverSnapshot {
+        &self.snapshot
     }
 
     /// Current logical driver clock without copying its task/attempt inventory.
@@ -129,6 +136,9 @@ impl Driver {
             DriverCommand::WorkerLost(worker_id) => {
                 self.worker_lost(worker_id, &mut actions)?;
             }
+            DriverCommand::WorkerLostWithReport { worker_id, report } => {
+                self.worker_lost_with_report(worker_id, *report, &mut actions)?;
+            }
             DriverCommand::Submit(submission) => self.submit(*submission)?,
             DriverCommand::SubmitBatch(submissions) => {
                 if submissions.is_empty() {
@@ -146,6 +156,26 @@ impl Driver {
             }
             DriverCommand::BackendReport(report) => {
                 self.apply_backend_report(report, &mut actions)?;
+            }
+            DriverCommand::CancelTask {
+                task_id,
+                reason,
+                now_millis,
+            } => {
+                self.advance_clock(now_millis)?;
+                if !self.task_is_terminal(task_id)? {
+                    self.emit(DriverEventKind::TaskCancellationRequested {
+                        task_id,
+                        reason,
+                        now_millis,
+                    });
+                }
+                self.cancel_task(
+                    task_id,
+                    now_millis,
+                    crate::TaskCancellationCause::Task { task_id, reason },
+                    &mut actions,
+                )?;
             }
             DriverCommand::CancelScope {
                 scope_id,
@@ -166,7 +196,12 @@ impl Driver {
                     .map(|(task_id, _)| *task_id)
                     .collect::<Vec<_>>();
                 for task_id in tasks {
-                    self.cancel_task(task_id, now_millis, &mut actions)?;
+                    self.cancel_task(
+                        task_id,
+                        now_millis,
+                        crate::TaskCancellationCause::Scope { scope_id, reason },
+                        &mut actions,
+                    )?;
                 }
             }
             DriverCommand::Tick { now_millis } => {
@@ -174,7 +209,12 @@ impl Driver {
                 for task_id in self.snapshot.deadlines.expired(now_millis) {
                     if !self.task_is_terminal(task_id)? {
                         self.emit(DriverEventKind::DeadlineExpired { task_id });
-                        self.cancel_task(task_id, now_millis, &mut actions)?;
+                        self.cancel_task(
+                            task_id,
+                            now_millis,
+                            crate::TaskCancellationCause::Deadline,
+                            &mut actions,
+                        )?;
                     }
                 }
                 self.expire_attempt_wall_times(now_millis, &mut actions)?;

@@ -306,6 +306,40 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             "completed solver results contain unauthored procedure steps",
         ));
     }
+    for run in &runs_to_persist {
+        run_persistence::stage(&context, &staging, run)?;
+        original_fields::stage(
+            &context,
+            &staging,
+            &run.run_id,
+            &thermal_original_fields,
+            &original_sources,
+        )?;
+        // Attach source-backed evidence with its owning run before retaining
+        // independent suffix outputs. All entries remain hidden until commit.
+        if thermal_observations
+            .as_ref()
+            .is_some_and(|(run_id, _, _)| run_id == &run.run_id)
+        {
+            let (run_id, completed, source) = thermal_observations.take().unwrap();
+            staging
+                .stage_thermal_observations(&run_id, &completed, &source)
+                .map_err(|error| {
+                    completion_storage_error(
+                        &context,
+                        "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
+                        error,
+                    )
+                })?;
+        }
+    }
+    if thermal_observations.is_some() {
+        return Err(completion_error(
+            &context,
+            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+            "thermal observations have no staged thermal run",
+        ));
+    }
     let state_results = validate_and_persist_states(
         &context,
         &study_fingerprint,
@@ -316,23 +350,6 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         &entry_scoped_state_steps,
         &staging,
     )?;
-    for run in &runs_to_persist {
-        run_persistence::stage(&context, &staging, run)?;
-        original_fields::stage(
-            &context,
-            &staging,
-            &run.run_id,
-            &thermal_original_fields,
-            &original_sources,
-        )?;
-    }
-    if let Some((run_id, completed, source)) = thermal_observations {
-        staging
-            .stage_thermal_observations(&run_id, &completed, &source)
-            .map_err(|error| {
-                completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-            })?;
-    }
     for (step, persistence) in &frequency_runs_to_persist {
         staging
             .stage_structural_frequency(

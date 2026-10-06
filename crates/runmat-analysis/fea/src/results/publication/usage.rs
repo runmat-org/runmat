@@ -55,13 +55,33 @@ pub(crate) fn validate_accuracy_resource_usage(
     ))
 }
 
-/// Requires exactly the measured publication attempt in addition to every baseline attempt.
+/// Validates a cold terminal extension using its retained scheduler interval.
+/// This checks internal consistency, not an independently observed elapsed time.
+pub fn validate_retained_result_publication_resource_usage(
+    publication: &PublishedAnalysisResult,
+    baseline: &ResourceUsageEvidence,
+    terminal: &ResourceUsageEvidence,
+) -> AnalysisExecutionResult<()> {
+    let interval = terminal
+        .actual
+        .scheduler
+        .wall_millis
+        .checked_sub(baseline.actual.scheduler.wall_millis)
+        .filter(|interval| *interval > 0)
+        .ok_or(AnalysisExecutionError::Identity(
+            "publication omits its retained execution interval",
+        ))?;
+    validate_result_publication_resource_usage(publication, baseline, terminal, interval)
+}
+
+/// Requires every original publication attempt in addition to every baseline attempt.
 /// The immutable receipt names the baseline; terminal accounting cannot be embedded in that
 /// receipt without introducing a content-addressing cycle.
 pub fn validate_result_publication_resource_usage(
     publication: &PublishedAnalysisResult,
     baseline: &ResourceUsageEvidence,
     terminal: &ResourceUsageEvidence,
+    publication_wall_millis: u64,
 ) -> AnalysisExecutionResult<()> {
     publication.validate()?;
     validate_accuracy_resource_usage(
@@ -79,7 +99,8 @@ pub fn validate_result_publication_resource_usage(
         || terminal.result_digest != baseline.result_digest
         || !baseline.overruns.is_empty()
         || !terminal.overruns.is_empty()
-        || terminal.attempts.len() != baseline.attempts.len() + 1
+        || terminal.attempts.len() <= baseline.attempts.len()
+        || publication_wall_millis == 0
     {
         return Err(AnalysisExecutionError::Identity(
             "terminal publication usage differs from its baseline",
@@ -88,7 +109,7 @@ pub fn validate_result_publication_resource_usage(
     // Identity validation guarantees unique, sorted attempt IDs. Merge the inventories
     // in linear time rather than repeatedly scanning a potentially large task graph.
     let mut originals = baseline.attempts.iter().peekable();
-    let mut added = None;
+    let mut added = Vec::new();
     for attempt in &terminal.attempts {
         if originals
             .peek()
@@ -99,10 +120,8 @@ pub fn validate_result_publication_resource_usage(
                     "terminal publication usage rewrites a baseline attempt",
                 ));
             }
-        } else if added.replace(attempt).is_some() {
-            return Err(AnalysisExecutionError::Identity(
-                "terminal publication usage adds more than one attempt",
-            ));
+        } else {
+            added.push(attempt);
         }
     }
     if originals.next().is_some() {
@@ -110,13 +129,18 @@ pub fn validate_result_publication_resource_usage(
             "terminal publication usage omits a baseline attempt",
         ));
     }
-    let added = added.ok_or(AnalysisExecutionError::Identity(
-        "terminal usage omits publication attempt",
+    let first = added.first().ok_or(AnalysisExecutionError::Identity(
+        "terminal usage omits publication attempts",
     ))?;
+    if added.iter().any(|attempt| attempt.plan != first.plan) {
+        return Err(AnalysisExecutionError::Identity(
+            "publication retries name distinct plans",
+        ));
+    }
     let plan = terminal
         .plans
         .iter()
-        .find(|plan| plan.identity == added.plan)
+        .find(|plan| plan.identity == first.plan)
         .ok_or(AnalysisExecutionError::Identity(
             "terminal usage omits publication admission",
         ))?;
@@ -147,12 +171,12 @@ pub fn validate_result_publication_resource_usage(
         .collect::<Vec<_>>();
     plans.push(plan.clone());
     let mut attempts = baseline.attempts.clone();
-    attempts.push(added.clone());
+    attempts.extend(added.into_iter().cloned());
     let wall = baseline
         .actual
         .scheduler
         .wall_millis
-        .checked_add(added.resources.usage.wall_millis)
+        .checked_add(publication_wall_millis)
         .ok_or_else(|| {
             AnalysisExecutionError::Invalid("terminal publication wall time overflow".into())
         })?;

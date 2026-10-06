@@ -67,15 +67,22 @@ pub fn prepare_fluid_study_publication(
             )
         })?;
 
-    let fields = admission::validate(
-        completed,
-        source,
-        mesh,
-        meshing_evidence,
-        options,
-        definition,
-    )
-    .map_err(invalid)?;
+    let fields = {
+        let _source_phase = preparation.staging.begin_source_phase().map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+        admission::validate(
+            completed,
+            source,
+            mesh,
+            meshing_evidence,
+            options,
+            definition,
+        )
+        .map_err(invalid)?
+    };
     let run_id = publication_identity.local_run_id(
         runmat_analysis_core::PhysicsFamily::Fluid,
         definition,

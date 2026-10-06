@@ -183,7 +183,9 @@ async fn execute_unit_request(request: ProgramExecutionRequest) -> ProgramExecut
     bytecode.layout = Some(layout);
 
     match envelope.manifest.identity.entrypoint_kind {
-        runmat_execution::ExecutableEntrypointKind::Script => execute_unit_script(bytecode).await,
+        runmat_execution::ExecutableEntrypointKind::Script => {
+            execute_unit_script(bytecode, request.requested_outputs).await
+        }
         runmat_execution::ExecutableEntrypointKind::Function => {
             execute_function_request(&request, &registry).await
         }
@@ -215,8 +217,11 @@ async fn execute_function_request(
     )
     .await
     {
-        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
-            Ok(value) => ProgramExecutionResponse::Success { value },
+        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_outputs(
+            &value,
+            usize::from(request.requested_outputs),
+        ) {
+            Ok(outputs) => ProgramExecutionResponse::from_success_outputs(outputs, vec![]),
             Err(error) => ProgramExecutionResponse::Failure {
                 message: format!("worker could not transfer its result: {error}"),
             },
@@ -227,18 +232,49 @@ async fn execute_function_request(
     }
 }
 
-async fn execute_unit_script(bytecode: crate::Bytecode) -> ProgramExecutionResponse {
-    let result_slot = bytecode
+async fn execute_unit_script(
+    bytecode: crate::Bytecode,
+    requested_outputs: u16,
+) -> ProgramExecutionResponse {
+    if requested_outputs > 1 {
+        return ProgramExecutionResponse::Failure {
+            message: "scripts do not define multiple output ordinals".into(),
+        };
+    }
+    // A fresh script has no preassigned workspace bindings. Use the same VM-owned
+    // assignment authority as session execution; allocated slots are not results.
+    let names = bytecode
         .var_names
         .iter()
-        .find_map(|(slot, name)| (name == "ans").then_some(*slot));
-    match crate::interpret(&bytecode).await {
+        .map(|(slot, name)| (name.clone(), *slot))
+        .collect();
+    let _pending_workspace = crate::push_pending_workspace(names, Default::default());
+    let result = crate::interpret(&bytecode).await;
+    let workspace = crate::take_updated_workspace_state();
+    let _ = crate::take_updated_workspace_assigned_report();
+    match result {
         Ok(values) => {
-            let value = result_slot
-                .and_then(|slot| values.get(slot).cloned())
-                .unwrap_or(runmat_value::Value::Num(0.0));
-            match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
-                Ok(value) => ProgramExecutionResponse::Success { value },
+            let result_slot = workspace.as_ref().and_then(|workspace| {
+                workspace
+                    .assigned
+                    .contains("ans")
+                    .then(|| workspace.names.get("ans").copied())
+                    .flatten()
+            });
+            let value = if requested_outputs == 0 {
+                runmat_value::Value::OutputList(vec![])
+            } else if let Some(value) = result_slot.and_then(|slot| values.get(slot).cloned()) {
+                value
+            } else {
+                return ProgramExecutionResponse::Failure {
+                    message: "script did not produce the requested ans value".into(),
+                };
+            };
+            match runmat_runtime::execution::value_codec::encode_inline_outputs(
+                &value,
+                usize::from(requested_outputs),
+            ) {
+                Ok(outputs) => ProgramExecutionResponse::from_success_outputs(outputs, vec![]),
                 Err(error) => ProgramExecutionResponse::Failure {
                     message: format!("worker could not transfer its result: {error}"),
                 },
@@ -260,7 +296,7 @@ async fn execute_script_request(request: ProgramExecutionRequest) -> ProgramExec
             }
         }
     };
-    execute_unit_script(bytecode).await
+    execute_unit_script(bytecode, request.requested_outputs).await
 }
 
 #[cfg(test)]
@@ -380,3 +416,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "program_execution/outputs.rs"]
+mod output_tests;

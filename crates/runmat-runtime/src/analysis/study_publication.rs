@@ -1,4 +1,5 @@
 //! Typed publication facade; each physics owner authenticates its own retained completion.
+pub(in crate::analysis) mod catalog;
 pub(in crate::analysis) mod preparation;
 pub use super::contracts::AnalysisElectricalRunOptions;
 #[path = "magnetic_run_options.rs"]

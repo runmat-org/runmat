@@ -43,6 +43,8 @@ pub(super) use wire::ReplayContext;
 use wire::{CompletionWire, PreparationWire};
 
 const PREFIX: &[u8] = b"runmat-nonlinear-solid-study-completion\0";
+// Full original task history replaces the previous winning-attempt payload.
+const COMPLETION_SCHEMA_VERSION: u16 = 2;
 const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 /// New objects must be written to the shared store. Remaining catalog members already belong
@@ -63,7 +65,7 @@ pub fn prepare_nonlinear_solid_study_root(
     let descendants = descendant_catalog(completed, &access)?;
     check_inventory(&descendants.objects, &access, policy.inventory_limits())?;
     let wire = CompletionWire {
-        schema_version: 1,
+        schema_version: COMPLETION_SCHEMA_VERSION,
         preparation: PreparationWire::new(preparation),
         closures: completed.result_closures().to_vec(),
         descendants,
@@ -174,7 +176,7 @@ pub fn import_nonlinear_solid_study_root(
         &payload,
         import_limits(limits)?,
     )?;
-    if wire.schema_version != 1 {
+    if wire.schema_version != COMPLETION_SCHEMA_VERSION {
         return Err(invalid("unsupported nonlinear completion schema"));
     }
     let [step] = wire.preparation.workload.model.sequence.steps.as_slice() else {

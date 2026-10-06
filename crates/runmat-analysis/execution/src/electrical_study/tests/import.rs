@@ -183,22 +183,8 @@ fn exact_equation_order_result_receipt_profiles_survive_cold_import_and_reject_m
             allocation
                 .required_capabilities
                 .insert(runmat_execution::resource::Capability::ProcessIsolation);
-            let accounting = AttemptResourceAccounting {
-                attempt_id: AttemptId::derive(&[b"cold-attempt"]),
-                worker_id: WorkerId::derive(&[b"cold-worker"]),
-                resources: ResourceAccounting::for_reserved_interval(
-                    allocation,
-                    1,
-                    executed
-                        .result_objects
-                        .iter()
-                        .map(|object| object.encoded_length)
-                        .sum(),
-                    0,
-                    0,
-                )
-                .unwrap(),
-            };
+            let accounting =
+                crate::tests::phase_execution(&task.host, &task.program, &allocation, &response);
             study.complete_solve(&cold, response, accounting).unwrap();
             assert_eq!(study.phase(), ElectricalStudyPhase::ReadyForAccuracy);
             assert_eq!(study.result().unwrap().result, result);

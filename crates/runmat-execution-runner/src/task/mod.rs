@@ -1,4 +1,5 @@
 mod attempt;
+mod cancellation;
 mod execution_evidence;
 mod execution_observation;
 mod graph;
@@ -12,6 +13,7 @@ pub use attempt::{
     AttemptFailureKind, AttemptRecord, AttemptReport, AttemptRequest, AttemptResourceAccounting,
     AttemptResourceAggregate, AttemptSuccess,
 };
+pub use cancellation::{TaskCancellation, TaskCancellationCause};
 pub(crate) use execution_evidence::validate_history;
 pub use execution_evidence::TaskExecutionEvidence;
 pub use execution_observation::{AttemptExecutionObservation, AttemptExecutionTermination};

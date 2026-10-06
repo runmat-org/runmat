@@ -228,6 +228,7 @@ async fn print_terminal(
         if let secret::SavedOutputIntent::FeaStudy {
             study_id,
             expectation,
+            assessment_functions,
         } = &saved.output_intent
         {
             let objects = download_output_objects(client, saved, &outputs).await?;
@@ -236,7 +237,9 @@ async fn print_terminal(
                 outputs.response,
                 objects,
                 (**expectation).clone(),
-            )?;
+                assessment_functions,
+            )
+            .await?;
             return crate::commands::fea::result_presentation::print_fea_result(
                 study_id,
                 &result.result,
@@ -248,6 +251,7 @@ async fn print_terminal(
             sweep_id,
             case_ids,
             expectation,
+            assessment_functions,
         } = &saved.output_intent
         {
             let objects = download_output_objects(client, saved, &outputs).await?;
@@ -256,7 +260,9 @@ async fn print_terminal(
                 outputs.response,
                 objects,
                 (**expectation).clone(),
-            )?;
+                assessment_functions,
+            )
+            .await?;
             return crate::commands::fea::result_presentation::print_fea_sweep_result(
                 sweep_id, case_ids, &result, json,
             );

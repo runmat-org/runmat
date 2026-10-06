@@ -30,6 +30,8 @@ pub(crate) use completion::{delivered_attempt, AnalysisTaskCompletion};
 pub(crate) use local::LocalAnalysisTaskPool;
 pub(crate) use remote::RemoteAnalysisTaskPool;
 #[cfg(test)]
+pub(crate) mod phase_fixture;
+#[cfg(test)]
 mod tests;
 pub(crate) use phase::{execute_governed_analysis_phase, execute_governed_analysis_task};
 
@@ -123,6 +125,8 @@ pub(crate) struct ExecutedAnalysisTask {
     pub response: ProgramExecutionResponse,
     pub attempt: Option<AttemptSuccess>,
     pub evidence: TaskExecutionEvidence,
+    pub graph_wall_millis: u64,
+    pub failure: Option<crate::task_outcome::NativeTaskFailure>,
 }
 
 pub(crate) fn planned_resource_attempt(
@@ -135,7 +139,7 @@ pub(crate) fn planned_resource_attempt(
             "analysis task history belongs to another admitted task",
         ));
     }
-    let success = delivered_attempt(&task.response, task.attempt.as_ref())?;
+    let success = delivered_attempt(&task.response, task.attempt.as_ref(), task.failure.as_ref())?;
     success.validate_accounting().map_err(protocol)?;
     let accounting = success.resources.as_deref().cloned().ok_or_else(|| {
         NativeExecutionError::Protocol("analysis task lacks scheduler resource accounting".into())
@@ -155,12 +159,31 @@ pub(crate) fn planned_resource_attempt(
     })
 }
 
+pub(crate) fn planned_phase_execution(
+    plan: &FeaResourcePlan,
+    task: &ExecutedAnalysisTask,
+) -> NativeExecutionResult<runmat_analysis_execution::AnalysisPhaseExecutionEvidence> {
+    // Delivery errors retain their original diagnostic before any usage gate.
+    delivered_attempt(&task.response, task.attempt.as_ref(), task.failure.as_ref())?;
+    if task.evidence.task.id() != task.task_id {
+        return Err(protocol("phase evidence belongs to another admitted task"));
+    }
+    let execution = runmat_analysis_execution::AnalysisPhaseExecutionEvidence::new(
+        task.evidence.clone(),
+        task.graph_wall_millis,
+    )
+    .map_err(protocol)?;
+    execution.resource_graph(plan).map_err(protocol)?;
+    Ok(execution)
+}
+
 /// Registers and executes one independent task wave through the shared task substrate.
 pub(crate) async fn execute_analysis_task_batch(
     pool: &mut impl AnalysisTaskPool,
     tasks: Vec<PreparedAnalysisTask<'_>>,
     policy: AnalysisTaskBatchPolicy,
 ) -> NativeExecutionResult<Vec<ExecutedAnalysisTask>> {
+    let started = std::time::Instant::now();
     // Optional observation/history waves can contain no admitted work. Do not submit an
     // empty native graph or manufacture scheduler attempts for either placement.
     if tasks.is_empty() {
@@ -212,6 +235,9 @@ pub(crate) async fn execute_analysis_task_batch(
     if runmat_runtime::interrupt::is_cancelled() {
         return Err(NativeExecutionError::Cancelled);
     }
+    let graph_wall_millis = u64::try_from(started.elapsed().as_millis())
+        .map_err(|_| protocol("analysis wave observed interval overflowed"))?
+        .max(1);
     admitted
         .into_iter()
         .zip(responses)
@@ -227,6 +253,8 @@ pub(crate) async fn execute_analysis_task_batch(
                 response: completion.response,
                 attempt: completion.attempt,
                 evidence: completion.evidence,
+                graph_wall_millis,
+                failure: completion.failure,
             })
         })
         .collect()

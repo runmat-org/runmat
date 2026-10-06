@@ -1,4 +1,6 @@
 //! Cold-root authentication at the runtime boundary; no retained decoded prefix inventory.
+use crate::analysis_placement::source_failure as failure;
+use failure::{bridge, fea, limit};
 use runmat_analysis_execution::{
     import_nonlinear_solid_study_root, prepare_nonlinear_solid_study_root,
     CompletedNonlinearSolidStudy,
@@ -11,9 +13,6 @@ use runmat_execution_artifact::{
     cache::CacheImport, object::ObjectInventoryLimits, ArtifactAccess, ArtifactResult,
 };
 use runmat_runtime::analysis::storage::AnalysisPublicationError;
-#[path = "source/failure.rs"]
-mod failure;
-use failure::{bridge, fea, limit};
 use runmat_runtime::analysis::{
     NonlinearSolidStudyCompletion, NonlinearSolidStudyObjectSource, NonlinearSolidStudySource,
 };

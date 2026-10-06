@@ -7,7 +7,7 @@ use runmat_analysis_fea::{
     results::observation::{ObservationPublicationCatalog, ObservationPublicationEntry},
     study::plan_thermal_study,
 };
-use runmat_execution_artifact::cache::FilesystemObjectStore;
+use runmat_execution_artifact::{cache::FilesystemObjectStore, ProgramExecutionResponse};
 use runmat_meshing_core::ElementOrder;
 
 #[test]
@@ -84,10 +84,12 @@ fn run(order: ElementOrder, storage: PartialAccessPolicy, transient: bool) {
             task.resource_plan,
             ordinal,
         );
-        let mut wrong = accounting.clone();
-        wrong.resources.artifact_bytes += 1;
+        let wrong_response = ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: Vec::new(),
+            result_objects: Vec::new(),
+        };
         assert!(coordinator
-            .complete_observation(&store, response.clone(), wrong)
+            .complete_observation(&store, wrong_response, accounting.clone())
             .is_err());
         assert!(coordinator
             .complete_observation(&empty, response.clone(), accounting.clone())
