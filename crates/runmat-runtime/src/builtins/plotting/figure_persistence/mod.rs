@@ -30,6 +30,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::properties::{get_properties, resolve_plot_handle, set_properties, PlotHandle};
 use super::state::{current_figure_handle, set_figure_visible, FigureHandle};
+#[cfg(feature = "plot-core")]
+use super::{export_figure_scene, import_figure_scene_async, render_figure_snapshot};
 
 pub(super) const SAVEAS: &str = "saveas";
 pub(super) const SAVEFIG: &str = "savefig";
