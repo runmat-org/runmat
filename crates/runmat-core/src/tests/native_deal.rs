@@ -3,6 +3,7 @@
 use super::*;
 use runmat_value::{IntegerStorage, Tensor, Value};
 
+#[cfg(feature = "jit")]
 fn deterministic_native_session() -> RunMatSession {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
@@ -24,6 +25,7 @@ fn wide_tensor() -> Value {
     )
 }
 
+#[cfg(feature = "jit")]
 fn assert_wide_aliases(left: &Value, right: &Value) {
     let (Value::Tensor(left), Value::Tensor(right)) = (left, right) else {
         panic!("deal must retain tensor class in both outputs");
@@ -39,6 +41,7 @@ fn assert_wide_aliases(left: &Value, right: &Value) {
 }
 
 #[test]
+#[cfg(feature = "jit")]
 fn interactive_deal_wide_integer_replication_reaches_a_jit_entry() {
     runmat_gc::gc_test_context(|| {
         let mut session = deterministic_native_session();

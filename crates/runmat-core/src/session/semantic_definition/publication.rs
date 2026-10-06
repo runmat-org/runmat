@@ -13,7 +13,7 @@ use runmat_vm::{FunctionBytecode, FunctionRegistry};
 /// indexes, execution-stack caches, aliases, and retained definition owners
 /// remain coherent. Current private companions are intentionally absent from
 /// `publication` and therefore remain execution-only.
-pub(super) fn finalize_current_definitions(
+pub(in crate::session) fn finalize_current_definitions(
     publication: &mut FunctionRegistry,
     current: &HashSet<FunctionId>,
     executable: &FunctionRegistry,
