@@ -164,6 +164,14 @@ pub trait RuntimeWorkspaceService {
         Ok(())
     }
 
+    /// Admit an ordered executor-owned mutation without reconciling an
+    /// externally changed workspace view. Executor register stores use this
+    /// path after their exact frame lifecycle check; external/reentrant
+    /// effects continue to use [`Self::ensure_effect_authority`].
+    fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
+        self.ensure_effect_authority()
+    }
+
     /// Revision of an authority-backed workspace after its latest admission
     /// checkpoint. Exact executor adapters use this to avoid materializing a
     /// complete workspace when no externally visible state changed.

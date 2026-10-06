@@ -100,26 +100,37 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     }
 
     fn lookup(&self, name: &str) -> Option<Value> {
-        if self.lifecycle.get() == WorkspaceFrameLifecycle::Active {
-            workspace_frame_lookup(self.frame, name)
-        } else {
-            self.delegate.as_ref()?.lookup(name)
+        match self.lifecycle.get() {
+            WorkspaceFrameLifecycle::Pending => self.delegate.as_ref()?.lookup(name),
+            WorkspaceFrameLifecycle::Active => workspace_frame_lookup(self.frame, name),
+            WorkspaceFrameLifecycle::Closed => None,
         }
     }
 
     fn snapshot(&self) -> Vec<(String, Value)> {
-        if self.is_pending() {
-            self.delegate
+        match self.lifecycle.get() {
+            WorkspaceFrameLifecycle::Pending => self
+                .delegate
                 .as_ref()
                 .map(|delegate| delegate.snapshot())
-                .unwrap_or_default()
-        } else {
-            workspace_frame_snapshot(self.frame).unwrap_or_default()
+                .unwrap_or_default(),
+            WorkspaceFrameLifecycle::Active => {
+                workspace_frame_snapshot(self.frame).unwrap_or_default()
+            }
+            WorkspaceFrameLifecycle::Closed => Vec::new(),
         }
     }
 
     fn global_names(&self) -> Vec<String> {
-        workspace_global_names()
+        match self.lifecycle.get() {
+            WorkspaceFrameLifecycle::Pending => self
+                .delegate
+                .as_ref()
+                .map(|delegate| delegate.global_names())
+                .unwrap_or_default(),
+            WorkspaceFrameLifecycle::Active => workspace_global_names(),
+            WorkspaceFrameLifecycle::Closed => Vec::new(),
+        }
     }
 
     fn try_lookup(&self, name: &str) -> Result<Option<Value>, RuntimeError> {
@@ -183,6 +194,14 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         Ok(self.delegate_revision.get())
     }
 
+    fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
+        self.ensure_frame_active()?;
+        if let Some(delegate) = self.delegate.as_ref() {
+            delegate.ensure_mutation_authority()?;
+        }
+        Ok(())
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
         self.ensure_effect_authority()?;
         runmat_runtime::execution::validate_storable_value(&value)?;
@@ -202,7 +221,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         name: &str,
         value: Value,
     ) -> Result<(), RuntimeError> {
-        self.ensure_effect_authority()?;
+        self.ensure_mutation_authority()?;
         runmat_runtime::execution::validate_storable_value(&value)?;
         if self.should_publish()
             && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
@@ -257,8 +276,9 @@ mod tests {
     use super::*;
 
     struct CountingWorkspaceService {
-        inner: runmat_runtime::workspace::BaseWorkspaceService,
+        inner: Rc<dyn RuntimeWorkspaceService>,
         snapshots: Cell<usize>,
+        mutation_admissions: Cell<usize>,
     }
 
     impl RuntimeWorkspaceService for CountingWorkspaceService {
@@ -285,6 +305,12 @@ mod tests {
 
         fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
             self.inner.ensure_effect_authority()
+        }
+
+        fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
+            self.mutation_admissions
+                .set(self.mutation_admissions.get() + 1);
+            self.inner.ensure_mutation_authority()
         }
 
         fn workspace_revision(
@@ -366,9 +392,11 @@ mod tests {
         let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
         let base_service = runmat_runtime::workspace::BaseWorkspaceService::new(owner);
         base_service.assign("x", Value::Num(1.0)).unwrap();
+        let inner: Rc<dyn RuntimeWorkspaceService> = Rc::new(base_service.clone());
         let delegate = Rc::new(CountingWorkspaceService {
-            inner: base_service.clone(),
+            inner,
             snapshots: Cell::new(0),
+            mutation_admissions: Cell::new(0),
         });
         let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
@@ -436,6 +464,106 @@ mod tests {
             let error = service.clear().unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
             assert_eq!(service.lookup("x"), Some(Value::Num(1.0)));
+            drop(guard);
+        }));
+    }
+
+    #[test]
+    fn executor_slot_stores_do_not_snapshot_the_canonical_workspace() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let setup = runmat_runtime::workspace::BaseWorkspaceService::new(owner.clone());
+        for index in 0..256 {
+            setup
+                .assign(&format!("seed_{index}"), Value::Num(index as f64))
+                .unwrap();
+        }
+        let projection = runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+            owner.begin_projection().unwrap(),
+        );
+        let projection: Rc<dyn RuntimeWorkspaceService> = Rc::new(projection);
+        let delegate = Rc::new(CountingWorkspaceService {
+            inner: projection,
+            snapshots: Cell::new(0),
+            mutation_admissions: Cell::new(0),
+        });
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime = runtime.with_service_ports(
+            runtime
+                .service_ports()
+                .clone()
+                .with_workspace(delegate.clone()),
+        );
+        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+
+        futures::executor::block_on(runtime.scope(async {
+            let mut values = vec![Value::Num(0.0)];
+            let guard = super::super::workspace::set_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut values,
+                FrameGlobalBindings::default(),
+            );
+            for value in 1..=64 {
+                service
+                    .assign_executor_slot(0, "x", Value::Num(value as f64))
+                    .unwrap();
+            }
+            assert_eq!(delegate.mutation_admissions.get(), 64);
+            assert_eq!(delegate.snapshots.get(), 0);
+            assert_eq!(service.lookup("x"), Some(Value::Num(64.0)));
+            drop(guard);
+        }));
+    }
+
+    #[test]
+    fn canonical_reconciliation_never_overwrites_a_global_alias() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let base_service = runmat_runtime::workspace::BaseWorkspaceService::new(owner);
+        base_service.assign("x", Value::Num(1.0)).unwrap();
+        base_service.assign("unrelated", Value::Num(2.0)).unwrap();
+        let inner: Rc<dyn RuntimeWorkspaceService> = Rc::new(base_service.clone());
+        let delegate = Rc::new(CountingWorkspaceService {
+            inner,
+            snapshots: Cell::new(0),
+            mutation_admissions: Cell::new(0),
+        });
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime = runtime.with_service_ports(
+            runtime
+                .service_ports()
+                .clone()
+                .with_workspace(delegate.clone()),
+        );
+        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+
+        futures::executor::block_on(runtime.scope(async {
+            let aliases = FrameGlobalBindings::default();
+            aliases.declare_named(0, "x".into());
+            runmat_runtime::workspace::session::store_global_named("x", Value::Num(9.0));
+            let mut values = vec![Value::Num(9.0)];
+            let guard = super::super::workspace::set_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut values,
+                aliases,
+            );
+
+            assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(9.0)));
+            assert_eq!(
+                runmat_runtime::workspace::session::global_value("x"),
+                Some(Value::Num(9.0))
+            );
+            base_service.assign("unrelated", Value::Num(3.0)).unwrap();
+            assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(9.0)));
+            assert_eq!(
+                runmat_runtime::workspace::session::global_value("x"),
+                Some(Value::Num(9.0)),
+                "a base-workspace revision must not write through the global alias"
+            );
             drop(guard);
         }));
     }

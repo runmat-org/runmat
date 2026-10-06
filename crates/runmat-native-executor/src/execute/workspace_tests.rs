@@ -227,11 +227,11 @@ fn active_native_checked_reads_preserve_authority_and_borrow_failures() {
     let service = state.service();
 
     {
-        let _borrow = state.values.borrow_mut();
+        let _borrow = state.frame.values.borrow_mut();
         let error = service.try_lookup("missing").unwrap_err();
-        assert_eq!(error.identifier(), Some("NativeWorkspaceBorrow"));
+        assert_eq!(error.identifier(), Some("RunMat:NativeWorkspaceBorrow"));
         let error = service.try_snapshot().unwrap_err();
-        assert_eq!(error.identifier(), Some("NativeWorkspaceBorrow"));
+        assert_eq!(error.identifier(), Some("RunMat:NativeWorkspaceBorrow"));
     }
 
     owner.close().unwrap();
