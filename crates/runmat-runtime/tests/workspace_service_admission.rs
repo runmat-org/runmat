@@ -15,14 +15,12 @@ fn runtime_with_workspace() -> (RuntimeContext, BaseWorkspaceOwner) {
     (runtime, owner)
 }
 
-fn call(
+async fn call(
     runtime: &RuntimeContext,
     name: &str,
     arguments: &[Value],
 ) -> Result<Value, runmat_runtime::RuntimeError> {
-    block_on(runmat_runtime::call_builtin_async_with_outputs_in_context(
-        runtime, name, arguments, 1,
-    ))
+    runmat_runtime::call_builtin_async_with_outputs_in_context(runtime, name, arguments, 1).await
 }
 
 #[test]
@@ -37,7 +35,7 @@ fn introspection_builtins_preserve_closed_workspace_diagnostics() {
         ("clear", Vec::new()),
         ("clearvars", Vec::new()),
     ] {
-        let error = call(&runtime, name, &arguments).expect_err(name);
+        let error = block_on(call(&runtime, name, &arguments)).expect_err(name);
         assert_eq!(
             error.identifier(),
             Some("RunMat:Workspace:Closed"),
@@ -58,7 +56,7 @@ fn failed_clear_preflight_does_not_clear_dynamic_functions() {
     })));
     owner.close().unwrap();
 
-    let error = call(&runtime, "clear", &[Value::from("all")]).unwrap_err();
+    let error = block_on(call(&runtime, "clear", &[Value::from("all")])).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
     assert!(requests.borrow().is_empty());
 }
@@ -84,8 +82,8 @@ fn workspace_introspection_is_session_scoped_and_excludes_persistents() {
         );
     }
 
-    let first_names = names(call(&first, "who", &[]).unwrap());
-    let second_names = names(call(&second, "who", &[]).unwrap());
+    let first_names = names(block_on(call(&first, "who", &[])).unwrap());
+    let second_names = names(block_on(call(&second, "who", &[])).unwrap());
     assert_eq!(first_names, vec!["first"]);
     assert_eq!(second_names, vec!["second"]);
     {
