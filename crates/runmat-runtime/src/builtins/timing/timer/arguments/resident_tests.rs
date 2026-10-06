@@ -117,8 +117,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
         "StartDelay",
         resident.clone(),
     ))
-    .err()
-    .expect("frozen running property");
+    .expect_err("frozen running property");
     assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
 
@@ -134,8 +133,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
 
     owner.mode.store(2, Ordering::SeqCst);
     let direct = futures::executor::block_on(gather_value_async(&resident))
-        .err()
-        .expect("direct provider failure");
+        .expect_err("direct provider failure");
     let timer = futures::executor::block_on(prepare_timer_property_pairs(
         &[Value::String("Period".into()), resident.clone()],
         false,
