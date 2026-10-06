@@ -116,7 +116,14 @@ async fn compiled_region_worker_drop_retires_source_and_pending_effect_without_r
         }
         assert_eq!(calls.load(Ordering::SeqCst), invocation);
         assert_eq!(drops.load(Ordering::SeqCst), invocation - 1);
-        let issued = selected_sources.lock().expect("source recorder lock")[invocation - 1];
+        let recorded = selected_sources.lock().expect("source recorder lock");
+        assert_eq!(recorded.len(), invocation);
+        let issued = recorded[invocation - 1];
+        if invocation == 2 {
+            assert_ne!(issued, recorded[0]);
+            assert_eq!(recorded[0].resolve_in(&runtime), None);
+        }
+        drop(recorded);
         assert_eq!(issued.resolve_in(&runtime), Some(issued.source_id()));
         assert_eq!(
             runmat_runtime::source_context::source_info_in_context(&runtime, issued.source_id())
