@@ -5,12 +5,12 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use super::cooperation::{await_io, TabularCooperation};
+use super::cooperation::TabularCooperation;
 use super::path::TabularFsPath;
 use crate::context::RuntimeContext;
-use crate::RuntimeError;
+use crate::execution::staged_file;
 use futures::lock::Mutex as AsyncMutex;
-use runmat_filesystem::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
+use runmat_filesystem::FsStagedOutput;
 
 #[path = "write_owner/publication.rs"]
 mod publication;
@@ -89,13 +89,7 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-#[derive(Debug)]
-pub(super) enum StagedWriteError {
-    Io(io::Error),
-    Control(RuntimeError),
-    Publication(FsPublicationFailure),
-    PublicationInterrupted(RuntimeError, FsPublicationDisposition),
-}
+pub(super) use staged_file::StagedFileError as StagedWriteError;
 
 pub(super) async fn safe_replace_file(
     runtime: Option<&RuntimeContext>,
@@ -121,20 +115,13 @@ pub(super) async fn begin_stage(
     cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
 ) -> Result<Box<dyn FsStagedOutput>, StagedWriteError> {
-    cooperation
-        .completed(0)
-        .await
-        .map_err(StagedWriteError::Control)?;
-    selected.check().map_err(StagedWriteError::Io)?;
-    selected
-        .begin_staged_replace()
-        .map_err(StagedWriteError::Io)?
-        .ok_or_else(|| {
-            StagedWriteError::Io(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "selected filesystem provider cannot stage a tabular replacement",
-            ))
-        })
+    staged_file::begin_stage(
+        cooperation,
+        || selected.check(),
+        || selected.begin_staged_replace(),
+        "selected filesystem provider cannot stage a tabular replacement",
+    )
+    .await
 }
 
 pub(super) async fn write_stage_bytes(
@@ -145,37 +132,19 @@ pub(super) async fn write_stage_bytes(
     stage: &mut dyn FsStagedOutput,
     bytes: &[u8],
 ) -> Result<(), StagedWriteError> {
-    for chunk in bytes.chunks(4096) {
-        let mut remaining = chunk;
-        while !remaining.is_empty() {
-            cooperation
-                .completed(remaining.len())
-                .await
-                .map_err(StagedWriteError::Control)?;
-            selected.check().map_err(StagedWriteError::Io)?;
-            let written = await_io(runtime, builtin, stage.write_chunk(remaining))
-                .await
-                .map_err(StagedWriteError::Control)?;
-            match written {
-                Ok(0) => {
-                    return Err(StagedWriteError::Io(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "staged tabular write made no progress",
-                    )))
-                }
-                Ok(n) if n > remaining.len() => {
-                    return Err(StagedWriteError::Io(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "staged tabular write reported excess progress",
-                    )))
-                }
-                Ok(n) => remaining = &remaining[n..],
-                Err(source) if source.kind() == io::ErrorKind::Interrupted => continue,
-                Err(source) => return Err(StagedWriteError::Io(source)),
-            }
-        }
-    }
-    Ok(())
+    staged_file::write_stage_bytes(
+        runtime,
+        cooperation,
+        builtin,
+        || selected.check(),
+        stage,
+        bytes,
+        staged_file::StagedWriteMessages {
+            no_progress: "staged tabular write made no progress",
+            excess_progress: "staged tabular write reported excess progress",
+        },
+    )
+    .await
 }
 
 pub(super) async fn finish_stage(
@@ -183,29 +152,9 @@ pub(super) async fn finish_stage(
     cooperation: &mut TabularCooperation<'_>,
     builtin: &'static str,
     selected: &TabularFsPath,
-    mut stage: Box<dyn FsStagedOutput>,
+    stage: Box<dyn FsStagedOutput>,
 ) -> Result<(), StagedWriteError> {
-    cooperation
-        .completed(0)
-        .await
-        .map_err(StagedWriteError::Control)?;
-    selected.check().map_err(StagedWriteError::Io)?;
-    await_io(runtime, builtin, stage.flush_and_sync())
-        .await
-        .map_err(StagedWriteError::Control)?
-        .map_err(StagedWriteError::Io)?;
-    cooperation
-        .completed(0)
-        .await
-        .map_err(StagedWriteError::Control)?;
-    selected.check().map_err(StagedWriteError::Io)?;
-    publication::publish(runtime, builtin, stage).await?;
-    selected.check().map_err(|source| {
-        StagedWriteError::Publication(FsPublicationFailure::new(
-            FsPublicationDisposition::Published,
-            source,
-        ))
-    })
+    staged_file::finish_stage(runtime, cooperation, builtin, || selected.check(), stage).await
 }
 
 #[cfg(test)]
@@ -217,6 +166,7 @@ mod tests {
     use async_trait::async_trait;
     use runmat_execution::cancellation::CancellationSource;
     use runmat_filesystem::{self as fs, MemoryFsProvider};
+    use runmat_filesystem::{FsPublicationDisposition, FsPublicationFailure};
     use std::error::Error;
     use std::future::Future;
     use std::rc::Rc;

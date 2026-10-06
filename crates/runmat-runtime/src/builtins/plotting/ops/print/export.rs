@@ -1,19 +1,15 @@
 //! Captured filesystem authority for one PNG export.
 
-use std::cell::{Cell, RefCell};
-use std::fmt;
-use std::future::{poll_fn, Future};
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use runmat_filesystem::{
-    self as fs, CapturedFsResourceLease, FsProvider, FsPublicationDisposition, FsPublicationFailure,
-};
+use runmat_filesystem::{self as fs, CapturedFsResourceLease, FsProvider, FsPublicationFailure};
 
 use super::{print_error_with_source, BUILTIN_NAME, PRINT_ERROR_IO};
 use crate::context::RuntimeContext;
-use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
+use crate::execution::staged_file::{self, StagedCpuCooperation, StagedFileError};
 use crate::{BuiltinResult, RuntimeError};
 
 pub(super) struct PrintFsOwner {
@@ -100,52 +96,11 @@ pub(super) fn map_io(source: io::Error) -> RuntimeError {
     )
 }
 
-async fn checkpoint(
-    runtime: Option<&RuntimeContext>,
-    budget: &mut Option<CpuCooperationBudget>,
-    bytes: usize,
-) -> BuiltinResult<()> {
-    let (Some(runtime), Some(budget)) = (runtime, budget.as_mut()) else {
-        return Ok(());
-    };
-    budget
-        .checkpoint(u64::try_from(bytes).unwrap_or(u64::MAX))
-        .await
-        .map_err(|source| execution_error(runtime, source))
-}
-
-async fn await_io<T>(
-    runtime: Option<&RuntimeContext>,
-    work: impl Future<Output = T>,
-) -> BuiltinResult<T> {
-    let Some(runtime) = runtime else {
-        return Ok(work.await);
-    };
-    runtime
-        .cpu_cooperation()
-        .await_cancellable(work)
-        .await
-        .map_err(|source| execution_error(runtime, source))
-}
-
 pub(super) async fn await_effect<T>(
     runtime: Option<&RuntimeContext>,
     work: impl Future<Output = T>,
 ) -> BuiltinResult<T> {
-    await_io(runtime, work).await
-}
-
-fn execution_error(runtime: &RuntimeContext, source: ExecutionServiceError) -> RuntimeError {
-    match source {
-        cancelled @ ExecutionServiceError::Cancelled => {
-            crate::build_runtime_error("print: execution was cancelled")
-                .with_builtin(BUILTIN_NAME)
-                .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
-                .with_source(cancelled)
-                .build()
-        }
-        other => other.into_runtime_error(),
-    }
+    staged_file::await_cancellable(runtime, BUILTIN_NAME, work).await
 }
 
 pub(super) async fn replace_png(
@@ -153,60 +108,49 @@ pub(super) async fn replace_png(
     selected: &PrintFsPath,
     payload: &[u8],
 ) -> BuiltinResult<()> {
-    let mut budget = runtime.map(RuntimeContext::cpu_cooperation);
-    checkpoint(runtime, &mut budget, 0).await?;
-    selected.check().map_err(map_io)?;
-    let mut stage = selected
-        .provider
-        .begin_staged_replace(&selected.path)
-        .map_err(map_io)?
-        .ok_or_else(|| {
-            map_io(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "selected filesystem provider cannot stage PNG replacement",
-            ))
-        })?;
-    selected.check().map_err(map_io)?;
+    let mut cooperation = StagedCpuCooperation::new(runtime, BUILTIN_NAME);
+    let mut stage = staged_file::begin_stage(
+        &mut cooperation,
+        || selected.check(),
+        || selected.provider.begin_staged_replace(&selected.path),
+        "selected filesystem provider cannot stage PNG replacement",
+    )
+    .await
+    .map_err(map_staged_error)?;
+    staged_file::write_stage_bytes(
+        runtime,
+        &mut cooperation,
+        BUILTIN_NAME,
+        || selected.check(),
+        stage.as_mut(),
+        payload,
+        staged_file::StagedWriteMessages {
+            no_progress: "staged PNG write made no progress",
+            excess_progress: "staged PNG write reported excess progress",
+        },
+    )
+    .await
+    .map_err(map_staged_error)?;
+    staged_file::finish_stage(
+        runtime,
+        &mut cooperation,
+        BUILTIN_NAME,
+        || selected.check(),
+        stage,
+    )
+    .await
+    .map_err(map_staged_error)
+}
 
-    for chunk in payload.chunks(4096) {
-        let mut remaining = chunk;
-        while !remaining.is_empty() {
-            checkpoint(runtime, &mut budget, remaining.len()).await?;
-            selected.check().map_err(map_io)?;
-            let written = await_io(runtime, stage.write_chunk(remaining)).await?;
-            match written {
-                Ok(0) => {
-                    return Err(map_io(io::Error::new(
-                        io::ErrorKind::WriteZero,
-                        "staged PNG write made no progress",
-                    )))
-                }
-                Ok(n) if n > remaining.len() => {
-                    return Err(map_io(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "staged PNG write reported excess progress",
-                    )))
-                }
-                Ok(n) => remaining = &remaining[n..],
-                Err(source) if source.kind() == io::ErrorKind::Interrupted => continue,
-                Err(source) => return Err(map_io(source)),
-            }
+fn map_staged_error(error: StagedFileError) -> RuntimeError {
+    match error {
+        StagedFileError::Io(source) => map_io(source),
+        StagedFileError::Control(error) => error,
+        StagedFileError::Publication(source) => map_publication(source),
+        StagedFileError::PublicationInterrupted(error, disposition) => {
+            staged_file::interruption_error(error, disposition)
         }
     }
-    checkpoint(runtime, &mut budget, 0).await?;
-    selected.check().map_err(map_io)?;
-    await_io(runtime, stage.flush_and_sync())
-        .await?
-        .map_err(map_io)?;
-    checkpoint(runtime, &mut budget, 0).await?;
-    selected.check().map_err(map_io)?;
-    publish(runtime, stage).await?;
-    selected.check().map_err(|source| {
-        map_publication(FsPublicationFailure::new(
-            FsPublicationDisposition::Published,
-            source,
-        ))
-    })
 }
 
 fn map_publication(source: FsPublicationFailure) -> RuntimeError {
@@ -217,91 +161,16 @@ fn map_publication(source: FsPublicationFailure) -> RuntimeError {
     )
 }
 
-/// A cancellation after commit dispatch is indeterminate unless the provider
-/// returned an exact terminal disposition. Never report it as a rollback.
-async fn publish(
-    runtime: Option<&RuntimeContext>,
-    stage: Box<dyn fs::FsStagedOutput>,
-) -> BuiltinResult<()> {
-    let polled = Cell::new(false);
-    let completed = RefCell::new(None);
-    let mut publication = stage.publish();
-    let raced = await_io(
-        runtime,
-        poll_fn(|context| {
-            polled.set(true);
-            match publication.as_mut().poll(context) {
-                std::task::Poll::Ready(outcome) => {
-                    *completed.borrow_mut() = Some(outcome);
-                    std::task::Poll::Ready(())
-                }
-                std::task::Poll::Pending => std::task::Poll::Pending,
-            }
-        }),
-    )
-    .await;
-    match (raced, completed.into_inner()) {
-        (_, Some(Err(failure))) => Err(map_publication(failure)),
-        (Err(control), Some(Ok(()))) => Err(publication_interruption(
-            control,
-            FsPublicationDisposition::Published,
-        )),
-        (Err(control), None) => Err(publication_interruption(
-            control,
-            if polled.get() {
-                FsPublicationDisposition::Indeterminate
-            } else {
-                FsPublicationDisposition::NotPublished
-            },
-        )),
-        (Ok(()), Some(Ok(()))) => Ok(()),
-        (Ok(()), None) => unreachable!("publication completed without provider outcome"),
-    }
-}
-
-fn publication_interruption(
-    mut control: RuntimeError,
-    disposition: FsPublicationDisposition,
-) -> RuntimeError {
-    let source = control.source.take();
-    control.source = Some(Box::new(PublicationInterruption {
-        disposition,
-        source,
-    }));
-    control
-}
-
-#[derive(Debug)]
-struct PublicationInterruption {
-    disposition: FsPublicationDisposition,
-    source: Option<Box<runmat_async::runtime_error::RuntimeErrorSource>>,
-}
-
-impl fmt::Display for PublicationInterruption {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "PNG publication outcome is {:?}",
-            self.disposition
-        )
-    }
-}
-
-impl std::error::Error for PublicationInterruption {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source
-            .as_ref()
-            .map(|source| source.as_ref() as &(dyn std::error::Error + 'static))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::executor::block_on;
     use futures::task::noop_waker;
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_filesystem::FsPublicationDisposition;
     use runmat_filesystem::MemoryFsProvider;
+    use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll};
 
@@ -371,6 +240,42 @@ mod tests {
     }
 
     #[test]
+    fn all_admitted_host_text_forms_capture_one_mounted_provider() {
+        let _lock = fs::provider_override_lock();
+        let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
+        let replacement = Arc::new(MemoryFsProvider::with_current_dir("/replacement"));
+        let _restore = fs::replace_provider(selected.clone());
+        let name = "/exports/figure.png";
+        selected
+            .write_project_path(name, b"old")
+            .expect("selected parent");
+        let values = [
+            runmat_value::Value::String(name.into()),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(name)),
+            runmat_value::Value::StringArray(
+                runmat_value::StringArray::new_2d(vec![name.into()], 1, 1).unwrap(),
+            ),
+        ];
+        let owners: Vec<_> = values
+            .iter()
+            .map(|value| {
+                let path = super::super::preflight_host_arguments(std::slice::from_ref(value))
+                    .expect("valid text")
+                    .expect("known host filename");
+                PrintFsOwner::capture(Some(&path)).expect("capture mounted provider")
+            })
+            .collect();
+        fs::set_provider(replacement.clone());
+        for owner in owners {
+            assert!(owner.cwd.is_none());
+            let selected_path = owner.path(PathBuf::from(name)).expect("captured path");
+            block_on(replace_png(None, &selected_path, b"png")).expect("publish on original mount");
+        }
+        assert_eq!(selected.read_project_path(name).unwrap(), b"png");
+        assert!(replacement.read_project_path(name).is_err());
+    }
+
+    #[test]
     fn malformed_control_preflight_never_opens_a_stage() {
         let _lock = fs::provider_override_lock();
         let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
@@ -392,7 +297,7 @@ mod tests {
             polls: polls.clone(),
             dropped: dropped.clone(),
         });
-        let mut call = Box::pin(publish(None, stage));
+        let mut call = Box::pin(staged_file::publish(None, BUILTIN_NAME, stage));
         let waker = noop_waker();
         assert!(matches!(
             call.as_mut().poll(&mut Context::from_waker(&waker)),
@@ -400,6 +305,45 @@ mod tests {
         ));
         assert_eq!(polls.load(Ordering::SeqCst), 1);
         drop(call);
+        assert!(dropped.load(Ordering::SeqCst));
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cancelled_pending_png_publication_preserves_indeterminate_disposition() {
+        let source = CancellationSource::new();
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let polls = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let stage = Box::new(PendingStage {
+            polls: polls.clone(),
+            dropped: dropped.clone(),
+        });
+        let mut call = Box::pin(staged_file::publish(Some(&runtime), BUILTIN_NAME, stage));
+        let waker = noop_waker();
+        assert!(matches!(
+            call.as_mut().poll(&mut Context::from_waker(&waker)),
+            Poll::Pending
+        ));
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        source.cancel(runmat_execution::CancellationReason::User);
+        let error = block_on(call).expect_err("cancelled publication");
+        let StagedFileError::PublicationInterrupted(error, disposition) = error else {
+            panic!("cancelled publication retains its exact dispatch state");
+        };
+        assert_eq!(disposition, FsPublicationDisposition::Indeterminate);
+        let diagnostic =
+            map_staged_error(StagedFileError::PublicationInterrupted(error, disposition));
+        assert!(diagnostic
+            .identifier()
+            .is_some_and(|id| id.ends_with(":Cancelled")));
+        assert_eq!(
+            staged_file::error_disposition(&diagnostic),
+            Some(FsPublicationDisposition::Indeterminate)
+        );
         assert!(dropped.load(Ordering::SeqCst));
         assert_eq!(polls.load(Ordering::SeqCst), 1);
     }

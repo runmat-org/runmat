@@ -4,13 +4,19 @@
 use std::future::Future;
 
 use crate::context::RuntimeContext;
-use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::execution::{staged_file, CpuCooperationBudget, ExecutionServiceError};
+use crate::{BuiltinResult, RuntimeError};
 
 pub(super) struct TabularCooperation<'a> {
     runtime: Option<&'a RuntimeContext>,
     budget: Option<CpuCooperationBudget>,
     builtin: &'static str,
+}
+
+impl staged_file::StagedWriteCooperation for TabularCooperation<'_> {
+    async fn completed(&mut self, work: usize) -> BuiltinResult<()> {
+        TabularCooperation::completed(self, work).await
+    }
 }
 
 impl<'a> TabularCooperation<'a> {
@@ -54,14 +60,7 @@ pub(super) async fn await_io<T, F>(
 where
     F: Future<Output = T>,
 {
-    let Some(runtime) = runtime else {
-        return Ok(work.await);
-    };
-    runtime
-        .cpu_cooperation()
-        .await_cancellable(work)
-        .await
-        .map_err(|source| execution_error(runtime, builtin, source))
+    staged_file::await_cancellable(runtime, builtin, work).await
 }
 
 fn execution_error(
@@ -69,14 +68,5 @@ fn execution_error(
     builtin: &'static str,
     source: ExecutionServiceError,
 ) -> RuntimeError {
-    match source {
-        cancelled @ ExecutionServiceError::Cancelled => {
-            build_runtime_error(format!("{builtin}: execution was cancelled"))
-                .with_builtin(builtin)
-                .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
-                .with_source(cancelled)
-                .build()
-        }
-        other => other.into_runtime_error(),
-    }
+    staged_file::execution_error(runtime, builtin, source)
 }

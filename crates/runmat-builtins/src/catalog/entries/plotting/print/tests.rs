@@ -107,6 +107,24 @@ fn print_inference_rejects_known_invalid_and_preserves_unknown() {
 }
 
 #[test]
+fn repeated_resolution_is_not_a_static_error() {
+    let text = ValueFact::scalar(ValueKindFact::Character);
+    let result = inference::infer(
+        &request(
+            vec![text.clone(), text.clone(), text],
+            vec![
+                LiteralValue::String("plot.png".into()),
+                LiteralValue::String("-r75".into()),
+                LiteralValue::String("-r300".into()),
+            ],
+            0,
+        ),
+        &PRINT_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty());
+}
+
+#[test]
 fn print_documentation_conserves_historical_examples_and_links() {
     assert_eq!(PRINT_CATALOG_ENTRY.documentation.examples.len(), 5);
     assert_eq!(PRINT_CATALOG_ENTRY.documentation.faqs.len(), 3);

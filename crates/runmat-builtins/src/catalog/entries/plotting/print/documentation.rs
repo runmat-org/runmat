@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Forms and options", paragraphs: &[
             "`print(filename)` and `print(filename,'-dpng')` export the current figure. `print(fig,filename,'-dpng')` chooses a figure explicitly. Device and filename text can occur in command-style order, including `print -dpng command_style_plot.png`.",
-            "`-rN` changes the output dimensions relative to the default 800-by-600 canvas at 150 DPI; `-r0` selects that default. PNG is the only available device. Recognized PDF, EPS, and SVG requests fail with an unsupported-device error rather than producing PNG under another extension.",
+            "`-rN` changes the output dimensions relative to the default 800-by-600 canvas at 150 DPI; `-r0` selects that default. If repeated, the last resolution token wins. PNG is the only available device. Recognized PDF, EPS, and SVG requests fail with an unsupported-device error rather than producing PNG under another extension.",
             "A filename without `.png` receives that extension. A requested logical success output is a RunMat extension; MATLAB-compatible file-export forms are statement calls. Typed-integer figure aliases are also RunMat-only and must exactly identify a graphics handle.",
         ] },
         BuiltinDocumentationSection { heading: "Storage and execution", paragraphs: &[

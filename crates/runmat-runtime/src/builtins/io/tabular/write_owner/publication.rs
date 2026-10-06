@@ -1,115 +1,25 @@
 //! One publication attempt retains its exact poll and commit disposition.
 
-use std::cell::{Cell, RefCell};
-use std::future::poll_fn;
-
-use crate::builtins::io::tabular::cooperation::await_io;
-use crate::context::RuntimeContext;
-use crate::RuntimeError;
-use runmat_filesystem::{FsPublicationDisposition, FsStagedOutput};
-
+#[cfg(test)]
 use super::StagedWriteError;
+#[cfg(test)]
+use crate::context::RuntimeContext;
+use crate::execution::staged_file;
+#[cfg(test)]
+use runmat_filesystem::FsStagedOutput;
 
-/// Keep the original runtime diagnostic, policy, context, and typed source.
-pub(in crate::builtins::io::tabular) fn interruption_error(
-    mut error: RuntimeError,
-    disposition: FsPublicationDisposition,
-) -> RuntimeError {
-    let source = error.source.take();
-    error.source = Some(Box::new(PublicationInterruption {
-        disposition,
-        source,
-    }));
-    error
-}
+pub(in crate::builtins::io::tabular) use staged_file::error_disposition;
+pub(in crate::builtins::io::tabular) use staged_file::interruption_error;
+#[cfg(test)]
+use staged_file::PublicationInterruption;
 
-/// Inspect the owning typed error chain; diagnostic spelling has no role in
-/// deciding whether a failed call may have changed its destination.
-pub(in crate::builtins::io::tabular) fn error_disposition(
-    error: &RuntimeError,
-) -> Option<FsPublicationDisposition> {
-    let mut current: &(dyn std::error::Error + 'static) = error;
-    loop {
-        if let Some(failure) = current.downcast_ref::<runmat_filesystem::FsPublicationFailure>() {
-            return Some(failure.disposition());
-        }
-        if let Some(interruption) = current.downcast_ref::<PublicationInterruption>() {
-            return Some(interruption.disposition());
-        }
-        current = current.source()?;
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct PublicationInterruption {
-    disposition: FsPublicationDisposition,
-    source: Option<Box<runmat_async::runtime_error::RuntimeErrorSource>>,
-}
-
-impl PublicationInterruption {
-    pub(super) fn disposition(&self) -> FsPublicationDisposition {
-        self.disposition
-    }
-}
-
-impl std::fmt::Display for PublicationInterruption {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "staged publication outcome is {:?}",
-            self.disposition()
-        )
-    }
-}
-
-impl std::error::Error for PublicationInterruption {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source
-            .as_ref()
-            .map(|source| source.as_ref() as &(dyn std::error::Error + 'static))
-    }
-}
-
+#[cfg(test)]
 pub(super) async fn publish(
     runtime: Option<&RuntimeContext>,
     builtin: &'static str,
     stage: Box<dyn FsStagedOutput>,
 ) -> Result<(), StagedWriteError> {
-    let polled = Cell::new(false);
-    let completed = RefCell::new(None);
-    let mut publication = stage.publish();
-    let result = await_io(
-        runtime,
-        builtin,
-        poll_fn(|context| {
-            polled.set(true);
-            match publication.as_mut().poll(context) {
-                std::task::Poll::Ready(outcome) => {
-                    *completed.borrow_mut() = Some(outcome);
-                    std::task::Poll::Ready(())
-                }
-                std::task::Poll::Pending => std::task::Poll::Pending,
-            }
-        }),
-    )
-    .await;
-    match (result, completed.into_inner()) {
-        (_, Some(Err(failure))) => Err(StagedWriteError::Publication(failure)),
-        (Err(error), Some(Ok(()))) => Err(StagedWriteError::PublicationInterrupted(
-            error,
-            FsPublicationDisposition::Published,
-        )),
-        (Err(error), None) => Err(StagedWriteError::PublicationInterrupted(
-            error,
-            if polled.get() {
-                FsPublicationDisposition::Indeterminate
-            } else {
-                FsPublicationDisposition::NotPublished
-            },
-        )),
-        (Ok(()), Some(Ok(()))) => Ok(()),
-        (Ok(()), None) => unreachable!("publication future completed without an outcome"),
-    }
+    staged_file::publish(runtime, builtin, stage).await
 }
 
 #[cfg(test)]
@@ -118,6 +28,7 @@ mod tests {
     use crate::execution::RuntimeExecutionService;
     use async_trait::async_trait;
     use runmat_execution::cancellation::CancellationSource;
+    use runmat_filesystem::FsPublicationDisposition;
     use std::io;
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, Ordering};

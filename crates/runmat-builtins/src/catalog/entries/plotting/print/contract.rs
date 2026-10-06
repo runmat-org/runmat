@@ -129,7 +129,7 @@ pub const PRINT_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescr
     code: "RM.PRINT.INVALID_OPTION",
     identifier: Some("RunMat:print:InvalidOption"),
     when:
-        "An option token or resolution is invalid, duplicated, or exceeds supported PNG dimensions.",
+        "An option token or resolution is invalid, a device is duplicated, or PNG dimensions exceed supported limits. Repeated resolution tokens use the last value.",
     message: "print: invalid option",
 };
 pub const PRINT_ERROR_RENDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

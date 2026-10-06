@@ -58,6 +58,10 @@ const BUILTIN_NAME: &str = "print";
 #[path = "print/export.rs"]
 mod export;
 
+#[cfg(all(test, feature = "plot-core"))]
+#[path = "print/tests/pending.rs"]
+mod pending_tests;
+
 #[runtime_builtin(
     name = "print",
     category = "plotting",
@@ -108,7 +112,6 @@ pub async fn print_builtin(
     if let Some(first) = args.first() {
         crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
     }
-    preflight_host_arguments(&args)?;
     if args
         .first()
         .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
@@ -126,18 +129,6 @@ pub async fn print_builtin(
             )?;
         }
     }
-    #[cfg(feature = "plot-core")]
-    let early_handle = match args.first() {
-        Some(value) if is_host_text(value) => Some(selected_figure),
-        Some(value) => figure_handle_arg(value)?,
-        None => None,
-    };
-    // The ordinary host-known scene is cloned before any provider or renderer
-    // await. A resident handle is resolved and cloned after materialization.
-    #[cfg(feature = "plot-core")]
-    let early_scene = early_handle.and_then(clone_figure);
-    let owner =
-        export::PrintFsOwner::capture(host_known_filename(&args)).map_err(export::map_io)?;
     if let Some(first) = args.first() {
         if crate::builtins::common::validation::value_has_native_integer_class(first)
             && !export::await_effect(
@@ -154,6 +145,18 @@ pub async fn print_builtin(
             .build());
         }
     }
+    let known_filename = preflight_host_arguments(&args)?;
+    #[cfg(feature = "plot-core")]
+    let early_handle = match args.first() {
+        Some(value) if is_host_text(value) => Some(selected_figure),
+        Some(value) => figure_handle_arg(value)?,
+        None => None,
+    };
+    // The ordinary host-known scene is cloned before any provider or renderer
+    // await. A resident handle is resolved and cloned after materialization.
+    #[cfg(feature = "plot-core")]
+    let early_scene = early_handle.and_then(clone_figure);
+    let owner = export::PrintFsOwner::capture(known_filename.as_deref()).map_err(export::map_io)?;
     // Host-known invalid controls are rejected before any resident download or
     // filesystem service capture. Dynamic controls receive the same parser
     // after materialization.
@@ -195,13 +198,6 @@ fn is_host_text(value: &Value) -> bool {
         value,
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
     )
-}
-
-fn host_known_filename(args: &[Value]) -> Option<&Path> {
-    args.iter().find_map(|value| match value {
-        Value::String(text) if !text.trim().starts_with('-') => Some(Path::new(text.trim())),
-        _ => None,
-    })
 }
 
 async fn gather_values(
@@ -324,7 +320,7 @@ fn parse_print_args(args: &[Value], selected_figure: FigureHandle) -> BuiltinRes
     })
 }
 
-fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<Option<PathBuf>> {
     if args.is_empty() {
         return Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
@@ -332,6 +328,7 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
         ));
     }
     let mut filenames = 0usize;
+    let mut known_filename = None;
     let mut devices = 0usize;
     let mut dpi = PRINT_DEFAULT_DPI;
     let mut dynamic_text = false;
@@ -383,6 +380,7 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
                     "filename must include a file name before appending '.png'",
                 ));
             }
+            known_filename = Some(path.to_path_buf());
         }
         if filenames > 1 || devices > 1 {
             return Err(print_error_with_detail(
@@ -397,7 +395,7 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
             "filename is required for RunMat figure export",
         ));
     }
-    Ok(())
+    Ok(known_filename)
 }
 
 fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
@@ -743,6 +741,100 @@ mod tests {
             request.output_path().expect("output path"),
             PathBuf::from("exports/report.png")
         );
+    }
+
+    #[test]
+    fn all_host_text_forms_retain_the_absolute_filename_before_gather() {
+        let filename = "/exports/plot.png";
+        let controls = [
+            Value::String(filename.into()),
+            Value::CharArray(runmat_value::CharArray::new_row(filename)),
+            Value::StringArray(
+                runmat_value::StringArray::new_2d(vec![filename.into()], 1, 1).unwrap(),
+            ),
+        ];
+        for control in controls {
+            assert_eq!(
+                preflight_host_arguments(&[control]).expect("host preflight"),
+                Some(PathBuf::from(filename))
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_resolution_uses_last_token_in_runtime_parser() {
+        let request = parse_print_args(
+            &[
+                Value::from("plot.png"),
+                Value::from("-r75"),
+                Value::from("-r300"),
+            ],
+            current_figure_handle(),
+        )
+        .expect("last resolution wins");
+        assert_eq!((request.width, request.height), (1600, 1200));
+    }
+
+    #[test]
+    fn integer_alias_admission_and_exactness_precede_filesystem_capture() {
+        let _guard = setup();
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        for integer in [
+            runmat_value::IntValue::U8(1),
+            runmat_value::IntValue::U64(u64::MAX),
+        ] {
+            let error = block_on(print_builtin(
+                None,
+                vec![Value::Int(integer), Value::from("/never-mounted/plot.png")],
+            ))
+            .expect_err("integer alias requires compatibility admission");
+            assert_eq!(
+                error.identifier(),
+                PRINT_INTEGER_FIGURE_EXTENSION.error_identifier
+            );
+        }
+        drop(_matlab);
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = block_on(print_builtin(
+            None,
+            vec![
+                Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+                Value::from("/never-mounted/plot.png"),
+            ],
+        ))
+        .expect_err("wide integer must fail before filesystem capture");
+        assert!(error.message().contains("exactly representable"));
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn pre_cancelled_public_print_preserves_existing_target() {
+        let _guard = setup();
+        let _fs = runmat_filesystem::provider_override_lock();
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor(&[0.0, 1.0])),
+            Value::Tensor(tensor(&[1.0, 2.0])),
+        ]))
+        .expect("plot before cancellation");
+        let provider =
+            std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::with_current_dir("/"));
+        provider
+            .write_project_path("/plot.png", b"old")
+            .expect("old target");
+        let _selected = runmat_filesystem::replace_provider(provider.clone());
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        source.cancel(runmat_execution::CancellationReason::User);
+        let runtime = crate::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
+            source.token(),
+        );
+        let _statement = crate::output_count::push_output_count(Some(0));
+        let error = block_on(print_builtin(Some(runtime), vec![Value::from("/plot.png")]))
+            .expect_err("pre-cancelled call");
+        assert!(error
+            .identifier()
+            .is_some_and(|id| id.ends_with(":Cancelled")));
+        assert_eq!(provider.read_project_path("/plot.png").unwrap(), b"old");
     }
 
     #[test]

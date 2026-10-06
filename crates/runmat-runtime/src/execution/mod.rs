@@ -5,6 +5,7 @@ mod errors;
 mod running_future;
 mod services;
 mod storable;
+pub(crate) mod staged_file;
 pub mod value_codec;
 
 pub use capture::{validate_spawn_capture, validate_spawn_captures};
