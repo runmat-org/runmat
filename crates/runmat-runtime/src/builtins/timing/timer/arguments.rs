@@ -3,6 +3,30 @@
 use super::*;
 use crate::builtins::common::gpu_helpers::gather_value_async;
 
+async fn checkpoint_timer(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {
+    if let Some(runtime) = runtime {
+        runtime
+            .cpu_cooperation()
+            .checkpoint(0)
+            .await
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    }
+    Ok(())
+}
+
+fn admit_numeric_extension(
+    runtime: Option<&RuntimeContext>,
+    extension: &runmat_builtins::BuiltinExtensionDescriptor,
+    builtin: &str,
+) -> BuiltinResult<()> {
+    match runtime {
+        Some(runtime) => crate::compatibility::ensure_builtin_extension_enabled_in_context(
+            runtime, extension, builtin,
+        ),
+        None => crate::compatibility::ensure_builtin_extension_enabled(extension, builtin),
+    }
+}
+
 /// Materialization uses the selected invocation's existing cancellation budget.
 /// Provider errors remain intact; cancellation is checked before publication.
 async fn gather_timer_value(
@@ -41,6 +65,7 @@ pub(super) async fn prepare_timer_setter_value(
     property: TimerProperty,
     value: Value,
 ) -> BuiltinResult<PreparedTimerPair> {
+    checkpoint_timer(runtime).await?;
     if property.is_readonly() {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
@@ -49,7 +74,8 @@ pub(super) async fn prepare_timer_setter_value(
     }
     if property.is_numeric() {
         if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
-            crate::compatibility::ensure_builtin_extension_enabled(
+            admit_numeric_extension(
+                runtime,
                 &TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION,
                 "timer",
             )?;
@@ -63,6 +89,7 @@ pub(super) async fn prepare_timer_setter_value(
         })
     } else {
         normalize_property_value(property, value.clone())?;
+        checkpoint_timer(runtime).await?;
         Ok(PreparedTimerPair { property, value })
     }
 }
@@ -99,7 +126,8 @@ pub(super) async fn prepare_timer_property_pairs(
                 } else {
                     &TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION
                 };
-                crate::compatibility::ensure_builtin_extension_enabled(
+                admit_numeric_extension(
+                    runtime,
                     extension,
                     if finding { "timerfind" } else { "timer" },
                 )?;
@@ -113,6 +141,7 @@ pub(super) async fn prepare_timer_property_pairs(
         admitted.push((property, &pair[1]));
     }
     let mut prepared = Vec::with_capacity(admitted.len());
+    checkpoint_timer(runtime).await?;
     for (property, input) in admitted {
         let value = if property.is_numeric() {
             // Retain the provider's identifier, retry policy, source and span.
@@ -122,6 +151,7 @@ pub(super) async fn prepare_timer_property_pairs(
         };
         prepared.push(PreparedTimerPair { property, value });
     }
+    checkpoint_timer(runtime).await?;
     Ok(prepared)
 }
 

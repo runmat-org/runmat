@@ -178,7 +178,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     let previous_period =
         super::super::access::numeric_property(timer_handle, "Period").expect("initial period");
     let mut setter = Box::pin(super::super::setter::set_timer_property(
-        Some(runtime),
+        Some(runtime.clone()),
         timer.clone(),
         TimerProperty::Period,
         args[1].clone(),
@@ -197,6 +197,28 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
         previous_period
     );
     drop(setter);
+    for (property, value) in [
+        (TimerProperty::Tag, Value::String("must-not-publish".into())),
+        (TimerProperty::UserData, Value::Num(123.0)),
+    ] {
+        let before = super::super::access::property(timer_handle, property.name())
+            .expect("existing timer property");
+        // Use the same owning timer session; a foreign receiver rejection
+        // would not establish cancellation-before-publication behavior.
+        let error = futures::executor::block_on(super::super::setter::set_timer_property(
+            Some(runtime.clone()),
+            timer.clone(),
+            property,
+            value,
+        ))
+        .expect_err("pre-cancelled nonnumeric setter");
+        assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+        assert_eq!(
+            super::super::access::property(timer_handle, property.name())
+                .expect("unchanged timer property"),
+            before
+        );
+    }
     handle
         .allocation_lease()
         .validate_live()
