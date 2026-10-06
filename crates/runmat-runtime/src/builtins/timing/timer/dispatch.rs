@@ -79,7 +79,6 @@ pub(super) async fn delete_timer_values(
             if let Some(lease) = pending {
                 lease.cancel();
             }
-            let _ = runmat_gc::gc_remove_root(handle.target);
             Ok(())
         }
         Value::Cell(cell) => {

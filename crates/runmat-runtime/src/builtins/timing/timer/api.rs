@@ -41,7 +41,7 @@ pub async fn timer_builtin(
     })?;
     let target = runmat_gc::gc_allocate(Value::Object(object))
         .map_err(|err| timer_error(&TIMER_ERROR_GC, format!("timer: {err}")))?;
-    runmat_gc::gc_add_root(target)
+    let root = runmat_gc::gc_root(target)
         .map_err(|err| timer_error(&TIMER_ERROR_GC, format!("timer: {err}")))?;
     let handle = HandleRef {
         class_name: TIMER_CLASS.into(),
@@ -51,7 +51,7 @@ pub async fn timer_builtin(
     runtime
         .timer_session()
         .borrow_mut()
-        .register(handle.clone(), visibility);
+        .register(handle.clone(), root, visibility);
     Ok(Value::HandleObject(handle))
 }
 

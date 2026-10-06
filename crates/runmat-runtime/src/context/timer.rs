@@ -8,6 +8,7 @@ use crate::builtins::timing::timer::property::{
     TimerBusyMode, TimerExecutionMode, TimerVisibility,
 };
 use crate::RuntimeError;
+use runmat_gc::ExplicitRoot;
 use runmat_value::HandleRef;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -44,6 +45,9 @@ pub(crate) enum TimerAdmissionError {
 
 pub(crate) struct TimerRecord {
     pub(crate) handle: HandleRef,
+    // Session discovery keeps the object and its traced callback graph alive
+    // after the constructor result leaves the workspace.
+    _root: ExplicitRoot,
     pub(crate) generation: u64,
     pub(crate) phase: TimerPhase,
     pub(crate) busy_mode: TimerBusyMode,
@@ -76,9 +80,15 @@ impl TimerSessionState {
         Some(format!("timer-{}", self.next_name))
     }
 
-    pub(crate) fn register(&mut self, handle: HandleRef, visibility: TimerVisibility) {
+    pub(crate) fn register(
+        &mut self,
+        handle: HandleRef,
+        root: ExplicitRoot,
+        visibility: TimerVisibility,
+    ) {
         self.records.push(TimerRecord {
             handle,
+            _root: root,
             generation: 0,
             phase: TimerPhase::Idle,
             busy_mode: TimerBusyMode::Drop,
@@ -206,7 +216,6 @@ impl Drop for TimerSessionState {
             if let Some(lease) = entry.lease {
                 lease.cancel();
             }
-            let _ = runmat_gc::gc_remove_root(entry.handle.target);
         }
     }
 }
@@ -214,5 +223,56 @@ impl Drop for TimerSessionState {
 impl RuntimeContext {
     pub(crate) fn timer_session(&self) -> &std::cell::RefCell<TimerSessionState> {
         &self.state().timers
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use runmat_value::{Closure, ObjectInstance, Value};
+
+    #[test]
+    fn session_root_retains_discoverable_timer_and_traced_callback_capture() {
+        runmat_gc::gc_test_context(|| {
+            let captured = runmat_gc::gc_allocate_rooted(Value::String("capture".into()))
+                .expect("captured handle");
+            let captured_handle = captured.handle();
+            let mut object = ObjectInstance::new("timer");
+            object.properties.insert(
+                "TimerFcn".into(),
+                Value::Closure(Closure {
+                    function_name: "callback".into(),
+                    bound_function: None,
+                    captures: vec![Value::HandleObject(HandleRef {
+                        class_name: "Capture".into(),
+                        target: captured_handle,
+                        valid: true,
+                    })],
+                }),
+            );
+            let timer = runmat_gc::gc_allocate_rooted(Value::Object(object)).expect("timer object");
+            let handle = HandleRef {
+                class_name: "timer".into(),
+                target: timer.handle(),
+                valid: true,
+            };
+            let mut session = TimerSessionState::default();
+            session.register(
+                handle.clone(),
+                runmat_gc::gc_root(handle.target).expect("session root"),
+                TimerVisibility::On,
+            );
+            timer.unroot().expect("release constructor root");
+            captured.unroot().expect("release callback creator root");
+
+            runmat_gc::gc_collect_major().expect("collect while discoverable");
+            assert!(runmat_gc::gc_clone_value(&handle.target).is_ok());
+            assert!(runmat_gc::gc_clone_value(&captured_handle).is_ok());
+
+            session.delete(&handle);
+            runmat_gc::gc_collect_major().expect("collect after deletion");
+            assert!(runmat_gc::gc_clone_value(&handle.target).is_err());
+            assert!(runmat_gc::gc_clone_value(&captured_handle).is_err());
+        });
     }
 }

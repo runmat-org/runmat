@@ -129,6 +129,10 @@ pub(super) async fn start_one_timer(
     }
     let config = TimerRunConfig::admit(runtime, &handle, override_delay)?;
     let tasks = runtime.service_ports().require_local_tasks("timer")?;
+    // The session record owns discovery, while this independent root keeps a
+    // currently polled callback's receiver alive if it deletes its timer.
+    let task_root = runmat_gc::gc_root(handle.target)
+        .map_err(|err| timer_error(&TIMER_ERROR_GC, format!("timer: {err}")))?;
     let (generation, failure) = runtime
         .timer_session()
         .borrow_mut()
@@ -154,6 +158,7 @@ pub(super) async fn start_one_timer(
     let scoped_runtime = runtime.clone();
     let task_handle = handle.clone();
     let future = scoped_runtime.scope(async move {
+        let _task_root = task_root;
         run_timer_task(task_runtime, task_handle, generation, config, failure).await;
     });
     let lease = match tasks.spawn_local(runtime.local_identity(), Box::pin(future)) {
