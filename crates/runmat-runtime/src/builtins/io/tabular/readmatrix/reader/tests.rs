@@ -71,7 +71,7 @@ fn staged_scan_retains_full_first_numeric_error_through_remaining_utf8_validatio
     let stage = ledger.reserve_stage(4096).expect("diagnostic stage");
     let diagnostic = TestDiagnosticStage(stage.clone());
     let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
-    let error = block_on(bounded::scan_utf8(
+    let Err(error) = block_on(bounded::scan_utf8(
         &mut source,
         &mut cooperation,
         &selected,
@@ -86,8 +86,9 @@ fn staged_scan_retains_full_first_numeric_error_through_remaining_utf8_validatio
             ),
             diagnostic: Some(&diagnostic),
         },
-    ))
-    .expect_err("numeric error after complete UTF-8 scan");
+    )) else {
+        panic!("expected numeric error after complete UTF-8 scan");
+    };
     assert_eq!(
         error.message(),
         "readmatrix: unable to parse numeric value 'abc' on line 1 column 2"

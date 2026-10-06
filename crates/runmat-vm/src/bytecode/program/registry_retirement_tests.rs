@@ -271,7 +271,7 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
         .unwrap()
         .authority
         .admits_local(&std::sync::Arc::downgrade(&session)));
-    assert_eq!(old.current_view().get(FunctionId(1)), None);
+    assert!(old.current_view().get(FunctionId(1)).is_none());
     assert_eq!(
         old.current_view()
             .get(FunctionId(4))

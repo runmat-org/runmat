@@ -1421,7 +1421,7 @@ fn validate_catch_scope_metadata(
 
 #[cfg(test)]
 mod function_registry_tests {
-    use super::{Bytecode, FunctionBytecode, FunctionRegistry};
+    use super::{fresh_definition_owner, Bytecode, FunctionBytecode, FunctionRegistry};
     use crate::Instr;
     use runmat_hir::FunctionId;
     use runmat_types::{
