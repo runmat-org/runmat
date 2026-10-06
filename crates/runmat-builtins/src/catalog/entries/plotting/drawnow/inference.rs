@@ -31,11 +31,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    let literals: Option<Vec<&str>> = (0..request.arguments.len())
+    let literals: Option<Vec<String>> = (0..request.arguments.len())
         .map(|index| request.literals.literal_string_at(index))
         .collect();
     if let Some(literals) = literals {
-        if DrawNowControl::decode(&literals).is_err() {
+        let tokens: Vec<&str> = literals.iter().map(String::as_str).collect();
+        if DrawNowControl::decode(&tokens).is_err() {
             diagnostics.push(argument_error(
                 "RM-CATALOG-DRAWNOW-CONTROL",
                 "drawnow requires limitrate, nocallbacks, update, or expose in a supported form",
