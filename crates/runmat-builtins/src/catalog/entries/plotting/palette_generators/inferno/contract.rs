@@ -24,7 +24,7 @@ pub(super) const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub(super) const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
         form: "c = inferno(integer_m)",
-        inputs: &shared::LENGTH_INTEGER_INPUTS,
+        inputs: &shared::EXTENSION_LENGTH_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::Double,
         overflow: BuiltinIntegerOverflowRule::NotApplicable,

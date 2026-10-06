@@ -40,6 +40,15 @@ pub(super) const LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "All eight host integer classes are read exactly as a structural row count. Resident controls are rejected without provider access.",
     }];
+
+pub(super) const EXTENSION_LENGTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "m",
+        classes: &ALL_INTEGER_CLASSES,
+        availability: BuiltinIntegerInputAvailability::RunMatOnly,
+        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+        notes: "The RunMat-only palette accepts all eight exact host integer row-count classes; no MATLAB builtin compatibility is claimed.",
+    }];
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() > 1 {

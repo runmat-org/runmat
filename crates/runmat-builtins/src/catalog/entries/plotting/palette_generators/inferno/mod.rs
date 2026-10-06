@@ -14,7 +14,7 @@ pub const INFERNO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),
-        compatibility: BuiltinCompatibility::Matlab,
+        compatibility: BuiltinCompatibility::RunMat,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::DeterministicReadOnly,
         semantic_kind: BuiltinSemanticKind::General,

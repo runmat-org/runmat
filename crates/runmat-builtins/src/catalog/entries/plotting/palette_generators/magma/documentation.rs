@@ -4,6 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
+            "This named palette generator is a RunMat extension; no MATLAB builtin-function compatibility is claimed for this spelling.",
             "magma() returns a normalized host double RGB matrix. Its row count is the active axes colormap length, or 256 when no active axes length exists.",
             "magma(m) returns exactly m rows and three columns. m accepts a real integral single or double scalar or any of the eight exact host integer classes, including zero; negative, fractional, nonfinite, nonscalar and over-limit values reject.",
             "Generating an RGB matrix does not change a figure or axes palette. Pass the result to colormap to update graphics state.",
@@ -25,7 +26,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         title: "Generate an RGB matrix",
         program: "c = magma(8);",
         display_output: None,
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
@@ -38,7 +39,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         title: "Apply the palette to a figure",
         program: "imagesc([1 2; 3 4]);\ncolormap(magma(8));\ncolorbar;",
         display_output: None,
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::BrowserGraphics,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
