@@ -267,7 +267,8 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
             panic!("callback must publish the resident alias");
         };
         assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
-        let [Value::GpuTensor(output)] = sequence.into_values().try_into().unwrap() else {
+        let values: [Value; 1] = sequence.into_values().try_into().unwrap();
+        let [Value::GpuTensor(output)] = values else {
             panic!("callback must publish one resident alias");
         };
         assert_eq!(calls(), vec![(id, Some(1))]);
@@ -383,7 +384,8 @@ fn pending_dlupdate_network_traverses_canonical_learnables_without_replay() {
             Poll::Ready(result) => break result.expect("network update"),
         }
     };
-    assert!(matches!(result, Value::Object(_)));
+    assert_eq!(result.kind(), runmat_value::ValueSequenceKind::Single);
+    assert!(matches!(result.as_slice(), [Value::Object(_)]));
     assert_eq!(
         calls(),
         vec![(id, Some(1)); 2],

@@ -113,10 +113,9 @@ fn dlfeval_callback_uses_invoking_runtime_and_structural_output_count() {
         2,
     ))
     .expect("selected callback");
-    assert_eq!(output.as_slice(), [Value::Num(23.0), Value::Num(29.0)]);
     assert_eq!(
-        output.kind(),
-        runmat_value::ValueSequenceKind::CommaSeparated
+        output,
+        Value::OutputList(vec![Value::Num(23.0), Value::Num(29.0)])
     );
     CALLBACKS.with(|calls| {
         assert_eq!(
@@ -142,9 +141,10 @@ fn dlfeval_registered_binding_uses_invocation_count_not_ambient_count() {
         Some(2),
     )))
     .expect("registered callback");
+    assert_eq!(output.as_slice(), [Value::Num(23.0), Value::Num(29.0)]);
     assert_eq!(
-        output,
-        Value::OutputList(vec![Value::Num(23.0), Value::Num(29.0)])
+        output.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
     );
     CALLBACKS.with(|calls| {
         assert_eq!(

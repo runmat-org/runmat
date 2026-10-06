@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 pub fn prepare_workspace_guard(
     var_names: &HashMap<usize, String>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     initial_assigned_var_count: usize,
     initially_unassigned_slots: &HashSet<usize>,
     global_aliases: runmat_runtime::workspace::bindings::FrameGlobalBindings,
