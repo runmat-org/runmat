@@ -1,5 +1,6 @@
 import { compareCodePoint } from "../constants.mjs";
 import { implementationBindingKey } from "../identity-authority.mjs";
+import { nativeBindingSymbol as nativeSymbol } from "../native-binding-symbol.mjs";
 
 export function identityControlAuthorityTemplate(scaffold, identity) {
   const proposal = scaffold.authority_proposals.identity_rows
@@ -79,8 +80,4 @@ function constantImplementationTemplate(proposal) {
     implementationBindingKey(left), implementationBindingKey(right),
   ));
   return { kind: "owned", owner_path: observed.proposed_owner_path, bindings };
-}
-
-function nativeSymbol(name, variant) {
-  return `runmat_builtin_binding_v2_${Buffer.from(name).toString("hex")}_${Buffer.from(variant).toString("hex")}`;
 }

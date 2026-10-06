@@ -5,6 +5,7 @@ pub(crate) mod admission;
 pub(crate) mod catalog;
 pub mod closures;
 pub mod descriptor;
+pub(crate) mod feval;
 pub mod function_abi;
 pub mod identity;
 pub mod lexical;

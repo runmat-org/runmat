@@ -33,6 +33,8 @@ static WASM_REGISTRY_INIT: OnceLock<()> = OnceLock::new();
 /// Canonical `binding_variant` functions may opt into `context = true`
 /// and `requested_outputs = true`. Those leading, structurally typed
 /// invocation parameters are not user arguments and do not affect arity.
+/// `output_sequence = true` selects a handler returning a checked
+/// `ValueSequence` directly, without a language-value output carrier.
 #[proc_macro_attribute]
 pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse attribute arguments as `name = "..."`
@@ -57,6 +59,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut binding_variant_lit: Option<LitStr> = None;
     let mut explicit_context = false;
     let mut explicit_requested_outputs = false;
+    let mut output_sequence = false;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     let mut process_execution_stack = false;
@@ -150,6 +153,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         explicit_requested_outputs = value.value;
                     } else {
                         panic!("requested_outputs must be a boolean literal");
+                    }
+                } else if path.is_ident("output_sequence") {
+                    if let Lit::Bool(value) = lit {
+                        output_sequence = value.value;
+                    } else {
+                        panic!("output_sequence must be a boolean literal");
                     }
                 } else if path.is_ident("type_resolver") {
                     if let Lit::Str(ls) = lit {
@@ -269,6 +278,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     }
     if (explicit_context || explicit_requested_outputs) && binding_variant_lit.is_none() {
         panic!("invocation metadata requires a canonical binding_variant");
+    }
+    if output_sequence && binding_variant_lit.is_none() {
+        panic!("output_sequence requires a canonical binding_variant");
     }
     let context_param = if explicit_context {
         let context_type = param_types
@@ -409,6 +421,19 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { let args = args.to_vec(); }
     };
 
+    let result_adaptation = if output_sequence {
+        quote! { Ok(value) }
+    } else if binding_variant_lit.is_some() {
+        // Existing handlers retain their Value-returning ABI until migrated.
+        // Adapt once here; the canonical binding and executors carry sequences.
+        quote! {
+            crate::call::arguments::adapt_legacy_builtin_result(
+                runmat_value::Value::from(value),
+            )
+        }
+    } else {
+        quote! { Ok(runmat_value::Value::from(value)) }
+    };
     let wrapper = quote! {
         fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
             #![allow(unused_variables)]
@@ -433,7 +458,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 #(#conv_stmts)*
                 let value = #call_expr;
-                Ok(runmat_value::Value::from(value))
+                #result_adaptation
             })
         }
     };

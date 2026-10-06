@@ -157,6 +157,6 @@ function binding(variant, id = "foo") {
   return {
     kind: "canonical_binding", function: `${id}_builtin`, variant,
     builtin_path: `builtins::math::${id}`,
-    native_symbol: `runmat_builtin_binding_v2_${Buffer.from(id).toString("hex")}_${Buffer.from(variant).toString("hex")}`,
+    native_symbol: `runmat_builtin_binding_v3_${Buffer.from(id).toString("hex")}_${Buffer.from(variant).toString("hex")}`,
   };
 }

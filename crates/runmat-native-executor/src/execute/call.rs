@@ -426,14 +426,13 @@ fn builtin_inner(
             let name = name.to_owned();
             let runtime = state.runtime.clone();
             async move {
-                let value = runmat_runtime::call_builtin_async_with_outputs_in_context(
+                runmat_runtime::call_builtin_sequence_async_with_outputs_in_context(
                     &runtime,
                     &name,
                     &arguments,
                     requested_outputs,
                 )
-                .await?;
-                runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)
+                .await
             }
         },
         requested_outputs,

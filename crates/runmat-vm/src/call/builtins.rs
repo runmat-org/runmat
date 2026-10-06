@@ -979,7 +979,7 @@ fn remap_eval_local_callable_identity(
 }
 
 pub enum ImportedBuiltinResolution {
-    Resolved(Value),
+    Resolved(runmat_value::ValueSequence),
     Ambiguous(RuntimeError),
     NotFound,
 }
@@ -1005,7 +1005,7 @@ pub async fn resolve_imported_builtin(
     args: &[Value],
     requested_outputs: usize,
 ) -> Result<ImportedBuiltinResolution, RuntimeError> {
-    let mut specific_matches: Vec<(String, Value)> = Vec::new();
+    let mut specific_matches: Vec<(String, runmat_value::ValueSequence)> = Vec::new();
     for (path, wildcard) in imports {
         if *wildcard {
             continue;
@@ -1041,7 +1041,7 @@ pub async fn resolve_imported_builtin(
         return Ok(ImportedBuiltinResolution::Resolved(value));
     }
 
-    let mut wildcard_matches: Vec<(String, Value)> = Vec::new();
+    let mut wildcard_matches: Vec<(String, runmat_value::ValueSequence)> = Vec::new();
     for (path, wildcard) in imports {
         if !*wildcard || path.is_empty() {
             continue;

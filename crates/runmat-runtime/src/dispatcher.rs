@@ -25,7 +25,9 @@ thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<ClassIdentity>> = const { RefCell::new(None) };
 }
 
-fn resolve_single_sequence(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+pub(crate) fn resolve_single_sequence(
+    sequence: runmat_value::ValueSequence,
+) -> Result<Value, RuntimeError> {
     let mut values = sequence.resolve(
         runmat_types::SequenceUse::RequireSingle,
         crate::sequence::SequenceResolutionContext::default(),
@@ -288,8 +290,13 @@ struct ResolvedBuiltinName<'a> {
 
 mod preparation;
 mod selected_execution;
+mod sequence_api;
 use preparation::SelectedBindingOrigin;
 use selected_execution::SelectedImplementation;
+pub use sequence_api::{
+    call_builtin_sequence_async, call_builtin_sequence_async_in_context,
+    call_builtin_sequence_async_with_outputs, call_builtin_sequence_async_with_outputs_in_context,
+};
 
 impl<'a> ResolvedBuiltinName<'a> {
     fn resolve(requested: &'a str) -> Self {
@@ -307,7 +314,19 @@ async fn call_builtin_async_impl(
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
-    try_call_builtin_async_impl(name, args, output_count, context)
+    call_builtin_sequence_async_impl(name, args, output_count, context)
+        .await
+        .map(crate::call::arguments::project_legacy_builtin_value_abi)
+}
+
+#[async_recursion::async_recursion(?Send)]
+async fn call_builtin_sequence_async_impl(
+    name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+    context: Option<crate::context::RuntimeContext>,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    try_call_builtin_sequence_async_impl(name, args, output_count, context)
         .await?
         .ok_or_else(|| {
             let resolved_name = ResolvedBuiltinName::resolve(name);
@@ -319,12 +338,12 @@ async fn call_builtin_async_impl(
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn try_call_builtin_async_impl(
+async fn try_call_builtin_sequence_async_impl(
     name: &str,
     args: &[Value],
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
-) -> Result<Option<Value>, RuntimeError> {
+) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     ensure_wasm_builtins_registered();
 
     let resolved_name = ResolvedBuiltinName::resolve(name);
@@ -364,14 +383,15 @@ async fn try_call_builtin_async_impl(
 
     if matching_bindings.is_empty() && matching_builtins.is_empty() {
         if let Some(result) =
-            try_call_registered_instance_method(name, args, output_count, context.as_ref()).await?
+            try_call_registered_instance_method_sequence(name, args, output_count, context.as_ref())
+                .await?
         {
-            return compatibility_checked_builtin_result(name, args, result).map(Some);
+            return compatibility_checked_builtin_sequence(name, args, result).map(Some);
         }
         if let Some(result) =
             try_call_registered_static_method(name, args, output_count, context.as_ref()).await?
         {
-            return compatibility_checked_builtin_result(name, args, result).map(Some);
+            return compatibility_checked_builtin_sequence(name, args, result).map(Some);
         }
         // Fallback: treat as class constructor if class is registered.
         if ClassIdentity::new(name)
@@ -382,15 +402,16 @@ async fn try_call_builtin_async_impl(
             let result =
                 call_registered_class_constructor(name, args, output_count, context.as_ref())
                     .await?;
-            return compatibility_checked_builtin_result(name, args, result).map(Some);
+            return compatibility_checked_legacy_builtin_sequence(name, args, result).map(Some);
         }
         return Ok(None);
     }
 
     if let Some(result) =
-        try_call_registered_instance_method(name, args, output_count, context.as_ref()).await?
+        try_call_registered_instance_method_sequence(name, args, output_count, context.as_ref())
+            .await?
     {
-        return compatibility_checked_builtin_result(name, args, result).map(Some);
+        return compatibility_checked_builtin_sequence(name, args, result).map(Some);
     }
 
     // Partition into no-category (tests/legacy shims) and categorized (library) builtins.
@@ -441,7 +462,7 @@ async fn try_call_builtin_async_impl(
         output_count,
     )
     .await?;
-    compatibility_checked_builtin_result(name, args, result).map(Some)
+    compatibility_checked_builtin_sequence(name, args, result).map(Some)
 }
 
 pub(crate) async fn try_call_builtin_async_with_outputs(
@@ -450,12 +471,23 @@ pub(crate) async fn try_call_builtin_async_with_outputs(
     output_count: usize,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Value>, RuntimeError> {
+    try_call_builtin_sequence_async_with_outputs(name, args, output_count, context)
+        .await
+        .map(|sequence| sequence.map(crate::call::arguments::project_legacy_builtin_value_abi))
+}
+
+pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
+    name: &str,
+    args: &[Value],
+    output_count: usize,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context);
     let context = context.cloned();
     let result = match &context {
         Some(context) => {
             context
-                .scope(try_call_builtin_async_impl(
+                .scope(try_call_builtin_sequence_async_impl(
                     name,
                     args,
                     Some(output_count),
@@ -463,9 +495,9 @@ pub(crate) async fn try_call_builtin_async_with_outputs(
                 ))
                 .await
         }
-        None => try_call_builtin_async_impl(name, args, Some(output_count), None).await,
+        None => try_call_builtin_sequence_async_impl(name, args, Some(output_count), None).await,
     };
-    fence.finish_optional(result)
+    fence.finish_optional_sequence(result)
 }
 
 async fn try_distributed_builtin(
@@ -473,7 +505,7 @@ async fn try_distributed_builtin(
     args: &[Value],
     output_count: Option<usize>,
     runtime: Option<&crate::context::RuntimeContext>,
-) -> Result<Option<Value>, RuntimeError> {
+) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     if !args
         .iter()
         .any(|value| matches!(value, Value::Distributed(_)))
@@ -505,7 +537,7 @@ async fn try_distributed_builtin(
                     materialized.push(argument.clone());
                 }
             }
-            call_builtin_async_impl(name, &materialized, output_count, Some(context))
+            call_builtin_sequence_async_impl(name, &materialized, output_count, Some(context))
                 .await
                 .map(Some)
         }
@@ -564,7 +596,6 @@ async fn try_distributed_builtin(
                     ),
                 })
                 .await
-                .map(crate::call::arguments::project_legacy_builtin_value_abi)
                 .map(Some)
         }
     }
@@ -626,14 +657,43 @@ pub(crate) fn compatibility_checked_builtin_result(
     Ok(result)
 }
 
+fn compatibility_checked_legacy_builtin_sequence(
+    name: &str,
+    args: &[Value],
+    result: Value,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    compatibility_checked_builtin_sequence(
+        name,
+        args,
+        crate::call::arguments::adapt_legacy_builtin_result(result)?,
+    )
+}
+
+fn compatibility_checked_builtin_sequence(
+    name: &str,
+    args: &[Value],
+    result: runmat_value::ValueSequence,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    let explicit = explicit_gpu_provenance(args)?;
+    result.try_map(|mut value| {
+        crate::compatibility::ensure_value_compatible(&value, name)?;
+        provenance::project(&mut value, explicit)?;
+        Ok(value)
+    })
+}
+
 fn propagate_gpu_provenance(args: &[Value], result: &mut Value) -> Result<(), RuntimeError> {
+    provenance::project(result, explicit_gpu_provenance(args)?)
+}
+
+fn explicit_gpu_provenance(args: &[Value]) -> Result<bool, RuntimeError> {
     let mut explicit = false;
     for arg in args {
         try_visit_gpu_handles(arg, &mut |handle| {
             explicit |= runmat_accelerate_api::handle_is_explicit(handle);
         })?;
     }
-    provenance::project(result, explicit)
+    Ok(explicit)
 }
 
 /// Visit resident handles, including nested object/callable payloads, without
@@ -724,6 +784,17 @@ pub(crate) async fn try_call_registered_instance_method(
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Value>, RuntimeError> {
+    try_call_registered_instance_method_sequence(method_name, args, output_count, context)
+        .await
+        .map(|sequence| sequence.map(crate::call::arguments::project_legacy_builtin_value_abi))
+}
+
+async fn try_call_registered_instance_method_sequence(
+    method_name: &str,
+    args: &[Value],
+    output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     let Some(receiver) = args.first() else {
         return Ok(None);
     };
@@ -768,15 +839,14 @@ pub(crate) async fn try_call_registered_instance_method(
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != method_name
     {
-        let result =
-            call_builtin_async_impl(&method.function_name, args, output_count, context.cloned())
-                .await;
-        return finalize_instance_method_result(
-            &method_identity,
-            receiver,
-            result.and_then(crate::call::arguments::adapt_legacy_builtin_result),
+        let result = call_builtin_sequence_async_impl(
+            &method.function_name,
+            args,
+            output_count,
+            context.cloned(),
         )
-        .map(Some);
+        .await;
+        return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
     }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
@@ -792,15 +862,14 @@ pub(crate) async fn try_call_registered_instance_method(
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != method_name
         {
-            let result =
-                call_builtin_async_impl(&owner_qualified, args, output_count, context.cloned())
-                    .await;
-            return finalize_instance_method_result(
-                &method_identity,
-                receiver,
-                result.and_then(crate::call::arguments::adapt_legacy_builtin_result),
+            let result = call_builtin_sequence_async_impl(
+                &owner_qualified,
+                args,
+                output_count,
+                context.cloned(),
             )
-            .map(Some);
+            .await;
+            return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
         }
     }
     Ok(None)
@@ -810,8 +879,8 @@ fn finalize_instance_method_result(
     method_name: &runmat_types::MethodName,
     receiver: &Value,
     result: Result<runmat_value::ValueSequence, RuntimeError>,
-) -> Result<Value, RuntimeError> {
-    let result = crate::call::arguments::project_legacy_builtin_value_abi(result?);
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    let result = result?;
     const DELETE_METHOD: runmat_types::StaticMethodName =
         runmat_types::StaticMethodName::new("delete");
     if DELETE_METHOD.is(method_name) {
@@ -834,7 +903,7 @@ async fn try_call_registered_static_method(
     args: &[Value],
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
-) -> Result<Option<Value>, RuntimeError> {
+) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     let Some((class_name, method_name)) = qualified_name.rsplit_once('.') else {
         return Ok(None);
     };
@@ -870,14 +939,12 @@ async fn try_call_registered_static_method(
     )
     .await
     {
-        return result
-            .map(crate::call::arguments::project_legacy_builtin_value_abi)
-            .map(Some);
+        return result.map(Some);
     }
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != qualified_name
     {
-        return call_builtin_async_impl(
+        return call_builtin_sequence_async_impl(
             &method.function_name,
             args,
             output_count,
@@ -895,16 +962,19 @@ async fn try_call_registered_static_method(
         )
         .await
         {
-            return result
-                .map(crate::call::arguments::project_legacy_builtin_value_abi)
-                .map(Some);
+            return result.map(Some);
         }
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != qualified_name
         {
-            return call_builtin_async_impl(&owner_qualified, args, output_count, context.cloned())
-                .await
-                .map(Some);
+            return call_builtin_sequence_async_impl(
+                &owner_qualified,
+                args,
+                output_count,
+                context.cloned(),
+            )
+            .await
+            .map(Some);
         }
     }
     Ok(None)
@@ -1064,7 +1134,9 @@ fn normalize_constructor_result(
 /// runtime's poll-local scope does not change this selection contract; session
 /// callers must use `call_builtin_async_in_context`.
 pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl(name, args, None, None).await
+    call_builtin_sequence_async(name, args)
+        .await
+        .map(crate::call::arguments::project_legacy_builtin_value_abi)
 }
 
 /// Session-owned entrypoint. Binding selection, preparation and execution all
@@ -1075,16 +1147,9 @@ pub async fn call_builtin_async_in_context(
     name: &str,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(Some(context));
-    let result = context
-        .scope(call_builtin_async_impl(
-            name,
-            args,
-            None,
-            Some(context.clone()),
-        ))
-        .await;
-    fence.finish(result)
+    call_builtin_sequence_async_in_context(context, name, args)
+        .await
+        .map(crate::call::arguments::project_legacy_builtin_value_abi)
 }
 
 /// Direct embedding call with no session binding authority. Use the
@@ -1094,7 +1159,9 @@ pub async fn call_builtin_async_with_outputs(
     args: &[Value],
     output_count: usize,
 ) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl(name, args, Some(output_count), None).await
+    call_builtin_sequence_async_with_outputs(name, args, output_count)
+        .await
+        .map(crate::call::arguments::project_legacy_builtin_value_abi)
 }
 
 pub async fn call_builtin_async_with_outputs_in_context(
@@ -1103,16 +1170,9 @@ pub async fn call_builtin_async_with_outputs_in_context(
     args: &[Value],
     output_count: usize,
 ) -> Result<Value, RuntimeError> {
-    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(Some(context));
-    let result = context
-        .scope(call_builtin_async_impl(
-            name,
-            args,
-            Some(output_count),
-            Some(context.clone()),
-        ))
-        .await;
-    fence.finish(result)
+    call_builtin_sequence_async_with_outputs_in_context(context, name, args, output_count)
+        .await
+        .map(crate::call::arguments::project_legacy_builtin_value_abi)
 }
 
 /// Invoke the implementation already selected for this invocation. Re-resolving
@@ -1122,7 +1182,7 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     args: &[Value],
     output_count: usize,
     context: Option<crate::context::RuntimeContext>,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context.as_ref());
     let result = async move {
         let name = binding.identity.builtin.name;
@@ -1132,11 +1192,15 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
         {
             return Ok(result);
         }
-        if let Some(result) =
-            try_call_registered_instance_method(name, args, Some(output_count), context.as_ref())
-                .await?
+        if let Some(result) = try_call_registered_instance_method_sequence(
+            name,
+            args,
+            Some(output_count),
+            context.as_ref(),
+        )
+        .await?
         {
-            return compatibility_checked_builtin_result(name, args, result);
+            return compatibility_checked_builtin_sequence(name, args, result);
         }
         let prepared = preparation::prepare_selected(
             SelectedBindingOrigin::CanonicalOrScoped,
@@ -1152,10 +1216,10 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
             Some(output_count),
         )
         .await?;
-        compatibility_checked_builtin_result(name, args, result)
+        compatibility_checked_builtin_sequence(name, args, result)
     }
     .await;
-    fence.finish(result)
+    fence.finish_sequence(result)
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
@@ -1274,7 +1338,7 @@ mod tests {
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
-    fn instance_method_legacy_boundary_preserves_output_cardinality() {
+    fn instance_method_sequence_preserves_output_kind_and_cardinality() {
         use runmat_value::ValueSequence;
         let method = runmat_types::MethodName::from("display");
         let receiver = Value::Num(0.0);
@@ -1289,7 +1353,11 @@ mod tests {
                 Ok(ValueSequence::comma_separated(values.clone()).unwrap()),
             )
             .unwrap();
-            assert_eq!(output, Value::OutputList(values));
+            assert_eq!(
+                output.kind(),
+                runmat_value::ValueSequenceKind::CommaSeparated
+            );
+            assert_eq!(output.as_slice(), values);
         }
         assert_eq!(
             super::finalize_instance_method_result(
@@ -1298,7 +1366,7 @@ mod tests {
                 Ok(ValueSequence::single(Value::Num(3.0)).unwrap()),
             )
             .unwrap(),
-            Value::Num(3.0),
+            ValueSequence::single(Value::Num(3.0)).unwrap(),
         );
     }
 
@@ -1872,11 +1940,12 @@ mod tests {
             .unwrap();
             assert_eq!(
                 out,
-                Value::OutputList(
+                runmat_value::ValueSequence::comma_separated(
                     (0..requested_outputs)
                         .map(|index| Value::Num(index as f64))
                         .collect(),
                 )
+                .unwrap()
             );
         }
     }

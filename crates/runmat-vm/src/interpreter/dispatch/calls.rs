@@ -196,7 +196,7 @@ pub async fn build_user_function_expand_multi_args(
 }
 
 pub fn handle_builtin_outcome(
-    result: Result<Value, RuntimeError>,
+    result: Result<runmat_value::ValueSequence, RuntimeError>,
     imported: ImportedBuiltinResolution,
     _output_hint: usize,
     _stack: &mut Vec<Value>,
@@ -210,13 +210,9 @@ pub fn handle_builtin_outcome(
         pc,
     } = ctx;
     match result {
-        Ok(result) => {
-            let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?;
-            Ok(BuiltinHandling::Completed(sequence))
-        }
+        Ok(sequence) => Ok(BuiltinHandling::Completed(sequence)),
         Err(err) => match imported {
-            ImportedBuiltinResolution::Resolved(value) => {
-                let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?;
+            ImportedBuiltinResolution::Resolved(sequence) => {
                 Ok(BuiltinHandling::Completed(sequence))
             }
             ImportedBuiltinResolution::Ambiguous(err) => Err(err),
@@ -273,7 +269,7 @@ async fn handle_builtin_call_inner(
     if call_builtins::is_vm_intrinsic_builtin(name) {
         let result = call_builtins::vm_intrinsic_builtin(stack, name, arg_count, invocation_arity);
         return handle_builtin_outcome(
-            result,
+            result.and_then(runmat_runtime::call::arguments::adapt_legacy_builtin_result),
             ImportedBuiltinResolution::NotFound,
             requested_outputs,
             stack,
@@ -293,7 +289,7 @@ async fn handle_builtin_call_inner(
         )
         .await;
         return handle_builtin_outcome(
-            result,
+            result.and_then(runmat_runtime::call::arguments::adapt_legacy_builtin_result),
             ImportedBuiltinResolution::NotFound,
             requested_outputs,
             stack,
@@ -313,7 +309,13 @@ async fn handle_builtin_call_inner(
 
     let result =
         crate::call::call_builtin_async_with_outputs(runtime, name, &args, requested_outputs).await;
-    let _result_roots = root_values(result.as_ref().ok())?;
+    let _result_roots = root_values(
+        result
+            .as_ref()
+            .ok()
+            .into_iter()
+            .flat_map(|sequence| sequence.iter()),
+    )?;
     let imported =
         call_builtins::resolve_imported_builtin(runtime, name, imports, &args, requested_outputs)
             .await?;

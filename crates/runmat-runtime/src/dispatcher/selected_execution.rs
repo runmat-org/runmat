@@ -20,7 +20,12 @@ impl SelectedImplementation {
             Self::Canonical(implementation) => implementation(
                 crate::builtin::RuntimeBuiltinInvocation::new(args, context, requested_outputs),
             ),
-            Self::Legacy(implementation) => implementation(args),
+            Self::Legacy(implementation) => {
+                let future = implementation(args);
+                Box::pin(async move {
+                    crate::call::arguments::adapt_legacy_builtin_result(future.await?)
+                })
+            }
         }
     }
 }
@@ -30,7 +35,7 @@ pub(super) async fn execute(
     execution: &[Value],
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let result = match implementation
         .invoke(execution, context.clone(), requested_outputs)
         .await

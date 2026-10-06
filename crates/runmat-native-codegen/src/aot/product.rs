@@ -259,7 +259,7 @@ mod admission_tests {
         let binding = AotBuiltinBinding {
             name: "sin".into(),
             variant: "default".into(),
-            native_symbol: "runmat_builtin_binding_v1_73696e_64656661756c74".into(),
+            native_symbol: "runmat_builtin_binding_v2_73696e_64656661756c74".into(),
         };
         let error = binding
             .validate()

@@ -91,15 +91,14 @@ fn evaluate_inner(
             .await?;
             return Ok(vec![value]);
         }
-        let result = runmat_runtime::call_builtin_async_with_outputs_in_context(
+        let result = runmat_runtime::call_builtin_sequence_async_with_outputs_in_context(
             &runtime,
             name.display_name(),
             &arguments,
             1,
         )
         .await?;
-        let outputs =
-            runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?.into_values();
+        let outputs = result.into_values();
         let [value] = <[Value; 1]>::try_from(outputs).map_err(|_| {
             crate::NativeExecutorError::Host(
                 "operator evaluation requires exactly one output".into(),

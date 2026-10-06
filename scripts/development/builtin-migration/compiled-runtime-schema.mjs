@@ -4,6 +4,7 @@ import {
 } from "./schema.mjs";
 import { sortedBy, uniqueBy } from "./compiled-schema.mjs";
 import { rustModuleIsWithinScope } from "./rust-module-path.mjs";
+import { nativeBindingSymbol } from "./native-binding-symbol.mjs";
 
 const PRECISIONS = ["f32", "f64", "i32", "bool"];
 const CONSTANT_STRATEGIES = ["inline_literal", "uniform_buffer", "workgroup_memory"];
@@ -33,7 +34,7 @@ export function registrationManifestEntry(value) {
 export function runtimeBinding(value) {
   exact(value, ["name", "variant", "native_symbol"], "compiled runtime binding");
   identity(value.name, "compiled runtime binding name"); nonempty(value.variant, "compiled runtime binding variant");
-  const expected = `runmat_builtin_binding_v2_${Buffer.from(value.name).toString("hex")}_${Buffer.from(value.variant).toString("hex")}`;
+  const expected = nativeBindingSymbol(value.name, value.variant);
   if (value.native_symbol !== expected) throw new Error("compiled native symbol does not encode its exact binding identity");
 }
 

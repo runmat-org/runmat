@@ -5,6 +5,7 @@ use runmat_value::Value;
     binding_variant = "default",
     context = true,
     requested_outputs = true,
+    output_sequence = true,
     builtin_path = "crate::builtins::introspection::feval"
 )]
 pub async fn feval_builtin_registered(
@@ -12,15 +13,14 @@ pub async fn feval_builtin_registered(
     requested_outputs: Option<usize>,
     f: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+) -> crate::BuiltinResult<runmat_value::ValueSequence> {
     let input_callsite = crate::callsite::current_callsite().and_then(|mut callsite| {
         (!callsite.arg_spans.is_empty()).then(|| {
             callsite.arg_spans.remove(0);
             callsite
         })
     });
-    crate::feval_builtin_in_runtime(runtime.as_ref(), requested_outputs, f, rest, input_callsite)
-        .await
+    crate::call::feval::invoke(runtime.as_ref(), requested_outputs, f, rest, input_callsite).await
 }
 
 #[cfg(test)]

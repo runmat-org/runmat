@@ -110,6 +110,37 @@ impl ValueSequence {
             ValueSequenceStorage::CommaSeparated(values) => values,
         }
     }
+
+    /// Transforms owned outputs without changing their sequence kind or
+    /// cardinality. Each replacement is checked before it enters the sequence.
+    /// A single-valued result does not allocate a temporary output vector.
+    pub fn try_map<E>(self, mut map: impl FnMut(Value) -> Result<Value, E>) -> Result<Self, E>
+    where
+        E: From<ValueSequenceError>,
+    {
+        let storage = match self.0 {
+            ValueSequenceStorage::Single(value) => {
+                let value = map(value)?;
+                validate_no_transient_sequence(&value)
+                    .map_err(ValueSequenceError::from)
+                    .map_err(E::from)?;
+                ValueSequenceStorage::Single(value)
+            }
+            ValueSequenceStorage::CommaSeparated(values) => ValueSequenceStorage::CommaSeparated(
+                values
+                    .into_iter()
+                    .map(|value| {
+                        let value = map(value)?;
+                        validate_no_transient_sequence(&value)
+                            .map_err(ValueSequenceError::from)
+                            .map_err(E::from)?;
+                        Ok(value)
+                    })
+                    .collect::<Result<Vec<_>, E>>()?,
+            ),
+        };
+        Ok(Self(storage))
+    }
 }
 
 /// Checks a requested or produced result cardinality without allocating its
@@ -132,6 +163,57 @@ mod tests {
 
     use super::*;
     use crate::{CellArray, Closure, ObjectArray, ObjectInstance, StructArray, StructValue};
+
+    #[test]
+    fn mapping_preserves_sequence_kind_and_cardinality() {
+        for sequence in [
+            ValueSequence::empty(),
+            ValueSequence::single(Value::Num(2.0)).unwrap(),
+            ValueSequence::comma_separated(vec![Value::Num(2.0)]).unwrap(),
+            ValueSequence::comma_separated(vec![Value::Num(2.0), Value::Num(3.0)]).unwrap(),
+        ] {
+            let kind = sequence.kind();
+            let expected = sequence.as_slice().to_vec();
+            let mapped = sequence.try_map::<ValueSequenceError>(Ok).unwrap();
+            assert_eq!(mapped.kind(), kind);
+            assert_eq!(mapped.as_slice(), expected);
+        }
+    }
+
+    #[test]
+    fn mapping_rejects_transient_output_values() {
+        for sequence in [
+            ValueSequence::single(Value::Num(2.0)).unwrap(),
+            ValueSequence::comma_separated(vec![Value::Num(2.0)]).unwrap(),
+        ] {
+            let error = sequence
+                .try_map::<ValueSequenceError>(|_| Ok(Value::OutputList(Vec::new())))
+                .unwrap_err();
+            assert_eq!(
+                error,
+                ValueSequenceError::TransientValue(TransientValueError::LegacyOutputList)
+            );
+        }
+    }
+
+    #[test]
+    fn mapping_stops_at_the_original_failure() {
+        let sequence =
+            ValueSequence::comma_separated(vec![Value::Num(2.0), Value::Num(3.0)]).unwrap();
+        let expected = ValueSequenceError::TooManyOutputs {
+            actual: 9,
+            maximum: 8,
+        };
+        let mut calls = 0;
+        let error = sequence
+            .try_map(|_| {
+                calls += 1;
+                Err(expected.clone())
+            })
+            .unwrap_err();
+        assert_eq!(error, expected);
+        assert_eq!(calls, 1);
+    }
 
     #[test]
     fn preserves_empty_single_and_comma_separated_cardinality() {

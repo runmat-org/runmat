@@ -32,11 +32,7 @@ pub(super) async fn dispatch(
                 *out_count,
             )
             .await?;
-            calls::publish_fixed_outputs(
-                stack,
-                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
-                *out_count,
-            )?;
+            calls::publish_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

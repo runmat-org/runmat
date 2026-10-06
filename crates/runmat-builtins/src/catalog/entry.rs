@@ -40,7 +40,7 @@ pub struct BuiltinBindingIdentity {
     pub variant: &'static str,
 }
 
-const NATIVE_BINDING_SYMBOL_PREFIX: &str = "runmat_builtin_binding_v2_";
+const NATIVE_BINDING_SYMBOL_PREFIX: &str = "runmat_builtin_binding_v3_";
 
 /// Stable native symbol exported by the runtime implementation for one
 /// catalog binding. Encoding both identity components byte-for-byte avoids
@@ -145,7 +145,7 @@ mod tests {
     fn native_binding_symbols_preserve_the_complete_identity() {
         assert_eq!(
             native_binding_symbol("DataArray.read", "default"),
-            "runmat_builtin_binding_v2_4461746141727261792e72656164_64656661756c74"
+            "runmat_builtin_binding_v3_4461746141727261792e72656164_64656661756c74"
         );
         assert_ne!(
             native_binding_symbol("a.b", "c"),

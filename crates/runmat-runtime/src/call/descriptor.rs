@@ -466,29 +466,28 @@ async fn call_builtin_with_requested_outputs(
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<ValueSequence, RuntimeError> {
-    let value = match runtime {
+    match runtime {
         Some(runtime) => {
             runtime
                 .scope(crate::callsite::with_callsite(
                     callsite,
-                    crate::call_builtin_async_with_outputs_in_context(
+                    crate::call_builtin_sequence_async_with_outputs_in_context(
                         runtime,
                         name,
                         args,
                         requested_outputs,
                     ),
                 ))
-                .await?
+                .await
         }
         None => {
             crate::callsite::with_callsite(
                 callsite,
-                crate::call_builtin_async_with_outputs(name, args, requested_outputs),
+                crate::call_builtin_sequence_async_with_outputs(name, args, requested_outputs),
             )
-            .await?
+            .await
         }
-    };
-    crate::call::arguments::adapt_legacy_builtin_result(value)
+    }
 }
 
 async fn forward_named_fallback(
@@ -500,14 +499,14 @@ async fn forward_named_fallback(
 ) -> Result<ValueSequence, RuntimeError> {
     let invoke = crate::callsite::with_callsite(
         callsite,
-        crate::dispatcher::try_call_builtin_async_with_outputs(
+        crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
             &name,
             &args,
             requested_outputs,
             runtime,
         ),
     );
-    let value = match runtime {
+    match runtime {
         Some(runtime) => runtime.scope(invoke).await?,
         None => invoke.await?,
     }
@@ -516,8 +515,7 @@ async fn forward_named_fallback(
             .with_identifier("RunMat:UndefinedFunction")
             .with_failure_origin(crate::runtime_error::RuntimeFailureOrigin::LanguageEvaluation)
             .build()
-    })?;
-    crate::call::arguments::adapt_legacy_builtin_result(value)
+    })
 }
 
 async fn execute_resolved_callable(
@@ -700,7 +698,7 @@ async fn try_execute_resolved_callable(
             };
             let invoke = crate::callsite::with_callsite(
                 input_callsite,
-                crate::dispatcher::try_call_builtin_async_with_outputs(
+                crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
                     &name,
                     &args,
                     requested_outputs,
@@ -711,9 +709,7 @@ async fn try_execute_resolved_callable(
                 Some(runtime) => runtime.scope(invoke).await?,
                 None => invoke.await?,
             };
-            value
-                .map(crate::call::arguments::adapt_legacy_builtin_result)
-                .transpose()
+            Ok(value)
         }
     }
 }
@@ -776,7 +772,7 @@ async fn execute_callable_descriptor_with_runtime(
         CallableTarget::FevalForward(func_value) => {
             let value = match runtime {
                 Some(runtime) => {
-                    crate::call_feval_async_with_outputs_in_context(
+                    crate::call_feval_sequence_async_with_outputs_in_context(
                         runtime,
                         func_value,
                         &args,
@@ -785,11 +781,15 @@ async fn execute_callable_descriptor_with_runtime(
                     .await?
                 }
                 None => {
-                    crate::call_feval_async_with_outputs(func_value, &args, requested_outputs)
-                        .await?
+                    crate::call_feval_sequence_async_with_outputs(
+                        func_value,
+                        &args,
+                        requested_outputs,
+                    )
+                    .await?
                 }
             };
-            crate::call::arguments::adapt_legacy_builtin_result(value)
+            Ok(value)
         }
     }
 }
@@ -857,7 +857,7 @@ async fn try_execute_callable_descriptor_with_runtime(
         CallableTarget::FevalForward(func_value) => {
             let value = match runtime {
                 Some(runtime) => {
-                    crate::call_feval_async_with_outputs_in_context(
+                    crate::call_feval_sequence_async_with_outputs_in_context(
                         runtime,
                         func_value,
                         &args,
@@ -866,11 +866,15 @@ async fn try_execute_callable_descriptor_with_runtime(
                     .await?
                 }
                 None => {
-                    crate::call_feval_async_with_outputs(func_value, &args, requested_outputs)
-                        .await?
+                    crate::call_feval_sequence_async_with_outputs(
+                        func_value,
+                        &args,
+                        requested_outputs,
+                    )
+                    .await?
                 }
             };
-            crate::call::arguments::adapt_legacy_builtin_result(value).map(Some)
+            Ok(Some(value))
         }
     }
 }

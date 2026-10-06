@@ -61,6 +61,7 @@ pub(super) async fn try_fast_path(
     )
     .await
     .map_err(callback_error)?;
+    let result = crate::dispatcher::resolve_single_sequence(result).map_err(callback_error)?;
     normalize::uniform(result, &shape, inputs).await.map(Some)
 }
 

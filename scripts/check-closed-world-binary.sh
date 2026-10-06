@@ -31,7 +31,9 @@ case "$(uname -s)" in
 esac
 jq -r '.retained_builtin_bindings[].native_symbol' "$plan_path" | sort -u >"$expected_file"
 
-actual_bindings="$(sed -n 's/^.*[_ ]\(runmat_builtin_binding_v2_[[:alnum:]_]*\)$/\1/p' "$symbol_file" | sort -u)"
+# Inspect every binding ABI version: an obsolete symbol must appear in the
+# exact-plan comparison rather than being silently excluded by the scanner.
+actual_bindings="$(sed -n 's/^.*[_ ]\(runmat_builtin_binding_v[[:digit:]][[:digit:]]*_[[:alnum:]_]*\)$/\1/p' "$symbol_file" | sort -u)"
 expected_bindings="$(cat "$expected_file")"
 if [[ "$actual_bindings" != "$expected_bindings" ]]; then
   echo "linked builtin symbols do not match the exact link plan" >&2

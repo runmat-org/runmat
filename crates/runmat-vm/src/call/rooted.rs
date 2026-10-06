@@ -31,7 +31,14 @@ pub(crate) async fn call_builtin_async(
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
     let _roots = root_values(args)?;
-    runmat_runtime::call_builtin_async_in_context(runtime, name, args).await
+    use runmat_runtime::sequence::ResolveValueSequence;
+    let sequence =
+        runmat_runtime::call_builtin_sequence_async_in_context(runtime, name, args).await?;
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        runmat_runtime::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
 }
 
 pub(crate) async fn call_builtin_async_with_outputs(
@@ -39,7 +46,10 @@ pub(crate) async fn call_builtin_async_with_outputs(
     name: &str,
     args: &[Value],
     outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<ValueSequence, RuntimeError> {
     let _roots = root_values(args)?;
-    runmat_runtime::call_builtin_async_with_outputs_in_context(runtime, name, args, outputs).await
+    runmat_runtime::call_builtin_sequence_async_with_outputs_in_context(
+        runtime, name, args, outputs,
+    )
+    .await
 }

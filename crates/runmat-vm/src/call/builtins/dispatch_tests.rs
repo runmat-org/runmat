@@ -56,7 +56,8 @@ fn imported_call_uses_runtime_dispatch_with_original_arguments() {
             let crate::call::builtins::ImportedBuiltinResolution::Resolved(value) = result else {
                 panic!("resolved import")
             };
-            assert_eq!(value, Value::Num(6.));
+            assert_eq!(value.kind(), runmat_value::ValueSequenceKind::Single);
+            assert_eq!(value.as_slice(), [Value::Num(6.)]);
         });
     });
 }

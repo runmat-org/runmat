@@ -2,7 +2,9 @@ use std::rc::Rc;
 
 use crate::context::{RuntimeContext, RuntimeWorkspaceService};
 use crate::RuntimeError;
+#[cfg(test)]
 use runmat_value::Value;
+use runmat_value::ValueSequence;
 
 /// Retains the exact workspace port selected for one contextual call and
 /// reconciles reentrant effects before execution resumes in its caller.
@@ -17,15 +19,39 @@ impl PostCallWorkspaceEffectFence {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn finish(self, result: Result<Value, RuntimeError>) -> Result<Value, RuntimeError> {
         self.finish_optional(result.map(Some))
             .map(|value| value.expect("scalar builtin result remains present"))
     }
 
+    #[cfg(test)]
     pub(super) fn finish_optional(
         self,
         result: Result<Option<Value>, RuntimeError>,
     ) -> Result<Option<Value>, RuntimeError> {
+        self.finish_optional_rooted(result)
+    }
+
+    pub(super) fn finish_sequence(
+        self,
+        result: Result<ValueSequence, RuntimeError>,
+    ) -> Result<ValueSequence, RuntimeError> {
+        self.finish_optional_sequence(result.map(Some))
+            .map(|sequence| sequence.expect("selected builtin result remains present"))
+    }
+
+    pub(super) fn finish_optional_sequence(
+        self,
+        result: Result<Option<ValueSequence>, RuntimeError>,
+    ) -> Result<Option<ValueSequence>, RuntimeError> {
+        self.finish_optional_rooted(result)
+    }
+
+    fn finish_optional_rooted<T: runmat_gc::Trace>(
+        self,
+        result: Result<Option<T>, RuntimeError>,
+    ) -> Result<Option<T>, RuntimeError> {
         if self.workspace.is_none() {
             return result;
         }
@@ -48,15 +74,14 @@ impl PostCallWorkspaceEffectFence {
                 let roots = value
                     .as_ref()
                     .map(|value| {
-                        crate::execution::RootedValueHandles::for_values(std::iter::once(value))
-                            .map_err(|source| {
-                                crate::build_runtime_error(
-                                    "could not retain a builtin result during workspace reconciliation",
-                                )
-                                .with_identifier("RunMat:Workspace:Rooting")
-                                .with_source(source)
-                                .build()
-                            })
+                        crate::execution::RootedValueHandles::for_traced(value).map_err(|source| {
+                            crate::build_runtime_error(
+                                "could not retain a builtin result during workspace reconciliation",
+                            )
+                            .with_identifier("RunMat:Workspace:Rooting")
+                            .with_source(source)
+                            .build()
+                        })
                     })
                     .transpose();
                 let checkpoint = self.checkpoint();
@@ -135,10 +160,44 @@ mod tests {
         assert_eq!(result, None);
     }
 
+    #[test]
+    fn empty_selected_sequence_still_checks_workspace_authority() {
+        let owner = crate::workspace::BaseWorkspaceOwner::new();
+        let service: Rc<dyn RuntimeWorkspaceService> =
+            Rc::new(crate::workspace::BaseWorkspaceService::new(owner.clone()));
+        let runtime = runtime_with_workspace(service);
+        owner.close().unwrap();
+
+        let error = PostCallWorkspaceEffectFence::capture(Some(&runtime))
+            .finish_sequence(Ok(ValueSequence::empty()))
+            .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+        assert!(PostCallWorkspaceEffectFence::capture(Some(&runtime))
+            .finish_optional_sequence(Ok(None))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn failed_sequence_keeps_original_error_after_workspace_revocation() {
+        let owner = crate::workspace::BaseWorkspaceOwner::new();
+        let service: Rc<dyn RuntimeWorkspaceService> =
+            Rc::new(crate::workspace::BaseWorkspaceService::new(owner.clone()));
+        let runtime = runtime_with_workspace(service);
+        owner.close().unwrap();
+        let original =
+            crate::runtime_error::semantic_error("RunMat:PostCallFixture", "original call failure");
+
+        let error = PostCallWorkspaceEffectFence::capture(Some(&runtime))
+            .finish_sequence(Err(original))
+            .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:PostCallFixture"));
+    }
+
     struct CollectingWorkspace {
-        initial_root: std::cell::RefCell<Option<runmat_gc::ExplicitRoot>>,
+        initial_roots: std::cell::RefCell<Option<Vec<runmat_gc::ExplicitRoot>>>,
         retained_during_checkpoint: std::cell::Cell<bool>,
-        handle: runmat_gc::GcHandle,
+        handles: Vec<runmat_gc::GcHandle>,
     }
 
     impl RuntimeWorkspaceService for CollectingWorkspace {
@@ -155,15 +214,20 @@ mod tests {
         }
 
         fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
-            self.initial_root
+            for root in self
+                .initial_roots
                 .borrow_mut()
                 .take()
                 .expect("one checkpoint")
-                .unroot()
-                .expect("release fixture root");
+            {
+                root.unroot().expect("release fixture root");
+            }
             runmat_gc::gc_collect_major().expect("collect during checkpoint");
-            self.retained_during_checkpoint
-                .set(runmat_gc::gc_clone_value(&self.handle).is_ok());
+            self.retained_during_checkpoint.set(
+                self.handles
+                    .iter()
+                    .all(|handle| runmat_gc::gc_clone_value(handle).is_ok()),
+            );
             Ok(())
         }
 
@@ -181,28 +245,46 @@ mod tests {
     }
 
     #[test]
-    fn returned_managed_value_remains_rooted_during_workspace_reconciliation() {
+    fn every_sequence_output_remains_rooted_during_workspace_reconciliation() {
         runmat_gc::gc_test_context(|| {
             let initial = runmat_gc::gc_allocate_rooted(Value::String("retained".into()))
                 .expect("allocate fixture value");
             let handle = initial.handle();
+            let second = runmat_gc::gc_allocate_rooted(Value::String("second retained".into()))
+                .expect("allocate second fixture value");
+            let second_handle = second.handle();
             let service = Rc::new(CollectingWorkspace {
-                initial_root: std::cell::RefCell::new(Some(initial)),
+                initial_roots: std::cell::RefCell::new(Some(vec![initial, second])),
                 retained_during_checkpoint: std::cell::Cell::new(false),
-                handle,
+                handles: vec![handle, second_handle],
             });
             let runtime = runtime_with_workspace(service.clone());
-            let result = Value::HandleObject(HandleRef {
-                class_name: "PostCallFenceFixture".into(),
-                target: handle,
-                valid: true,
-            });
+            let result = ValueSequence::comma_separated(vec![
+                Value::HandleObject(HandleRef {
+                    class_name: "PostCallFenceFixture".into(),
+                    target: handle,
+                    valid: true,
+                }),
+                Value::HandleObject(HandleRef {
+                    class_name: "PostCallFenceFixture".into(),
+                    target: second_handle,
+                    valid: true,
+                }),
+            ])
+            .expect("checked output sequence");
 
             let returned = PostCallWorkspaceEffectFence::capture(Some(&runtime))
-                .finish(Ok(result))
+                .finish_sequence(Ok(result))
                 .expect("checkpoint succeeds");
             assert!(service.retained_during_checkpoint.get());
-            assert!(matches!(returned, Value::HandleObject(_)));
+            assert_eq!(
+                returned.kind(),
+                runmat_value::ValueSequenceKind::CommaSeparated
+            );
+            assert_eq!(returned.len(), 2);
+            assert!(returned
+                .iter()
+                .all(|value| matches!(value, Value::HandleObject(_))));
         });
     }
 }

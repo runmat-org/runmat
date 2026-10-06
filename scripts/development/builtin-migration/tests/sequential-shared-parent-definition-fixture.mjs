@@ -130,5 +130,5 @@ function identityControl(identity, bundleId) {
 }
 
 function nativeSymbol(identity) {
-  return `runmat_builtin_binding_v2_${Buffer.from(identity).toString("hex")}_${Buffer.from("default").toString("hex")}`;
+  return `runmat_builtin_binding_v3_${Buffer.from(identity).toString("hex")}_${Buffer.from("default").toString("hex")}`;
 }
