@@ -2,11 +2,14 @@ use super::{interpret_with_vars_in_context, InterpreterOutcome};
 use crate::bytecode::program::{Bytecode, FunctionBytecode, FunctionRegistry};
 use crate::bytecode::Instr;
 use futures::executor::block_on;
+use futures::task::noop_waker;
 use runmat_hir::FunctionId;
 use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
 use runmat_value::{Value, ValueSequence};
+use std::future::Future;
 use std::rc::Rc;
 use std::sync::{mpsc, Mutex};
+use std::task::{Context, Poll};
 
 struct ProcessDispatchControl {
     reached: mpsc::Sender<()>,
@@ -167,4 +170,55 @@ fn process_stack_builtin_can_suspend_on_a_bounded_native_thread_stack() {
 #[test]
 fn nested_process_stack_calls_reach_a_pending_leaf_on_a_bounded_native_thread_stack() {
     run_process_fixture_on_bounded_stack(12);
+}
+
+#[test]
+fn nested_process_stack_calls_retire_a_pending_leaf_on_drop() {
+    let _test_guard = PROCESS_DISPATCH_TEST_LOCK
+        .lock()
+        .expect("serialize process dispatch fixtures");
+    let (reached_tx, reached_rx) = mpsc::channel();
+    let (release_tx, release_rx) = futures::channel::oneshot::channel();
+    *PROCESS_DISPATCH_CONTROL
+        .lock()
+        .expect("process dispatch control lock") = Some(ProcessDispatchControl {
+        reached: reached_tx,
+        release: release_rx,
+    });
+
+    let execution = std::thread::Builder::new()
+        .name("vm-process-dispatch-drop".into())
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let runtime = RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(
+                RuntimeServicePorts::default().with_builtin(Rc::new(ProcessBuiltinService)),
+            );
+            let bytecode = nested_process_bytecode(12);
+            let mut vars = Vec::new();
+            let mut pending = Box::pin(interpret_with_vars_in_context(
+                &bytecode,
+                &mut vars,
+                Some("process_dispatch_fixture"),
+                runtime,
+            ));
+            let waker = noop_waker();
+            let mut cx = Context::from_waker(&waker);
+            assert!(matches!(pending.as_mut().poll(&mut cx), Poll::Pending));
+            drop(pending);
+        })
+        .expect("spawn bounded-stack VM thread");
+
+    reached_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("Process builtin reached a genuine Pending boundary");
+    execution
+        .join()
+        .expect("dropping a suspended Process chain must not overflow");
+    assert!(
+        release_tx.send(()).is_err(),
+        "leaf must have retired without replay"
+    );
 }

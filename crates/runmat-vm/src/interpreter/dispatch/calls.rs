@@ -12,12 +12,13 @@ use runmat_runtime::call::arguments::ArgumentSpec;
 use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
-use runmat_types::MemberAccess;
 use runmat_value::{MException, Value};
 
 #[path = "calls/dispatch.rs"]
 mod dispatch;
 pub(super) use dispatch::{dispatch_call, CallDispatchContext};
+#[path = "calls/user_preparation.rs"]
+mod user_preparation;
 
 pub enum BuiltinHandling {
     Completed(runmat_value::ValueSequence),
@@ -358,223 +359,27 @@ pub async fn handle_prepared_user_function_call(
         last_exception,
         pc,
     } = exception;
-    let static_candidate = match &identity {
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
-            if segments.len() >= 2 =>
-        {
-            let class_name = segments[..segments.len() - 1]
-                .iter()
-                .map(|segment| segment.0.as_str())
-                .collect::<Vec<_>>()
-                .join(".");
-            Some((
-                runmat_types::ClassIdentity::new(class_name).map_err(|error| {
-                    crate::interpreter::errors::mex("InvalidClassIdentity", &error.to_string())
-                })?,
-                runmat_types::MethodName::from(segments[segments.len() - 1].0.as_str()),
-            ))
-        }
-        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
-            if name.contains('.') =>
-        {
-            name.rsplit_once('.')
-                .map(|(class_name, method_name)| {
-                    runmat_types::ClassIdentity::new(class_name)
-                        .map(|class_name| (class_name, runmat_types::MethodName::from(method_name)))
-                })
-                .transpose()
-                .map_err(|error| {
-                    crate::interpreter::errors::mex("InvalidClassIdentity", &error.to_string())
-                })?
-        }
-        _ => None,
-    };
-    if current_class_context.is_some() {
-        if let Some((class_name, method_name)) = static_candidate {
-            if runmat_runtime::class_registry::get_class(&class_name).is_some() {
-                if let Some((method, owner)) =
-                    runmat_runtime::class_registry::lookup_method(&class_name, &method_name)
-                {
-                    if method.is_static {
-                        let allowed = match method.access {
-                            MemberAccess::Public => true,
-                            MemberAccess::Private => current_class_context.as_ref() == Some(&owner),
-                            MemberAccess::Protected => {
-                                current_class_context.as_ref().is_some_and(|caller_class| {
-                                    runmat_runtime::class_registry::is_class_or_subclass(
-                                        caller_class,
-                                        &owner,
-                                    )
-                                })
-                            }
-                        };
-                        if !allowed {
-                            return Err(crate::interpreter::errors::mex(
-                                "MethodPrivate",
-                                &format!("Method '{}' is private", method_name),
-                            ));
-                        }
-                        let method_identity = if method.function_name.contains('.') {
-                            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
-                                method
-                                    .function_name
-                                    .split('.')
-                                    .map(|segment| {
-                                        runmat_hir::SymbolName(segment.trim().to_string())
-                                    })
-                                    .collect(),
-                            ))
-                        } else {
-                            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
-                                method.function_name.clone(),
-                            ))
-                        };
-                        let static_descriptor = CallableDescriptor::resolved(
-                            method_identity,
-                            args,
-                            out_count,
-                            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                            CallableCallKind::Direct,
-                        );
-                        let result =
-                            execute_callable_descriptor(runtime, static_descriptor).await?;
-                        return Ok(UserCallHandling::Completed(result));
-                    }
-                }
-            }
-        }
-    }
 
-    let local_method_candidate = match &identity {
-        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
-            if !name.contains('.') && !name.trim().is_empty() =>
-        {
-            Some(runmat_types::MethodName::from(name.trim()))
-        }
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
-            if segments.len() == 1 && !segments[0].0.trim().is_empty() =>
-        {
-            Some(runmat_types::MethodName::from(segments[0].0.trim()))
-        }
-        _ => None,
-    };
-    if let (Some(class_name), Some(method_name)) = (
+    let prepared = user_preparation::prepare(
+        identity,
+        bound,
+        fallback_policy,
+        out_count,
+        args,
         current_class_context.as_ref(),
-        local_method_candidate.as_ref(),
-    ) {
-        if let Some((method, owner)) =
-            runmat_runtime::class_registry::lookup_method(class_name, method_name)
-        {
-            if method.is_static {
-                let allowed = match method.access {
-                    MemberAccess::Public => true,
-                    MemberAccess::Private => current_class_context.as_ref() == Some(&owner),
-                    MemberAccess::Protected => {
-                        current_class_context.as_ref().is_some_and(|caller_class| {
-                            runmat_runtime::class_registry::is_class_or_subclass(
-                                caller_class,
-                                &owner,
-                            )
-                        })
-                    }
-                };
-                if !allowed {
-                    return Err(crate::interpreter::errors::mex(
-                        "MethodPrivate",
-                        &format!("Method '{}' is private", method_name),
-                    ));
-                }
-                let method_identity = if method.function_name.contains('.') {
-                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
-                        method
-                            .function_name
-                            .split('.')
-                            .map(|segment| runmat_hir::SymbolName(segment.trim().to_string()))
-                            .collect(),
-                    ))
-                } else {
-                    runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
-                        method.function_name.clone(),
-                    ))
-                };
-                let static_descriptor = CallableDescriptor::resolved(
-                    method_identity,
-                    args,
-                    out_count,
-                    runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                    CallableCallKind::Direct,
-                );
-                let result = execute_callable_descriptor(runtime, static_descriptor).await?;
-                return Ok(UserCallHandling::Completed(result));
-            }
-        }
-    }
-    if let Some(method_name) = local_method_candidate.as_ref() {
-        if let Some(owner_class) = imported_static_method_owner(imports, method_name)? {
-            if let Some((method, owner)) =
-                runmat_runtime::class_registry::lookup_method(&owner_class, method_name)
-            {
-                if method.is_static {
-                    let allowed = match method.access {
-                        MemberAccess::Public => true,
-                        MemberAccess::Private => current_class_context.as_ref() == Some(&owner),
-                        MemberAccess::Protected => {
-                            current_class_context.as_ref().is_some_and(|caller_class| {
-                                runmat_runtime::class_registry::is_class_or_subclass(
-                                    caller_class,
-                                    &owner,
-                                )
-                            })
-                        }
-                    };
-                    if !allowed {
-                        return Err(crate::interpreter::errors::mex(
-                            "MethodPrivate",
-                            &format!("Method '{}' is private", method_name),
-                        ));
-                    }
-                    let method_identity = if method.function_name.contains('.') {
-                        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
-                            method
-                                .function_name
-                                .split('.')
-                                .map(|segment| runmat_hir::SymbolName(segment.trim().to_string()))
-                                .collect(),
-                        ))
-                    } else {
-                        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
-                            method.function_name.clone(),
-                        ))
-                    };
-                    let static_descriptor = CallableDescriptor::resolved(
-                        method_identity,
-                        args,
-                        out_count,
-                        runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                        CallableCallKind::Direct,
-                    );
-                    let result = execute_callable_descriptor(runtime, static_descriptor).await?;
-                    return Ok(UserCallHandling::Completed(result));
-                }
-            }
-        }
-    }
-
-    let descriptor = if let Some(binding) = bound {
-        CallableDescriptor::bound(binding, args, out_count, CallableCallKind::Direct)
+        imports,
+    )?;
+    let _access_guard = if prepared.route == user_preparation::UserCallRoute::StaticMethod {
+        None
     } else {
-        CallableDescriptor::resolved(
-            identity,
-            args,
-            out_count,
-            fallback_policy,
-            CallableCallKind::Direct,
-        )
+        current_class_context
+            .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
     };
-    let _access_guard = current_class_context
-        .clone()
-        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    match execute_callable_descriptor(runtime, descriptor).await {
+    let result = execute_callable_descriptor(runtime, prepared.descriptor).await;
+    if prepared.route == user_preparation::UserCallRoute::StaticMethod {
+        return result.map(UserCallHandling::Completed);
+    }
+    match result {
         Ok(result) => Ok(UserCallHandling::Completed(result)),
         Err(err) => Ok(
             match redirect_exception_to_catch(
