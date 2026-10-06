@@ -1,4 +1,4 @@
-use super::standalone_runtime;
+use super::{execution_diagnostic, standalone_runtime};
 use runmat_execution::{Digest, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision};
 use runmat_runtime::context::RuntimeLanguageMode;
 
@@ -87,4 +87,15 @@ fn standalone_program_contexts_keep_independent_policies() {
         .with_service_ports(runmat.service_ports().clone().without_workspace());
     assert_eq!(callback.language_mode(), RuntimeLanguageMode::RunMat);
     assert!(callback.runmat_extensions_enabled());
+}
+
+#[test]
+fn standalone_execution_diagnostic_keeps_original_identifier_and_message() {
+    let original = runmat_runtime::build_runtime_error("aot source failure")
+        .with_identifier("RunMat:test:AotSource")
+        .build();
+    assert_eq!(
+        execution_diagnostic(original),
+        "standalone native execution failed: RunMat:test:AotSource: aot source failure"
+    );
 }

@@ -21,7 +21,7 @@ pub async fn invoke(
     let execution = executor
         .invoke_async(function, arguments, requested_outputs, runtime)
         .await
-        .map_err(native_error);
+        .map_err(native_executor_error);
     drop(active);
     drop(guards);
     execution
@@ -41,7 +41,7 @@ pub async fn invoke_workspace(
     let execution = executor
         .invoke_workspace_async(function, workspace, requested_outputs, runtime)
         .await
-        .map_err(native_error);
+        .map_err(native_executor_error);
     drop(active);
     drop(guards);
     execution
@@ -137,7 +137,7 @@ impl ProgramInvocationGuards {
                     let execution = executor
                         .invoke_async(function, arguments, requested_outputs, runtime)
                         .await
-                        .map_err(native_error)?;
+                        .map_err(native_executor_error)?;
                     normalize_outputs(execution.outputs, requested_outputs).map_err(|error| *error)
                 })
             }),
@@ -177,7 +177,7 @@ impl ProgramInvocationGuards {
                             runtime,
                         )
                         .await
-                        .map_err(native_error)?;
+                        .map_err(native_executor_error)?;
                     Ok(runmat_runtime::call::lexical::LexicalCallResult {
                         outputs: normalize_outputs(execution.outputs, call.requested_outputs)
                             .map_err(|error| *error)?,
@@ -267,4 +267,13 @@ fn native_error(error: impl std::fmt::Display) -> runmat_runtime::RuntimeError {
     runmat_runtime::build_runtime_error(error.to_string())
         .with_identifier("RunMat:AotNativeCall")
         .build()
+}
+
+fn native_executor_error(
+    error: runmat_native_executor::NativeExecutorError,
+) -> runmat_runtime::RuntimeError {
+    match error {
+        runmat_native_executor::NativeExecutorError::Runtime(original) => *original,
+        other => native_error(other),
+    }
 }

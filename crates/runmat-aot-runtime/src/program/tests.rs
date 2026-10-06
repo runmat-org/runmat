@@ -39,6 +39,28 @@ fn runtime() -> RuntimeContext {
 }
 
 #[test]
+fn native_runtime_failure_keeps_original_source_and_frames() {
+    use std::error::Error as _;
+
+    let original = runmat_runtime::build_runtime_error("aot source failure")
+        .with_identifier("RunMat:test:AotSource")
+        .with_call_frames(vec![runmat_runtime::CallFrame {
+            function: "source_callback".into(),
+            source_id: Some(3),
+            span: Some((2, 5)),
+        }])
+        .with_source(std::io::Error::other("typed source cause"))
+        .build();
+    let mapped = native_executor_error(runmat_native_executor::NativeExecutorError::Runtime(
+        Box::new(original),
+    ));
+    assert_eq!(mapped.identifier(), Some("RunMat:test:AotSource"));
+    assert_eq!(mapped.message, "aot source failure");
+    assert_eq!(mapped.context.call_frames[0].source_id, Some(3));
+    assert!(mapped.source().unwrap().is::<std::io::Error>());
+}
+
+#[test]
 fn installation_preserves_supplied_services_across_nested_program_contexts() {
     let events = Events::default();
     let placement: Rc<dyn RuntimePlacementService> = Rc::new(PlacementProbe(events));
