@@ -12,6 +12,9 @@ use std::pin::Pin;
 pub enum GraphicsFlushRate {
     Immediate,
     LimitRate,
+    /// Legacy `drawnow update`: skip while a renderer is busy, without the
+    /// 50 ms limit-rate clock.
+    WhenIdle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
