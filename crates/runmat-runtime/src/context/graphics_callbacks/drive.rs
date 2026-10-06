@@ -70,7 +70,7 @@ impl RuntimeGraphicsCallbackQueue {
 mod tests {
     use super::*;
     #[cfg(not(target_arch = "wasm32"))]
-    use crate::context::{RuntimeLocalTaskService, RuntimeLocalTaskSupervisor};
+    use crate::context::RuntimeLocalTaskSupervisor;
     use crate::execution::RuntimeExecutionService;
     use futures::channel::oneshot;
     use futures::FutureExt;
