@@ -17,8 +17,9 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
                 let count = calls.get() + 1;
                 calls.set(count);
                 if count == 1 {
-                    super::timer_stop_builtin(Some(runtime.clone()), None, handle.clone()).await?;
-                    super::timer_start_builtin(Some(runtime), None, handle).await?;
+                    super::super::timer_stop_builtin(Some(runtime.clone()), None, handle.clone())
+                        .await?;
+                    super::super::timer_start_builtin(Some(runtime), None, handle).await?;
                 }
                 Ok(crate::sequence::ValueSequence::empty())
             })
@@ -70,9 +71,13 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
                         let count = ticks.get() + 1;
                         ticks.set(count);
                         if count == 1 {
-                            super::timer_stop_builtin(Some(runtime.clone()), None, handle.clone())
-                                .await?;
-                            super::timer_start_builtin(Some(runtime), None, handle).await?;
+                            super::super::timer_stop_builtin(
+                                Some(runtime.clone()),
+                                None,
+                                handle.clone(),
+                            )
+                            .await?;
+                            super::super::timer_start_builtin(Some(runtime), None, handle).await?;
                             return Err(crate::build_runtime_error("old generation failed")
                                 .with_identifier("RunMat:TimerTest:OldGeneration")
                                 .build());

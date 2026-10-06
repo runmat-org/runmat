@@ -5,7 +5,7 @@ fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects()
     reset_timer_state_for_tests();
     let timer = block_on(timer_builtin(Vec::new())).expect("timer");
     let runtime = test_runtime();
-    let assigned = block_on(super::timer_start_builtin(
+    let assigned = block_on(super::super::timer_start_builtin(
         Some(runtime.clone()),
         Some(1),
         timer.clone(),
@@ -15,7 +15,7 @@ fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects()
         assigned.identifier(),
         Some("RunMat:compatibility:TimerMethodStatusOutputExtension")
     );
-    let relative = block_on(super::timer_startat_builtin(
+    let relative = block_on(super::super::timer_startat_builtin(
         Some(runtime.clone()),
         Some(0),
         timer.clone(),
@@ -32,7 +32,11 @@ fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects()
     assert_eq!(string_property(handle, "Running").unwrap(), "off");
     runtime.state().runmat_extensions_enabled.set(true);
     assert!(matches!(
-        block_on(super::timer_stop_builtin(Some(runtime), Some(1), timer)),
+        block_on(super::super::timer_stop_builtin(
+            Some(runtime),
+            Some(1),
+            timer
+        )),
         Ok(Value::Num(0.0))
     ));
 }
@@ -51,7 +55,7 @@ fn absolute_startat_uses_injected_wall_clock_without_relative_extension() {
         .naive_utc()
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
-    block_on(super::timer_startat_builtin(
+    block_on(super::super::timer_startat_builtin(
         Some(test_runtime()),
         Some(0),
         timer.clone(),
@@ -82,7 +86,7 @@ fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
         now + chrono::Duration::days(26),
     ] {
         let date = instant.format("%Y-%m-%d %H:%M:%S").to_string();
-        let error = block_on(super::timer_startat_builtin(
+        let error = block_on(super::super::timer_startat_builtin(
             Some(test_runtime()),
             Some(0),
             timer.clone(),
@@ -105,7 +109,7 @@ fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
         )
         .unwrap(),
     );
-    let error = block_on(super::timer_startat_builtin(
+    let error = block_on(super::super::timer_startat_builtin(
         Some(test_runtime()),
         Some(0),
         timer.clone(),
@@ -162,7 +166,7 @@ fn startat_uses_column_major_timer_arrays_and_accepts_nd_object_arrays() {
         )
         .unwrap(),
     );
-    block_on(super::timer_startat_builtin(
+    block_on(super::super::timer_startat_builtin(
         Some(test_runtime()),
         Some(0),
         object_array.clone(),
@@ -185,7 +189,7 @@ fn startat_empty_object_array_preserves_shape_and_has_no_lifecycle_effect() {
     let array =
         Value::ObjectArray(ObjectArray::empty(TIMER_CLASS.to_string(), vec![0, 2, 1]).unwrap());
     let empty_dates = Value::StringArray(StringArray::new(Vec::new(), vec![0, 2, 1]).unwrap());
-    block_on(super::timer_startat_builtin(
+    block_on(super::super::timer_startat_builtin(
         Some(test_runtime()),
         Some(0),
         array,

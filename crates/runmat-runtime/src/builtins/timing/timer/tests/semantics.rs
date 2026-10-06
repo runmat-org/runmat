@@ -66,7 +66,7 @@ fn timer_handle_cannot_start_in_another_session_before_task_admission() {
     ]))
     .expect("timer");
     let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-    let error = block_on(super::timer_start_builtin(
+    let error = block_on(super::super::timer_start_builtin(
         Some(foreign),
         None,
         timer.clone(),
@@ -225,7 +225,7 @@ fn timer_dependent_setters_validate_post_construction_values() {
     let object = runmat_gc::gc_clone_value(&handle.target).expect("timer object");
     let err = block_on(set_timer_property_object(
         object.clone(),
-        "Period",
+        TimerProperty::Period,
         Value::Num(0.0),
     ))
     .unwrap_err();
@@ -236,7 +236,7 @@ fn timer_dependent_setters_validate_post_construction_values() {
 
     let updated = block_on(set_timer_property_object(
         object,
-        "Tag",
+        TimerProperty::Tag,
         Value::CharArray(CharArray::new_row("batch")),
     ))
     .expect("valid tag update");

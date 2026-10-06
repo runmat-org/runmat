@@ -115,7 +115,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     let error =
         futures::executor::block_on(super::super::setter_bindings::set_timer_property_object(
             Value::Object(running),
-            "StartDelay",
+            TimerProperty::StartDelay,
             resident.clone(),
         ))
         .expect_err("frozen running property");
