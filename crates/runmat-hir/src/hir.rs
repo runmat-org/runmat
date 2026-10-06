@@ -24,6 +24,10 @@ use serde::{Deserialize, Serialize};
 /// name types.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct HirAssembly {
+    /// Compiler-admitted program root, including function-only and empty
+    /// sources with no synthetic executable entrypoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_source: Option<ProgramSourceId>,
     pub modules: Vec<HirModule>,
     pub functions: Vec<HirFunction>,
     pub classes: Vec<HirClass>,
@@ -833,6 +837,7 @@ mod tests {
         let entrypoint = EntrypointId(0);
 
         let assembly = HirAssembly {
+            primary_source: None,
             modules: vec![HirModule {
                 id: module,
                 name: QualifiedName(vec![SymbolName("demo".into())]),

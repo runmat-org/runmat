@@ -11,7 +11,9 @@ fn companion_function_and_entrypoint_have_distinct_mir_source_ordinals() {
     let sources = [ProgramSourceId(0), ProgramSourceId(0), ProgramSourceId(3)];
     let hir = lower(
         &program,
-        &LoweringContext::empty().with_top_level_sources(&sources),
+        &LoweringContext::empty()
+            .with_primary_source(ProgramSourceId(0))
+            .with_top_level_sources(&sources),
     )
     .unwrap();
     let mir = lower_assembly(&hir.assembly).unwrap();

@@ -230,6 +230,7 @@ async fn load_dynamic_function(
                     .map(|catalog| &catalog.symbols)
                     .cloned()
                     .unwrap_or_default();
+                let primary_source = source_table.primary_source();
                 let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
                     &ast,
                     &LoweringContext::new(&HashMap::new())
@@ -241,7 +242,8 @@ async fn load_dynamic_function(
                         )
                         .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
                         .with_top_level_await_enabled(top_level_await_enabled)
-                        .with_top_level_sources(&source_table.statement_sources),
+                        .with_top_level_sources(&source_table.statement_sources)
+                        .with_primary_source(primary_source),
                     source_catalog.as_ref(),
                 );
                 if let Some(error) = frontend.lowering_failure {
@@ -284,8 +286,16 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionCompileError")
                     .build()
                 })?;
+                let lowering = frontend.lowering.as_ref().ok_or_else(|| {
+                    build_runtime_error(format!(
+                        "Canonical frontend produced no source lowering for '{}'",
+                        path.display()
+                    ))
+                    .with_identifier("RunMat:FunctionCompileError")
+                    .build()
+                })?;
                 source_table
-                    .validate_compiled_sources(&bytecode)
+                    .validate_compiled_sources(&bytecode, &lowering.assembly)
                     .map_err(|error| {
                         build_runtime_error(error)
                             .with_identifier("RunMat:ExecutableSourceIdentity")

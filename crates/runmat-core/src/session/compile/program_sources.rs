@@ -39,6 +39,7 @@ impl SourceKey {
 /// One source table for the immutable compiler product. These ordinals never
 /// borrow authority from the session SourcePool or a runtime source lease.
 pub(in crate::session) struct ProgramSourceTable {
+    primary_source: ProgramSourceId,
     pub(in crate::session) source_map: crate::ExecutableSourceMap,
     pub(in crate::session) statement_sources: Vec<ProgramSourceId>,
     pub(in crate::session) function_sources: HashMap<String, ProgramSourceId>,
@@ -84,9 +85,14 @@ struct CompanionSource {
 }
 
 impl ProgramSourceTable {
+    pub(in crate::session) fn primary_source(&self) -> ProgramSourceId {
+        self.primary_source
+    }
+
     pub(in crate::session) fn validate_compiled_sources(
         &self,
         bytecode: &runmat_vm::Bytecode,
+        hir: &runmat_hir::HirAssembly,
     ) -> Result<(), String> {
         let contains = |source: Option<runmat_vm::BytecodeSourceRef>| {
             source
@@ -98,14 +104,69 @@ impl ProgramSourceTable {
                         .is_some_and(|entry| entry.source_id == ordinal)
                 })
         };
-        if !contains(bytecode.source_id) {
-            return Err("compiled entrypoint has no admitted program source".into());
+        let primary = self.primary_source;
+        if hir.primary_source != Some(primary)
+            || !hir.modules.iter().any(|module| module.source_id == primary)
+        {
+            return Err("HIR primary source differs from the admitted source table".into());
         }
-        for function in bytecode.function_registry.functions.values() {
-            if !contains(function.source_id) {
+        match (bytecode.active_function, bytecode.source_id) {
+            (None, Some(source)) if hir.entrypoints.is_empty() => {
+                if source.program() != Some(primary) || !contains(Some(source)) {
+                    return Err("compiled function file has no admitted primary source".into());
+                }
+            }
+            (Some(active), Some(source)) => {
+                let function = hir
+                    .functions
+                    .iter()
+                    .find(|function| function.id == active)
+                    .ok_or("compiled entrypoint is absent from HIR")?;
+                let module_source = hir
+                    .modules
+                    .get(function.module.0)
+                    .filter(|module| module.id == function.module)
+                    .map(|module| module.source_id)
+                    .ok_or("compiled entrypoint has no HIR source module")?;
+                if !hir.entrypoints.iter().any(|entry| entry.target == active)
+                    || source.program() != Some(module_source)
+                    || !contains(Some(source))
+                {
+                    return Err("compiled entrypoint has no admitted program source".into());
+                }
+            }
+            _ => return Err("compiled entrypoint has no admitted program source".into()),
+        }
+        for function in &hir.functions {
+            if Some(function.id) == bytecode.active_function {
+                continue;
+            }
+            let module_source = hir
+                .modules
+                .get(function.module.0)
+                .filter(|module| module.id == function.module)
+                .map(|module| module.source_id)
+                .ok_or("compiled function has no HIR source module")?;
+            let compiled = bytecode
+                .function_registry
+                .functions
+                .get(&function.id)
+                .ok_or("HIR function is absent from compiled registry")?;
+            if compiled
+                .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::program)
+                != Some(module_source)
+                || bytecode
+                    .bound_functions
+                    .get(&function.id)
+                    .and_then(|body| body.source_id)
+                    .and_then(runmat_vm::BytecodeSourceRef::program)
+                    != Some(module_source)
+                || !contains(compiled.source_id)
+            {
                 return Err(format!(
-                    "compiled function {:?} has no admitted program source",
-                    function.function
+                    "compiled function {:?} differs from its admitted HIR source module",
+                    function.id
                 ));
             }
         }
@@ -325,9 +386,10 @@ impl ProgramSourceTable {
             }
         }
 
+        let primary_source = ProgramSourceId(0);
         let mut entries = Vec::with_capacity(companions.len() + 1);
         entries.push(crate::SourceMapEntry {
-            source_id: ProgramSourceId(0),
+            source_id: primary_source,
             owner_identity: root.owner_identity.clone(),
             relative_path: root.relative_path.clone(),
             content_revision: runmat_execution::Digest::sha256(root.text.as_bytes()),
@@ -336,7 +398,7 @@ impl ProgramSourceTable {
             text: root.text.clone(),
         });
         let mut ids = BTreeMap::new();
-        ids.insert(primary_key, ProgramSourceId(0));
+        ids.insert(primary_key, primary_source);
         for (key, source) in companions {
             let ordinal = u32::try_from(entries.len())
                 .map_err(|_| "portable program has too many source units".to_string())?;
@@ -364,7 +426,7 @@ impl ProgramSourceTable {
             });
         }
 
-        let mut statement_sources = vec![ProgramSourceId(0); primary_statement_count];
+        let mut statement_sources = vec![primary_source; primary_statement_count];
         let mut function_sources = HashMap::new();
         for discovered in &discovery.statements {
             let context = discovered
@@ -389,6 +451,7 @@ impl ProgramSourceTable {
             .map(|(runtime_id, key)| (runtime_id, ids[&key]))
             .collect();
         Ok(Self {
+            primary_source,
             source_map: crate::ExecutableSourceMap::new(entries),
             statement_sources,
             function_sources,
@@ -400,6 +463,107 @@ impl ProgramSourceTable {
 #[cfg(test)]
 mod authority_tests {
     use super::*;
+
+    #[test]
+    fn nonzero_primary_table_does_not_infer_root_from_first_map_entry() {
+        let primary = ProgramSourceId(7);
+        let source = "function y = helper(); y = 1; end";
+        let ast = runmat_parser::parse(source).unwrap();
+        let sources = [primary];
+        let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
+            &ast,
+            &runmat_hir::LoweringContext::empty()
+                .with_primary_source(primary)
+                .with_top_level_sources(&sources),
+            None,
+        );
+        let hir = &frontend.lowering.as_ref().expect("HIR").assembly;
+        let bytecode = frontend.bytecode.expect("function-only product");
+        let entries = (0..=primary.0)
+            .map(|ordinal| {
+                let text = format!("source {ordinal}");
+                crate::SourceMapEntry {
+                    source_id: ProgramSourceId(ordinal),
+                    owner_identity: "fixture".into(),
+                    relative_path: format!("source-{ordinal}.m"),
+                    content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+                    display_name: format!("source-{ordinal}.m"),
+                    full_path: None,
+                    text,
+                }
+            })
+            .collect();
+        let table = ProgramSourceTable {
+            primary_source: primary,
+            source_map: crate::ExecutableSourceMap::new(entries),
+            statement_sources: sources.to_vec(),
+            function_sources: HashMap::new(),
+            retained_runtime_sources: HashMap::new(),
+        };
+        table
+            .validate_compiled_sources(&bytecode, hir)
+            .expect("typed primary is independent of first map record");
+    }
+
+    #[test]
+    fn admitted_function_source_must_match_its_hir_module_not_merely_any_map_entry() {
+        let source = "function y = primary(); y = 1; end\nfunction y = companion(); y = 2; end";
+        let ast = runmat_parser::parse(source).expect("two functions");
+        assert_eq!(ast.body.len(), 2);
+        let sources = [ProgramSourceId(0), ProgramSourceId(1)];
+        let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
+            &ast,
+            &runmat_hir::LoweringContext::empty()
+                .with_primary_source(ProgramSourceId(0))
+                .with_top_level_sources(&sources),
+            None,
+        );
+        assert!(frontend.compile_failure.is_none());
+        let hir = &frontend.lowering.as_ref().expect("HIR").assembly;
+        let mut bytecode = frontend.bytecode.expect("compiled function file");
+        let record = |source_id, relative_path: &str, text: &str| crate::SourceMapEntry {
+            source_id,
+            owner_identity: "fixture".into(),
+            relative_path: relative_path.into(),
+            content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+            display_name: relative_path.into(),
+            full_path: None,
+            text: text.into(),
+        };
+        let table = ProgramSourceTable {
+            primary_source: ProgramSourceId(0),
+            source_map: crate::ExecutableSourceMap::new(vec![
+                record(
+                    ProgramSourceId(0),
+                    "primary.m",
+                    "function y = primary(); y = 1; end",
+                ),
+                record(
+                    ProgramSourceId(1),
+                    "companion.m",
+                    "function y = companion(); y = 2; end",
+                ),
+            ]),
+            statement_sources: sources.to_vec(),
+            function_sources: HashMap::new(),
+            retained_runtime_sources: HashMap::new(),
+        };
+        table
+            .validate_compiled_sources(&bytecode, hir)
+            .expect("exact HIR sources");
+        let companion = hir
+            .functions
+            .iter()
+            .find(|function| function.name.0 == "companion")
+            .expect("companion HIR function");
+        bytecode
+            .function_registry
+            .functions
+            .get_mut(&companion.id)
+            .unwrap()
+            .source_id = Some(runmat_vm::BytecodeSourceRef::Program(ProgramSourceId(0)));
+        assert!(table.validate_compiled_sources(&bytecode, hir).is_err());
+    }
 
     #[test]
     fn reverse_projection_uses_issued_authority_not_pool_integer() {
@@ -415,6 +579,7 @@ mod authority_tests {
         .expect("advance the selected source issuer");
         let text = "function y = main(); y = 2; end";
         let table = ProgramSourceTable {
+            primary_source: ProgramSourceId(0),
             source_map: crate::ExecutableSourceMap::new(vec![crate::SourceMapEntry {
                 source_id: ProgramSourceId(0),
                 owner_identity: "fixture".into(),

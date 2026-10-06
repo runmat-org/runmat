@@ -1094,6 +1094,7 @@ impl RunMatSession {
                 .map(|catalog| &catalog.symbols)
                 .cloned()
                 .unwrap_or_default();
+            let primary_source = source_table.primary_source();
             let frontend = runmat_static_analysis::frontend::analyze_program_with_catalog(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
@@ -1102,6 +1103,7 @@ impl RunMatSession {
                     .with_known_project_symbols(&known_project_symbols)
                     .with_project_symbol_aliases(&project_symbol_aliases)
                     .with_top_level_sources(&source_table.statement_sources)
+                    .with_primary_source(primary_source)
                     .with_private_functions(
                         &private_companion_function_owners,
                         &private_companion_function_aliases,
@@ -1145,7 +1147,7 @@ impl RunMatSession {
             )?);
         }
         source_table
-            .validate_compiled_sources(&bytecode)
+            .validate_compiled_sources(&bytecode, &lowering.assembly)
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)

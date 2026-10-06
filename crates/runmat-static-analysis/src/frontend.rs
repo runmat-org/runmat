@@ -339,6 +339,10 @@ fn compile_lowering(
         )?;
         let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
         let mut bytecode = runmat_vm::Bytecode::empty();
+        bytecode.source_id = lowering
+            .assembly
+            .primary_source
+            .map(runmat_vm::BytecodeSourceRef::Program);
         bytecode.bound_functions = bound_functions;
         bytecode.function_registry = function_registry;
         return Ok(bytecode);
@@ -612,6 +616,73 @@ mod tests {
 
     fn analyze(source: &str) -> FrontendAnalysis {
         analyze_source(source, CompatMode::default(), &LoweringContext::empty())
+    }
+
+    #[test]
+    fn function_only_and_empty_compiler_products_keep_explicit_primary_source() {
+        let primary = runmat_types::ProgramSourceId(7);
+        for source in ["function y = helper(); y = 1; end", "% empty source"] {
+            let ast = runmat_parser::parse(source).unwrap();
+            let sources = vec![primary; ast.body.len()];
+            let analysis = analyze_program_with_catalog(
+                &ast,
+                &LoweringContext::empty()
+                    .with_primary_source(primary)
+                    .with_top_level_sources(&sources),
+                None,
+            );
+            assert!(analysis.compile_failure.is_none(), "{source}");
+            let lowering = analysis.lowering.as_ref().expect("HIR");
+            assert!(lowering.assembly.entrypoints.is_empty());
+            assert_eq!(lowering.assembly.primary_source, Some(primary));
+            let bytecode = analysis.bytecode.expect("function-only bytecode");
+            assert_eq!(
+                bytecode.source_id,
+                Some(runmat_vm::BytecodeSourceRef::Program(primary))
+            );
+            for body in bytecode.function_registry.functions.values() {
+                assert_eq!(
+                    body.source_id,
+                    Some(runmat_vm::BytecodeSourceRef::Program(primary))
+                );
+            }
+        }
+        let source_less = analyze("function y = helper(); y = 1; end")
+            .bytecode
+            .expect("generic source-less product remains valid");
+        assert_eq!(source_less.source_id, None);
+    }
+
+    #[test]
+    fn script_entry_and_companion_body_keep_distinct_admitted_sources() {
+        let ast = runmat_parser::parse("value = companion(); function y = companion(); y = 2; end")
+            .unwrap();
+        let primary = runmat_types::ProgramSourceId(7);
+        let companion = runmat_types::ProgramSourceId(9);
+        let sources = [primary, companion];
+        let analysis = analyze_program_with_catalog(
+            &ast,
+            &LoweringContext::empty()
+                .with_primary_source(primary)
+                .with_top_level_sources(&sources),
+            None,
+        );
+        assert!(analysis.compile_failure.is_none());
+        let bytecode = analysis.bytecode.expect("compiled script and companion");
+        assert_eq!(
+            bytecode.source_id,
+            Some(runmat_vm::BytecodeSourceRef::Program(primary))
+        );
+        let companion_body = bytecode
+            .function_registry
+            .functions
+            .values()
+            .find(|body| body.display_name == "companion")
+            .expect("compiled companion");
+        assert_eq!(
+            companion_body.source_id,
+            Some(runmat_vm::BytecodeSourceRef::Program(companion))
+        );
     }
 
     #[test]
