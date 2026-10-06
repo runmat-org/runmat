@@ -872,12 +872,6 @@ impl RunMatSession {
         let workspace_projection = std::rc::Rc::new(
             runmat_runtime::workspace::BaseWorkspaceProjectionService::new(workspace_projection),
         );
-        let original_workspace_names = workspace_projection
-            .snapshot()
-            .map_err(RunError::Runtime)?
-            .into_iter()
-            .map(|(name, _)| name)
-            .collect::<HashSet<_>>();
         if debug_trace {
             let workspace_values_before = workspace_projection
                 .snapshot()
@@ -1383,57 +1377,33 @@ impl RunMatSession {
         };
 
         // An unsuppressed expression updates `ans` only after successful
-        // execution. Keep the slot identity in the invocation projection and
-        // publish the value through the same ordered workspace commit.
+        // execution. This is a language-visible host write, so admit it
+        // explicitly instead of inferring it from the completed register file.
         if error.is_none() {
             if let (Some(workspace), Some((var_id, value))) =
                 (completed_workspace.as_mut(), ans_update)
             {
                 runmat_runtime::execution::validate_storable_value(&value)
                     .map_err(RunError::Runtime)?;
+                workspace_projection
+                    .assign("ans", value.clone())
+                    .map_err(RunError::Runtime)?;
+                let commit = workspace_projection.publish().map_err(RunError::Runtime)?;
+                for change in commit.changes().changes() {
+                    if let (Some(name), Some(value)) = (change.name(), change.value()) {
+                        workspace_updates.push(workspace_entry(name, value));
+                    }
+                }
                 workspace.insert("ans".to_string(), (var_id, value));
             }
         }
 
         if let Some(completed_workspace) = completed_workspace {
-            let current_names = completed_workspace.keys().cloned().collect::<HashSet<_>>();
-            let removed_names = original_workspace_names
-                .difference(&current_names)
-                .cloned()
-                .collect::<Vec<_>>();
-
-            self.workspace_bindings.clear();
-            for (name, (slot, value)) in &completed_workspace {
-                self.bind_workspace_slot(name.clone(), *slot);
-                runmat_runtime::execution::validate_storable_value(value)
-                    .map_err(RunError::Runtime)?;
-                if workspace_projection
-                    .lookup(name)
-                    .map_err(RunError::Runtime)?
-                    .as_ref()
-                    != Some(value)
-                {
-                    workspace_projection
-                        .assign(name.clone(), value.clone())
-                        .map_err(RunError::Runtime)?;
-                    workspace_updates.push(workspace_entry(name, value));
-                    if debug_trace {
-                        debug!(name, ?value, "[repl] workspace update");
-                    }
-                }
-            }
-            for name in &removed_names {
-                workspace_projection
-                    .remove(name)
-                    .map_err(RunError::Runtime)?;
-            }
-            workspace_snapshot_force_full |= !removed_names.is_empty();
-            if workspace_projection
-                .has_pending_changes()
-                .map_err(RunError::Runtime)?
-            {
-                workspace_projection.publish().map_err(RunError::Runtime)?;
-            }
+            // The executor has already admitted every language-visible
+            // mutation in source order. The completed register file now only
+            // refreshes VM slot metadata; it is never a second workspace
+            // authority and must not overwrite a newer canonical value.
+            self.refresh_workspace_binding_slots(&completed_workspace);
         }
 
         // Function-definition publication remains transactional with a

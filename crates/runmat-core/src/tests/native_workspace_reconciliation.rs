@@ -1,7 +1,28 @@
 use crate::{execute_text_request_for_testing, RunMatSession};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+#[test]
+fn completed_register_metadata_cannot_overwrite_newer_canonical_state() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let outcome = execute_text_request_for_testing(&mut session, "x = 99;").unwrap();
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+
+        session.refresh_workspace_binding_slots(&HashMap::from([(
+            "x".to_string(),
+            (0, runmat_value::Value::Num(1.0)),
+        )]));
+
+        assert_eq!(
+            session.get_variables().unwrap().get("x"),
+            Some(&runmat_value::Value::Num(99.0))
+        );
+        assert_eq!(session.lowering_workspace_bindings().get("x"), Some(&0));
+    });
+}
 
 #[test]
 fn native_calls_publish_dynamic_workspace_writes_before_following_reads() {

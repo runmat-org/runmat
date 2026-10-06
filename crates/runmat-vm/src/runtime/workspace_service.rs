@@ -160,9 +160,9 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
         self.ensure_frame_active()?;
-        if self.should_publish() {
-            if let Some(delegate) = self.delegate.as_ref() {
-                delegate.ensure_effect_authority()?;
+        if let Some(delegate) = self.delegate.as_ref() {
+            delegate.ensure_effect_authority()?;
+            if self.should_publish() {
                 let revision = delegate.workspace_revision()?;
                 if revision.is_some() && revision == self.delegate_revision.get() {
                     return Ok(());
@@ -396,6 +396,35 @@ mod tests {
             base_service.assign("x", Value::Num(3.0)).unwrap();
             assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(3.0)));
             assert_eq!(delegate.snapshots.get(), 2);
+            drop(guard);
+        }));
+    }
+
+    #[test]
+    fn transient_frame_rejects_effects_after_session_workspace_closes() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
+        ));
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime = runtime
+            .with_service_ports(runtime.service_ports().clone().with_workspace(base_service));
+        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+
+        futures::executor::block_on(runtime.scope(async {
+            let mut values = vec![Value::Num(1.0)];
+            let guard = super::super::workspace::set_transient_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut values,
+                FrameGlobalBindings::default(),
+            );
+            owner.close().unwrap();
+
+            let error = service.try_lookup("x").unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
             drop(guard);
         }));
     }

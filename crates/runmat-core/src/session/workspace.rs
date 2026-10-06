@@ -47,6 +47,18 @@ impl RunMatSession {
             .insert(name, SessionWorkspaceBinding { key, slot });
     }
 
+    /// Refresh compiler/VM slot metadata from a completed invocation without
+    /// treating the register file as a second base-workspace authority.
+    pub(crate) fn refresh_workspace_binding_slots(
+        &mut self,
+        completed: &HashMap<String, (usize, Value)>,
+    ) {
+        self.workspace_bindings.clear();
+        for (name, (slot, _)) in completed {
+            self.bind_workspace_slot(name.clone(), *slot);
+        }
+    }
+
     pub(crate) fn lowering_workspace_bindings(&self) -> HashMap<String, usize> {
         self.workspace_bindings
             .iter()
