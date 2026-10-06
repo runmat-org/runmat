@@ -106,6 +106,13 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
             .map_err(base_workspace_error_to_runtime)
     }
 
+    fn workspace_revision(&self) -> Result<Option<super::WorkspaceRevision>, RuntimeError> {
+        self.owner
+            .revision()
+            .map(Some)
+            .map_err(base_workspace_error_to_runtime)
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
         let mut delta = WorkspaceDelta::new();
         delta

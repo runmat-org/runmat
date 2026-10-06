@@ -3,8 +3,8 @@ use crate::bytecode::program::Bytecode;
 use crate::interpreter::timing::InterpreterTiming;
 use crate::runtime::gc::InterpretContext;
 use crate::runtime::workspace::{
-    refresh_workspace_state, set_transient_workspace_state, set_workspace_state,
-    take_pending_workspace_state, WorkspaceStateGuard,
+    refresh_workspace_state, set_transient_workspace_state, take_pending_workspace_state,
+    WorkspaceStateGuard,
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -18,12 +18,20 @@ pub fn prepare_workspace_guard(
     global_aliases: runmat_runtime::workspace::bindings::FrameGlobalBindings,
 ) -> Option<WorkspaceStateGuard> {
     let pending_state = take_pending_workspace_state();
-    let guard = pending_state.map(|(names, assigned)| {
+    let guard = pending_state.map(|pending| {
+        let names = pending.names;
+        let assigned = pending.assigned;
         let filtered_assigned: HashSet<String> = assigned
             .into_iter()
             .filter(|name| names.contains_key(name))
             .collect();
-        set_workspace_state(names, filtered_assigned, vars, global_aliases.clone())
+        crate::runtime::workspace::set_workspace_state_with_publication(
+            names,
+            filtered_assigned,
+            vars,
+            pending.publish_to_current_service,
+            global_aliases.clone(),
+        )
     });
     if guard.is_some() {
         refresh_workspace_state(vars);

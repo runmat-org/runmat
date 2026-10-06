@@ -3,7 +3,7 @@ use crate::bytecode::EmitLabel;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop2, pop_value};
 use crate::runtime::workspace::{
-    ensure_workspace_slot_name, mark_workspace_assigned, workspace_slot_value,
+    admit_workspace_slot_write, ensure_workspace_slot_name, workspace_slot_value,
 };
 use runmat_runtime::{dispatcher::gather_if_needed_async, RuntimeError};
 use runmat_value::{CharArray, Value};
@@ -125,11 +125,11 @@ where
     if index >= vars.len() {
         vars.resize(index + 1, Value::Num(0.0));
     }
-    vars[index] = value;
     if let Some(name) = var_names.get(&index) {
         ensure_workspace_slot_name(index, name);
     }
-    mark_workspace_assigned(index, &vars[index]);
+    admit_workspace_slot_write(index, &value)?;
+    vars[index] = value;
     after_store(index, &vars[index]);
     Ok(())
 }

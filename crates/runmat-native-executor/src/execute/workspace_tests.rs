@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 #[test]
 fn only_external_workspace_mutation_requests_reconciliation() {
     let (function, input) = fixture(Value::Num(1.0));
-    let state = NativeWorkspaceState::new(&function, input, Default::default()).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
     assert!(!state.needs_reconciliation());
     state.synchronize_local(0, Value::Num(2.0)).unwrap();
     assert!(!state.needs_reconciliation());
@@ -65,7 +65,7 @@ fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
 }
 
 fn error(function: &NativeFunction, input: NativeWorkspaceInput) -> String {
-    match NativeWorkspaceState::new(function, input, Default::default()) {
+    match NativeWorkspaceState::new(function, input, Default::default(), None) {
         Ok(_) => panic!("invalid binding accepted"),
         Err(error) => error.to_string(),
     }
@@ -76,7 +76,7 @@ fn caller_snapshot_nan_payload_is_retained_without_copying_storage() {
     let bits = 0xfff8_0000_0000_0042;
     let tensor = Tensor::new(vec![f64::from_bits(bits), -0.0], vec![1, 2]).unwrap();
     let (function, input) = fixture(Value::Tensor(tensor.clone()));
-    let state = NativeWorkspaceState::new(&function, input, Default::default()).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
     let Value::Tensor(actual) = state.initial_value(0).unwrap() else {
         panic!("tensor value");
     };
@@ -133,7 +133,7 @@ fn unassigned_local_may_be_absent_and_unreferenced_caller_values_are_retained() 
     input.bindings.clear();
     input.values.clear();
     input.values.insert("ambient".into(), Value::Num(2.0));
-    let state = NativeWorkspaceState::new(&function, input, Default::default()).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
     assert!(state.initial_value(0).is_none());
     assert_eq!(state.snapshot().unwrap().values["ambient"], Value::Num(2.0));
 }
@@ -148,7 +148,7 @@ fn dynamic_assignment_publishes_active_global_and_clear_unbinds_only_the_frame()
         let aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
         aliases.declare_named(0, "missing".into());
         runmat_runtime::workspace::session::store_global_named("missing", Value::Num(7.0));
-        let state = NativeWorkspaceState::new(&function, input, aliases.clone()).unwrap();
+        let state = NativeWorkspaceState::new(&function, input, aliases.clone(), None).unwrap();
         let service = state.service();
         service.assign("missing", Value::Num(8.0)).unwrap();
         assert_eq!(
@@ -169,4 +169,28 @@ fn dynamic_assignment_publishes_active_global_and_clear_unbinds_only_the_frame()
             Some(Value::Num(8.0))
         );
     }));
+}
+
+#[test]
+fn admitted_native_write_remains_publishable_after_execution_state_drops() {
+    let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
+    initial.assign("missing", Value::Num(1.0)).unwrap();
+    owner.apply(initial).unwrap();
+    let projection = std::rc::Rc::new(
+        runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+            owner.begin_projection().unwrap(),
+        ),
+    );
+    let canonical: std::rc::Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> =
+        projection.clone();
+    let (function, input) = fixture(Value::Num(1.0));
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical)).unwrap();
+    state.synchronize_local(0, Value::Num(42.0)).unwrap();
+    drop(state);
+
+    assert!(projection.has_pending_changes().unwrap());
+    projection.publish().unwrap();
+    assert_eq!(owner.lookup("missing").unwrap(), Some(Value::Num(42.0)));
 }

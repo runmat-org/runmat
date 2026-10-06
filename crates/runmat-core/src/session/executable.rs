@@ -95,14 +95,17 @@ impl RunMatSession {
     pub(super) fn prepare_tiered_interactive(
         &self,
         unit: &crate::ExecutableUnit,
-        workspace_projection: &runmat_runtime::workspace::BaseWorkspaceProjection,
-    ) -> Option<(
-        runmat_native_executor::execute::NativeWorkspaceInput,
-        Option<runmat_jit::tiering::RepresentationProfile>,
-    )> {
+        workspace_projection: &runmat_runtime::workspace::BaseWorkspaceProjectionService,
+    ) -> std::result::Result<
+        Option<(
+            runmat_native_executor::execute::NativeWorkspaceInput,
+            Option<runmat_jit::tiering::RepresentationProfile>,
+        )>,
+        RuntimeError,
+    > {
         if !self.native_tiering_enabled {
             log::debug!(target: "runmat_core::native_tiering", "native interactive admission skipped reason=tiering_disabled");
-            return None;
+            return Ok(None);
         }
         // Empty inputs and function-definition-only inputs intentionally have no
         // executable script entrypoint. They still update session state through
@@ -110,10 +113,11 @@ impl RunMatSession {
         // publish for them.
         if unit.script_entrypoint().is_none() {
             log::debug!(target: "runmat_core::native_tiering", "native interactive admission skipped reason=no_script_entrypoint");
-            return None;
+            return Ok(None);
         }
         let values = workspace_projection
-            .iter()
+            .snapshot()?
+            .into_iter()
             .map(|(name, value)| (name.to_string(), value.clone()))
             .collect::<BTreeMap<_, _>>();
         let local_names = unit
@@ -144,7 +148,7 @@ impl RunMatSession {
             profile_values.len(), profile.is_some());
         // Generic execution and feedback do not require a bounded specialization
         // profile. The complete workspace still reaches native execution.
-        Some((workspace, profile))
+        Ok(Some((workspace, profile)))
     }
 
     /// Execute only an already-admitted native product. `None` preserves the
@@ -156,6 +160,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         workspace: &runmat_native_executor::execute::NativeWorkspaceInput,
         profile: Option<&runmat_jit::tiering::RepresentationProfile>,
+        runtime: runmat_runtime::context::RuntimeContext,
     ) -> std::result::Result<Option<crate::generic_native::NativeExecution>, RuntimeError> {
         let published = self
             .generic_native_cache
@@ -181,9 +186,7 @@ impl RunMatSession {
                 preferred_function: None,
                 arguments: Vec::new(),
                 requested_outputs: 0,
-                runtime: self
-                    .runtime_context
-                    .clone()
+                runtime: runtime
                     .with_program_revision(Some(unit.revision().program_revision.clone())),
                 workspace: Some(workspace.clone()),
             },

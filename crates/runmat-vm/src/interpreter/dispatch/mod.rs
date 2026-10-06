@@ -14,7 +14,7 @@ mod stack;
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::runtime::workspace::{
-    refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
+    refresh_workspace_slot, refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
@@ -874,10 +874,9 @@ pub async fn dispatch_instruction(
             {
                 if *index >= vars.len() {
                     vars.resize(*index + 1, Value::Num(0.0));
-                    refresh_workspace_state(vars);
                 }
                 vars[*index] = global_value;
-                refresh_workspace_state(vars);
+                refresh_workspace_slot(*index, &vars[*index]);
             }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
@@ -920,10 +919,9 @@ pub async fn dispatch_instruction(
             {
                 if *index >= vars.len() {
                     vars.resize(*index + 1, Value::Num(0.0));
-                    refresh_workspace_state(vars);
                 }
                 vars[*index] = global_value;
-                refresh_workspace_state(vars);
+                refresh_workspace_slot(*index, &vars[*index]);
             }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(

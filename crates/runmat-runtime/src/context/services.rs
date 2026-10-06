@@ -164,7 +164,28 @@ pub trait RuntimeWorkspaceService {
         Ok(())
     }
 
+    /// Revision of an authority-backed workspace after its latest admission
+    /// checkpoint. Exact executor adapters use this to avoid materializing a
+    /// complete workspace when no externally visible state changed.
+    fn workspace_revision(
+        &self,
+    ) -> Result<Option<crate::workspace::WorkspaceRevision>, RuntimeError> {
+        Ok(None)
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError>;
+
+    /// Publish an executor register write whose register file is updated by
+    /// the caller immediately after admission. Frame adapters override this to
+    /// avoid scheduling the same write for callback reconciliation.
+    fn assign_executor_slot(
+        &self,
+        _slot: usize,
+        name: &str,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign(name, value)
+    }
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;
 }

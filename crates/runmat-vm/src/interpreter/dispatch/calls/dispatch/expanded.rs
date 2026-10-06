@@ -339,15 +339,11 @@ pub(super) async fn dispatch(
                     context.runtime.clone(),
                 )
                 .await?;
-            let mut captures_updated = false;
             for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
                 if *slot < vars.len() {
+                    crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
                     vars[*slot] = value;
-                    captures_updated = true;
                 }
-            }
-            if captures_updated {
-                refresh_workspace_state(vars);
             }
             calls::publish_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(

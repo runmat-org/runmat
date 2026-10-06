@@ -1,8 +1,19 @@
 use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
+mod frame;
+pub(crate) use frame::{
+    reconcile_workspace_frame, release_pending_workspace_service_frame,
+    reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
+    workspace_frame_clear, workspace_frame_lookup, workspace_frame_name_is_global,
+    workspace_frame_publishes, workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId,
+    WorkspaceFrameLifecycle,
+};
+use frame::{take_service_frame, PendingServiceFrame};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum WorkspaceOwner {
@@ -42,15 +53,22 @@ struct WorkspaceState {
     removed_slots_this_execution: HashMap<usize, String>,
     slot_lifecycle: HashMap<usize, SlotLifecycle>,
     values: Vec<Value>,
+    pending_var_reconciliation: HashSet<usize>,
 }
 
 struct WorkspaceFrame {
+    id: WorkspaceFrameId,
+    lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
     state: WorkspaceState,
     global_aliases: FrameGlobalBindings,
     publish_on_drop: bool,
 }
 
-pub type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
+pub(crate) struct PendingWorkspace {
+    pub(crate) names: HashMap<String, usize>,
+    pub(crate) assigned: HashSet<String>,
+    pub(crate) publish_to_current_service: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceValueSnapshot {
@@ -83,9 +101,11 @@ pub struct WorkspaceAssignedReport {
 
 runmat_thread_local! {
     static WORKSPACE_STACKS: RefCell<HashMap<WorkspaceOwner, Vec<WorkspaceFrame>>> = RefCell::new(HashMap::new());
-    static PENDING_WORKSPACES: RefCell<HashMap<WorkspaceOwner, WorkspaceSnapshot>> = RefCell::new(HashMap::new());
+    static PENDING_WORKSPACES: RefCell<HashMap<WorkspaceOwner, PendingWorkspace>> = RefCell::new(HashMap::new());
     static LAST_WORKSPACE_STATES: RefCell<HashMap<WorkspaceOwner, WorkspaceValueSnapshot>> = RefCell::new(HashMap::new());
     static LAST_WORKSPACE_ASSIGNED_REPORTS: RefCell<HashMap<WorkspaceOwner, WorkspaceAssignedReport>> = RefCell::new(HashMap::new());
+    static PENDING_SERVICE_FRAMES: RefCell<HashMap<WorkspaceOwner, Vec<PendingServiceFrame>>> = RefCell::new(HashMap::new());
+    static NEXT_WORKSPACE_FRAME_ID: Cell<usize> = const { Cell::new(1) };
 }
 
 fn with_stack<R>(owner: WorkspaceOwner, f: impl FnOnce(&[WorkspaceFrame]) -> R) -> R {
@@ -191,6 +211,7 @@ impl Drop for WorkspaceStateGuard {
     fn drop(&mut self) {
         with_stack_mut(self.owner, |stack| {
             if let Some(frame) = stack.pop() {
+                frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
                 if !frame.publish_on_drop {
                     return;
                 }
@@ -239,16 +260,42 @@ pub fn push_pending_workspace(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> PendingWorkspaceGuard {
+    push_pending_workspace_with_publication(names, assigned, true)
+}
+
+pub(crate) fn push_transactional_pending_workspace(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+) -> PendingWorkspaceGuard {
+    push_pending_workspace_with_publication(names, assigned, false)
+}
+
+fn push_pending_workspace_with_publication(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+    publish_to_current_service: bool,
+) -> PendingWorkspaceGuard {
     let owner = current_owner();
     PENDING_WORKSPACES.with(|workspaces| {
-        workspaces.borrow_mut().insert(owner, (names, assigned));
+        workspaces.borrow_mut().insert(
+            owner,
+            PendingWorkspace {
+                names,
+                assigned,
+                publish_to_current_service,
+            },
+        );
     });
     PendingWorkspaceGuard { owner }
 }
 
-pub fn take_pending_workspace_state() -> Option<WorkspaceSnapshot> {
+pub(crate) fn take_pending_workspace_state() -> Option<PendingWorkspace> {
     let owner = current_owner();
     PENDING_WORKSPACES.with(|workspaces| workspaces.borrow_mut().remove(&owner))
+}
+
+pub fn workspace_global_names() -> Vec<String> {
+    runmat_runtime::workspace::session::global_names()
 }
 
 pub fn take_updated_workspace_state() -> Option<WorkspaceValueSnapshot> {
@@ -296,8 +343,12 @@ fn set_workspace_state_with_publish(
         slot_lifecycle.insert(*idx, lifecycle);
     }
     let owner = current_owner();
+    let service_frame = take_service_frame(owner);
+    service_frame.lifecycle.set(WorkspaceFrameLifecycle::Active);
     with_stack_mut(owner, |stack| {
         stack.push(WorkspaceFrame {
+            id: service_frame.id,
+            lifecycle: service_frame.lifecycle,
             global_aliases,
             state: WorkspaceState {
                 names,
@@ -307,11 +358,28 @@ fn set_workspace_state_with_publish(
                 removed_slots_this_execution: HashMap::new(),
                 slot_lifecycle,
                 values: vars.clone(),
+                pending_var_reconciliation: HashSet::new(),
             },
             publish_on_drop,
         });
     });
     WorkspaceStateGuard { owner }
+}
+
+pub(crate) fn set_workspace_state_with_publication(
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+    vars: &mut Vec<Value>,
+    publish_to_current_service: bool,
+    global_aliases: FrameGlobalBindings,
+) -> WorkspaceStateGuard {
+    set_workspace_state_with_publish(
+        names,
+        assigned,
+        vars,
+        publish_to_current_service,
+        global_aliases,
+    )
 }
 
 pub fn refresh_workspace_state(vars: &[Value]) {
@@ -332,6 +400,26 @@ pub fn refresh_workspace_slot(index: usize, value: &Value) {
                 frame.state.values.resize(index + 1, Value::Num(0.0));
             }
             frame.state.values[index] = value.clone();
+        }
+    });
+}
+
+pub fn reconcile_workspace_vars(vars: &mut Vec<Value>) {
+    with_stack_mut(current_owner(), |stack| {
+        let Some(frame) = stack.last_mut() else {
+            return;
+        };
+        let changed = std::mem::take(&mut frame.state.pending_var_reconciliation);
+        for slot in changed {
+            if vars.len() <= slot {
+                vars.resize(slot + 1, Value::Num(0.0));
+            }
+            vars[slot] = frame
+                .state
+                .values
+                .get(slot)
+                .cloned()
+                .unwrap_or(Value::Num(0.0));
         }
     });
 }
@@ -392,18 +480,23 @@ pub fn workspace_clear() -> Result<(), String> {
         let frame = stack
             .last_mut()
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
-        let ws = &mut frame.state;
-        for (name, idx) in ws.names.clone() {
-            if let Some(value) = ws.values.get_mut(idx) {
-                *value = Value::Num(0.0);
-            }
-            mark_slot_unassigned(ws, idx, name);
-        }
-        ws.names.clear();
-        ws.assigned.clear();
-        frame.global_aliases.unbind_all();
+        clear_workspace_frame(frame);
         Ok(())
     })
+}
+
+fn clear_workspace_frame(frame: &mut WorkspaceFrame) {
+    let ws = &mut frame.state;
+    for (name, idx) in ws.names.clone() {
+        if let Some(value) = ws.values.get_mut(idx) {
+            *value = Value::Num(0.0);
+        }
+        mark_slot_unassigned(ws, idx, name);
+        ws.pending_var_reconciliation.insert(idx);
+    }
+    ws.names.clear();
+    ws.assigned.clear();
+    frame.global_aliases.unbind_all();
 }
 
 pub fn workspace_remove(name: &str) -> Result<(), String> {
@@ -411,17 +504,22 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
         let frame = stack
             .last_mut()
             .ok_or_else(|| "clear: workspace state unavailable".to_string())?;
-        let ws = &mut frame.state;
-        if let Some(idx) = ws.names.remove(name) {
-            if let Some(value) = ws.values.get_mut(idx) {
-                *value = Value::Num(0.0);
-            }
-            ws.assigned.remove(name);
-            frame.global_aliases.unbind_slot(idx);
-            mark_slot_unassigned(ws, idx, name.to_string());
-        }
+        remove_workspace_name(frame, name);
         Ok(())
     })
+}
+
+fn remove_workspace_name(frame: &mut WorkspaceFrame, name: &str) {
+    let ws = &mut frame.state;
+    if let Some(idx) = ws.names.remove(name) {
+        if let Some(value) = ws.values.get_mut(idx) {
+            *value = Value::Num(0.0);
+        }
+        ws.assigned.remove(name);
+        frame.global_aliases.unbind_slot(idx);
+        mark_slot_unassigned(ws, idx, name.to_string());
+        ws.pending_var_reconciliation.insert(idx);
+    }
 }
 
 pub fn workspace_snapshot() -> Vec<(String, Value)> {
@@ -478,6 +576,13 @@ pub fn replace_workspace_target_vars_and_state(
         let frame = stack
             .get_mut(index)
             .ok_or_else(|| "workspace state unavailable".to_string())?;
+        let mut changed_slots = frame
+            .state
+            .slot_lifecycle
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        changed_slots.extend(names.values().copied());
         frame.state.values = vars;
         for (slot, binding) in frame.global_aliases.snapshot() {
             let still_named = match binding {
@@ -492,6 +597,7 @@ pub fn replace_workspace_target_vars_and_state(
         frame.state.assigned = assigned;
         frame.state.slot_lifecycle =
             lifecycle_from_names(&frame.state.names, &frame.state.assigned);
+        frame.state.pending_var_reconciliation.extend(changed_slots);
         Ok(())
     })
 }
@@ -526,6 +632,15 @@ fn set_workspace_variable_in_frame(
     name: &str,
     value: Value,
 ) -> Result<(), String> {
+    set_workspace_variable_in_frame_with_reconciliation(frame, name, value, true)
+}
+
+fn set_workspace_variable_in_frame_with_reconciliation(
+    frame: &mut WorkspaceFrame,
+    name: &str,
+    value: Value,
+    reconcile_var: bool,
+) -> Result<(), String> {
     let ws = &mut frame.state;
     let idx = if let Some(idx) = ws.names.get(name).copied() {
         idx
@@ -541,6 +656,9 @@ fn set_workspace_variable_in_frame(
         ws.values.resize(idx + 1, Value::Num(0.0));
     }
     ws.values[idx] = value;
+    if reconcile_var {
+        ws.pending_var_reconciliation.insert(idx);
+    }
     match frame.global_aliases.binding_for_slot(idx) {
         Some(FrameGlobalBinding::Named(bound)) if bound == name => {
             runmat_runtime::workspace::session::store_global_named(name, ws.values[idx].clone());
@@ -587,6 +705,27 @@ pub fn mark_workspace_assigned(index: usize, value: &Value) {
     });
 }
 
+/// Admit a language-visible named-slot write before changing the VM register
+/// file. Installed VM workspace services update both the exact frame and, for
+/// a top-level invocation, its Runtime-owned canonical projection.
+pub fn admit_workspace_slot_write(
+    index: usize,
+    value: &Value,
+) -> Result<(), runmat_runtime::RuntimeError> {
+    let name = workspace_slot_name(index);
+    let Some(name) = name else {
+        mark_workspace_assigned(index, value);
+        return Ok(());
+    };
+    if let Some(context) = runmat_runtime::context::legacy::active() {
+        if let Some(service) = context.service_ports().workspace() {
+            return service.assign_executor_slot(index, &name, value.clone());
+        }
+    }
+    mark_workspace_assigned(index, value);
+    Ok(())
+}
+
 /// Read the authoritative language-visible value for a named workspace slot.
 /// Compiler temporaries and procedure locals are intentionally absent.
 pub fn workspace_slot_value(index: usize) -> Option<Value> {
@@ -623,6 +762,8 @@ pub(crate) fn reset_thread_state_for_tests() {
     PENDING_WORKSPACES.with(|workspaces| workspaces.borrow_mut().clear());
     LAST_WORKSPACE_STATES.with(|states| states.borrow_mut().clear());
     LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| reports.borrow_mut().clear());
+    PENDING_SERVICE_FRAMES.with(|frames| frames.borrow_mut().clear());
+    NEXT_WORKSPACE_FRAME_ID.with(|next| next.set(1));
 }
 
 #[cfg(test)]
@@ -758,6 +899,59 @@ mod tests {
     }
 
     #[test]
+    fn service_mutations_reconcile_only_changed_register_slots() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime_id = runtime.local_identity();
+        let (_reserved, _lifecycle) = reserve_workspace_service_frame(runtime_id);
+        futures::executor::block_on(runtime.scope(async {
+            let mut vars = vec![Value::Num(1.0), Value::Num(2.0)];
+            let guard = set_workspace_state(
+                HashMap::from([("x".to_string(), 0), ("y".to_string(), 1)]),
+                HashSet::from(["x".to_string(), "y".to_string()]),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
+            let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
+
+            workspace_frame_assign(frame, "x", Value::Num(9.0)).unwrap();
+            assert_eq!(vars, vec![Value::Num(1.0), Value::Num(2.0)]);
+            reconcile_workspace_vars(&mut vars);
+            assert_eq!(vars, vec![Value::Num(9.0), Value::Num(2.0)]);
+
+            workspace_frame_clear(frame).unwrap();
+            reconcile_workspace_vars(&mut vars);
+            assert_eq!(vars, vec![Value::Num(0.0), Value::Num(0.0)]);
+            drop(guard);
+        }));
+    }
+
+    #[test]
+    fn executor_admission_does_not_schedule_duplicate_register_reconciliation() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let runtime_id = runtime.local_identity();
+        let (_reserved, _lifecycle) = reserve_workspace_service_frame(runtime_id);
+        futures::executor::block_on(runtime.scope(async {
+            let mut vars = vec![Value::Num(1.0)];
+            let guard = set_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
+            let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
+            workspace_frame_assign_from_executor(frame, "x", Value::Num(7.0)).unwrap();
+            vars[0] = Value::Num(7.0);
+            reconcile_workspace_vars(&mut vars);
+            assert_eq!(vars, vec![Value::Num(7.0)]);
+            drop(guard);
+        }));
+    }
+
+    #[test]
     fn assignment_after_clear_clears_final_removal_marker() {
         let report = take_report_after(|vars| {
             set_workspace_variable("x", Value::Num(1.0), vars).unwrap();
@@ -837,5 +1031,42 @@ mod tests {
         let raw_value_pointer = ["*const", "Value"].join(" ");
         assert!(!source.contains(&raw_vec_pointer));
         assert!(!source.contains(&raw_value_pointer));
+    }
+
+    #[test]
+    fn asynchronous_language_visible_writers_use_checked_slot_admission() {
+        let writers = [
+            ("fusion", include_str!("../accel/fusion.rs")),
+            (
+                "prepared outputs",
+                include_str!("../interpreter/dispatch/prepared_outputs/commit.rs"),
+            ),
+            (
+                "parfor",
+                include_str!("../interpreter/dispatch/parallel/parfor.rs"),
+            ),
+            (
+                "spmd",
+                include_str!("../interpreter/dispatch/parallel/spmd.rs"),
+            ),
+            (
+                "expanded nested calls",
+                include_str!("../interpreter/dispatch/calls/dispatch/expanded.rs"),
+            ),
+            (
+                "nested user calls",
+                include_str!("../interpreter/dispatch/calls/dispatch/user.rs"),
+            ),
+            (
+                "catch variables",
+                include_str!("../interpreter/dispatch/exceptions.rs"),
+            ),
+        ];
+        for (domain, source) in writers {
+            assert!(
+                source.contains("admit_workspace_slot_write"),
+                "{domain} bypasses checked language-visible slot admission"
+            );
+        }
     }
 }

@@ -177,8 +177,14 @@ impl HostState {
             .filter_map(|(local, value)| value.is_none().then_some(*local))
             .collect();
         let global_bindings = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
+        let canonical_workspace = runtime.service_ports().workspace().cloned();
         let workspace = if let Some(input) = workspace {
-            super::workspace::NativeWorkspaceState::new(&function, input, global_bindings.clone())?
+            super::workspace::NativeWorkspaceState::new(
+                &function,
+                input,
+                global_bindings.clone(),
+                canonical_workspace,
+            )?
         } else {
             super::workspace::NativeWorkspaceState::function_frame(
                 &function,

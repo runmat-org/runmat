@@ -383,6 +383,7 @@ pub async fn interpret_with_vars_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = crate::runtime::workspace_service::VmWorkspaceService::install(runtime);
     let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(runmat_runtime::data::with_tx_registry_scope(
@@ -402,6 +403,7 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = crate::runtime::workspace_service::VmWorkspaceService::install(runtime);
     let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(runmat_runtime::data::with_tx_registry_scope(
@@ -807,6 +809,7 @@ async fn run_interpreter_inner(
     // roots and frame state outside it until suspended work has been dropped.
     let execution_result = super::dispatch_cancellation::until_cancelled(&cancellation, async {
         while pc < bytecode.instructions.len() {
+            crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
             if let (Some(scope), Some(exception)) =
                 (catch_entries.get(&pc), last_exception.as_ref())
             {
@@ -1319,6 +1322,7 @@ async fn run_interpreter_inner(
     #[cfg(feature = "native-accel")]
     fusion_observations.abort();
     interpreter_timing.flush_host_span("loop_complete", None);
+    crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
     sync_initial_vars(initial_vars, &vars);
     Ok(InterpreterOutcome::Completed(
         crate::interpreter::state::InterpreterCompletion {

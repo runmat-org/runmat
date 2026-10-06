@@ -63,6 +63,8 @@ pub(super) struct NativeWorkspaceState {
     local_names: BTreeMap<usize, String>,
     publish: bool,
     global_aliases: FrameGlobalBindings,
+    canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+    canonical_revision: Rc<Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>>,
 }
 
 impl NativeWorkspaceState {
@@ -70,6 +72,7 @@ impl NativeWorkspaceState {
         function: &runmat_native_codegen::NativeFunction,
         input: NativeWorkspaceInput,
         global_aliases: FrameGlobalBindings,
+        canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
     ) -> NativeExecutorResult<Self> {
         let local_names = function
             .locals
@@ -127,6 +130,8 @@ impl NativeWorkspaceState {
             local_names,
             publish: true,
             global_aliases,
+            canonical,
+            canonical_revision: Rc::new(Cell::new(None)),
         })
     }
 
@@ -146,6 +151,8 @@ impl NativeWorkspaceState {
             local_names,
             publish: false,
             global_aliases,
+            canonical: None,
+            canonical_revision: Rc::new(Cell::new(None)),
         }
     }
 
@@ -155,6 +162,8 @@ impl NativeWorkspaceState {
             externally_mutated: Rc::clone(&self.externally_mutated),
             global_aliases: self.global_aliases.clone(),
             local_names: self.local_names.clone(),
+            canonical: self.canonical.clone(),
+            canonical_revision: Rc::clone(&self.canonical_revision),
         })
     }
 
@@ -177,12 +186,25 @@ impl NativeWorkspaceState {
 
     pub(super) fn synchronize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
         if let Some(name) = self.local_names.get(&slot) {
-            let rooted = RootedWorkspaceValue::new(value).map_err(NativeExecutorError::Runtime)?;
-            let previous = self
+            let rooted =
+                RootedWorkspaceValue::new(value.clone()).map_err(NativeExecutorError::Runtime)?;
+            self.values
+                .try_borrow_mut()
+                .map(drop)
+                .map_err(workspace_borrow_error)?;
+            if self.publish && !self.global_aliases.is_bound(slot, name) {
+                if let Some(canonical) = self.canonical.as_ref() {
+                    canonical
+                        .assign(name, value.clone())
+                        .map_err(NativeExecutorError::Runtime)?;
+                }
+            }
+            let mut values = self
                 .values
                 .try_borrow_mut()
-                .map_err(workspace_borrow_error)?
-                .insert(name.clone(), rooted);
+                .map_err(workspace_borrow_error)?;
+            let previous = values.insert(name.clone(), rooted);
+            drop(values);
             drop(previous);
         }
         Ok(())
@@ -222,11 +244,20 @@ fn workspace_borrow_error(error: std::cell::BorrowMutError) -> runmat_runtime::R
     )
 }
 
+fn workspace_read_borrow_error(error: std::cell::BorrowError) -> runmat_runtime::RuntimeError {
+    runmat_runtime::runtime_error::semantic_error(
+        "NativeWorkspaceBorrow",
+        format!("native workspace read is reentrant: {error}"),
+    )
+}
+
 struct NativeWorkspaceService {
     values: Rc<RefCell<BTreeMap<String, RootedWorkspaceValue>>>,
     externally_mutated: Rc<Cell<bool>>,
     global_aliases: FrameGlobalBindings,
     local_names: BTreeMap<usize, String>,
+    canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+    canonical_revision: Rc<Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>>,
 }
 
 impl RuntimeWorkspaceService for NativeWorkspaceService {
@@ -255,6 +286,59 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         runmat_runtime::workspace::session::global_names()
     }
 
+    fn ensure_effect_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
+        if let Some(canonical) = self.canonical.as_ref() {
+            canonical.ensure_effect_authority()?;
+            let revision = canonical.workspace_revision()?;
+            if revision.is_some() && revision == self.canonical_revision.get() {
+                return Ok(());
+            }
+            let canonical_values = canonical.try_snapshot()?;
+            let global_values = {
+                let values = self
+                    .values
+                    .try_borrow()
+                    .map_err(|error| workspace_read_borrow_error(error))?;
+                self.local_names
+                    .iter()
+                    .filter(|(slot, name)| self.global_aliases.is_bound(**slot, name))
+                    .filter_map(|(_, name)| {
+                        values
+                            .get(name)
+                            .map(|entry| (name.clone(), entry.value.clone()))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let refreshed = canonical_values
+                .into_iter()
+                .chain(global_values)
+                .map(|(name, value)| {
+                    RootedWorkspaceValue::new(value)
+                        .map(|value| (name, value))
+                        .map_err(|error| *error)
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+            let mut values = self
+                .values
+                .try_borrow_mut()
+                .map_err(workspace_borrow_error)?;
+            let previous = std::mem::replace(&mut *values, refreshed);
+            drop(values);
+            self.externally_mutated.set(true);
+            self.canonical_revision.set(revision);
+            drop(previous);
+        }
+        Ok(())
+    }
+
+    fn workspace_revision(
+        &self,
+    ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, runmat_runtime::RuntimeError>
+    {
+        self.ensure_effect_authority()?;
+        Ok(self.canonical_revision.get())
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), runmat_runtime::RuntimeError> {
         let publish_global = self
             .local_names
@@ -262,11 +346,21 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .any(|(slot, local)| local == name && self.global_aliases.is_bound(*slot, name));
         let global_value = publish_global.then(|| value.clone());
         let rooted = RootedWorkspaceValue::new(value).map_err(|error| *error)?;
-        let previous = self
+        self.values
+            .try_borrow_mut()
+            .map(drop)
+            .map_err(workspace_borrow_error)?;
+        if !publish_global {
+            if let Some(canonical) = self.canonical.as_ref() {
+                canonical.assign(name, rooted.value.clone())?;
+            }
+        }
+        let mut values = self
             .values
             .try_borrow_mut()
-            .map_err(workspace_borrow_error)?
-            .insert(name.to_string(), rooted);
+            .map_err(workspace_borrow_error)?;
+        let previous = values.insert(name.to_string(), rooted);
+        drop(values);
         if let Some(value) = global_value {
             runmat_runtime::workspace::session::store_global_named(name, value);
         }
@@ -276,12 +370,19 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn clear(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        let previous = std::mem::take(
-            &mut *self
-                .values
-                .try_borrow_mut()
-                .map_err(workspace_borrow_error)?,
-        );
+        self.values
+            .try_borrow_mut()
+            .map(drop)
+            .map_err(workspace_borrow_error)?;
+        if let Some(canonical) = self.canonical.as_ref() {
+            canonical.clear()?;
+        }
+        let mut values = self
+            .values
+            .try_borrow_mut()
+            .map_err(workspace_borrow_error)?;
+        let previous = std::mem::take(&mut *values);
+        drop(values);
         self.externally_mutated.set(true);
         self.global_aliases.unbind_all();
         drop(previous);
@@ -289,11 +390,19 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn remove(&self, name: &str) -> Result<(), runmat_runtime::RuntimeError> {
-        let previous = self
+        self.values
+            .try_borrow_mut()
+            .map(drop)
+            .map_err(workspace_borrow_error)?;
+        if let Some(canonical) = self.canonical.as_ref() {
+            canonical.remove(name)?;
+        }
+        let mut values = self
             .values
             .try_borrow_mut()
-            .map_err(workspace_borrow_error)?
-            .remove(name);
+            .map_err(workspace_borrow_error)?;
+        let previous = values.remove(name);
+        drop(values);
         self.externally_mutated.set(true);
         self.global_aliases.unbind_name(name);
         drop(previous);

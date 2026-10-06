@@ -864,14 +864,25 @@ impl RunMatSession {
         if debug_trace {
             debug!(?execution_vars, "[repl] execution vars");
         }
-        let mut workspace_projection = self
+        let workspace_projection = self
             .base_workspace
             .begin_projection()
             .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
             .map_err(RunError::Runtime)?;
+        let workspace_projection = std::rc::Rc::new(
+            runmat_runtime::workspace::BaseWorkspaceProjectionService::new(workspace_projection),
+        );
+        let original_workspace_names = workspace_projection
+            .snapshot()
+            .map_err(RunError::Runtime)?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<HashSet<_>>();
         if debug_trace {
             let workspace_values_before = workspace_projection
-                .iter()
+                .snapshot()
+                .map_err(RunError::Runtime)?
+                .into_iter()
                 .map(|(name, value)| (name.to_string(), value.clone()))
                 .collect::<HashMap<_, _>>();
             debug!(
@@ -885,8 +896,15 @@ impl RunMatSession {
             .collect();
         let assigned_snapshot: HashSet<String> = execution_vars
             .keys()
-            .filter(|name| workspace_projection.lookup(name.as_str()).is_some())
-            .cloned()
+            .map(|name| {
+                workspace_projection
+                    .lookup(name.as_str())
+                    .map(|value| value.map(|_| name.clone()))
+            })
+            .collect::<std::result::Result<Vec<_>, RuntimeError>>()
+            .map_err(RunError::Runtime)?
+            .into_iter()
+            .flatten()
             .collect();
         if debug_trace {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
@@ -949,12 +967,14 @@ impl RunMatSession {
         let fusion_snapshot: Option<FusionPlanSnapshot> = None;
 
         // Prepare variable array with existing values before execution
-        let mut variable_array = self.prepare_variable_array_for_execution(
-            &bytecode,
-            &execution_vars,
-            &workspace_projection,
-            debug_trace,
-        );
+        let mut variable_array = self
+            .prepare_variable_array_for_execution(
+                &bytecode,
+                &execution_vars,
+                &workspace_projection,
+                debug_trace,
+            )
+            .map_err(RunError::Runtime)?;
 
         if self.verbose {
             debug!("Variable array after preparation: {:?}", variable_array);
@@ -976,10 +996,30 @@ impl RunMatSession {
         let mut workspace_snapshot_force_full = false;
         let mut ans_update: Option<(usize, Value)> = None;
         #[cfg(not(target_arch = "wasm32"))]
-        let tiered_interactive =
-            self.prepare_tiered_interactive(&interactive_unit, &workspace_projection);
+        let tiered_interactive = self
+            .prepare_tiered_interactive(&interactive_unit, &workspace_projection)
+            .map_err(RunError::Runtime)?;
         #[cfg(not(target_arch = "wasm32"))]
         let mut native_loop_backedges = std::collections::BTreeMap::new();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let execution_runtime = self
+            .runtime_context
+            .clone()
+            .with_program_revision(Some(interactive_unit.revision().program_revision.clone()))
+            .with_service_ports(
+                self.runtime_context
+                    .service_ports()
+                    .clone()
+                    .with_workspace(workspace_projection.clone()),
+            );
+        #[cfg(target_arch = "wasm32")]
+        let execution_runtime = self.runtime_context.clone().with_service_ports(
+            self.runtime_context
+                .service_ports()
+                .clone()
+                .with_workspace(workspace_projection.clone()),
+        );
 
         // Check if this is an expression statement (ends with Pop)
         let is_expression_stmt = bytecode
@@ -1019,7 +1059,12 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some((workspace, profile)) = tiered_interactive.as_ref() {
             match self
-                .invoke_tiered_interactive(&interactive_unit, workspace, profile.as_ref())
+                .invoke_tiered_interactive(
+                    &interactive_unit,
+                    workspace,
+                    profile.as_ref(),
+                    execution_runtime.clone(),
+                )
                 .await
             {
                 Ok(Some(native)) => {
@@ -1114,13 +1159,6 @@ impl RunMatSession {
                 }
             }
 
-            #[cfg(not(target_arch = "wasm32"))]
-            let execution_runtime = self
-                .runtime_context
-                .clone()
-                .with_program_revision(Some(interactive_unit.revision().program_revision.clone()));
-            #[cfg(target_arch = "wasm32")]
-            let execution_runtime = self.runtime_context.clone();
             match self
                 .interpret_with_context(&execution_bytecode, &mut variable_array, execution_runtime)
                 .await
@@ -1249,6 +1287,30 @@ impl RunMatSession {
             }
         }
 
+        // Executor-visible workspace mutations are admitted in source order.
+        // Publish them even when a later statement fails so an ordinary script
+        // preserves MATLAB workspace semantics without replacing concurrent
+        // canonical state from an end-of-run snapshot.
+        if workspace_projection
+            .has_pending_changes()
+            .map_err(RunError::Runtime)?
+        {
+            let commit = workspace_projection.publish().map_err(RunError::Runtime)?;
+            for change in commit.changes().changes() {
+                match change.kind() {
+                    runmat_runtime::workspace::WorkspaceChangeKind::Assign => {
+                        if let (Some(name), Some(value)) = (change.name(), change.value()) {
+                            workspace_updates.push(workspace_entry(name, value));
+                        }
+                    }
+                    runmat_runtime::workspace::WorkspaceChangeKind::Remove
+                    | runmat_runtime::workspace::WorkspaceChangeKind::Clear => {
+                        workspace_snapshot_force_full = true;
+                    }
+                }
+            }
+        }
+
         #[cfg(not(target_arch = "wasm32"))]
         if used_jit && is_expression_stmt {
             if let Some(value) = result_value.clone() {
@@ -1334,12 +1396,8 @@ impl RunMatSession {
         }
 
         if let Some(completed_workspace) = completed_workspace {
-            let original_names = workspace_projection
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .collect::<HashSet<_>>();
             let current_names = completed_workspace.keys().cloned().collect::<HashSet<_>>();
-            let removed_names = original_names
+            let removed_names = original_workspace_names
                 .difference(&current_names)
                 .cloned()
                 .collect::<Vec<_>>();
@@ -1349,10 +1407,14 @@ impl RunMatSession {
                 self.bind_workspace_slot(name.clone(), *slot);
                 runmat_runtime::execution::validate_storable_value(value)
                     .map_err(RunError::Runtime)?;
-                if workspace_projection.lookup(name) != Some(value) {
+                if workspace_projection
+                    .lookup(name)
+                    .map_err(RunError::Runtime)?
+                    .as_ref()
+                    != Some(value)
+                {
                     workspace_projection
                         .assign(name.clone(), value.clone())
-                        .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
                         .map_err(RunError::Runtime)?;
                     workspace_updates.push(workspace_entry(name, value));
                     if debug_trace {
@@ -1361,14 +1423,16 @@ impl RunMatSession {
                 }
             }
             for name in &removed_names {
-                workspace_projection.remove(name);
-            }
-            workspace_snapshot_force_full = !removed_names.is_empty();
-            if workspace_projection.has_pending_changes() {
                 workspace_projection
-                    .publish()
-                    .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
+                    .remove(name)
                     .map_err(RunError::Runtime)?;
+            }
+            workspace_snapshot_force_full |= !removed_names.is_empty();
+            if workspace_projection
+                .has_pending_changes()
+                .map_err(RunError::Runtime)?
+            {
+                workspace_projection.publish().map_err(RunError::Runtime)?;
             }
         }
 

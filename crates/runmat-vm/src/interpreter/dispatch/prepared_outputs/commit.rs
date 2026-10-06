@@ -71,6 +71,7 @@ pub(super) async fn commit(
             )
         })?;
         before_overwrite(root(vars, slot)?, &value);
+        crate::runtime::workspace::admit_workspace_slot_write(slot, &value)?;
         vars[slot] = value;
         after_store(slot, &vars[slot]);
     }

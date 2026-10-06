@@ -37,6 +37,31 @@ impl BaseWorkspaceProjectionService {
         Ok(self.borrow()?.has_pending_changes())
     }
 
+    pub fn lookup(&self, name: &str) -> Result<Option<Value>, RuntimeError> {
+        self.with_live_projection(|projection| projection.lookup(name).cloned())
+    }
+
+    pub fn snapshot(&self) -> Result<Vec<(String, Value)>, RuntimeError> {
+        self.with_live_projection(|projection| {
+            projection
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.clone()))
+                .collect()
+        })
+    }
+
+    pub fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        <Self as RuntimeWorkspaceService>::assign(self, name, value)
+    }
+
+    pub fn remove(&self, name: &str) -> Result<(), RuntimeError> {
+        <Self as RuntimeWorkspaceService>::remove(self, name)
+    }
+
+    pub fn clear(&self) -> Result<(), RuntimeError> {
+        <Self as RuntimeWorkspaceService>::clear(self)
+    }
+
     /// Publish all ordered mutations admitted since the preceding safepoint.
     pub fn publish(&self) -> Result<BaseWorkspaceCommit, RuntimeError> {
         self.borrow_mut()?
@@ -53,9 +78,19 @@ impl BaseWorkspaceProjectionService {
 
     /// Admit a new external or reentrant effect against this exact workspace.
     pub fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
+        self.synchronize_for_effect()?;
         self.borrow()?
             .ensure_effect_authority()
             .map_err(base_workspace_error_to_runtime)
+    }
+
+    fn synchronize_for_effect(&self) -> Result<(), RuntimeError> {
+        if self.has_pending_changes()? {
+            self.publish()?;
+        } else {
+            self.reconcile()?;
+        }
+        Ok(())
     }
 
     fn borrow(&self) -> Result<Ref<'_, BaseWorkspaceProjection>, RuntimeError> {
@@ -74,6 +109,7 @@ impl BaseWorkspaceProjectionService {
         &self,
         operation: impl FnOnce(&BaseWorkspaceProjection) -> T,
     ) -> Result<T, RuntimeError> {
+        self.synchronize_for_effect()?;
         let projection = self.borrow()?;
         projection
             .ensure_effect_authority()
@@ -144,6 +180,10 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
         BaseWorkspaceProjectionService::ensure_effect_authority(self)
+    }
+
+    fn workspace_revision(&self) -> Result<Option<WorkspaceRevision>, RuntimeError> {
+        self.revision().map(Some)
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {

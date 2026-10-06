@@ -2,7 +2,6 @@ use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
 use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
-use crate::runtime::workspace::refresh_workspace_state;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram_placed, execute_elementwise_placed, execute_explained_variance_placed,
@@ -445,15 +444,15 @@ pub fn write_elementwise_materialized_stores(
     materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
     vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
-) {
+) -> Result<(), RuntimeError> {
     for (store, value) in materialized_stores {
         match store.binding.kind {
             VarKind::Global => {
                 let i = store.binding.index;
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
-                    refresh_workspace_state(vars);
                 }
+                crate::runtime::workspace::admit_workspace_slot_write(i, &value)?;
                 vars[i] = value;
             }
             VarKind::Local => {
@@ -467,13 +466,14 @@ pub fn write_elementwise_materialized_stores(
                     let i = store.binding.index;
                     if i >= vars.len() {
                         vars.resize(i + 1, Value::Num(0.0));
-                        refresh_workspace_state(vars);
                     }
+                    crate::runtime::workspace::admit_workspace_slot_write(i, &value)?;
                     vars[i] = value;
                 }
             }
         }
     }
+    Ok(())
 }
 
 fn fusion_execution_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
@@ -492,7 +492,7 @@ pub async fn execute_fusion_elementwise(
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
     match execute_elementwise_placed(request).await {
         Ok(FusionExecutionOutcome::Executed(result)) => {
-            write_elementwise_materialized_stores(result.materialized_stores, vars, context);
+            write_elementwise_materialized_stores(result.materialized_stores, vars, context)?;
             stack_guard.commit();
             Ok(FusionExecutionOutcome::Executed(result.final_value))
         }
@@ -753,7 +753,8 @@ mod tests {
                 )],
                 &mut vars,
                 &mut context,
-            );
+            )
+            .unwrap();
             // Both external handles are genuine owners; writeback cannot free either.
             assert!(block_on(PROVIDER.download(&shared)).is_ok());
             assert!(block_on(PROVIDER.download(&old_only)).is_ok());
