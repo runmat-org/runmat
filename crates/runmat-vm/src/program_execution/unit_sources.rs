@@ -1,20 +1,16 @@
 use crate::{Bytecode, BytecodeSourceRef, FunctionRegistry};
-use runmat_execution::{ExecutableComponentKind, ExecutableSourceMapV2, ExecutableUnitEnvelope};
+use runmat_execution::{ExecutableSourceMapV2, ExecutableUnitEnvelope};
 
 /// Import is a materialization boundary: validate all ordinal references,
 /// issue fresh session leases, then project the executable body and selected
 /// registry together. No serialized ordinal is ever used as a runtime ID.
 pub(super) fn bind_unit_sources(
     envelope: &ExecutableUnitEnvelope,
+    source_map: &ExecutableSourceMapV2,
     bytecode: &mut Bytecode,
     registry: &mut FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::context::RuntimeContext, String> {
-    let payload = envelope
-        .component(ExecutableComponentKind::SourceMap)
-        .ok_or_else(|| "worker rejected executable unit without a source map".to_string())?;
-    let source_map = ExecutableSourceMapV2::decode(&payload.bytes)
-        .map_err(|error| format!("worker rejected invalid executable source map: {error}"))?;
     bytecode
         .validate_portable_source_origins()
         .map_err(str::to_string)?;
@@ -35,8 +31,8 @@ pub(super) fn bind_unit_sources(
     {
         return Err("worker rejected executable source ordinal outside its source map".into());
     }
-    validate_function_components(&source_map, &envelope.manifest.identity.program, registry)?;
-    let runtime = runmat_runtime::source_context::bind_portable_source_map_v2(runtime, &source_map)
+    validate_function_components(source_map, &envelope.manifest.identity.program, registry)?;
+    let runtime = runmat_runtime::source_context::bind_portable_source_map_v2(runtime, source_map)
         .map_err(|error| format!("worker cannot bind executable source map: {error}"))?;
     let project = |source: BytecodeSourceRef| {
         source

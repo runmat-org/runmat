@@ -1,0 +1,153 @@
+use super::*;
+
+fn replace_component(
+    envelope: &mut runmat_execution::ExecutableUnitEnvelope,
+    kind: runmat_execution::ExecutableComponentKind,
+    value: &impl serde::Serialize,
+) {
+    let bytes = serde_json::to_vec(value).expect("encode mismatched component");
+    envelope
+        .payloads
+        .iter_mut()
+        .find(|payload| payload.kind == kind)
+        .expect("component payload")
+        .bytes = bytes.clone();
+    let descriptor = envelope
+        .manifest
+        .components
+        .iter_mut()
+        .find(|descriptor| descriptor.kind == kind)
+        .expect("component descriptor");
+    *descriptor = runmat_execution::ExecutableComponentDescriptor::from_payload(
+        kind,
+        descriptor.schema_version,
+        &bytes,
+    )
+    .expect("updated component descriptor");
+}
+
+#[test]
+fn portable_script_entrypoint_rejects_registry_and_layout_identity_mismatches() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "core-script-entrypoint-mismatch-test@1",
+            "script_entrypoint_mismatch.m",
+            "answer = localPlusOne(41);\nfunction output = localPlusOne(input)\noutput = input + 1;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile script with a local function");
+    let envelope = unit.portable_envelope().expect("portable script product");
+    let registry_payload = envelope
+        .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+        .expect("function registry payload");
+    let registry: runmat_vm::FunctionRegistry =
+        serde_json::from_slice(&registry_payload.bytes).expect("decode function registry");
+    let local_function = registry
+        .resolve_name("localPlusOne")
+        .and_then(|function| registry.get(function))
+        .expect("local function body");
+
+    let mut registry_identity = envelope.clone();
+    registry_identity.manifest.identity.entrypoint_function = local_function.portable_function;
+    let error = runmat_vm::admit_executable_unit(
+        &registry_identity
+            .canonical_bytes()
+            .expect("canonical registry-identity mismatch"),
+    )
+    .expect_err("a script entrypoint cannot name a registry function body");
+    assert!(
+        error
+            .to_string()
+            .contains("script entrypoint does not identify synthetic MIR"),
+        "{error}"
+    );
+
+    let mut kind_mismatch = envelope.clone();
+    kind_mismatch.manifest.identity.entrypoint_kind =
+        runmat_execution::ExecutableEntrypointKind::Function;
+    let error = runmat_vm::admit_executable_unit(
+        &kind_mismatch
+            .canonical_bytes()
+            .expect("canonical entrypoint-kind mismatch"),
+    )
+    .expect_err("a synthetic script entrypoint is not a registry function");
+    assert!(
+        error
+            .to_string()
+            .contains("executable entrypoint is absent from its admitted function registry"),
+        "{error}"
+    );
+
+    let mut layout_mismatch = envelope.clone();
+    let layout_payload = layout_mismatch
+        .component(runmat_execution::ExecutableComponentKind::VmLayout)
+        .expect("VM layout payload");
+    let mut layout: runmat_vm::VmAssemblyLayout =
+        serde_json::from_slice(&layout_payload.bytes).expect("decode VM layout");
+    let script_function = runmat_hir::FunctionId(
+        usize::try_from(layout_mismatch.manifest.identity.entrypoint_function.0)
+            .expect("script function identity fits this host"),
+    );
+    let local_function = registry
+        .resolve_name("localPlusOne")
+        .expect("local function identity");
+    let script_layout = layout
+        .entrypoints
+        .values_mut()
+        .find(|entrypoint| entrypoint.target == script_function)
+        .expect("script VM entrypoint");
+    script_layout.target = local_function;
+    replace_component(
+        &mut layout_mismatch,
+        runmat_execution::ExecutableComponentKind::VmLayout,
+        &layout,
+    );
+
+    let error = runmat_vm::admit_executable_unit(
+        &layout_mismatch
+            .canonical_bytes()
+            .expect("canonical VM-layout mismatch"),
+    )
+    .expect_err("script MIR and VM entrypoints must agree");
+    assert!(
+        error
+            .to_string()
+            .contains("script entrypoint identity disagrees with its admitted VM layout"),
+        "{error}"
+    );
+
+    let bytecode_payload = envelope
+        .component(runmat_execution::ExecutableComponentKind::Bytecode)
+        .expect("bytecode payload");
+    let bytecode: runmat_vm::Bytecode =
+        serde_json::from_slice(&bytecode_payload.bytes).expect("decode bytecode");
+    for source in [
+        None,
+        Some(runmat_vm::BytecodeSourceRef::Program(
+            runmat_types::ProgramSourceId(1),
+        )),
+    ] {
+        let mut source_mismatch = envelope.clone();
+        let mut mismatched_bytecode = bytecode.clone();
+        mismatched_bytecode.source_id = source;
+        replace_component(
+            &mut source_mismatch,
+            runmat_execution::ExecutableComponentKind::Bytecode,
+            &mismatched_bytecode,
+        );
+        let error = runmat_vm::admit_executable_unit(
+            &source_mismatch
+                .canonical_bytes()
+                .expect("canonical source-identity mismatch"),
+        )
+        .expect_err("script bytecode must retain its exact primary source");
+        assert!(
+            error
+                .to_string()
+                .contains("script bytecode does not identify its primary MIR source"),
+            "{error}"
+        );
+    }
+}

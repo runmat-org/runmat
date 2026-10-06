@@ -1,4 +1,6 @@
 use crate::*;
+#[path = "tests/portable_entrypoint.rs"]
+mod portable_entrypoint;
 #[path = "tests/timers.rs"]
 mod timers;
 #[cfg(not(target_arch = "wasm32"))]
@@ -14587,7 +14589,7 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         ExecutableSource::new(
             "core-interop-manifest-test@1",
             "interop_manifest.m",
-            "answer = 42;\n",
+            "answer = localPlusOne(41);\nfunction output = localPlusOne(input)\noutput = input + 1;\nend\n",
         ),
         None,
     ))
@@ -14621,6 +14623,15 @@ fn portable_product_preserves_and_validates_explicit_interop_contract() {
         first.manifest.identity.entrypoint_kind,
         runmat_execution::ExecutableEntrypointKind::Script
     );
+    let registry_payload = first
+        .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+        .expect("script function registry");
+    let registry: runmat_vm::FunctionRegistry =
+        serde_json::from_slice(&registry_payload.bytes).expect("decode script function registry");
+    assert!(registry.resolve_name("localPlusOne").is_some());
+    assert!(registry.functions.values().all(|function| {
+        function.portable_function != first.manifest.identity.entrypoint_function
+    }));
     assert!(first
         .manifest
         .capabilities

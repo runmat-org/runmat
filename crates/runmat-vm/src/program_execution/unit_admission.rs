@@ -2,6 +2,8 @@ use runmat_execution::{ExecutableComponentKind, ExecutableUnitEnvelope};
 
 use crate::{Bytecode, FunctionRegistry, VmAssemblyLayout};
 
+mod entrypoint;
+
 /// Fully decoded executable unit whose component identities and revisions have
 /// been validated, but whose portable source ordinals have not yet issued
 /// runtime-local source leases.
@@ -11,6 +13,8 @@ pub struct AdmittedExecutableUnit {
     bytecode: Bytecode,
     registry: FunctionRegistry,
     layout: VmAssemblyLayout,
+    source_map: runmat_execution::ExecutableSourceMapV2,
+    entrypoint_origin: runmat_execution::FunctionBindingOrigin,
 }
 
 /// Executable unit bound to one exact runtime source owner. The runtime must
@@ -38,43 +42,7 @@ impl AdmittedExecutableUnit {
     pub fn entrypoint_origin(
         &self,
     ) -> Result<runmat_execution::FunctionBindingOrigin, ExecutableUnitAdmissionError> {
-        let identity = &self.envelope.manifest.identity;
-        let function = match identity.entrypoint_kind {
-            runmat_execution::ExecutableEntrypointKind::Function => self
-                .registry
-                .resolve_name(&identity.entrypoint)
-                .and_then(|function| self.registry.get(function)),
-            runmat_execution::ExecutableEntrypointKind::Script => self
-                .registry
-                .functions
-                .values()
-                .find(|function| function.portable_function == identity.entrypoint_function),
-        }
-        .ok_or_else(|| {
-            ExecutableUnitAdmissionError::SourceBinding(
-                "executable entrypoint is absent from its admitted function registry".into(),
-            )
-        })?;
-        if function.portable_function != identity.entrypoint_function {
-            return Err(ExecutableUnitAdmissionError::SourceBinding(
-                "executable entrypoint identity disagrees with its admitted function body".into(),
-            ));
-        }
-        let expected = runmat_execution::FunctionBindingOrigin::from_revision(
-            &identity.program,
-            function.portable_function,
-        )
-        .map_err(|error| {
-            ExecutableUnitAdmissionError::SourceBinding(format!(
-                "executable entrypoint has an invalid immutable origin: {error}"
-            ))
-        })?;
-        if function.binding_origin != Some(expected) {
-            return Err(ExecutableUnitAdmissionError::SourceBinding(
-                "executable entrypoint lies outside its admitted revision".into(),
-            ));
-        }
-        Ok(expected)
+        Ok(self.entrypoint_origin)
     }
 
     pub fn bind_runtime_sources(
@@ -83,6 +51,7 @@ impl AdmittedExecutableUnit {
     ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
         let runtime = super::unit_sources::bind_unit_sources(
             &self.envelope,
+            &self.source_map,
             &mut self.bytecode,
             &mut self.registry,
             runtime,
@@ -173,6 +142,8 @@ pub enum ExecutableUnitAdmissionError {
     CompilerRevision(runmat_execution::ContractError),
     ComponentRevisions(String),
     InvalidEnvelope(runmat_execution::ContractError),
+    InvalidMir(serde_json::Error),
+    InvalidSourceMap(runmat_execution::ContractError),
     MissingComponent(&'static str),
     InvalidBytecode(serde_json::Error),
     DuplicateComponentAuthority,
@@ -205,6 +176,10 @@ impl std::fmt::Display for ExecutableUnitAdmissionError {
             Self::InvalidEnvelope(error) => {
                 write!(formatter, "an invalid executable unit: {error}")
             }
+            Self::InvalidMir(error) => write!(formatter, "invalid executable MIR: {error}"),
+            Self::InvalidSourceMap(error) => {
+                write!(formatter, "invalid executable source map: {error}")
+            }
             Self::MissingComponent(component) => {
                 write!(formatter, "executable unit without {component}")
             }
@@ -229,8 +204,10 @@ impl std::error::Error for ExecutableUnitAdmissionError {
         match self {
             Self::InvalidHeader(error)
             | Self::CompilerRevision(error)
-            | Self::InvalidEnvelope(error) => Some(error),
-            Self::InvalidBytecode(error)
+            | Self::InvalidEnvelope(error)
+            | Self::InvalidSourceMap(error) => Some(error),
+            Self::InvalidMir(error)
+            | Self::InvalidBytecode(error)
             | Self::InvalidRegistry(error)
             | Self::InvalidLayout(error) => Some(error),
             Self::ComponentRevisions(_)
@@ -261,6 +238,11 @@ pub fn admit_executable_unit(
     if let Some(message) = super::unsupported_executable_revisions(&envelope.manifest.revisions) {
         return Err(ExecutableUnitAdmissionError::ComponentRevisions(message));
     }
+    let mir_payload = envelope
+        .component(ExecutableComponentKind::Mir)
+        .ok_or(ExecutableUnitAdmissionError::MissingComponent("MIR"))?;
+    let mir = serde_json::from_slice(&mir_payload.bytes)
+        .map_err(ExecutableUnitAdmissionError::InvalidMir)?;
     let bytecode_payload = envelope
         .component(ExecutableComponentKind::Bytecode)
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("bytecode"))?;
@@ -284,12 +266,19 @@ pub fn admit_executable_unit(
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("VM layout"))?;
     let layout = serde_json::from_slice(&layout_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidLayout)?;
-    let admitted = AdmittedExecutableUnit {
+    let source_map_payload = envelope
+        .component(ExecutableComponentKind::SourceMap)
+        .ok_or(ExecutableUnitAdmissionError::MissingComponent("source map"))?;
+    let source_map = runmat_execution::ExecutableSourceMapV2::decode(&source_map_payload.bytes)
+        .map_err(ExecutableUnitAdmissionError::InvalidSourceMap)?;
+    let entrypoint_origin =
+        entrypoint::admit(&envelope, &mir, &bytecode, &registry, &layout, &source_map)?;
+    Ok(AdmittedExecutableUnit {
         envelope,
         bytecode,
         registry,
         layout,
-    };
-    admitted.entrypoint_origin()?;
-    Ok(admitted)
+        source_map,
+        entrypoint_origin,
+    })
 }

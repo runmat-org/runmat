@@ -54,44 +54,7 @@ impl ExecutableUnit {
         let payloads = self.component_payloads()?;
         let revisions = self.component_revisions()?;
         let components = component_descriptors(&payloads, &revisions)?;
-        let source_stem = std::path::Path::new(&self.source().relative_path)
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("script");
-        let selected = preferred_function
-            .map(|name| {
-                self.native_function_id(name)
-                    .map(|function| (name.to_string(), function))
-                    .ok_or_else(|| format!("source does not define requested function '{name}'"))
-            })
-            .transpose()?
-            .or_else(|| {
-                self.native_function_id(source_stem)
-                    .map(|function| (source_stem.to_string(), function))
-            });
-        let (entrypoint, entrypoint_function, entrypoint_kind) = if let Some((name, function)) =
-            selected
-        {
-            (
-                name,
-                function,
-                runmat_execution::ExecutableEntrypointKind::Function,
-            )
-        } else if !self.bytecode().instructions.is_empty() {
-            (
-                "script".to_string(),
-                self.script_entrypoint()
-                    .ok_or_else(|| "executable script has no synthetic entrypoint".to_string())?,
-                runmat_execution::ExecutableEntrypointKind::Script,
-            )
-        } else {
-            return Err("executable has no callable function or script entrypoint".to_string());
-        };
-        let entrypoint_function = self
-            .functions()
-            .get(entrypoint_function)
-            .map(|function| function.portable_function)
-            .ok_or_else(|| "executable entrypoint has no compiled function body".to_string())?;
+        let entrypoint = super::portable_entrypoint::resolve(self, preferred_function)?;
         let mut capabilities = runmat_types::CapabilitySet(
             self.analysis()
                 .functions
@@ -114,9 +77,9 @@ impl ExecutableUnit {
             identity: runmat_execution::ExecutableIdentity {
                 program: self.revision().program_revision.clone(),
                 root_package: self.source().owner_identity.clone(),
-                entrypoint,
-                entrypoint_function,
-                entrypoint_kind,
+                entrypoint: entrypoint.name,
+                entrypoint_function: entrypoint.function,
+                entrypoint_kind: entrypoint.kind,
                 source_digest: self
                     .revision()
                     .source_digest
