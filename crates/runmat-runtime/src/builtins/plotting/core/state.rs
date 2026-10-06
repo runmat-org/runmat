@@ -5105,7 +5105,7 @@ pub fn reset_plot_state() {
             _ => {}
         }
     }
-    let retired = std::mem::replace(&mut *reg, PlotRegistry::default());
+    let retired = std::mem::take(&mut *reg);
     drop(reg);
     drop(retired);
     reset_recent_figures();
