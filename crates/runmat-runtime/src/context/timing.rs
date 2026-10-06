@@ -91,7 +91,6 @@ impl TimingSessionState {
     pub(crate) fn latest_start(&self) -> Option<Duration> {
         self.latest
     }
-
 }
 
 #[cfg(test)]

@@ -120,7 +120,7 @@ fn staged_scan_incomplete_utf8_owns_fixed_error_until_last_drop() {
     let stage = ledger.reserve_stage(4096).expect("diagnostic stage");
     let diagnostic = TestDiagnosticStage(stage.clone());
     let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
-    let error = block_on(bounded::scan_utf8(
+    let Err(error) = block_on(bounded::scan_utf8(
         &mut source,
         &mut cooperation,
         &selected,
@@ -135,8 +135,9 @@ fn staged_scan_incomplete_utf8_owns_fixed_error_until_last_drop() {
             ),
             diagnostic: Some(&diagnostic),
         },
-    ))
-    .expect_err("incomplete UTF-8 must fail before numeric parsing");
+    )) else {
+        panic!("incomplete UTF-8 must fail before numeric parsing");
+    };
     assert_eq!(
         error.message(),
         "readmatrix: file contains bytes that are invalid for Encoding 'utf-8'"
@@ -164,7 +165,7 @@ fn staged_scan_invalid_utf8_retains_exact_typed_source_and_charge() {
     let stage = ledger.reserve_stage(4096).expect("diagnostic stage");
     let diagnostic = TestDiagnosticStage(stage.clone());
     let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
-    let error = block_on(bounded::scan_utf8(
+    let Err(error) = block_on(bounded::scan_utf8(
         &mut source,
         &mut cooperation,
         &selected,
@@ -179,8 +180,9 @@ fn staged_scan_invalid_utf8_retains_exact_typed_source_and_charge() {
             ),
             diagnostic: Some(&diagnostic),
         },
-    ))
-    .expect_err("invalid UTF-8 has an exact typed parse cause");
+    )) else {
+        panic!("invalid UTF-8 has an exact typed parse cause");
+    };
     assert_eq!(
         error.message(),
         "readmatrix: file contains bytes that are invalid for Encoding 'utf-8'"
