@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use runmat_builtins::BuiltinIntegerAuditKind;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, FIGURE_PERSISTENCE_ERROR_IMPORT as ERROR_IMPORT,
+    FIGURE_PERSISTENCE_ERROR_IMPORT as ERROR_IMPORT,
     FIGURE_PERSISTENCE_ERROR_INTERNAL as ERROR_INTERNAL,
     FIGURE_PERSISTENCE_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
     FIGURE_PERSISTENCE_ERROR_IO as ERROR_IO, FIGURE_PERSISTENCE_ERROR_RENDER as ERROR_RENDER,
@@ -26,7 +26,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::replay::limits::ReplayLimits;
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{BuiltinResult, RuntimeError};
 
 use super::properties::{get_properties, resolve_plot_handle, set_properties, PlotHandle};
 use super::state::{current_figure_handle, set_figure_visible, FigureHandle};
@@ -114,6 +114,7 @@ pub(crate) use savefig::__runmat_wasm_register_builtin_savefig_builtin_registere
 
 mod arguments;
 mod archive;
+mod errors;
 mod filesystem;
 mod handles;
 mod operations;
@@ -127,6 +128,7 @@ mod tests;
 
 use archive::*;
 use arguments::*;
+use errors::*;
 use filesystem::*;
 use handles::*;
 use operations::*;
