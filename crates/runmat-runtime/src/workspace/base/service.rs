@@ -119,17 +119,27 @@ pub(crate) fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> Runt
                 .with_source(source)
                 .build()
         }
-        error => {
-            let identifier = match &error {
-                BaseWorkspaceError::Closed => "RunMat:Workspace:Closed",
-                BaseWorkspaceError::BorrowConflict => "RunMat:Workspace:Busy",
-                BaseWorkspaceError::FutureRevision { .. } => "RunMat:Workspace:RevisionMismatch",
-                BaseWorkspaceError::RevisionExhausted => "RunMat:Workspace:RevisionExhausted",
-                BaseWorkspaceError::TransientValue(_) => "RunMat:TransientSequenceNotStorable",
-                BaseWorkspaceError::PendingChanges => "RunMat:Workspace:PendingChanges",
-                BaseWorkspaceError::Rooting(_) => unreachable!("handled above"),
-            };
-            semantic_error(identifier, error.to_string())
+        BaseWorkspaceError::TransientValue(source) => {
+            let message = format!("a workspace value is not storable: {source}");
+            crate::build_runtime_error(message)
+                .with_identifier("RunMat:TransientSequenceNotStorable")
+                .with_source(source)
+                .build()
+        }
+        error @ BaseWorkspaceError::Closed => {
+            semantic_error("RunMat:Workspace:Closed", error.to_string())
+        }
+        error @ BaseWorkspaceError::BorrowConflict => {
+            semantic_error("RunMat:Workspace:Busy", error.to_string())
+        }
+        error @ BaseWorkspaceError::FutureRevision { .. } => {
+            semantic_error("RunMat:Workspace:RevisionMismatch", error.to_string())
+        }
+        error @ BaseWorkspaceError::RevisionExhausted => {
+            semantic_error("RunMat:Workspace:RevisionExhausted", error.to_string())
+        }
+        error @ BaseWorkspaceError::PendingChanges => {
+            semantic_error("RunMat:Workspace:PendingChanges", error.to_string())
         }
     }
 }

@@ -174,6 +174,30 @@ fn rooting_failure_keeps_its_typed_gc_source() {
 }
 
 #[test]
+fn canonical_service_keeps_direct_and_nested_transient_value_sources() {
+    use crate::context::RuntimeWorkspaceService;
+    use std::error::Error;
+
+    let service = BaseWorkspaceService::new(BaseWorkspaceOwner::new());
+    let direct = Value::OutputList(vec![Value::Num(1.0)]);
+    let nested = Value::Cell(CellArray::new(vec![direct.clone()], 1, 1).unwrap());
+
+    for (name, value) in [("direct", direct), ("nested", nested)] {
+        let error = service.assign(name, value).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceNotStorable")
+        );
+        let source = error.source().expect("typed transient-value source");
+        assert!(matches!(
+            source.downcast_ref::<TransientValueError>(),
+            Some(TransientValueError::LegacyOutputList)
+        ));
+        assert_eq!(service.try_lookup(name).unwrap(), None);
+    }
+}
+
+#[test]
 fn unchanged_tensor_entries_share_the_same_immutable_value() {
     let tensor = Value::Tensor(Tensor::new(vec![1.0; 1024], vec![32, 32]).unwrap());
     let entry = RootedWorkspaceEntry::new(tensor).unwrap();
