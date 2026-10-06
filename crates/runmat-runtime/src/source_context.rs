@@ -72,6 +72,21 @@ impl SourceCatalogProjection {
         self.current().clone()
     }
 
+    /// A parallel lab has its own catalog, not the parent's weak leases. The
+    /// state snapshot has copied each still-live issued source into owned
+    /// records; retain those records alongside the poll-local foreground view.
+    pub(crate) fn fork_with_inherited_sources(&self, source: &crate::context::SourceState) -> Self {
+        let mut catalog = self.snapshot_catalog();
+        for id in source.issued_authorities.keys() {
+            if let Some(info) = source.catalog.get(id) {
+                // An issued identity cannot be replaced by an untyped
+                // foreground row, even if a caller reused its integer.
+                catalog.insert(*id, info.clone());
+            }
+        }
+        Self::new(catalog)
+    }
+
     fn current(&self) -> &HashMap<SourceId, SourceInfo> {
         self.overlays
             .last()
@@ -1127,38 +1142,48 @@ mod lease_tests {
                 },
             ])
             .unwrap();
-        let pending =
-            |ordinal: runmat_types::ProgramSourceId, imported: SourceId, expected: &'static str| {
-                let scoped = selected.clone();
-                selected.scope(async move {
-                    let source_id = scoped.program_source_id(ordinal).unwrap();
-                    let _source = replace_current_source_id_in_context(&scoped, Some(source_id));
-                    let _catalog =
-                        replace_source_catalog(vec![(imported, expected.into(), expected.into())])
-                            .expect("sibling catalog admission");
-                    std::future::poll_fn(|_| {
-                        assert_eq!(current_source().as_deref(), Some(expected));
-                        assert_eq!(source_info(imported).unwrap().text.as_ref(), expected);
-                        assert_eq!(
-                            source_info_in_context(&scoped, imported)
-                                .unwrap()
-                                .text
-                                .as_ref(),
-                            expected
-                        );
-                        Poll::<()>::Pending
-                    })
-                    .await;
+        let pending = |ordinal: runmat_types::ProgramSourceId,
+                       imported: SourceId,
+                       expected_program: &'static str,
+                       expected_import: &'static str| {
+            let scoped = selected.clone();
+            selected.scope(async move {
+                let source_id = scoped.program_source_id(ordinal).unwrap();
+                let _source = replace_current_source_id_in_context(&scoped, Some(source_id));
+                let _catalog = replace_source_catalog(vec![(
+                    imported,
+                    expected_import.into(),
+                    expected_import.into(),
+                )])
+                .expect("sibling catalog admission");
+                std::future::poll_fn(|_| {
+                    assert_eq!(current_source().as_deref(), Some(expected_program));
+                    assert_eq!(
+                        source_info(imported).unwrap().text.as_ref(),
+                        expected_import
+                    );
+                    assert_eq!(
+                        source_info_in_context(&scoped, imported)
+                            .unwrap()
+                            .text
+                            .as_ref(),
+                        expected_import
+                    );
+                    Poll::<()>::Pending
                 })
-            };
+                .await;
+            })
+        };
         let mut first = Box::pin(pending(
             runmat_types::ProgramSourceId(0),
             SourceId(31),
+            "primary",
             "first",
         ));
         let mut second = Box::pin(pending(
             runmat_types::ProgramSourceId(1),
             SourceId(32),
+            "helper",
             "second",
         ));
         let waker = std::task::Waker::from(Arc::new(NoopWake));
