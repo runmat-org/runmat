@@ -421,7 +421,7 @@ fn clear_completed_frame_if_drained(owner: WorkspaceOwner, frame: WorkspaceFrame
 pub fn set_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
     set_workspace_state_with_policy(
@@ -436,7 +436,7 @@ pub fn set_workspace_state(
 pub fn set_transient_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
     set_workspace_state_with_policy(
@@ -504,7 +504,7 @@ fn install_workspace_state(
 pub(crate) fn set_workspace_state_with_policy(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     policy: WorkspaceFramePolicy,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
