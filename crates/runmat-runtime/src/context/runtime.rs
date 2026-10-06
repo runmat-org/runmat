@@ -387,6 +387,7 @@ impl RuntimeContext {
 
     pub(crate) fn same_source_projection_owner(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.state, &other.state)
+            && self.source_selection.same_lineage(&other.source_selection)
             && match (&self.program_sources, &other.program_sources) {
                 (Some(left), Some(right)) => Rc::ptr_eq(left, right),
                 (None, None) => true,

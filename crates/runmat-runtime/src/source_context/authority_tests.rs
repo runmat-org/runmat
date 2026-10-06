@@ -51,6 +51,55 @@ fn nested_selected_program_sources_keep_exact_current_file_across_scopes() {
 }
 
 #[test]
+fn selected_source_lineage_inherits_nested_overlay_but_not_sibling_frame() {
+    let bound = context()
+        .with_program_sources([
+            ProgramSourceRecord {
+                ordinal: runmat_types::ProgramSourceId(0),
+                name: Arc::from("primary.m"),
+                fullpath_name: None,
+                text: Arc::from("primary text"),
+            },
+            ProgramSourceRecord {
+                ordinal: runmat_types::ProgramSourceId(1),
+                name: Arc::from("eval.m"),
+                fullpath_name: None,
+                text: Arc::from("nested eval text"),
+            },
+        ])
+        .expect("admit sources");
+    let selected = bound
+        .with_current_program_source(runmat_types::ProgramSourceId(0))
+        .expect("select primary function");
+    let sibling = selected
+        .clone()
+        .with_current_program_source(runmat_types::ProgramSourceId(0))
+        .expect("issue distinct sibling selection");
+    let eval = selected
+        .program_source_id(runmat_types::ProgramSourceId(1))
+        .expect("admitted nested source");
+    futures::executor::block_on(selected.clone().scope(async {
+        let overlay = replace_current_source_id_in_context(&selected, Some(eval));
+        assert_eq!(current_source_info().unwrap().name.as_ref(), "eval.m");
+        selected
+            .clone()
+            .scope(async {
+                assert_eq!(current_source_info().unwrap().name.as_ref(), "eval.m");
+            })
+            .await;
+        sibling
+            .scope(async {
+                assert_eq!(current_source_info().unwrap().name.as_ref(), "primary.m");
+            })
+            .await;
+        assert_eq!(current_source_info().unwrap().name.as_ref(), "eval.m");
+        drop(overlay);
+        assert_eq!(current_source_info().unwrap().name.as_ref(), "primary.m");
+    }));
+    assert!(current_source_info().is_none());
+}
+
+#[test]
 fn retired_admitted_source_fails_before_current_file_changes() {
     let runtime = context()
         .with_program_sources([ProgramSourceRecord {

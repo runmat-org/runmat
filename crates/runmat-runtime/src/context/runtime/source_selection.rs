@@ -21,11 +21,22 @@ impl std::fmt::Display for ProgramSourceSelectionError {
 
 impl std::error::Error for ProgramSourceSelectionError {}
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum InvocationSourceSelection {
     Inherited,
-    Selected,
-    Unbound,
+    Selected(Rc<()>),
+    Unbound(Rc<()>),
+}
+
+impl InvocationSourceSelection {
+    pub(super) fn same_lineage(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Inherited, Self::Inherited) => true,
+            (Self::Selected(left), Self::Selected(right))
+            | (Self::Unbound(left), Self::Unbound(right)) => Rc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
 }
 
 impl RuntimeContext {
@@ -65,9 +76,9 @@ impl RuntimeContext {
             crate::source_context::SourceCurrentProjection::new(current),
         )));
         self.source_selection = if self.program_sources.is_some() {
-            InvocationSourceSelection::Selected
+            InvocationSourceSelection::Selected(Rc::new(()))
         } else {
-            InvocationSourceSelection::Unbound
+            InvocationSourceSelection::Unbound(Rc::new(()))
         };
         Ok(self)
     }
@@ -76,10 +87,13 @@ impl RuntimeContext {
         let active = super::super::scope::active_runtime_context()
             .filter(|active| active.same_source_projection_owner(&self));
         let current = match self.source_selection {
-            InvocationSourceSelection::Selected | InvocationSourceSelection::Unbound => self
-                .source_current
-                .as_ref()
-                .and_then(|current| current.borrow().snapshot()),
+            InvocationSourceSelection::Selected(_) | InvocationSourceSelection::Unbound(_) => {
+                active
+                    .as_ref()
+                    .and_then(|active| active.source_current())
+                    .or(self.source_current.as_ref())
+                    .and_then(|current| current.borrow().snapshot())
+            }
             InvocationSourceSelection::Inherited => active
                 .as_ref()
                 .and_then(|active| {
