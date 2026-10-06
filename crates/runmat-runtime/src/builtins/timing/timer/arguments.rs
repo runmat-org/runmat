@@ -32,6 +32,7 @@ pub(super) async fn prepare_timer_property_pairs(
             ));
         }
         if property.is_numeric() {
+            let has_gpu = crate::dispatcher::value_contains_gpu(&pair[1]);
             if crate::builtins::common::validation::value_contains_explicit_gpu(&pair[1]) {
                 let extension = if finding {
                     &TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION
@@ -42,7 +43,8 @@ pub(super) async fn prepare_timer_property_pairs(
                     extension,
                     if finding { "timerfind" } else { "timer" },
                 )?;
-            } else if !finding {
+            }
+            if !has_gpu && !finding {
                 normalize_property_value(property, pair[1].clone())?;
             }
         } else if !finding {
@@ -147,3 +149,7 @@ mod tests {
         assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "arguments/resident_tests.rs"]
+mod resident_tests;
