@@ -22,6 +22,7 @@ pub(crate) mod document_test_support;
 pub(crate) mod physical_test_support;
 mod runtime;
 mod scope;
+mod source_evaluation;
 mod services;
 mod state;
 mod timing;
@@ -74,6 +75,10 @@ pub use services::{
     RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
     RuntimeSpmdService, RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
+};
+pub use source_evaluation::{
+    RuntimeSourceEvaluationService, SessionSourceEvaluation, SourceEvaluationPolicy,
+    SourceEvaluationProvenance,
 };
 pub(crate) use state::RuntimeContextState;
 pub use tcp::{

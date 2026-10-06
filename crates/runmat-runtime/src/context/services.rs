@@ -1,6 +1,7 @@
 use super::{
-    RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService, RuntimeTcpService,
-    RuntimeTimingService, RuntimeUserPathService,
+    RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService,
+    RuntimeSourceEvaluationService, RuntimeTcpService, RuntimeTimingService,
+    RuntimeUserPathService,
 };
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
@@ -934,6 +935,7 @@ pub struct RuntimeServicePorts {
     collective: Option<Rc<dyn RuntimeCollectiveService>>,
     timing: Rc<dyn RuntimeTimingService>,
     local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
+    source_evaluation: Option<Rc<dyn super::RuntimeSourceEvaluationService>>,
 }
 
 impl Default for RuntimeServicePorts {
@@ -962,6 +964,7 @@ impl Default for RuntimeServicePorts {
             collective: None,
             timing: super::timing::platform_service(),
             local_tasks: None,
+            source_evaluation: None,
         }
     }
 }
@@ -994,6 +997,7 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("collective", &self.collective.is_some());
         debug.field("timing", &"installed");
         debug.field("local_tasks", &self.local_tasks.is_some());
+        debug.field("source_evaluation", &self.source_evaluation.is_some());
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
         debug.finish()
@@ -1087,6 +1091,14 @@ impl RuntimeServicePorts {
         workspace,
         RuntimeWorkspaceService,
         Workspace
+    );
+    port_accessors!(
+        with_source_evaluation,
+        source_evaluation,
+        require_source_evaluation,
+        source_evaluation,
+        RuntimeSourceEvaluationService,
+        SourceEvaluation
     );
 
     /// Remove an inherited caller-workspace service before entering an
@@ -1308,6 +1320,7 @@ mod tests {
             missing(ports.require_distributed("distributed array")),
             missing(ports.require_collective("SPMD barrier")),
             missing(ports.require_local_tasks("schedule callback")),
+            missing(ports.require_source_evaluation("evaluate session source")),
         ];
         assert_eq!(
             failures
@@ -1332,6 +1345,7 @@ mod tests {
                 RuntimeCapability::Distributed,
                 RuntimeCapability::Collective,
                 RuntimeCapability::LocalTasks,
+                RuntimeCapability::SourceEvaluation,
             ]
         );
         assert!(failures.iter().all(|failure| {

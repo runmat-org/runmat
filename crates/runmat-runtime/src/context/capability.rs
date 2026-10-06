@@ -27,6 +27,7 @@ pub enum RuntimeCapability {
     Distributed,
     Collective,
     LocalTasks,
+    SourceEvaluation,
 }
 
 impl RuntimeCapability {
@@ -53,6 +54,7 @@ impl RuntimeCapability {
             Self::Distributed => "distributed",
             Self::Collective => "collective",
             Self::LocalTasks => "local_tasks",
+            Self::SourceEvaluation => "source_evaluation",
         }
     }
 }
