@@ -10,8 +10,6 @@ use runmat_filesystem::FsStagedOutput;
 
 pub(in crate::builtins::io::tabular) use staged_file::error_disposition;
 pub(in crate::builtins::io::tabular) use staged_file::interruption_error;
-#[cfg(test)]
-use staged_file::PublicationInterruption;
 
 #[cfg(test)]
 pub(super) async fn publish(
