@@ -84,6 +84,12 @@ pub trait HostEffectOutputHeadroom: std::fmt::Debug + Send + Sync {
     fn retire_invocation(&self) {}
 }
 
+/// The selected output allocator and any invocation-local headroom to retire.
+pub(super) struct StageOutputAdmission {
+    pub permit: Arc<dyn runmat_value::ExactHostAllocationPermit>,
+    pub headroom: Option<Arc<dyn HostEffectOutputHeadroom>>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostEffectStageEvidence {
     pub authority_revision: Digest,
@@ -478,13 +484,7 @@ impl HostEffectStagePermit {
     pub(super) fn output_permit(
         &self,
         max_output_bytes: u64,
-    ) -> Result<
-        (
-            Arc<dyn runmat_value::ExactHostAllocationPermit>,
-            Option<Arc<dyn HostEffectOutputHeadroom>>,
-        ),
-        HostEffectAllocationError,
-    > {
+    ) -> Result<StageOutputAdmission, HostEffectAllocationError> {
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(HostEffectAllocationError::Revoked);
         }
@@ -502,7 +502,10 @@ impl HostEffectStagePermit {
             {
                 return Err(HostEffectAllocationError::Revoked);
             }
-            return Ok((permit, None));
+            return Ok(StageOutputAdmission {
+                permit,
+                headroom: None,
+            });
         }
         let headroom = self.reservation.reserve_output_headroom(max_output_bytes)?;
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
@@ -518,7 +521,10 @@ impl HostEffectStagePermit {
             max_output_bytes,
             live_output_bytes: Arc::new(AtomicU64::new(0)),
         });
-        Ok((permit, Some(headroom)))
+        Ok(StageOutputAdmission {
+            permit,
+            headroom: Some(headroom),
+        })
     }
 
     pub(super) fn terminate_allocations(&self) {

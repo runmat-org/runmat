@@ -7,7 +7,13 @@ pub(super) enum ReadFailure {
         source: std::io::Error,
     },
     Semantic(String),
-    Execution(RuntimeError),
+    Execution(Box<RuntimeError>),
+}
+
+impl From<RuntimeError> for ReadFailure {
+    fn from(error: RuntimeError) -> Self {
+        Self::Execution(Box::new(error))
+    }
 }
 
 impl From<String> for ReadFailure {
@@ -31,7 +37,7 @@ impl std::error::Error for ReadFailure {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Semantic(_) => None,
-            Self::Execution(error) => Some(error),
+            Self::Execution(error) => Some(error.as_ref()),
         }
     }
 }
@@ -158,7 +164,7 @@ pub(super) async fn read_numeric_values<R: Read + Seek>(
         cooperation
             .completed(element_size.saturating_add(if applied_skip { skip } else { 0 }))
             .await
-            .map_err(ReadFailure::Execution)?;
+            .map_err(ReadFailure::from)?;
     }
     Ok((
         numeric_storage_from_scalars(input, values, cooperation).await?,
@@ -225,7 +231,7 @@ pub(super) async fn read_char_values<R: Read + Seek>(
         cooperation
             .completed(element_size.saturating_add(if applied_skip { skip } else { 0 }))
             .await
-            .map_err(ReadFailure::Execution)?;
+            .map_err(ReadFailure::from)?;
     }
 
     Ok((values, count, encountered_eof))

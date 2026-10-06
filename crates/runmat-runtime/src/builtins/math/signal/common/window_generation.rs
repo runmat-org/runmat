@@ -36,7 +36,7 @@ pub(crate) async fn symmetric_window_values(
     cooperation
         .completed(0)
         .await
-        .map_err(WindowArgError::Execution)?;
+        .map_err(WindowArgError::from)?;
     if len == 0 {
         return Err(WindowArgError::InvalidLength);
     }
@@ -70,7 +70,7 @@ pub(crate) async fn window_tensor(
     cooperation
         .completed(0)
         .await
-        .map_err(WindowArgError::Execution)?;
+        .map_err(WindowArgError::from)?;
     let len = options.len;
     if len == 0 {
         let storage = match options.output_type {
@@ -139,7 +139,7 @@ async fn populate<T>(
         cooperation
             .completed((end - start) as u64)
             .await
-            .map_err(WindowArgError::Execution)?;
+            .map_err(WindowArgError::from)?;
     }
     Ok(data)
 }

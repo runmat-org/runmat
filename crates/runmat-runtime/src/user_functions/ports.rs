@@ -162,14 +162,13 @@ pub fn install_local_bound_function_invoker(
     invoker: Rc<BoundFunctionInvoker>,
 ) -> BoundFunctionInvokerGuard {
     if let Some(state) = active_state() {
-        let previous = std::mem::replace(&mut state.call.borrow_mut().bound_invoker, Some(invoker));
+        let previous = state.call.borrow_mut().bound_invoker.replace(invoker);
         return BoundFunctionInvokerGuard {
             previous,
             state: Some(state),
         };
     }
-    let previous = BOUND_FUNCTION_INVOKER
-        .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), Some(invoker)));
+    let previous = BOUND_FUNCTION_INVOKER.with(|slot| slot.borrow_mut().replace(invoker));
     BoundFunctionInvokerGuard {
         previous,
         state: None,

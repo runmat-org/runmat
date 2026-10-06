@@ -422,9 +422,8 @@ fn select_host_effect_inner(
     let (output_allocation_permit, output_headroom_to_retire) = match stage.as_ref() {
         Some(stage) => match retained_bytes {
             ResourceByteBound::Known(bytes) => {
-                let (permit, headroom) =
-                    stage.output_permit(bytes).map_err(selected_output_error)?;
-                (Some(permit), headroom)
+                let output = stage.output_permit(bytes).map_err(selected_output_error)?;
+                (Some(output.permit), output.headroom)
             }
             ResourceByteBound::Unavailable(_) => (None, None),
         },

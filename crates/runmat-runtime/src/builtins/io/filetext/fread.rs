@@ -190,7 +190,7 @@ pub async fn evaluate_in(
     )
     .await
     .map_err(|error| match error {
-        ReadFailure::Execution(source) => source,
+        ReadFailure::Execution(source) => *source,
         other => {
             let detail = other.to_string();
             let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);

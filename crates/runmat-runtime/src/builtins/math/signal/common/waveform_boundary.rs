@@ -16,8 +16,14 @@ const LOGICAL_CONVERSION_CHUNK: usize = 4096;
 pub(crate) enum WaveformInputError {
     Invalid(String),
     Allocation(std::collections::TryReserveError),
-    Execution(RuntimeError),
+    Execution(Box<RuntimeError>),
     Tensor(String),
+}
+
+impl From<RuntimeError> for WaveformInputError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Execution(Box::new(error))
+    }
 }
 
 impl WaveformInputError {
@@ -31,7 +37,7 @@ impl WaveformInputError {
             Self::Invalid(detail) => (invalid, detail, None),
             Self::Tensor(detail) => (internal, detail, None),
             Self::Allocation(cause) => (internal, cause.to_string(), Some(cause)),
-            Self::Execution(cause) => return cause,
+            Self::Execution(cause) => return *cause,
         };
         let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
             .with_builtin(builtin)
@@ -64,7 +70,7 @@ pub(crate) async fn waveform_input_tensor(
     cooperation
         .completed(0)
         .await
-        .map_err(WaveformInputError::Execution)?;
+        .map_err(WaveformInputError::from)?;
     let mut data = Vec::new();
     data.try_reserve_exact(array.data.len())
         .map_err(WaveformInputError::Allocation)?;
@@ -73,7 +79,7 @@ pub(crate) async fn waveform_input_tensor(
         cooperation
             .completed(chunk.len() as u64)
             .await
-            .map_err(WaveformInputError::Execution)?;
+            .map_err(WaveformInputError::from)?;
     }
     Tensor::new(data, array.shape).map_err(WaveformInputError::Tensor)
 }

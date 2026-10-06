@@ -29,7 +29,7 @@ fn evaluate_continuous_step(
     let t = continuous_time_vector(model, time, caller)?;
     let (num, den) = model
         .normalized(caller.name())
-        .map_err(SimulationError::Model)?;
+        .map_err(SimulationError::from)?;
     let response = continuous_response(&num, &den, &t)?;
     Ok(StepResponse { y: response, t })
 }
@@ -153,7 +153,7 @@ fn evaluate_discrete_step(
     })?;
     let (num, den) = model
         .normalized(caller.name())
-        .map_err(SimulationError::Model)?;
+        .map_err(SimulationError::from)?;
     let all_y = discrete_response(&num, &den, count)?;
     let y = sample_indices
         .into_iter()
@@ -244,7 +244,7 @@ fn automatic_final_time(
 ) -> SimulationResult<f64> {
     let (_, den) = model
         .normalized(caller.name())
-        .map_err(SimulationError::Model)?;
+        .map_err(SimulationError::from)?;
     let poles = polynomial_roots(&den)?;
     let slowest_decay = poles
         .iter()

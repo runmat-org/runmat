@@ -13,7 +13,7 @@ pub(super) struct Target {
 
 pub(super) enum ResolveError {
     Status(super::errors::Failure),
-    Compatibility(crate::RuntimeError),
+    Compatibility(Box<crate::RuntimeError>),
 }
 
 pub(super) async fn resolve(filename: Option<&str>) -> Result<Target, ResolveError> {
@@ -47,7 +47,7 @@ async fn explicit(filename: &str) -> Result<Target, ResolveError> {
             &runmat_builtins::SAVEPATH_DIRECTORY_TARGET_EXTENSION,
             super::errors::NAME,
         )
-        .map_err(ResolveError::Compatibility)?;
+        .map_err(|error| ResolveError::Compatibility(Box::new(error)))?;
         path.push(DEFAULT_FILENAME);
     }
     Ok(Target {

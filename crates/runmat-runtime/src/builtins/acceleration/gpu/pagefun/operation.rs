@@ -90,7 +90,7 @@ impl PageOperation {
                 match error {
                     ProductError::InvalidInput(message) => pagefun_error_with_detail(&PAGEFUN_ERROR_INVALID_INPUT, message),
                     ProductError::Internal(message) => pagefun_internal_error(message),
-                    ProductError::Runtime(error) => error,
+                    ProductError::Runtime(error) => *error,
                 }
             }),
         }

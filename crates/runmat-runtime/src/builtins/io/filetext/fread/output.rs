@@ -265,7 +265,7 @@ pub(super) async fn resize_numeric_storage(
         ($values:expr, $zero:expr, $width:expr) => {{
             if $values.len() < len {
                 $values.try_reserve(len - $values.len()).map_err(|error| {
-                    ReadFailure::Execution(
+                    ReadFailure::from(
                         build_runtime_error("fread: output storage cannot be allocated")
                             .with_builtin(BUILTIN_NAME)
                             .with_source(error)
@@ -279,7 +279,7 @@ pub(super) async fn resize_numeric_storage(
                     cooperation
                         .completed(added.saturating_mul($width))
                         .await
-                        .map_err(ReadFailure::Execution)?;
+                        .map_err(ReadFailure::from)?;
                 }
             } else {
                 $values.truncate(len);
@@ -330,7 +330,7 @@ pub(super) async fn finalize_char(
         column_major
             .try_reserve(target - column_major.len())
             .map_err(|error| {
-                ReadFailure::Execution(
+                ReadFailure::from(
                     build_runtime_error("fread: character storage cannot be allocated")
                         .with_builtin(BUILTIN_NAME)
                         .with_source(error)
@@ -344,7 +344,7 @@ pub(super) async fn finalize_char(
             cooperation
                 .completed(added.saturating_mul(std::mem::size_of::<char>()))
                 .await
-                .map_err(ReadFailure::Execution)?;
+                .map_err(ReadFailure::from)?;
         }
     } else {
         column_major.truncate(target);
@@ -365,7 +365,7 @@ pub(super) async fn column_to_row_major(
     let target = rows.saturating_mul(cols);
     let mut output = Vec::new();
     output.try_reserve(target).map_err(|error| {
-        ReadFailure::Execution(
+        ReadFailure::from(
             build_runtime_error("fread: transposed characters cannot be allocated")
                 .with_builtin(BUILTIN_NAME)
                 .with_source(error)
@@ -379,7 +379,7 @@ pub(super) async fn column_to_row_major(
         cooperation
             .completed(added.saturating_mul(std::mem::size_of::<char>()))
             .await
-            .map_err(ReadFailure::Execution)?;
+            .map_err(ReadFailure::from)?;
     }
     let mut mapped = 0usize;
     for c in 0..cols {
@@ -394,7 +394,7 @@ pub(super) async fn column_to_row_major(
                 cooperation
                     .completed(mapped)
                     .await
-                    .map_err(ReadFailure::Execution)?;
+                    .map_err(ReadFailure::from)?;
                 mapped = 0;
             }
         }
@@ -402,6 +402,6 @@ pub(super) async fn column_to_row_major(
     cooperation
         .completed(mapped)
         .await
-        .map_err(ReadFailure::Execution)?;
+        .map_err(ReadFailure::from)?;
     Ok(output)
 }

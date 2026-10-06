@@ -46,6 +46,6 @@ pub(super) fn from_product(error: super::super::product::ProductError) -> Runtim
     match error {
         super::super::product::ProductError::InvalidInput(message) => invalid_input(message),
         super::super::product::ProductError::Internal(message) => internal(message),
-        super::super::product::ProductError::Runtime(error) => map_control_flow(error),
+        super::super::product::ProductError::Runtime(error) => map_control_flow(*error),
     }
 }

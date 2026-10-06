@@ -51,7 +51,7 @@ fn hann_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &HANN_ERROR_INTERNAL, cause)
         }
-        WindowArgError::Execution(cause) => cause,
+        WindowArgError::Execution(cause) => *cause,
         WindowArgError::TensorBuild(detail) => hann_error_with_detail(&HANN_ERROR_INTERNAL, detail),
     }
 }

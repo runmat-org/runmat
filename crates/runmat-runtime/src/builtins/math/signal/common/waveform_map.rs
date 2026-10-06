@@ -20,8 +20,14 @@ pub(crate) enum WaveformOutputMode {
 pub(crate) enum WaveformMapError {
     Storage(String),
     Allocation(std::collections::TryReserveError),
-    Execution(RuntimeError),
+    Execution(Box<RuntimeError>),
     Tensor(String),
+}
+
+impl From<RuntimeError> for WaveformMapError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Execution(Box::new(error))
+    }
 }
 
 impl WaveformMapError {
@@ -31,7 +37,7 @@ impl WaveformMapError {
         descriptor: &'static BuiltinErrorDescriptor,
     ) -> RuntimeError {
         let detail = match self {
-            Self::Execution(error) => return error,
+            Self::Execution(error) => return *error,
             Self::Storage(detail) | Self::Tensor(detail) => detail,
             Self::Allocation(cause) => {
                 let mut builder = build_runtime_error(format!("{}: {cause}", descriptor.message))
@@ -65,7 +71,7 @@ pub(crate) async fn map_real_waveform(
     cooperation
         .completed(0)
         .await
-        .map_err(WaveformMapError::Execution)?;
+        .map_err(WaveformMapError::from)?;
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
@@ -204,7 +210,7 @@ async fn map_values<Input: Copy, Output>(
         cooperation
             .completed(chunk.len() as u64)
             .await
-            .map_err(WaveformMapError::Execution)?;
+            .map_err(WaveformMapError::from)?;
     }
     Ok(output)
 }

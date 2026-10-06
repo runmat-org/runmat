@@ -300,44 +300,39 @@ fn query_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     };
 
     match WarningTarget::parse(&target) {
-        WarningTarget::All => {
-            return structs_to_cell(warnings::with_policy(|policy| policy.snapshot()))
-        }
-        WarningTarget::Last => {
-            return Ok(
-                warnings::with_policy(|policy| policy.last_warning()).map_or_else(
-                    || {
-                        let mut st = StructValue::new();
-                        st.fields.insert("identifier".to_string(), Value::from(""));
-                        st.fields.insert("message".to_string(), Value::from(""));
-                        st.fields.insert("state".to_string(), Value::from("none"));
-                        Value::Struct(st)
-                    },
-                    |warning| {
-                        let mut st = StructValue::new();
-                        st.fields
-                            .insert("identifier".to_string(), Value::from(warning.identifier));
-                        st.fields
-                            .insert("message".to_string(), Value::from(warning.message));
-                        st.fields.insert("state".to_string(), Value::from("last"));
-                        Value::Struct(st)
-                    },
-                ),
-            );
-        }
+        WarningTarget::All => structs_to_cell(warnings::with_policy(|policy| policy.snapshot())),
+        WarningTarget::Last => Ok(warnings::with_policy(|policy| policy.last_warning())
+            .map_or_else(
+                || {
+                    let mut st = StructValue::new();
+                    st.fields.insert("identifier".to_string(), Value::from(""));
+                    st.fields.insert("message".to_string(), Value::from(""));
+                    st.fields.insert("state".to_string(), Value::from("none"));
+                    Value::Struct(st)
+                },
+                |warning| {
+                    let mut st = StructValue::new();
+                    st.fields
+                        .insert("identifier".to_string(), Value::from(warning.identifier));
+                    st.fields
+                        .insert("message".to_string(), Value::from(warning.message));
+                    st.fields.insert("state".to_string(), Value::from("last"));
+                    Value::Struct(st)
+                },
+            )),
         WarningTarget::Backtrace => {
             let enabled = warnings::with_policy(|policy| policy.backtrace_enabled());
-            return Ok(state_struct_value(
+            Ok(state_struct_value(
                 "backtrace",
                 if enabled { "on" } else { "off" },
-            ));
+            ))
         }
         WarningTarget::Verbose => {
             let enabled = warnings::with_policy(|policy| policy.verbose_enabled());
-            return Ok(state_struct_value(
+            Ok(state_struct_value(
                 "verbose",
                 if enabled { "on" } else { "off" },
-            ));
+            ))
         }
         WarningTarget::Identifier(identifier) => {
             let normalized = normalize_identifier(identifier);

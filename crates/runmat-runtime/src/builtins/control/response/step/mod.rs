@@ -68,7 +68,13 @@ enum SimulationErrorKind {
 
 enum SimulationError {
     Domain(SimulationErrorKind, String),
-    Model(RuntimeError),
+    Model(Box<RuntimeError>),
+}
+
+impl From<RuntimeError> for SimulationError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Model(Box::new(error))
+    }
 }
 
 type SimulationResult<T> = Result<T, SimulationError>;
@@ -80,7 +86,7 @@ fn simulation_error(kind: SimulationErrorKind, detail: impl ToString) -> Simulat
 impl SimulationError {
     fn into_runtime(self, caller: StepSimulationCaller) -> RuntimeError {
         match self {
-            Self::Model(error) => error,
+            Self::Model(error) => *error,
             Self::Domain(kind, detail) => {
                 let descriptor = caller.descriptor(kind);
                 let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))

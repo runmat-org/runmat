@@ -1017,14 +1017,12 @@ fn function_surface_state(
         )),
         SurfaceFunction::Parametric { x, y, z } => {
             let x = function_surface_ref(x, BUILTIN_NAME)?;
-            let y = function_surface_ref(y, BUILTIN_NAME).map_err(|error| {
+            let y = function_surface_ref(y, BUILTIN_NAME).inspect_err(|_| {
                 super::state::release_function_ref(&x);
-                error
             })?;
-            let z = function_surface_ref(z, BUILTIN_NAME).map_err(|error| {
+            let z = function_surface_ref(z, BUILTIN_NAME).inspect_err(|_| {
                 super::state::release_function_ref(&x);
                 super::state::release_function_ref(&y);
-                error
             })?;
             Ok(FunctionSurfaceFunctionState::Parametric { x, y, z })
         }

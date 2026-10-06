@@ -43,7 +43,7 @@ pub(super) async fn numeric_storage_from_scalars(
                 cooperation
                     .completed(std::mem::size_of::<NumericScalar>())
                     .await
-                    .map_err(ReadFailure::Execution)?;
+                    .map_err(ReadFailure::from)?;
             }
             NumericStorage::$storage_variant(output)
         }};

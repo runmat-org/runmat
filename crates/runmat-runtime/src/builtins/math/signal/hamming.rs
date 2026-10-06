@@ -54,7 +54,7 @@ fn hamming_map_window_error(error: WindowArgError) -> RuntimeError {
         WindowArgError::Allocation(cause) => {
             window_allocation_error(BUILTIN_NAME, &HAMMING_ERROR_INTERNAL, cause)
         }
-        WindowArgError::Execution(cause) => cause,
+        WindowArgError::Execution(cause) => *cause,
         WindowArgError::TensorBuild(detail) => {
             hamming_error_with_detail(&HAMMING_ERROR_INTERNAL, detail)
         }

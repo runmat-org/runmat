@@ -56,8 +56,14 @@ pub(crate) enum WindowArgError {
     InvalidOptionType,
     UnknownOption(String),
     Allocation(std::collections::TryReserveError),
-    Execution(RuntimeError),
+    Execution(Box<RuntimeError>),
     TensorBuild(String),
+}
+
+impl From<RuntimeError> for WindowArgError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Execution(Box::new(error))
+    }
 }
 
 #[derive(Debug, Clone)]

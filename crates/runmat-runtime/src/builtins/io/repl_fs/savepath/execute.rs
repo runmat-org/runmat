@@ -14,7 +14,7 @@ pub(super) async fn evaluate(
         Err(super::target::ResolveError::Status(failure)) => {
             return Ok(super::result::Outcome::failure(failure));
         }
-        Err(super::target::ResolveError::Compatibility(error)) => return Err(error),
+        Err(super::target::ResolveError::Compatibility(error)) => return Err(*error),
     };
     let path = crate::builtins::common::path_state::current_path_string();
     let contents = super::contents::build(&path);
