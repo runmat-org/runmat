@@ -26,5 +26,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(gpu_array::ENTRIES.iter().copied());
     values.extend(pagefun::ENTRIES.iter().copied());
     values.extend(transfer::ENTRIES.iter().copied());
-    values.extend(gpu::ENTRIES.iter().copied());
+    gpu::extend_entries(values);
 }

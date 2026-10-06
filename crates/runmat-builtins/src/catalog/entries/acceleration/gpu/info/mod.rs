@@ -8,6 +8,7 @@ mod inference;
 mod tests;
 
 pub use contract::*;
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GPU_INFO_CATALOG_ENTRY];
 
 pub const GPU_INFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

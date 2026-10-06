@@ -9,6 +9,7 @@ mod selector;
 mod tests;
 
 pub use contract::*;
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GPU_DEVICE_CATALOG_ENTRY];
 pub use selector::{
     gpu_device_index_from_float, gpu_device_index_from_integer, GpuDeviceIndexError,
     GPU_DEVICE_ACTIVE_INDEX,
