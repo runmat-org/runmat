@@ -2,6 +2,7 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod documentation;
+mod arity_check;
 mod function_dispatch;
 mod get_p;
 mod num_arguments_from_subscript;
@@ -13,6 +14,7 @@ mod functions;
 mod inputname;
 mod localfunctions;
 
+pub use self::arity_check::*;
 pub use self::function_dispatch::*;
 pub use self::functions::*;
 pub use self::get_p::*;
@@ -25,6 +27,7 @@ pub use self::subsref::*;
 pub use self::superclasses::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(arity_check::ENTRIES.iter().copied());
     values.extend(function_dispatch::ENTRIES.iter().copied());
     values.extend(get_p::ENTRIES.iter().copied());
     values.extend(num_arguments_from_subscript::ENTRIES.iter().copied());
