@@ -29,6 +29,7 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Tensor;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 
@@ -92,6 +93,82 @@ fn call(args: Vec<Value>) -> BuiltinResult<Value> {
         let _outputs = crate::output_count::push_output_count(outputs);
         open_builtin(Some(selected), args).await
     }))
+}
+
+fn selected_openfig(
+    invocation: crate::builtin::RuntimeBuiltinInvocation<'_>,
+) -> crate::builtin::RuntimeBuiltinFuture {
+    assert_eq!(invocation.requested_outputs, Some(1));
+    assert!(invocation.context.is_some());
+    let [Value::String(path)] = invocation.args else {
+        panic!("openfig must receive one resolved path");
+    };
+    assert!(path.ends_with("selected.fig"));
+    Box::pin(async {
+        runmat_value::ValueSequence::single(Value::Num(90_210.0))
+            .map_err(crate::sequence::sequence_error_to_runtime)
+    })
+}
+
+struct SelectedOpenfigService;
+
+impl crate::context::RuntimeBuiltinService for SelectedOpenfigService {
+    fn bindings_by_name(&self, name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
+        if name == "open" {
+            return crate::builtin::runtime_builtin_bindings_by_name(name);
+        }
+        if name != "openfig" {
+            return Vec::new();
+        }
+        vec![crate::builtin::RuntimeBuiltinBinding::new(
+            runmat_builtins::BuiltinBindingIdentity {
+                builtin: runmat_builtins::BuiltinCatalogIdentity { name: "openfig" },
+                variant: "default",
+            },
+            selected_openfig,
+        )]
+    }
+}
+
+#[test]
+fn figure_archive_uses_the_exact_selected_openfig_binding() {
+    let directory = tempdir().expect("tempdir");
+    let path = directory.path().join("selected.fig");
+    std::fs::write(&path, b"selected binding fixture").expect("write fixture");
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_builtin(Rc::new(SelectedOpenfigService));
+    let runtime = runtime.with_service_ports(ports);
+
+    let result = block_on(crate::call_builtin_async_with_outputs_in_context(
+        &runtime,
+        "open",
+        &[Value::String(path.to_string_lossy().into_owned())],
+        1,
+    ))
+    .expect("selected openfig binding");
+
+    assert_eq!(result, Value::Num(90_210.0));
+}
+
+#[test]
+fn corrupt_figure_archive_preserves_openfig_error_without_mat_fallthrough() {
+    let directory = tempdir().expect("tempdir");
+    let path = directory.path().join("corrupt.fig");
+    std::fs::write(&path, b"not a RunMat figure archive").expect("write fixture");
+
+    let error = call(vec![Value::String(path.to_string_lossy().into_owned())])
+        .expect_err("corrupt figure archive");
+
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:figurePersistence:ImportFailed")
+    );
+    assert_ne!(error.identifier(), Some("RunMat:load:InvalidArgument"));
 }
 
 #[test]
