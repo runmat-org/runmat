@@ -68,7 +68,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
                 process_repl_input(&buffer, &mut engine, config),
             ))
             .await
-            .context("Local callback driver stopped during piped REPL input")??
+            .context("Local callback driver stopped during piped REPL input")???
         {
             engine.shutdown_local_tasks();
             engine
@@ -147,7 +147,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
                         process_repl_input(&line, &mut engine, config),
                     ))
                     .await
-                    .context("Local callback driver stopped during REPL execution")??;
+                    .context("Local callback driver stopped during REPL execution")???;
                 let _ = continue_sender.send(keep_running);
                 if !keep_running {
                     break;

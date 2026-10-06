@@ -80,7 +80,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn idle_callback_participates_in_the_same_local_task_supervisor_poll() {
-        futures::executor::block_on(async {
+        let host = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test host reactor");
+        host.block_on(async {
             let selected = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
             let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
             let queue = RuntimeGraphicsCallbackQueue::new(
