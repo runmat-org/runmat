@@ -275,6 +275,11 @@ mod catch_scope_tests {
                     MException::new("RunMat:native".into(), "native".into()),
                 )
                 .unwrap();
+            state.enter_site_block(entry);
+            assert_eq!(
+                state.active_catch_exception().unwrap().identifier,
+                "RunMat:native"
+            );
             let polls = Rc::new(Cell::new(0));
             let drops = Rc::new(Cell::new(0));
             let future: CompletionFuture = Box::pin(PendingCatchProbe {
